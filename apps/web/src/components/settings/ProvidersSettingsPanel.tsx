@@ -74,6 +74,7 @@ type ProviderInstallTextKey =
   | "cursorBinaryPath"
   | "cursorApiEndpoint"
   | "antigravityBinaryPath"
+  | "commandCodeBinaryPath"
   | "grokBinaryPath"
   | "droidBinaryPath"
   | "kiloBinaryPath"
@@ -241,6 +242,27 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         description: (
           <>
             Leave blank to use <code>grok</code> from your PATH.
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    provider: "commandCode",
+    docs: [
+      { label: "Install", href: "https://commandcode.ai/docs" },
+      { label: "Headless", href: "https://commandcode.ai/docs/core-concepts/headless" },
+      { label: "Models", href: "https://commandcode.ai/docs/models" },
+    ],
+    fields: [
+      {
+        kind: "text",
+        settingsKey: "commandCodeBinaryPath",
+        label: "CommandCode binary path",
+        placeholder: "CommandCode CLI binary path",
+        description: (
+          <>
+            Leave blank to use <code>cmd</code> from your PATH (<code>cmdc</code> on Windows).
           </>
         ),
       },

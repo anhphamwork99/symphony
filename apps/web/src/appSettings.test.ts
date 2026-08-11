@@ -272,6 +272,7 @@ describe("resolveAppModelSelection", () => {
           claudeAgent: [],
           cursor: [],
           antigravity: [],
+          commandCode: [],
           grok: [],
           droid: [],
           kilo: [],
@@ -292,6 +293,7 @@ describe("resolveAppModelSelection", () => {
           claudeAgent: [],
           cursor: [],
           antigravity: [],
+          commandCode: [],
           grok: [],
           droid: [],
           kilo: [],
@@ -312,6 +314,7 @@ describe("resolveAppModelSelection", () => {
           claudeAgent: [],
           cursor: [],
           antigravity: [],
+          commandCode: [],
           grok: [],
           droid: [],
           kilo: [],
@@ -332,6 +335,7 @@ describe("resolveAppModelSelection", () => {
           claudeAgent: [],
           cursor: [],
           antigravity: [],
+          commandCode: [],
           grok: [],
           droid: [],
           kilo: [],
@@ -352,6 +356,7 @@ describe("resolveAppModelSelection", () => {
           claudeAgent: [],
           cursor: [],
           antigravity: [],
+          commandCode: [],
           grok: [],
           droid: [],
           kilo: [],
@@ -510,6 +515,7 @@ describe("getProviderStartOptions", () => {
         cursorApiEndpoint: "http://localhost:3000",
         cursorBinaryPath: "/usr/local/bin/agent",
         antigravityBinaryPath: "/usr/local/bin/agy",
+        commandCodeBinaryPath: "",
         grokBinaryPath: "/usr/local/bin/grok",
         droidBinaryPath: "",
         kiloBinaryPath: "",
@@ -549,6 +555,7 @@ describe("getProviderStartOptions", () => {
         cursorApiEndpoint: "",
         cursorBinaryPath: "",
         antigravityBinaryPath: "",
+        commandCodeBinaryPath: "",
         grokBinaryPath: "",
         droidBinaryPath: "",
         kiloBinaryPath: "",
@@ -571,6 +578,7 @@ describe("getProviderStartOptions", () => {
         cursorApiEndpoint: "",
         cursorBinaryPath: "cursor-agent",
         antigravityBinaryPath: "agy",
+        commandCodeBinaryPath: "cmd",
         grokBinaryPath: "grok",
         droidBinaryPath: "droid",
         kiloBinaryPath: "kilo",
@@ -591,6 +599,7 @@ describe("provider-indexed custom model settings", () => {
     customClaudeModels: ["claude/custom-opus"],
     customCursorModels: ["cursor/custom-model"],
     customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
+    customCommandCodeModels: ["custom/command-model"],
     customGrokModels: ["grok/custom-fast"],
     customDroidModels: ["claude-opus-4-8-custom"],
     customKiloModels: ["kilo/kilo-auto/free"],
@@ -604,6 +613,7 @@ describe("provider-indexed custom model settings", () => {
       "claudeAgent",
       "cursor",
       "antigravity",
+      "commandCode",
       "grok",
       "droid",
       "kilo",
@@ -622,6 +632,9 @@ describe("provider-indexed custom model settings", () => {
     expect(getCustomModelsForProvider(settings, "codex")).toEqual(["custom/codex-model"]);
     expect(getCustomModelsForProvider(settings, "claudeAgent")).toEqual(["claude/custom-opus"]);
     expect(getCustomModelsForProvider(settings, "cursor")).toEqual(["cursor/custom-model"]);
+    expect(getCustomModelsForProvider(settings, "commandCode")).toEqual([
+      "custom/command-model",
+    ]);
     expect(getCustomModelsForProvider(settings, "grok")).toEqual(["grok/custom-fast"]);
     expect(getCustomModelsForProvider(settings, "droid")).toEqual(["claude-opus-4-8-custom"]);
     expect(getCustomModelsForProvider(settings, "kilo")).toEqual(["kilo/kilo-auto/free"]);
@@ -635,6 +648,7 @@ describe("provider-indexed custom model settings", () => {
       customClaudeModels: ["claude/default-opus"],
       customCursorModels: ["cursor/default-model"],
       customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
+      customCommandCodeModels: ["custom/default-command-model"],
       customGrokModels: ["grok/default-fast"],
       customDroidModels: ["droid/default-model"],
       customKiloModels: ["kilo/default-auto"],
@@ -649,6 +663,9 @@ describe("provider-indexed custom model settings", () => {
     expect(getDefaultCustomModelsForProvider(defaults, "cursor")).toEqual(["cursor/default-model"]);
     expect(getDefaultCustomModelsForProvider(defaults, "antigravity")).toEqual([
       "Gemini 3.5 Flash (Experimental)",
+    ]);
+    expect(getDefaultCustomModelsForProvider(defaults, "commandCode")).toEqual([
+      "custom/default-command-model",
     ]);
     expect(getDefaultCustomModelsForProvider(defaults, "grok")).toEqual(["grok/default-fast"]);
     expect(getDefaultCustomModelsForProvider(defaults, "droid")).toEqual(["droid/default-model"]);
@@ -678,6 +695,12 @@ describe("provider-indexed custom model settings", () => {
   it("patches custom models for grok", () => {
     expect(patchCustomModels("grok", ["grok/custom-fast"])).toEqual({
       customGrokModels: ["grok/custom-fast"],
+    });
+  });
+
+  it("patches custom models for CommandCode", () => {
+    expect(patchCustomModels("commandCode", ["custom/command-model"])).toEqual({
+      customCommandCodeModels: ["custom/command-model"],
     });
   });
 
@@ -717,6 +740,7 @@ describe("provider-indexed custom model settings", () => {
       claudeAgent: ["claude/custom-opus"],
       cursor: ["cursor/custom-model"],
       antigravity: ["Gemini 3.5 Flash (Experimental)"],
+      commandCode: ["custom/command-model"],
       grok: ["grok/custom-fast"],
       droid: ["claude-opus-4-8-custom"],
       kilo: ["kilo/kilo-auto/free"],

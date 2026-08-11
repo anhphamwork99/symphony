@@ -112,6 +112,7 @@ type CustomModelSettingsKey =
   | "customClaudeModels"
   | "customCursorModels"
   | "customAntigravityModels"
+  | "customCommandCodeModels"
   | "customGrokModels"
   | "customDroidModels"
   | "customKiloModels"
@@ -132,6 +133,7 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   claudeAgent: new Set(getModelOptions("claudeAgent").map((option) => option.slug)),
   cursor: new Set(getModelOptions("cursor").map((option) => option.slug)),
   antigravity: new Set(getModelOptions("antigravity").map((option) => option.slug)),
+  commandCode: new Set(getModelOptions("commandCode").map((option) => option.slug)),
   grok: new Set(getModelOptions("grok").map((option) => option.slug)),
   droid: new Set(getModelOptions("droid").map((option) => option.slug)),
   kilo: new Set(getModelOptions("kilo").map((option) => option.slug)),
@@ -157,6 +159,7 @@ const PersistedProviderKind = Schema.Literals([
   "claudeAgent",
   "cursor",
   "antigravity",
+  "commandCode",
   "gemini",
   "grok",
   "droid",
@@ -187,6 +190,7 @@ export const AppSettingsSchema = Schema.Struct({
   cursorBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   cursorApiEndpoint: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   antigravityBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
+  commandCodeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   // Deprecated Gemini keys remain decodable until normalization rewrites local storage.
   geminiBinaryPath: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
   grokBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
@@ -258,6 +262,7 @@ export const AppSettingsSchema = Schema.Struct({
   customClaudeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customCursorModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customAntigravityModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
+  customCommandCodeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customGeminiModels: Schema.optionalKey(Schema.Array(Schema.String)),
   customGrokModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customDroidModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
@@ -355,6 +360,15 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Antigravity CLI base model names for the picker.",
     placeholder: "Model Name",
     example: "Gemini 4 Pro",
+  },
+  commandCode: {
+    provider: "commandCode",
+    settingsKey: "customCommandCodeModels",
+    defaultSettingsKey: "customCommandCodeModels",
+    title: "CommandCode",
+    description: "Save additional CommandCode model slugs for the picker.",
+    placeholder: "provider/model-slug",
+    example: "poolside/laguna-s-2.1-free",
   },
   grok: {
     provider: "grok",
@@ -525,6 +539,10 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
       "antigravity",
       settings.antigravityBinaryPath || legacyGeminiBinaryPath,
     ),
+    commandCodeBinaryPath: normalizeProviderBinaryPathOverride(
+      "commandCode",
+      settings.commandCodeBinaryPath,
+    ),
     grokBinaryPath: normalizeProviderBinaryPathOverride("grok", settings.grokBinaryPath),
     droidBinaryPath: normalizeProviderBinaryPathOverride("droid", settings.droidBinaryPath),
     kiloBinaryPath: normalizeProviderBinaryPathOverride("kilo", settings.kiloBinaryPath),
@@ -543,6 +561,10 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customAntigravityModels: normalizeCustomModelSlugs(
       [...settings.customAntigravityModels, ...(legacyCustomGeminiModels ?? [])],
       "antigravity",
+    ),
+    customCommandCodeModels: normalizeCustomModelSlugs(
+      settings.customCommandCodeModels,
+      "commandCode",
     ),
     customGrokModels: normalizeCustomModelSlugs(settings.customGrokModels, "grok"),
     customDroidModels: normalizeCustomModelSlugs(settings.customDroidModels, "droid"),
@@ -566,6 +588,7 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     enableAssistantStreaming: settings.enableAssistantStreaming,
     enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
     antigravityBinaryPath: settings.providers.antigravity.binaryPath,
+    commandCodeBinaryPath: settings.providers.commandCode.binaryPath,
     grokBinaryPath: settings.providers.grok.binaryPath,
     droidBinaryPath: settings.providers.droid.binaryPath,
     kiloBinaryPath: settings.providers.kilo.binaryPath,
@@ -581,6 +604,7 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     customClaudeModels: settings.providers.claudeAgent.customModels,
     customCursorModels: settings.providers.cursor.customModels,
     customAntigravityModels: settings.providers.antigravity.customModels,
+    customCommandCodeModels: settings.providers.commandCode.customModels,
     customGrokModels: settings.providers.grok.customModels,
     customDroidModels: settings.providers.droid.customModels,
     customKiloModels: settings.providers.kilo.customModels,
@@ -689,6 +713,16 @@ function appSettingsPatchToServerSettingsPatch(patch: Partial<AppSettings>): Ser
         : {}),
     };
   }
+  if (hasOwn(patch, "commandCodeBinaryPath") || hasOwn(patch, "customCommandCodeModels")) {
+    providers.commandCode = {
+      ...(hasOwn(patch, "commandCodeBinaryPath")
+        ? { binaryPath: patch.commandCodeBinaryPath ?? "" }
+        : {}),
+      ...(hasOwn(patch, "customCommandCodeModels")
+        ? { customModels: patch.customCommandCodeModels ?? [] }
+        : {}),
+    };
+  }
   if (hasOwn(patch, "grokBinaryPath") || hasOwn(patch, "customGrokModels")) {
     providers.grok = {
       ...(hasOwn(patch, "grokBinaryPath") ? { binaryPath: patch.grokBinaryPath ?? "" } : {}),
@@ -778,6 +812,7 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "enableAssistantStreaming",
     "enableProviderUpdateChecks",
     "antigravityBinaryPath",
+    "commandCodeBinaryPath",
     "grokBinaryPath",
     "droidBinaryPath",
     "kiloBinaryPath",
@@ -811,6 +846,7 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "customClaudeModels",
     "customCursorModels",
     "customAntigravityModels",
+    "customCommandCodeModels",
     "customGrokModels",
     "customDroidModels",
     "customKiloModels",
@@ -860,6 +896,7 @@ export function getCustomModelsByProvider(
     claudeAgent: getCustomModelsForProvider(settings, "claudeAgent"),
     cursor: getCustomModelsForProvider(settings, "cursor"),
     antigravity: getCustomModelsForProvider(settings, "antigravity"),
+    commandCode: getCustomModelsForProvider(settings, "commandCode"),
     grok: getCustomModelsForProvider(settings, "grok"),
     droid: getCustomModelsForProvider(settings, "droid"),
     kilo: getCustomModelsForProvider(settings, "kilo"),
@@ -1008,6 +1045,7 @@ export function getCustomModelOptionsByProvider(
     claudeAgent: getAppModelOptions("claudeAgent", customModelsByProvider.claudeAgent),
     cursor: getAppModelOptions("cursor", customModelsByProvider.cursor),
     antigravity: getAppModelOptions("antigravity", customModelsByProvider.antigravity),
+    commandCode: getAppModelOptions("commandCode", customModelsByProvider.commandCode),
     grok: getAppModelOptions("grok", customModelsByProvider.grok),
     droid: getAppModelOptions("droid", customModelsByProvider.droid),
     kilo: getAppModelOptions("kilo", customModelsByProvider.kilo),
@@ -1025,6 +1063,7 @@ export function getProviderStartOptions(
     | "cursorApiEndpoint"
     | "cursorBinaryPath"
     | "antigravityBinaryPath"
+    | "commandCodeBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
     | "kiloBinaryPath"
@@ -1045,6 +1084,10 @@ export function getProviderStartOptions(
   const antigravityBinaryPath = normalizeProviderBinaryPathOverride(
     "antigravity",
     settings.antigravityBinaryPath,
+  );
+  const commandCodeBinaryPath = normalizeProviderBinaryPathOverride(
+    "commandCode",
+    settings.commandCodeBinaryPath,
   );
   const grokBinaryPath = normalizeProviderBinaryPathOverride("grok", settings.grokBinaryPath);
   const droidBinaryPath = normalizeProviderBinaryPathOverride("droid", settings.droidBinaryPath);
@@ -1085,6 +1128,13 @@ export function getProviderStartOptions(
       ? {
           antigravity: {
             binaryPath: antigravityBinaryPath,
+          },
+        }
+      : {}),
+    ...(commandCodeBinaryPath
+      ? {
+          commandCode: {
+            binaryPath: commandCodeBinaryPath,
           },
         }
       : {}),
@@ -1167,6 +1217,7 @@ export function getCustomBinaryPathForProvider(
     | "codexBinaryPath"
     | "cursorBinaryPath"
     | "antigravityBinaryPath"
+    | "commandCodeBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
     | "kiloBinaryPath"
@@ -1184,6 +1235,8 @@ export function getCustomBinaryPathForProvider(
       return normalizeProviderBinaryPathOverride(provider, settings.cursorBinaryPath);
     case "antigravity":
       return normalizeProviderBinaryPathOverride(provider, settings.antigravityBinaryPath);
+    case "commandCode":
+      return normalizeProviderBinaryPathOverride(provider, settings.commandCodeBinaryPath);
     case "grok":
       return normalizeProviderBinaryPathOverride(provider, settings.grokBinaryPath);
     case "droid":

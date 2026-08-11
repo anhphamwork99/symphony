@@ -23,6 +23,7 @@ export type ProviderModelPrefetchSettings = Pick<
   | "cursorBinaryPath"
   | "cursorApiEndpoint"
   | "antigravityBinaryPath"
+  | "commandCodeBinaryPath"
   | "grokBinaryPath"
   | "droidBinaryPath"
   | "kiloBinaryPath"
@@ -85,6 +86,12 @@ export function providerModelsPrefetchQueryOptions(input: {
       return providerModelsQueryOptions({
         provider: "antigravity",
         binaryPath: settings.antigravityBinaryPath || null,
+        cwd,
+      });
+    case "commandCode":
+      return providerModelsQueryOptions({
+        provider: "commandCode",
+        binaryPath: settings.commandCodeBinaryPath || null,
         cwd,
       });
     case "grok":
