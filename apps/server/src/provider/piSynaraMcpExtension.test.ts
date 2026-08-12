@@ -1,0 +1,131 @@
+import {
+  ModelRuntime,
+  SessionManager,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
+} from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  makePiSynaraMcpDormantExtension,
+  PI_SYNARA_MCP_DISABLED_REFUSAL,
+} from "./piSynaraMcpExtension.ts";
+
+describe("Pi Synara MCP dormant extension", () => {
+  it("loads and binds with zero MCP activity or catalog registration", async () => {
+    const sideEffects = {
+      connections: vi.fn(),
+      discoveries: vi.fn(),
+      credentials: vi.fn(),
+      registrations: vi.fn(),
+      retries: vi.fn(),
+      delayedStarts: vi.fn(),
+    };
+    const { adapter, extension } = makePiSynaraMcpDormantExtension({
+      connect: sideEffects.connections,
+      discover: sideEffects.discoveries,
+      issueCredential: sideEffects.credentials,
+      register: sideEffects.registrations,
+      scheduleRetry: sideEffects.retries,
+      scheduleDelayedStart: sideEffects.delayedStarts,
+    });
+
+    const cwd = "/tmp";
+    const agentDir = "/tmp/synara-pi-dormant-extension-test";
+    const modelRuntime = await ModelRuntime.create({
+      authPath: `${agentDir}/auth.json`,
+      modelsPath: null,
+    });
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      modelRuntime,
+      resourceLoaderOptions: { extensionFactories: [extension] },
+    });
+    const { session } = await createAgentSessionFromServices({
+      services,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+
+    await session.bindExtensions({});
+
+    expect(adapter.state).toBe("dormant");
+    expect(services.resourceLoader.getExtensions().extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "<inline:synara-mcp-dormant>", hidden: true }),
+      ]),
+    );
+    expect(session.getAllTools().some((tool) => tool.name.startsWith("synara_"))).toBe(false);
+    for (const boundary of Object.values(sideEffects)) {
+      expect(boundary).not.toHaveBeenCalled();
+    }
+
+    session.dispose();
+  });
+
+  it("preserves native and configured non-Synara tools while keeping Synara absent", async () => {
+    const { extension } = makePiSynaraMcpDormantExtension();
+    const configuredExtension = {
+      name: "configured-coding-agent-tool",
+      factory: (pi: any) => {
+        pi.registerTool({
+          name: "configured_non_synara_tool",
+          label: "Configured non-Synara tool",
+          description: "A tool configured by the coding agent.",
+          parameters: {} as any,
+          execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+        });
+      },
+    };
+    const cwd = "/tmp";
+    const agentDir = "/tmp/synara-pi-tool-surface-test";
+    const modelRuntime = await ModelRuntime.create({
+      authPath: `${agentDir}/auth.json`,
+      modelsPath: null,
+    });
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      modelRuntime,
+      resourceLoaderOptions: {
+        extensionFactories: [configuredExtension, extension],
+      },
+    });
+    const { session } = await createAgentSessionFromServices({
+      services,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+
+    const toolNames = session.getAllTools().map((tool) => tool.name);
+
+    expect(toolNames).toEqual(
+      expect.arrayContaining(["read", "bash", "edit", "write", "configured_non_synara_tool"]),
+    );
+    expect(toolNames.some((toolName) => toolName.startsWith("synara_"))).toBe(false);
+
+    session.dispose();
+  });
+
+  it("refuses an unexpected pre-activation invocation without performing an operation", async () => {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+
+    await expect(adapter.invoke({ method: "tools/list" })).rejects.toThrow(
+      PI_SYNARA_MCP_DISABLED_REFUSAL,
+    );
+    expect(adapter.state).toBe("dormant");
+  });
+
+  it("exposes a safe-boundary hook without activating the adapter", async () => {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+    let notifications = 0;
+    const removeListener = adapter.onSafeBoundary(async () => {
+      notifications += 1;
+    });
+
+    await adapter.notifySafeBoundary();
+
+    expect(notifications).toBe(1);
+    expect(adapter.state).toBe("dormant");
+    removeListener();
+  });
+});
