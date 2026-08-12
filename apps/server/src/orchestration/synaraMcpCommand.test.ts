@@ -18,6 +18,7 @@ import {
   parseSynaraMcpCommand,
   planSynaraMcpCommand,
   planSynaraMcpCompletion,
+  planSynaraMcpDispatch,
   planSynaraMcpFailure,
   sanitizeSynaraMcpDiagnostic,
   synaraMcpRequestId,
@@ -307,5 +308,102 @@ describe("Synara MCP command boundary and durable activity contract", () => {
     expect(String((activity.payload as { detail: string }).detail)).not.toContain("secret-value");
     expect(String((activity.payload as { detail: string }).detail)).not.toContain("/Users/private/file");
     expect(sanitizeSynaraMcpDiagnostic("\n")).toBe("The Synara MCP command could not be completed.");
+  });
+
+  it("keeps an exact Synara command owned by Synara when planning cannot produce a plan", async () => {
+    const command = turnCommand("/Enable Synara MCP");
+    const decision = planSynaraMcpDispatch({
+      command,
+      readModel: createEmptyReadModel(now),
+      now: () => new Date(now),
+    });
+    if (decision.kind !== "unprocessable") {
+      throw new Error("Expected an unprocessable MCP command decision");
+    }
+    // Regression (impl-05 AC1): the planning miss must never fall through to
+    // the original turn command. The decision contains only a journaled
+    // failure activity, never a thread.turn.start that could reach
+    // Pi/model history.
+    expect(decision).toEqual({
+      kind: "unprocessable",
+      activityCommand: expect.objectContaining({
+        type: "thread.activity.append",
+      }),
+    });
+    expect(decision.activityCommand.activity).toMatchObject({
+      kind: "synara.mcp.command.failed",
+      turnId: null,
+      summary: "Synara MCP activation failed; the project remains disabled",
+    });
+    expect(decision.activityCommand.activity.payload).toMatchObject({
+      requestId: synaraMcpRequestId(command.commandId),
+      command: "enable",
+      phase: "terminal",
+      status: "failed",
+      requestedState: "enabled",
+      finalState: "disabled",
+    });
+    const detail = String(
+      (decision.activityCommand.activity.payload as { detail: string }).detail,
+    );
+    expect(new TextEncoder().encode(detail).byteLength).toBeLessThanOrEqual(1_024);
+
+    // Re-decision of the same command keeps deterministic receipt identity so
+    // command-receipt deduplication and activity-id collapse stay idempotent.
+    const replay = planSynaraMcpDispatch({
+      command,
+      readModel: createEmptyReadModel(now),
+      now: () => new Date("2026-08-12T12:01:00.000Z"),
+    });
+    if (replay.kind !== "unprocessable") {
+      throw new Error("Expected an unprocessable MCP command decision");
+    }
+    expect(replay.activityCommand.commandId).toBe(decision.activityCommand.commandId);
+    expect(replay.activityCommand.activity.id).toBe(decision.activityCommand.activity.id);
+  });
+
+  it("journals a planning-miss failure through the decider as a durable activity with turnId null", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const withThread = await baseReadModel({ active: false });
+    // The command thread exists but its project is gone: planning misses while
+    // the journal can still append to the surviving thread.
+    const orphanProjectReadModel = { ...withThread, projects: [] as never[] };
+    const decision = planSynaraMcpDispatch({
+      command,
+      readModel: orphanProjectReadModel,
+      now: () => new Date(now),
+    });
+    if (decision.kind !== "unprocessable") {
+      throw new Error("Expected an unprocessable MCP command decision");
+    }
+
+    const eventResult = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: decision.activityCommand,
+        readModel: orphanProjectReadModel,
+      }),
+    );
+    const activityEvent = Array.isArray(eventResult) ? eventResult[0]! : eventResult;
+    expect(activityEvent.type).toBe("thread.activity-appended");
+    const projected = await Effect.runPromise(
+      projectEvent(orphanProjectReadModel, { ...activityEvent, sequence: 2 }),
+    );
+    const thread = projected.threads.find((candidate) => candidate.id === threadId)!;
+    expect(thread.messages).toHaveLength(0);
+    expect(thread.activities).toHaveLength(1);
+    expect(thread.activities[0]).toMatchObject({
+      id: `${(decision.activityCommand.activity.payload as { requestId: string }).requestId}:terminal`,
+      kind: "synara.mcp.command.failed",
+      turnId: null,
+      sequence: 2,
+    });
+
+    // Re-projecting the same event cannot duplicate the terminal activity.
+    const replayed = await Effect.runPromise(
+      projectEvent(projected, { ...activityEvent, sequence: 3 }),
+    );
+    const replayedThread = replayed.threads.find((candidate) => candidate.id === threadId)!;
+    expect(replayedThread.messages).toHaveLength(0);
+    expect(replayedThread.activities).toHaveLength(1);
   });
 });

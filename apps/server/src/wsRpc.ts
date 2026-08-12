@@ -91,8 +91,8 @@ import { Open, resolveAvailableEditors } from "./open";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
 import {
   isSynaraMcpTurnCommand,
-  planSynaraMcpCommand,
   planSynaraMcpCompletion,
+  planSynaraMcpDispatch,
   planSynaraMcpFailure,
   synaraMcpWaitStatus,
 } from "./orchestration/synaraMcpCommand";
@@ -613,10 +613,15 @@ const makeWsRpcHandlersLayer = () =>
           }
 
           const readModel = yield* orchestrationEngine.getReadModel();
-          const plan = planSynaraMcpCommand({ command, readModel });
-          if (plan === null) {
-            return yield* dispatchOrchestrationCommand(command);
+          const decision = planSynaraMcpDispatch({ command, readModel });
+          if (decision.kind === "unprocessable") {
+            // An exact Synara MCP command stays owned by Synara even when
+            // planning cannot produce a normal plan: journal a durable
+            // failure activity and never forward the turn to the
+            // provider/model path.
+            return yield* dispatchOrchestrationCommand(decision.activityCommand);
           }
+          const plan = decision.plan;
 
           let result = plan.projectCommand
             ? yield* dispatchOrchestrationCommand(plan.projectCommand)

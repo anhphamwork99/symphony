@@ -332,6 +332,70 @@ export function planSynaraMcpCommand(input: {
   };
 }
 
+export type SynaraMcpDispatchDecision =
+  | { readonly kind: "plan"; readonly plan: SynaraMcpCommandPlan }
+  | {
+      readonly kind: "unprocessable";
+      readonly activityCommand: SynaraMcpActivityAppendCommand;
+    };
+
+const SYNARA_MCP_UNPROCESSABLE_DETAIL =
+  "The Synara MCP command could not be processed because its thread or project was not available at the command boundary.";
+
+function planSynaraMcpUnprocessableActivity(input: {
+  readonly command: SynaraMcpTurnCommand;
+  readonly createdAt: IsoDateTime;
+}): SynaraMcpActivityAppendCommand {
+  const kind = commandKind(input.command.message.text)!;
+  const requestId = synaraMcpRequestId(input.command.commandId);
+  return activityCommand({
+    threadId: input.command.threadId,
+    requestId,
+    command: kind,
+    requestedState: synaraMcpRequestedState(kind),
+    phase: "terminal",
+    status: "failed",
+    finalState: "disabled",
+    detail: sanitizeSynaraMcpDiagnostic(SYNARA_MCP_UNPROCESSABLE_DETAIL),
+    summary:
+      kind === "enable"
+        ? "Synara MCP activation failed; the project remains disabled"
+        : "Synara MCP could not be disabled",
+    createdAt: input.createdAt,
+  });
+}
+
+/**
+ * Dispatch decision at the Synara MCP command boundary. Every exact
+ * `/Enable Synara MCP` or `/Disable Synara MCP` turn command is owned by
+ * Synara: when planning cannot produce a normal plan (the command thread or
+ * project is unavailable in the read model), the decision yields only a
+ * durable journaled failure activity (`thread.activity.append` ->
+ * `thread.activity-appended`) and never the original turn command, so the
+ * command can never reach Pi/model history.
+ */
+export function planSynaraMcpDispatch(input: {
+  readonly command: SynaraMcpTurnCommand;
+  readonly readModel: OrchestrationReadModel;
+  readonly now?: () => Date;
+}): SynaraMcpDispatchDecision {
+  const plan = planSynaraMcpCommand({
+    command: input.command,
+    readModel: input.readModel,
+    now: input.now,
+  });
+  if (plan !== null) {
+    return { kind: "plan", plan };
+  }
+  return {
+    kind: "unprocessable",
+    activityCommand: planSynaraMcpUnprocessableActivity({
+      command: input.command,
+      createdAt: isoNow(input.now),
+    }),
+  };
+}
+
 export function planSynaraMcpCompletion(input: {
   readonly plan: SynaraMcpCommandPlan;
   readonly project: OrchestrationProject;
