@@ -4,12 +4,18 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Remove unconditional Synara catalog injection from default Pi sessions.
-- [ ] Load the Pi extension without connection, discovery, credentials, registration, or retry activity.
-- [ ] Expose lifecycle hooks for later safe-boundary activation.
-- [ ] Prove default sessions have no Synara catalog or startup MCP activity.
+- [x] Remove unconditional Synara catalog injection from default Pi sessions.
+- [x] Load the Pi extension without connection, discovery, credentials, registration, or retry activity.
+- [x] Expose lifecycle hooks for later safe-boundary activation.
+- [x] Prove default sessions have no Synara catalog or startup MCP activity.
+
+**Implementation:** Merged in `b727e9ce` from worker commit
+`ca951544a923d7956e9b1fd41ab45e03658f7ed5`. Focused verification passed 21
+tests across `PiAdapter.test.ts` and `piSynaraMcpExtension.test.ts`; `git
+diff --check` passed. The main checkout could not rerun Vitest because Bun is
+not available on its PATH.
 
 ## Testing Seams
 
