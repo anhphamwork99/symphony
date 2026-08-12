@@ -10,9 +10,10 @@ import {
   TurnId,
 } from "@synara/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { PersistenceDecodeError } from "../../persistence/Errors.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -73,6 +74,56 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_spaces`;
       yield* sql`DELETE FROM projection_state`;
+    }),
+  );
+
+  it.effect("fails closed with row diagnostics for malformed persisted activation JSON", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          synara_mcp_desired_state,
+          synara_mcp_activation_version,
+          synara_mcp_activation_operation_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-malformed-activation',
+          'Malformed activation',
+          '/tmp/project-malformed-activation',
+          NULL,
+          '[]',
+          'enabled',
+          1,
+          '{',
+          '2026-08-12T00:00:00.000Z',
+          '2026-08-12T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      const result = yield* Effect.result(snapshotQuery.getCommandReadModel());
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.ok(Schema.is(PersistenceDecodeError)(result.failure));
+        assert.match(
+          result.failure.operation,
+          /ProjectionSnapshotQuery\.getCommandReadModel:listProjects:decodeRows/,
+        );
+        assert.match(result.failure.issue, /projectId|activation|missing|required/i);
+      }
+
+      yield* sql`DELETE FROM projection_projects`;
     }),
   );
 

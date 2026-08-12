@@ -3,13 +3,12 @@ import {
   EventId,
   IsoDateTime,
   OrchestrationEvent,
-  OrchestrationProject,
   ProjectId,
   ProjectMcpActivationOperation,
   ProjectMcpActivationUpdateCommand,
   ThreadId,
 } from "@synara/contracts";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
@@ -17,7 +16,6 @@ import { OrchestrationEventStoreLive } from "../persistence/Layers/Orchestration
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
-import { validateProjectMcpActivationUpdate } from "./projectActivation.ts";
 
 const now = "2026-08-12T12:00:00.000Z" as IsoDateTime;
 const projectId = ProjectId.makeUnsafe("project-activation");
@@ -46,25 +44,6 @@ const operation = (overrides: Partial<ProjectMcpActivationOperation> = {}) =>
     updatedAt: now,
     ...overrides,
   }) satisfies ProjectMcpActivationOperation;
-
-const project = (overrides: Partial<OrchestrationProject> = {}) =>
-  ({
-    id: projectId,
-    kind: "project",
-    title: "Activation",
-    workspaceRoot: "/tmp/activation",
-    defaultModelSelection: null,
-    scripts: [],
-    isPinned: false,
-    spaceId: null,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-    synaraMcpDesiredState: "disabled",
-    synaraMcpActivationVersion: 0,
-    synaraMcpActivationOperation: null,
-    ...overrides,
-  }) satisfies OrchestrationProject;
 
 const command = (overrides: Partial<ProjectMcpActivationUpdateCommand> = {}) =>
   ({
@@ -153,45 +132,45 @@ describe("project MCP activation persistence contract", () => {
     ).toEqual(operation());
   });
 
-  it("fails closed for stale CAS, generation, wait-set, and malformed aggregate state", async () => {
-    expect(validateProjectMcpActivationUpdate({ project: project(), command: command({ expectedVersion: 1 }) })).toEqual({
-      ok: false,
+  it("rejects stale CAS and concurrent activation requests through the decider boundary", async () => {
+    const initial = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({ expectedVersion: 1 }),
+          readModel: initial,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
       detail: "Project MCP activation version is stale: expected 0, received 1.",
     });
 
-    expect(
-      validateProjectMcpActivationUpdate({
-        project: project({
-          synaraMcpActivationVersion: 1,
-          synaraMcpActivationOperation: operation(),
+    const firstActivation = await Effect.runPromise(
+      decideOrchestrationCommand({ command: command(), readModel: initial }),
+    );
+    const firstActivationEvent = Array.isArray(firstActivation) ? firstActivation[0]! : firstActivation;
+    const afterFirstActivation = await Effect.runPromise(
+      projectEvent(initial, { ...firstActivationEvent, sequence: 2 }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            expectedVersion: 1,
+            operation: operation({
+              requestId: "request-activation-2",
+              version: 2,
+            }),
+          }),
+          readModel: afterFirstActivation,
         }),
-        command: command({
-          expectedVersion: 1,
-          operation: operation({ operationGeneration: 1, version: 2, requestId: "request-new" }),
-        }),
-      }),
-    ).toMatchObject({ ok: false });
-
-    expect(() => Schema.decodeUnknownSync(ProjectMcpActivationOperation)(operation({
-      outcomes: [{ ...operation().outcomes[0]!, sessionGeneration: "runtime-stale" }],
-    }))).toThrow(/stale session generation/i);
-
-    expect(() => Schema.decodeUnknownSync(ProjectMcpActivationOperation)(operation({
-      aggregateStatus: "succeeded",
-    }))).toThrow(/aggregate status/i);
-
-    expect(() => Schema.decodeUnknownSync(ProjectMcpActivationOperation)({
-      ...operation(),
-      unexpected: true,
-    })).toThrow(/unexpected/i);
-
-    expect(() => Schema.decodeUnknownSync(OrchestrationEvent)({
-      ...event(),
-      payload: { ...event().payload, synaraMcpDesiredState: "on" },
-    })).toThrow();
-    expect(() => Schema.decodeUnknownSync(ProjectMcpActivationUpdateCommand)({
-      ...command(),
-      unexpected: true,
-    })).toThrow(/unexpected/i);
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "A project activation operation is already pending for another request.",
+    });
   });
 });

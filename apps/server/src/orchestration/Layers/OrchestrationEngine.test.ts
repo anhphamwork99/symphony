@@ -275,6 +275,60 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("deduplicates a repeated project activation command into one durable operation and result", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("project-activation-receipt");
+    const createdAt = "2026-08-12T12:00:00.000Z";
+    const commandId = CommandId.makeUnsafe("cmd-activation-receipt");
+
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-activation-receipt-project"),
+        projectId,
+        title: "Activation receipt",
+        workspaceRoot: "/tmp/project-activation-receipt",
+        defaultModelSelection: null,
+        createdAt,
+      }),
+    );
+
+    const command = {
+      type: "project.mcp-activation.update" as const,
+      commandId,
+      projectId,
+      desiredState: "enabled" as const,
+      expectedVersion: 0,
+      operation: {
+        projectId,
+        requestId: "request-activation-receipt",
+        operationGeneration: 1,
+        absoluteDeadline: "2026-08-12T12:02:00.000Z",
+        desiredState: "enabled" as const,
+        waitSet: [],
+        outcomes: [],
+        aggregateStatus: "succeeded" as const,
+        version: 1,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    };
+
+    const first = await system.run(system.engine.dispatch(command));
+    await expect(system.run(system.engine.dispatch({ ...command }))).resolves.toEqual(first);
+
+    const events = await system.run(
+      Stream.runCollect(system.engine.readEvents(0)).pipe(Effect.map((chunk) => Array.from(chunk))),
+    );
+    const activationEvents = events.filter((event) => event.type === "project.mcp-activation-updated");
+    expect(activationEvents).toHaveLength(1);
+    expect((await system.run(system.engine.getReadModel())).projects[0]?.synaraMcpActivationOperation).toEqual(
+      command.operation,
+    );
+
+    await system.dispose();
+  });
+
   it("returns deterministic read models for repeated reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();
