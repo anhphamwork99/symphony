@@ -172,5 +172,34 @@ describe("project MCP activation persistence contract", () => {
       _tag: "OrchestrationCommandInvariantError",
       detail: "A project activation operation is already pending for another request.",
     });
+
+    const rollback = operation({
+      desiredState: "disabled",
+      aggregateStatus: "failed",
+      version: 2,
+      outcomes: [
+        {
+          sessionId,
+          sessionGeneration: "runtime-1",
+          status: "failed",
+          detail: "safe-boundary failure",
+          updatedAt: now,
+        },
+      ],
+    });
+    const rollbackEvent = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: command({
+          expectedVersion: 1,
+          desiredState: "disabled",
+          operation: rollback,
+          commandId: CommandId.makeUnsafe("command-activation-terminal-operation"),
+        }),
+        readModel: afterFirstActivation,
+      }),
+    );
+    expect(Array.isArray(rollbackEvent) ? rollbackEvent[0]?.type : rollbackEvent.type).toBe(
+      "project.mcp-activation-updated",
+    );
   });
 });

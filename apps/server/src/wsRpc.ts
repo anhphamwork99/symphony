@@ -89,6 +89,13 @@ import {
 } from "./managedAttachmentPrincipal";
 import { Open, resolveAvailableEditors } from "./open";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
+import {
+  isSynaraMcpTurnCommand,
+  planSynaraMcpCommand,
+  planSynaraMcpCompletion,
+  planSynaraMcpFailure,
+  synaraMcpWaitStatus,
+} from "./orchestration/synaraMcpCommand";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
@@ -594,6 +601,100 @@ const makeWsRpcHandlersLayer = () =>
           );
         });
 
+      /**
+       * Slash commands are still represented by the normal composer turn
+       * boundary, but Synara-owned commands stop here. Nothing below this
+       * branch creates a thread.message-sent or provider turn event.
+       */
+      const dispatchMaybeSynaraMcpCommand = (command: OrchestrationCommand) =>
+        Effect.gen(function* () {
+          if (!isSynaraMcpTurnCommand(command)) {
+            return yield* dispatchOrchestrationCommand(command);
+          }
+
+          const readModel = yield* orchestrationEngine.getReadModel();
+          const plan = planSynaraMcpCommand({ command, readModel });
+          if (plan === null) {
+            return yield* dispatchOrchestrationCommand(command);
+          }
+
+          let result = plan.projectCommand
+            ? yield* dispatchOrchestrationCommand(plan.projectCommand)
+            : { sequence: readModel.snapshotSequence };
+          if (!plan.pending) {
+            return yield* dispatchOrchestrationCommand(plan.terminalActivityCommand);
+          }
+
+          result = yield* dispatchOrchestrationCommand(plan.pendingActivityCommand);
+          const reconcile = Effect.gen(function* () {
+            const deadline = Date.parse(plan.operation.absoluteDeadline);
+            while (Date.now() < deadline) {
+              const current = yield* orchestrationEngine.getReadModel();
+              const currentProject = current.projects.find(
+                (project) => project.id === plan.project.id,
+              );
+              const currentOperation = currentProject?.synaraMcpActivationOperation;
+              if (
+                currentOperation?.requestId !== plan.requestId ||
+                currentOperation.aggregateStatus !== "pending"
+              ) {
+                return;
+              }
+              const waitStatus = synaraMcpWaitStatus(current, currentOperation);
+              if (waitStatus === "waiting") {
+                yield* Effect.sleep("100 millis");
+                continue;
+              }
+              const completed =
+                waitStatus === "ready"
+                  ? planSynaraMcpCompletion({
+                      plan,
+                      project: currentProject!,
+                    })
+                  : planSynaraMcpFailure({
+                      plan,
+                      project: currentProject!,
+                      detail: "A project session disappeared before the safe boundary.",
+                    });
+              if (completed.projectCommand) {
+                yield* dispatchOrchestrationCommand(completed.projectCommand);
+              }
+              yield* dispatchOrchestrationCommand(
+                "activityCommand" in completed
+                  ? completed.activityCommand
+                  : completed.terminalActivityCommand,
+              );
+              return;
+            }
+            const current = yield* orchestrationEngine.getReadModel();
+            const currentProject = current.projects.find(
+              (project) => project.id === plan.project.id,
+            );
+            const timedOut = planSynaraMcpFailure({
+              plan,
+              project: currentProject ?? plan.project,
+              detail: "The project safe-boundary wait expired before activation completed",
+            });
+            if (
+              currentProject?.synaraMcpActivationOperation?.requestId === plan.requestId &&
+              timedOut.projectCommand
+            ) {
+              yield* dispatchOrchestrationCommand(timedOut.projectCommand);
+            }
+            yield* dispatchOrchestrationCommand(timedOut.activityCommand);
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Synara MCP command reconciliation failed", {
+                requestId: plan.requestId,
+                detail: error instanceof Error ? error.message : "unknown reconciliation error",
+              }),
+            ),
+            Effect.forkDetach,
+          );
+          yield* reconcile;
+          return result;
+        });
+
       // Terminal-first threads are created with the generic "New terminal" placeholder.
       // The tracker buffers per-terminal input and, once a meaningful command is submitted,
       // surfaces a safe title used to auto-rename the thread on its first command.
@@ -839,7 +940,7 @@ const makeWsRpcHandlersLayer = () =>
             Effect.gen(function* () {
               const { command: normalizedCommand, prepareWorkspaceRoot } =
                 yield* normalizeDispatchCommand({ command });
-              const result = yield* dispatchOrchestrationCommand(normalizedCommand);
+              const result = yield* dispatchMaybeSynaraMcpCommand(normalizedCommand);
               // Only scaffold managed workspace-root subdirectories (Inbox/Outbox/work/outputs)
               // AFTER the decider has accepted the command. A rejected dispatch (e.g. a
               // cross-kind workspace-root ownership conflict) must never mutate the filesystem.

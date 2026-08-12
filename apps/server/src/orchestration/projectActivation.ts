@@ -59,7 +59,11 @@ export function validateProjectMcpActivationUpdate(input: {
         detail: "A terminal activation request cannot create a second durable operation.",
       };
     }
-    if (operation.desiredState !== currentOperation.desiredState) {
+    const isFailedEnableRollback =
+      currentOperation.desiredState === "enabled" &&
+      operation.desiredState === "disabled" &&
+      operation.aggregateStatus === "failed";
+    if (!isFailedEnableRollback && operation.desiredState !== currentOperation.desiredState) {
       return { ok: false, detail: "An activation request cannot change its desired state." };
     }
     if (operation.operationGeneration !== currentOperation.operationGeneration) {
