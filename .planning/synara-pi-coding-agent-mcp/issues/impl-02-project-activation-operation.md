@@ -4,12 +4,18 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Persist enabled/disabled desired state with legacy rows defaulting to disabled.
-- [ ] Persist request ID, operation generation, absolute deadline, wait-set, outcomes, and aggregate status.
-- [ ] Journal and project the state through the existing project metadata contract.
-- [ ] Enforce strict schema validation, version/CAS rules, and receipt idempotency.
+- [x] Persist enabled/disabled desired state with legacy rows defaulting to disabled.
+- [x] Persist request ID, operation generation, absolute deadline, wait-set, outcomes, and aggregate status.
+- [x] Journal and project the state through the existing project metadata contract.
+- [x] Enforce strict schema validation, version/CAS rules, and receipt idempotency.
+
+**Implementation:** Merged in `05d60e9c` with public-boundary review repairs in
+`68e17531`. Focused worker verification passed 124 tests across 10 server test
+files, followed by 45 public-boundary tests and 2 migration tests. The main
+checkout could not rerun Vitest because the local `vitest` dependency is
+unavailable.
 
 ## Testing Seams
 

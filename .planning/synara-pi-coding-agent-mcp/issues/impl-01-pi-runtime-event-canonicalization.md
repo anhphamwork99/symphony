@@ -4,12 +4,17 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Normalize leading/trailing whitespace and CRLF in Pi tool detail fields.
-- [ ] Omit whitespace-only detail without weakening the canonical schema.
-- [ ] Preserve raw output in the raw/data payload where required.
-- [ ] Add regression coverage for newline, CRLF, whitespace-only, and malformed output.
+- [x] Normalize leading/trailing whitespace and CRLF in Pi tool detail fields.
+- [x] Omit whitespace-only detail without weakening the canonical schema.
+- [x] Preserve raw output in the raw/data payload where required.
+- [x] Add regression coverage for newline, CRLF, whitespace-only, and malformed output.
+
+**Implementation:** Merged in `2e9ad12c` with follow-up seam cleanup in
+`b5a0adb4`. Focused worker verification passed 126 tests; the final public-seam
+cleanup passed 29 tests. The main checkout could not rerun Vitest because the
+local `vitest` dependency is unavailable.
 
 ## Testing Seams
 
