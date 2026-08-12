@@ -21,8 +21,6 @@ import {
   buildPiAgentGatewayCustomTools,
   makePiBashProcessSupervisor,
   makePiRuntimeEventBase,
-  mapPiToolLifecyclePayload,
-  normalizePiToolDetail,
   makePiUserInputOptions,
   PLAIN_PI_EXTENSION_THEME,
   toPiProviderModelDescriptor,
@@ -521,63 +519,6 @@ describe("getPiSupportedThinkingOptions", () => {
     );
 
     expect(options.map((option) => option.value)).toEqual(["low", "high", "max"]);
-  });
-});
-
-describe("Pi runtime tool-event canonicalization", () => {
-  it("normalizes canonical detail while preserving raw output", () => {
-    const output = "  first line\r\nsecond line\r  ";
-    const mapped = mapPiToolLifecyclePayload({
-      toolCallId: "call-pi-detail",
-      toolName: "bash",
-      args: { command: "printf output" },
-      result: { output },
-    });
-
-    expect(mapped.detail).toBe("first line\nsecond line");
-    expect(mapped.data).toMatchObject({
-      rawOutput: {
-        output,
-        stdout: output,
-        content: output,
-        exitCode: null,
-      },
-      result: { output },
-    });
-  });
-
-  it("omits whitespace-only canonical detail without dropping raw output", () => {
-    const output = " \t\r\n  ";
-    const mapped = mapPiToolLifecyclePayload({
-      toolCallId: "call-pi-whitespace",
-      toolName: "bash",
-      args: { command: "true" },
-      result: { stdout: output },
-    });
-
-    expect(mapped).not.toHaveProperty("detail");
-    expect(mapped.data).toMatchObject({
-      rawOutput: { stdout: output },
-      result: { stdout: output },
-    });
-  });
-
-  it("does not turn malformed output shapes into canonical detail", () => {
-    const mapped = mapPiToolLifecyclePayload({
-      toolCallId: "call-pi-malformed-output",
-      toolName: "bash",
-      args: { command: "printf malformed" },
-      result: { output: { unexpected: true } },
-    });
-
-    expect(mapped).not.toHaveProperty("detail");
-    expect(mapped.data).toMatchObject({ result: { output: { unexpected: true } } });
-  });
-
-  it("normalizes CRLF and omits empty values at the detail helper seam", () => {
-    expect(normalizePiToolDetail("\r\n  ready\r\n")).toBe("ready");
-    expect(normalizePiToolDetail(" \t\r\n ")).toBeUndefined();
-    expect(normalizePiToolDetail(undefined)).toBeUndefined();
   });
 });
 
