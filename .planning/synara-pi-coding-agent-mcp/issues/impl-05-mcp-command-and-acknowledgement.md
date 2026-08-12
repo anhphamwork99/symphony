@@ -4,12 +4,19 @@
 
 **Blocked by:** impl-02 — Persist project MCP activation operations.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Commands are handled by Synara and never sent to Pi or model history.
-- [ ] Emit pending only when waiting is required, then exactly one terminal activity.
-- [ ] Use the accepted pending/succeeded/failed activity contract with stable request IDs and deterministic phase IDs.
-- [ ] Keep activities journal-first, replayable, `turnId: null`, and diagnostically safe.
+- [x] Commands are handled by Synara and never sent to Pi or model history.
+- [x] Emit pending only when waiting is required, then exactly one terminal activity.
+- [x] Use the accepted pending/succeeded/failed activity contract with stable request IDs and deterministic phase IDs.
+- [x] Keep activities journal-first, replayable, `turnId: null`, and diagnostically safe.
+
+**Implementation:** Merged in `e132b663`, with the planning-miss command-boundary
+fix in `de7830d6`. Focused verification after the fix passed 6 tests in
+`synaraMcpCommand.test.ts`; broader orchestration verification passed 61 tests.
+The main checkout cannot rerun the suite because its workspace toolchain lacks
+`turbo`/local Vitest. A pre-existing `decider.ts` typecheck error remains
+unrelated to this ticket.
 
 ## Testing Seams
 
