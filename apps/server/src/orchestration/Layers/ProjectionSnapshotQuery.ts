@@ -33,6 +33,7 @@ import {
   type OrchestrationThreadActivity,
   ThreadHandoff,
   ModelSelection,
+  ProjectMcpActivationOperation,
 } from "@synara/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -92,6 +93,9 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(ModelSelectionJsonUnknown),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     isPinned: Schema.Number,
+    synaraMcpActivationOperation: Schema.NullOr(
+      Schema.fromJsonString(ProjectMcpActivationOperation),
+    ),
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
@@ -440,6 +444,9 @@ function toProjectedProject(row: ProjectionProjectDbRow): OrchestrationProject {
     scripts: row.scripts,
     isPinned: row.isPinned > 0,
     spaceId: row.spaceId,
+    synaraMcpDesiredState: row.synaraMcpDesiredState,
+    synaraMcpActivationVersion: row.synaraMcpActivationVersion,
+    synaraMcpActivationOperation: row.synaraMcpActivationOperation,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -599,6 +606,9 @@ function toProjectedProjectShell(row: ProjectionProjectDbRow): OrchestrationProj
     scripts: row.scripts,
     isPinned: row.isPinned > 0,
     spaceId: row.spaceId,
+    synaraMcpDesiredState: row.synaraMcpDesiredState,
+    synaraMcpActivationVersion: row.synaraMcpActivationVersion,
+    synaraMcpActivationOperation: row.synaraMcpActivationOperation,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -785,6 +795,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           is_pinned AS "isPinned",
           space_id AS "spaceId",
+          synara_mcp_desired_state AS "synaraMcpDesiredState",
+          synara_mcp_activation_version AS "synaraMcpActivationVersion",
+          synara_mcp_activation_operation_json AS "synaraMcpActivationOperation",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1272,6 +1285,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           is_pinned AS "isPinned",
           space_id AS "spaceId",
+          synara_mcp_desired_state AS "synaraMcpDesiredState",
+          synara_mcp_activation_version AS "synaraMcpActivationVersion",
+          synara_mcp_activation_operation_json AS "synaraMcpActivationOperation",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1332,6 +1348,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           is_pinned AS "isPinned",
           space_id AS "spaceId",
+          synara_mcp_desired_state AS "synaraMcpDesiredState",
+          synara_mcp_activation_version AS "synaraMcpActivationVersion",
+          synara_mcp_activation_operation_json AS "synaraMcpActivationOperation",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -2400,6 +2419,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               scripts: row.scripts,
               isPinned: row.isPinned > 0,
               spaceId: row.spaceId,
+              synaraMcpDesiredState: row.synaraMcpDesiredState,
+              synaraMcpActivationVersion: row.synaraMcpActivationVersion,
+              synaraMcpActivationOperation: row.synaraMcpActivationOperation,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
               deletedAt: row.deletedAt,

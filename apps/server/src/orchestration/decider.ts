@@ -31,6 +31,7 @@ import {
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { validateProjectMcpActivationUpdate } from "./projectActivation.ts";
 import { buildForkThreadTitle } from "./forkThreadTitle.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
@@ -842,6 +843,40 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.isPinned !== undefined ? { isPinned: command.isPinned } : {}),
           ...(changedSpaceId !== undefined ? { spaceId: changedSpaceId } : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.mcp-activation.update": {
+      const existingProject = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const validation = validateProjectMcpActivationUpdate({
+        project: existingProject,
+        command,
+      });
+      if (!validation.ok) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: validation.detail,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.operation.updatedAt,
+          commandId: command.commandId,
+        }),
+        type: "project.mcp-activation-updated",
+        payload: {
+          projectId: command.projectId,
+          desiredState: command.desiredState,
+          activationVersion: command.operation.version,
+          operation: command.operation,
+          updatedAt: command.operation.updatedAt,
         },
       };
     }

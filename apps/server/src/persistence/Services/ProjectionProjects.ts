@@ -9,8 +9,11 @@
 import {
   IsoDateTime,
   ModelSelection,
+  NonNegativeInt,
   ProjectId,
   ProjectKind,
+  ProjectMcpActivationOperation,
+  ProjectMcpDesiredState,
   ProjectScript,
   SpaceId,
 } from "@synara/contracts";
@@ -31,6 +34,15 @@ export const ProjectionProject = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  synaraMcpDesiredState: Schema.optional(ProjectMcpDesiredState).pipe(
+    Schema.withDecodingDefault(() => "disabled"),
+  ),
+  synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => 0),
+  ),
+  synaraMcpActivationOperation: Schema.optional(
+    Schema.NullOr(ProjectMcpActivationOperation),
+  ).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type ProjectionProject = typeof ProjectionProject.Type;
 
