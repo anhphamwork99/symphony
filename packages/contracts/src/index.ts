@@ -34,7 +34,6 @@ export * from "./editor";
 export * from "./environment";
 export * from "./project";
 export * from "./projectActivation";
-export * from "./projectActivation";
 export * from "./studio";
 export * from "./filesystem";
 export * from "./device";

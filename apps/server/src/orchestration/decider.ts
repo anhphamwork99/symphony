@@ -31,7 +31,10 @@ import {
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import { validateProjectMcpActivationUpdate } from "./projectActivation.ts";
+import {
+  makeProjectMcpActivationEventOperation,
+  validateProjectMcpActivationUpdate,
+} from "./projectActivation.ts";
 import { buildForkThreadTitle } from "./forkThreadTitle.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
@@ -875,7 +878,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           desiredState: command.desiredState,
           activationVersion: command.operation.version,
-          operation: command.operation,
+          operation: makeProjectMcpActivationEventOperation(command.operation),
           updatedAt: command.operation.updatedAt,
         },
       };
