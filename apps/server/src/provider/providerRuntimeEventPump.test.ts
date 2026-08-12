@@ -2,6 +2,7 @@ import { Cause, Deferred, Effect, Fiber, Option, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { EventId, ThreadId, TurnId, type ProviderRuntimeEvent } from "@synara/contracts";
 
+import { PersistenceDecodeError } from "../persistence/Errors.ts";
 import {
   makeProviderRuntimeEventPumpHealthRegistry,
   runProviderRuntimeEventPump,
@@ -155,6 +156,71 @@ describe("providerRuntimeEventPump", () => {
             status: "degraded",
             quarantinedEvents: 1,
             lastQuarantinedEventId: "event-poison",
+          });
+        }),
+      ),
+    );
+  });
+
+  it("quarantines a malformed canonical detail with a diagnostic cause", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+          const quarantined: Array<{ eventId: string; cause: string }> = [];
+          const health = makeProviderRuntimeEventPumpHealthRegistry(["pi"]);
+          const completed = yield* Deferred.make<void>();
+          const malformed = {
+            ...completedEvent("pi-malformed-detail"),
+            provider: "pi" as const,
+            type: "item.completed" as const,
+            payload: {
+              itemType: "command_execution" as const,
+              status: "completed" as const,
+              title: "bash",
+              detail: " \t\r\n ",
+            },
+          } as unknown as ProviderRuntimeEvent;
+
+          const fiber = yield* runProviderRuntimeEventPump({
+            provider: "pi",
+            stream: Stream.fromQueue(queue),
+            processEvent: (event) =>
+              event.eventId === malformed.eventId
+                ? Effect.fail(
+                    new PersistenceDecodeError({
+                      operation: "ProviderRuntimeEvent.append.encode",
+                      issue: "Expected a trimmed non-empty detail.",
+                    }),
+                  )
+                : Deferred.succeed(completed, undefined).pipe(Effect.asVoid),
+            updateHealth: health.update,
+            isPermanentFailure: (cause) =>
+              Option.match(Cause.findErrorOption(cause), {
+                onNone: () => false,
+                onSome: (error) => error instanceof PersistenceDecodeError,
+              }),
+            quarantineEvent: (event, cause) =>
+              Effect.sync(() => {
+                quarantined.push({ eventId: event.eventId, cause });
+              }),
+            retryBaseDelayMs: 1,
+            retryMaxDelayMs: 2,
+          }).pipe(Effect.forkScoped);
+
+          yield* Queue.offerAll(queue, [malformed, completedEvent("pi-after-malformed")]);
+          yield* Deferred.await(completed);
+          yield* Effect.sleep(5);
+          yield* Fiber.interrupt(fiber);
+
+          expect(quarantined).toHaveLength(1);
+          expect(quarantined[0]).toMatchObject({ eventId: malformed.eventId });
+          expect(quarantined[0]?.cause).toContain("Expected a trimmed non-empty detail");
+          expect(health.snapshot()[0]).toMatchObject({
+            provider: "pi",
+            status: "degraded",
+            quarantinedEvents: 1,
+            lastQuarantinedEventId: malformed.eventId,
           });
         }),
       ),

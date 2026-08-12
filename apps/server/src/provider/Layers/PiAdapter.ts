@@ -919,6 +919,16 @@ function textFromToolResult(result: unknown): string | undefined {
   return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
+/**
+ * Normalize only the canonical detail string. Provider-native output remains
+ * untouched in lifecycle data and raw event payloads for diagnostics.
+ */
+export function normalizePiToolDetail(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.replace(/\r\n?/g, "\n").trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function toolExitCode(result: unknown): number | null | undefined {
   const record = toolRecord(result);
   if (!record) return undefined;
@@ -1030,7 +1040,8 @@ function toolLifecycleData(input: {
   isError?: boolean;
 }): Record<string, unknown> {
   const { toolCallId, toolName, args } = input;
-  const rawOutput = toolRawOutput(input.result ?? input.partialResult);
+  const output = input.result ?? input.partialResult;
+  const rawOutput = toolRawOutput(output);
   const path = toolPath(args);
   const query = toolSearchQuery(toolName, args);
   const command = toolCommand(args);
@@ -1127,6 +1138,25 @@ function toolLifecycleData(input: {
     default:
       return base;
   }
+}
+
+export function mapPiToolLifecyclePayload(input: {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly args: unknown;
+  readonly result?: unknown;
+  readonly partialResult?: unknown;
+  readonly isError?: boolean;
+}): {
+  readonly detail?: string;
+  readonly data: Record<string, unknown>;
+} {
+  const output = input.result ?? input.partialResult;
+  const detail = normalizePiToolDetail(textFromToolResult(output));
+  return {
+    ...(detail === undefined ? {} : { detail }),
+    data: toolLifecycleData(input),
+  };
 }
 
 function mapMessageHistory(session: PiAgentSession): unknown[] {
@@ -1863,12 +1893,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         case "tool_execution_update": {
           const tracked = context.activeToolItems.get(event.toolCallId);
           if (!tracked) return;
-          const detail = textFromToolResult(event.partialResult);
+          const lifecycle = mapPiToolLifecyclePayload({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: tracked.args,
+            partialResult: event.partialResult,
+          });
           recordItem(context, {
             type: "tool_call",
             status: "updated",
             toolName: event.toolName,
-            output: detail,
+            output: lifecycle.detail,
           });
           offerRuntimeEvent({
             ...makeEventBase(context),
@@ -1879,13 +1914,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               itemType: tracked.itemType,
               status: "inProgress",
               title: toolTitle(event.toolName, tracked.args),
-              ...(detail ? { detail } : {}),
-              data: toolLifecycleData({
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                args: tracked.args,
-                partialResult: event.partialResult,
-              }),
+              ...lifecycle,
             },
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
@@ -1900,12 +1929,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             itemType: toolItemType(event.toolName),
           };
           context.activeToolItems.delete(event.toolCallId);
-          const detail = textFromToolResult(event.result);
+          const lifecycle = mapPiToolLifecyclePayload({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: tracked.args,
+            result: event.result,
+            isError: event.isError,
+          });
           recordItem(context, {
             type: "tool_call",
             status: event.isError ? "failed" : "completed",
             toolName: event.toolName,
-            output: detail,
+            output: lifecycle.detail,
             result: event.result,
           });
           offerRuntimeEvent({
@@ -1917,14 +1952,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               itemType: tracked.itemType,
               status: event.isError ? "failed" : "completed",
               title: toolTitle(event.toolName, tracked.args),
-              ...(detail ? { detail } : {}),
-              data: toolLifecycleData({
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                args: tracked.args,
-                result: event.result,
-                isError: event.isError,
-              }),
+              ...lifecycle,
             },
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);

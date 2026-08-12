@@ -17,6 +17,7 @@ import {
 } from "../Services/ProviderRuntimeEvents.ts";
 import { ProviderRuntimeEventRepositoryLive } from "./ProviderRuntimeEvents.ts";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { mapPiToolLifecyclePayload } from "../../provider/Layers/PiAdapter.ts";
 import { assignDerivedProviderRuntimeEventIds } from "../../provider/providerRuntimeEventIdentity.ts";
 
 const layer = it.layer(
@@ -251,6 +252,92 @@ layer("ProviderRuntimeEventRepository", (it) => {
         reason: "provider runtime event exceeded the durable journal size limit",
       });
       assert.isNumber(compactedRaw?.originalBytes);
+    }),
+  );
+
+  it.effect("persists normalized Pi tool detail while retaining lossless raw output", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProviderRuntimeEventRepository;
+      const output = "  first line\r\nsecond line\r  ";
+      const lifecycle = mapPiToolLifecyclePayload({
+        toolCallId: "pi-call-journal",
+        toolName: "bash",
+        args: { command: "printf output" },
+        result: { output },
+      });
+      const event = {
+        type: "item.completed",
+        eventId: EventId.makeUnsafe("pi-tool-detail-journal"),
+        provider: "pi" as const,
+        createdAt: "2026-07-14T00:03:00.000Z",
+        threadId: ThreadId.makeUnsafe("thread-pi-tool-detail-journal"),
+        turnId: TurnId.makeUnsafe("turn-pi-tool-detail-journal"),
+        itemId: "pi-item-journal" as never,
+        payload: {
+          itemType: "command_execution" as const,
+          status: "completed" as const,
+          title: "bash",
+          ...lifecycle,
+        },
+        raw: {
+          source: "pi.sdk.event" as const,
+          messageType: "tool_execution_end",
+          payload: { type: "tool_execution_end", result: { output } },
+        },
+      } satisfies ProviderRuntimeEvent;
+
+      const persisted = yield* repository.append(event);
+      const rows = yield* repository.readAfter({
+        sequenceExclusive: persisted.sequence - 1,
+        throughSequenceInclusive: persisted.sequence,
+        limit: 1,
+      });
+      const stored = rows[0]?.event;
+      if (stored === undefined || stored.type !== "item.completed") {
+        throw new Error("Expected a persisted Pi item.completed event.");
+      }
+
+      assert.strictEqual(stored.payload.detail, "first line\nsecond line");
+      assert.deepStrictEqual((stored.payload.data as Record<string, unknown>).rawOutput, {
+        output,
+        stdout: output,
+        content: output,
+        exitCode: null,
+      });
+      assert.deepStrictEqual(stored.raw?.payload, {
+        type: "tool_execution_end",
+        result: { output },
+      });
+    }),
+  );
+
+  it.effect("rejects malformed Pi detail instead of silently persisting it", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProviderRuntimeEventRepository;
+      const malformed = {
+        type: "item.completed",
+        eventId: EventId.makeUnsafe("pi-tool-detail-malformed"),
+        provider: "pi" as const,
+        createdAt: "2026-07-14T00:04:00.000Z",
+        threadId: ThreadId.makeUnsafe("thread-pi-tool-detail-malformed"),
+        turnId: TurnId.makeUnsafe("turn-pi-tool-detail-malformed"),
+        itemId: "pi-item-malformed" as never,
+        payload: {
+          itemType: "command_execution" as const,
+          status: "completed" as const,
+          title: "bash",
+          detail: " \t\r\n ",
+          data: { result: { output: " \t\r\n " } },
+        },
+      } as unknown as ProviderRuntimeEvent;
+
+      const failure = yield* Effect.flip(repository.append(malformed));
+      assert.strictEqual(failure._tag, "PersistenceDecodeError");
+      assert.deepStrictEqual(yield* repository.getThreadCoverage(malformed.threadId), {
+        retainedCount: 0,
+        oldestSequence: null,
+        highWaterSequence: 0,
+      });
     }),
   );
 
