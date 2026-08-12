@@ -7,7 +7,13 @@ import type { ProjectionStateRepositoryShape } from "../persistence/Services/Pro
 
 export type ProjectMetadataOrchestrationEvent = Extract<
   OrchestrationEvent,
-  { type: "project.created" | "project.meta-updated" | "project.deleted" }
+  {
+    type:
+      | "project.created"
+      | "project.meta-updated"
+      | "project.mcp-activation-updated"
+      | "project.deleted";
+  }
 >;
 
 export const PROJECT_METADATA_SNAPSHOT_PROJECTORS = [
@@ -37,6 +43,9 @@ export const applyProjectMetadataProjection = (input: {
           scripts: input.event.payload.scripts,
           isPinned: input.event.payload.isPinned ?? false,
           spaceId: input.event.payload.spaceId ?? null,
+          synaraMcpDesiredState: input.event.payload.synaraMcpDesiredState ?? "disabled",
+          synaraMcpActivationVersion: input.event.payload.synaraMcpActivationVersion ?? 0,
+          synaraMcpActivationOperation: input.event.payload.synaraMcpActivationOperation ?? null,
           createdAt: input.event.payload.createdAt,
           updatedAt: input.event.payload.updatedAt,
           deletedAt: null,
@@ -69,6 +78,22 @@ export const applyProjectMetadataProjection = (input: {
             ...(input.event.payload.spaceId !== undefined
               ? { spaceId: input.event.payload.spaceId }
               : {}),
+            updatedAt: input.event.payload.updatedAt,
+          });
+        }
+        break;
+      }
+
+      case "project.mcp-activation-updated": {
+        const existingRow = yield* input.projectionProjectRepository.getById({
+          projectId: input.event.payload.projectId,
+        });
+        if (Option.isSome(existingRow)) {
+          yield* input.projectionProjectRepository.upsert({
+            ...existingRow.value,
+            synaraMcpDesiredState: input.event.payload.desiredState,
+            synaraMcpActivationVersion: input.event.payload.activationVersion,
+            synaraMcpActivationOperation: input.event.payload.operation,
             updatedAt: input.event.payload.updatedAt,
           });
         }

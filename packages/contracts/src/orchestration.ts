@@ -28,6 +28,10 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
+import {
+  ProjectMcpActivationOperation,
+  ProjectMcpDesiredState,
+} from "./projectActivation";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -455,6 +459,15 @@ export const OrchestrationProject = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  synaraMcpDesiredState: Schema.optional(ProjectMcpDesiredState).pipe(
+    Schema.withDecodingDefault(() => "disabled"),
+  ),
+  synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => 0),
+  ),
+  synaraMcpActivationOperation: Schema.optional(
+    Schema.NullOr(ProjectMcpActivationOperation),
+  ).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
@@ -469,6 +482,15 @@ export const OrchestrationProjectShell = Schema.Struct({
   spaceId: Schema.optional(Schema.NullOr(SpaceId)).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  synaraMcpDesiredState: Schema.optional(ProjectMcpDesiredState).pipe(
+    Schema.withDecodingDefault(() => "disabled"),
+  ),
+  synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => 0),
+  ),
+  synaraMcpActivationOperation: Schema.optional(
+    Schema.NullOr(ProjectMcpActivationOperation),
+  ).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
@@ -1025,6 +1047,16 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
 });
+
+export const ProjectMcpActivationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.mcp-activation.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  desiredState: ProjectMcpDesiredState,
+  expectedVersion: NonNegativeInt,
+  operation: ProjectMcpActivationOperation,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type ProjectMcpActivationUpdateCommand = typeof ProjectMcpActivationUpdateCommand.Type;
 
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
@@ -1602,6 +1634,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
+  ProjectMcpActivationUpdateCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1619,6 +1652,7 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "project.mcp-activation-updated",
   "thread.created",
   "thread.deleted",
   // Legacy desktop installs can still contain these rows in orchestration_events.
@@ -1696,6 +1730,15 @@ export const ProjectCreatedPayload = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   isPinned: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
   spaceId: Schema.optional(Schema.NullOr(SpaceId)).pipe(Schema.withDecodingDefault(() => null)),
+  synaraMcpDesiredState: Schema.optional(ProjectMcpDesiredState).pipe(
+    Schema.withDecodingDefault(() => "disabled"),
+  ),
+  synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => 0),
+  ),
+  synaraMcpActivationOperation: Schema.optional(
+    Schema.NullOr(ProjectMcpActivationOperation),
+  ).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1716,6 +1759,15 @@ export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
 });
+
+export const ProjectMcpActivationUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  desiredState: ProjectMcpDesiredState,
+  activationVersion: NonNegativeInt,
+  operation: ProjectMcpActivationOperation,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type ProjectMcpActivationUpdatedPayload = typeof ProjectMcpActivationUpdatedPayload.Type;
 
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2087,6 +2139,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.mcp-activation-updated"),
+    payload: ProjectMcpActivationUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

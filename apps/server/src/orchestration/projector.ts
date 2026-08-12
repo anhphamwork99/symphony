@@ -29,6 +29,7 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  ProjectMcpActivationUpdatedPayload,
   ThreadArchivedPayload,
   ThreadActivityAppendedPayload,
   ThreadCreatedPayload,
@@ -407,6 +408,9 @@ export function projectEvent(
             scripts: payload.scripts,
             isPinned: payload.isPinned ?? false,
             spaceId: payload.spaceId ?? null,
+            synaraMcpDesiredState: payload.synaraMcpDesiredState ?? "disabled",
+            synaraMcpActivationVersion: payload.synaraMcpActivationVersion ?? 0,
+            synaraMcpActivationOperation: payload.synaraMcpActivationOperation ?? null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -442,6 +446,29 @@ export function projectEvent(
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   ...(payload.isPinned !== undefined ? { isPinned: payload.isPinned } : {}),
                   ...(payload.spaceId !== undefined ? { spaceId: payload.spaceId } : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.mcp-activation-updated":
+      return decodeForEvent(
+        ProjectMcpActivationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  synaraMcpDesiredState: payload.desiredState,
+                  synaraMcpActivationVersion: payload.activationVersion,
+                  synaraMcpActivationOperation: payload.operation,
                   updatedAt: payload.updatedAt,
                 }
               : project,

@@ -358,6 +358,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
           isPinned: false,
+          synaraMcpDesiredState: "disabled",
+          synaraMcpActivationVersion: 0,
+          synaraMcpActivationOperation: null,
         },
       ]);
       assert.deepEqual(snapshot.threads, [
