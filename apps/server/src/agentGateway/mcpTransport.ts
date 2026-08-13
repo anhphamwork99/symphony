@@ -5,6 +5,7 @@ import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/Pro
 import type { AgentGatewayShape } from "./Services/AgentGateway.ts";
 import type { AgentGatewayCredentialsShape } from "./Services/AgentGatewayCredentials.ts";
 import { extractBearerToken } from "./bearerToken.ts";
+import type { McpSessionAuthorityRegistryShape } from "./mcpSessionAuthority.ts";
 import {
   buildMcpInitializeResult,
   jsonRpcError,
@@ -60,6 +61,8 @@ function requestIdKey(id: JsonRpcId): string {
 
 export function makeAgentGatewayMcpTransport(input: {
   readonly credentials: AgentGatewayCredentialsShape;
+  /** Trusted session-local MCP authority registry (Decision 21). */
+  readonly mcpSessionAuthority: McpSessionAuthorityRegistryShape;
   readonly snapshotQuery: ProjectionSnapshotQueryShape;
   readonly tools: ReadonlyArray<ToolEntry>;
   readonly instructions: string;
@@ -164,6 +167,24 @@ export function makeAgentGatewayMcpTransport(input: {
         return invalidRequestResponse(
           401,
           "caller_session_inactive: Provider session no longer owns this thread.",
+        );
+      }
+      // Decision 21 / AC2: subject-bound authority admission is mandatory and
+      // happens before write binding, in-flight registration, or handler work.
+      // Missing, expired, revoked, stale, or mismatched authority fails closed
+      // and creates no operation and no side effect. The trusted subject comes
+      // exclusively from the server registry via the credential binding;
+      // request-supplied identity is never consulted.
+      const mcpAuthorityFailure =
+        callerSession.mcpAuthority === null
+          ? "missing-binding"
+          : input.mcpSessionAuthority.assertAdmittable(callerSession.mcpAuthority, {
+              projectId: String(callerThread.value.projectId),
+            });
+      if (mcpAuthorityFailure !== null) {
+        return invalidRequestResponse(
+          401,
+          `mcp_authority_denied:${mcpAuthorityFailure} (subject-bound MCP authority for this credential is not admittable; the credential must be reissued by the trusted server).`,
         );
       }
       const callerWriteAuthority =

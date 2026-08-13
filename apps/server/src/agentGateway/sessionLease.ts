@@ -1,6 +1,7 @@
 import type { ProviderKind, ThreadId } from "@synara/contracts";
 import { Effect, Exit } from "effect";
 
+import type { McpAuthorityBinding } from "./mcpSessionAuthority.ts";
 import type {
   AgentGatewayCredentialsShape,
   AgentGatewayMcpConnection,
@@ -146,10 +147,15 @@ export function acquireAgentGatewaySessionLease(
   credentials: AgentGatewaySessionLeaseCredentials | undefined,
   threadId: ThreadId,
   provider: ProviderKind,
+  mcpAuthority?: McpAuthorityBinding | null,
 ): AgentGatewaySessionLease | undefined {
   if (credentials === undefined) return undefined;
 
-  const connection = credentials.connectionForThread(threadId, provider);
+  // The credential carries the server-minted subject-bound authority snapshot
+  // (Decision 21) so shared MCP admission can re-validate it at request time.
+  // A missing binding stays missing: admission fails closed and never invents
+  // an identity for this credential.
+  const connection = credentials.connectionForThread(threadId, provider, mcpAuthority);
   let released = false;
 
   return {

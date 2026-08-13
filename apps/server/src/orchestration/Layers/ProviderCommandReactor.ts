@@ -1098,6 +1098,8 @@ const make = Effect.gen(function* () {
       readonly modelSelection?: ModelSelection;
       readonly providerOptions?: ProviderStartOptions;
       readonly runtimeMode?: RuntimeMode;
+      /** Originating command id used to resolve trusted dispatch authority. */
+      readonly commandId?: string | null;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -1106,6 +1108,21 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${threadId}' was not found in projection state.`),
       );
     }
+
+    // Decision 21: mint one fresh subject-bound credential binding for this
+    // session start from the trusted dispatch authority written at WS command
+    // dispatch time. Missing/revoked/expired authority yields no binding and
+    // the adapter issues an unbound credential that shared MCP admission
+    // rejects (fail closed); the provider runtime itself still starts.
+    const mcpAuthority =
+      options?.commandId === undefined || options.commandId === null
+        ? undefined
+        : yield* resolveMcpAuthorityBindingForSessionStart(
+            options.commandId,
+            threadId,
+            preferredProvider(thread),
+            String(thread.projectId),
+          );
     const shouldRegisterContextBootstrap =
       thread.session?.status !== "stopped" &&
       !suppressContextBootstrapOnNextStartThreadIds.has(threadId);
@@ -1159,6 +1176,7 @@ const make = Effect.gen(function* () {
       modelSelection: desiredModelSelection,
       providerOptions: resolvedProviderOptions,
       runtimeMode: desiredRuntimeMode,
+      ...(mcpAuthority !== undefined ? { mcpAuthority } : {}),
     };
 
     const resolveActiveSession = (threadId: ThreadId) =>

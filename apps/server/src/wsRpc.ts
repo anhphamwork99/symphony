@@ -89,6 +89,7 @@ import {
 } from "./managedAttachmentPrincipal";
 import { Open, resolveAvailableEditors } from "./open";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
+import { McpSessionAuthority } from "./agentGateway/Services/McpSessionAuthority";
 import {
   isSynaraMcpTurnCommand,
   planSynaraMcpCompletion,
@@ -135,6 +136,7 @@ import { ThreadDiagnosticsQuery } from "./diagnostics/Services/ThreadDiagnostics
 import { makeWsRequestAdmission } from "./wsRequestAdmission";
 import { voiceUploadAdmissionGate } from "./voiceUploadAdmission";
 import {
+  CurrentMcpSessionAuthorityId,
   CurrentWsSessionRole,
   provideWsConnectionSession,
   WS_CONNECTION_SESSION_HEADER,
@@ -596,6 +598,19 @@ const makeWsRpcHandlersLayer = () =>
       const dispatchOrchestrationCommand = (command: OrchestrationCommand) =>
         Effect.gen(function* () {
           const attachmentPrincipal = yield* CurrentManagedAttachmentPrincipal;
+          // Trusted dispatch-authority propagation (Decision 21): the current
+          // connection's server-minted authority is written into the shared
+          // registry under this exact command id and its thread so the
+          // provider reactor can resolve it without embedding any identity
+          // into commands or durable events. Commands dispatched without a
+          // connection-scoped authority (server-internal, recovery) stay
+          // unbound and fail closed at MCP admission.
+          const mcpAuthorityId = yield* CurrentMcpSessionAuthorityId;
+          if (mcpAuthorityId !== null && "commandId" in command && "threadId" in command) {
+            const mcpSessionAuthority = yield* McpSessionAuthority;
+            mcpSessionAuthority.bindDispatch(command.commandId, mcpAuthorityId);
+            mcpSessionAuthority.bindThread(command.threadId, mcpAuthorityId);
+          }
           return yield* runtimeStartup.enqueueCommand(
             orchestrationEngine.dispatch(command, { attachmentPrincipal }),
           );
@@ -2202,6 +2217,18 @@ export function makeWebsocketRpcRouteLayer<R>(
       ) =>
         Effect.gen(function* () {
           const sessionKey = yield* connectionSessions.register(session);
+          // Authority records are connection-scoped (Decision 21): closing the
+          // trusted connection revokes the record so credentials issued under
+          // a previous subject, reconnect, or runtime generation fail
+          // admission instead of surviving past their connection.
+          if (session.mcpAuthorityId !== null) {
+            const mcpSessionAuthority = yield* McpSessionAuthority;
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() =>
+                mcpSessionAuthority.revoke(session.mcpAuthorityId, "connection-closed"),
+              ),
+            );
+          }
           return yield* rpcWebSocketHttpEffect.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,
@@ -2219,6 +2246,7 @@ export function makeWebsocketRpcRouteLayer<R>(
           const config = yield* ServerConfig;
           const serverAuth = yield* ServerAuth;
           const sessions = yield* SessionCredentialService;
+          const mcpSessionAuthority = yield* McpSessionAuthority;
           const url = trustedWebSocketRequestUrl(request, config);
           if (!url) {
             return HttpServerResponse.text("Forbidden", { status: 403 });
@@ -2239,17 +2267,30 @@ export function makeWebsocketRpcRouteLayer<R>(
           });
 
           if (!authenticatedSession) {
+            // Trusted loopback: the server mints an opaque local-owner
+            // principal; it is never accepted from any request surface.
+            const localOwner = yield* mcpSessionAuthority.mintForLocalOwner();
             return yield* runWithConnectionSession(request, {
               role: "owner",
               attachmentPrincipal: LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
+              mcpAuthorityId: localOwner.authorityId,
             });
           }
+
+          // Authenticated: one session-local authority record bound to the
+          // verified subject and auth expiry (Decision 21).
+          const authenticated = yield* mcpSessionAuthority.mintForAuthenticated({
+            sessionId: authenticatedSession.sessionId,
+            subject: authenticatedSession.subject,
+            expiresAt: authenticatedSession.expiresAt,
+          });
 
           return yield* sessions.runAuthenticatedConnection(
             authenticatedSession.sessionId,
             runWithConnectionSession(request, {
               role: authenticatedSession.role,
               attachmentPrincipal: attachmentPrincipalForSession(authenticatedSession.sessionId),
+              mcpAuthorityId: authenticated.authorityId,
             }),
           );
         }).pipe(

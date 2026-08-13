@@ -14,6 +14,7 @@ import type {
   AgentGatewaySessionIdentity,
   AgentGatewayWriteAuthority,
 } from "./AgentGatewaySessionRegistry.ts";
+import type { McpAuthorityBinding } from "../mcpSessionAuthority.ts";
 import type {
   AgentGatewayCancellation,
   AgentGatewayInFlightRequestRegistration,
@@ -40,7 +41,11 @@ export interface AgentGatewayCredentialsShape {
   /** Update the endpoint after the HTTP server resolves a dynamic listen port. */
   readonly setListeningPort: (port: number) => void;
   /** Mint a new opaque bearer token for one provider session. */
-  readonly issueSessionToken: (threadId: ThreadId, provider: ProviderKind) => string;
+  readonly issueSessionToken: (
+    threadId: ThreadId,
+    provider: ProviderKind,
+    mcpAuthority?: McpAuthorityBinding | null,
+  ) => string;
   /** Resolve a live bearer token back to its thread id, or null when invalid. */
   readonly verifySessionToken: (token: string) => string | null;
   /** Resolve the complete non-secret invocation scope. */
@@ -78,6 +83,7 @@ export interface AgentGatewayCredentialsShape {
   readonly connectionForThread: (
     threadId: ThreadId,
     provider: ProviderKind,
+    mcpAuthority?: McpAuthorityBinding | null,
   ) => AgentGatewayMcpConnection;
   /** Spawn spec for the stdio->HTTP proxy used by stdio-only MCP clients. */
   readonly stdioProxy: AgentGatewayStdioProxySpawn;

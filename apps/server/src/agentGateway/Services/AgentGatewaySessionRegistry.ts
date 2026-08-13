@@ -1,6 +1,8 @@
 import type { ProviderKind, ThreadId } from "@synara/contracts";
 import { ServiceMap } from "effect";
 
+import type { McpAuthorityBinding } from "./../mcpSessionAuthority.ts";
+
 export type AgentGatewayCapability =
   | "thread:read"
   | "thread:write"
@@ -15,6 +17,12 @@ export interface AgentGatewaySessionIdentity {
   readonly provider: ProviderKind;
   readonly issuedAt: number;
   readonly capabilities: ReadonlySet<AgentGatewayCapability>;
+  /**
+   * Server-minted subject-bound MCP authority snapshot (Decision 21), or null
+   * for a legacy/unbound credential. Null bindings are rejected at shared MCP
+   * admission; this field is written only by trusted issuer call sites.
+   */
+  readonly mcpAuthority: McpAuthorityBinding | null;
 }
 
 export interface AgentGatewayIssuedSession extends AgentGatewaySessionIdentity {
@@ -37,7 +45,11 @@ export interface AgentGatewayWriteAuthority {
 }
 
 export interface AgentGatewaySessionRegistryShape {
-  readonly issue: (threadId: ThreadId, provider: ProviderKind) => AgentGatewayIssuedSession;
+  readonly issue: (
+    threadId: ThreadId,
+    provider: ProviderKind,
+    mcpAuthority?: McpAuthorityBinding | null,
+  ) => AgentGatewayIssuedSession;
   readonly verify: (token: string) => AgentGatewaySessionIdentity | null;
   readonly bindWriteAuthority: (token: string, turnId: string) => AgentGatewayWriteAuthority | null;
   readonly verifyWriteAuthority: (authority: AgentGatewayWriteAuthority) => boolean;

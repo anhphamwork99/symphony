@@ -64,6 +64,29 @@ export interface McpDispatchBindingOptions {
   readonly credentialTtlMs: number;
 }
 
+/**
+ * Deterministic fail-closed admission failure for one credential binding at
+ * the shared Agent Gateway MCP admission boundary (Decision 21 / AC2). A
+ * denial is derived only from server-side registry state plus the snapshot the
+ * credential itself carries; it never consults request-supplied identity.
+ */
+export type McpAuthorityAdmissionFailure =
+  | "missing-binding"
+  | "unknown-authority"
+  | "revoked"
+  | "expired-auth"
+  | "expired-credential"
+  | "invalid-issuance"
+  | "stale-session-generation"
+  | "subject-mismatch"
+  | "kind-mismatch"
+  | "project-mismatch";
+
+export interface McpAuthorityAdmissionContext {
+  /** Trusted project of the invoking thread; null when not resolvable. */
+  readonly projectId: string | null;
+}
+
 export interface McpSessionAuthorityRegistryShape {
   /** Mint one session-local authority record from trusted server context. */
   readonly mint: (input: {
@@ -84,6 +107,16 @@ export interface McpSessionAuthorityRegistryShape {
     authorityId: string,
     options: McpDispatchBindingOptions,
   ) => McpAuthorityBinding | null;
+  /**
+   * Fail-closed admission check for one credential binding (AC2). Returns the
+   * deterministic denial reason, or null when the binding is currently
+   * admittable against trusted registry state. Missing bindings are the
+   * caller's `"missing-binding"` outcome.
+   */
+  readonly assertAdmittable: (
+    binding: McpAuthorityBinding,
+    context?: McpAuthorityAdmissionContext,
+  ) => McpAuthorityAdmissionFailure | null;
   /** Server-side dispatch binding: commandId → authorityId (capped + TTL-pruned). */
   readonly bindDispatch: (commandId: string, authorityId: string) => boolean;
   /** Server-side thread binding: threadId → authorityId (capped + TTL-pruned). */
@@ -144,6 +177,37 @@ export function makeMcpSessionAuthorityRegistry(options: {
     return true;
   };
 
+  const assertAdmittable: McpSessionAuthorityRegistryShape["assertAdmittable"] = (
+    binding,
+    context,
+  ) => {
+    const record = records.get(binding.authorityId);
+    if (record === undefined) return "unknown-authority";
+    const at = now();
+    if (record.status === "revoked") return "revoked";
+    if (record.status === "expired") return "expired-auth";
+    if (record.authExpiresAt !== null && record.authExpiresAt <= at) {
+      return "expired-auth";
+    }
+    // A snapshot cannot be issued by the trusted server after admission time.
+    if (binding.issuedAt > at) return "invalid-issuance";
+    if (binding.credentialExpiresAt <= at) return "expired-credential";
+    if (record.sessionGeneration !== binding.sessionGeneration) {
+      return "stale-session-generation";
+    }
+    if (record.subject !== binding.subject) return "subject-mismatch";
+    if (record.kind !== binding.kind) return "kind-mismatch";
+    if (record.authSessionId !== binding.authSessionId) return "subject-mismatch";
+    if (
+      binding.projectId !== null &&
+      context?.projectId != null &&
+      binding.projectId !== context.projectId
+    ) {
+      return "project-mismatch";
+    }
+    return null;
+  };
+
   return {
     mint: ({ subject, kind, authSessionId = null, authExpiresAt = null }) => {
       const issuedAt = now();
@@ -197,6 +261,7 @@ export function makeMcpSessionAuthorityRegistry(options: {
         projectId: options.projectId,
       } satisfies McpAuthorityBinding;
     },
+    assertAdmittable,
     bindDispatch: (commandId, authorityId) =>
       writeIndex(commandAuthority, commandId, authorityId),
     bindThread: (threadId, authorityId) => writeIndex(threadAuthority, threadId, authorityId),

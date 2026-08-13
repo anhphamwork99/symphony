@@ -42,6 +42,7 @@ import { ThreadDiagnosticsQuery } from "../../diagnostics/Services/ThreadDiagnos
 import { AgentGateway, type AgentGatewayShape } from "../Services/AgentGateway.ts";
 import { AgentGatewayCredentials } from "../Services/AgentGatewayCredentials.ts";
 import { AgentGatewayOperationRepository } from "../Services/AgentGatewayOperationRepository.ts";
+import { McpSessionAuthority } from "../Services/McpSessionAuthority.ts";
 import { ProviderDiscoveryService } from "../../provider/Services/ProviderDiscoveryService.ts";
 import { ProviderHealth } from "../../provider/Services/ProviderHealth.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -87,6 +88,7 @@ const AGENT_GATEWAY_INSTRUCTIONS =
 
 export const makeAgentGateway = Effect.gen(function* () {
   const credentials = yield* AgentGatewayCredentials;
+  const mcpSessionAuthority = yield* McpSessionAuthority;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const automationService = yield* AutomationService;
@@ -633,6 +635,7 @@ export const makeAgentGateway = Effect.gen(function* () {
   return {
     handleMcpPost: makeAgentGatewayMcpTransport({
       credentials,
+      mcpSessionAuthority,
       snapshotQuery,
       tools,
       instructions: AGENT_GATEWAY_INSTRUCTIONS,
