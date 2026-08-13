@@ -18,12 +18,14 @@ import {
   parseSynaraMcpCommand,
   planSynaraMcpCommand,
   planSynaraMcpCompletion,
+  planSynaraMcpDisableResolution,
   planSynaraMcpDisableTerminal,
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
   sanitizeSynaraMcpDiagnostic,
   synaraMcpRequestId,
   synaraMcpWaitStatus,
+  type SynaraMcpCommandPayload,
 } from "./synaraMcpCommand.ts";
 
 const now = "2026-08-12T12:00:00.000Z" as IsoDateTime;
@@ -147,6 +149,21 @@ async function baseReadModel(options: { readonly active: boolean }): Promise<Orc
       }),
     ),
   );
+}
+
+/** A live but idle session: no in-flight turn, so its safe boundary is immediate. */
+async function idleSessionReadModel(): Promise<OrchestrationReadModel> {
+  const active = await baseReadModel({ active: true });
+  return {
+    ...active,
+    threads: active.threads.map((thread) => ({
+      ...thread,
+      session: thread.session
+        ? { ...thread.session, status: "ready" as const, activeTurnId: null }
+        : null,
+      latestTurn: null,
+    })),
+  };
 }
 
 function turnCommand(text: string) {
@@ -472,5 +489,278 @@ describe("Synara MCP command boundary and durable activity contract", () => {
     expect(new TextEncoder().encode(detail).byteLength).toBeLessThanOrEqual(1_024);
     expect(detail).not.toContain("secret-value");
     expect(detail).not.toContain("/Users/private/file");
+  });
+
+  it("keeps a no-wait disable pending until the provider outcome while an idle enable still settles immediately (Decision 14)", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const plan = planSynaraMcpCommand({
+      command,
+      readModel: await idleSessionReadModel(),
+      now: () => new Date(now),
+    });
+    if (!plan) throw new Error("Expected MCP command plan");
+    // The idle issuing session joins the wait-set so the contracts schema can
+    // represent the durable pending operation that the provider outcome
+    // transitions: a timeout/uncertain disable must never look like clean
+    // success before the provider result is known.
+    expect(plan.pending).toBe(true);
+    expect(plan.operation.aggregateStatus).toBe("pending");
+    expect(plan.operation.waitSet).toEqual([
+      { sessionId: threadId, sessionGeneration: `orchestration:${threadId}:${now}` },
+    ]);
+    expect(plan.operation.outcomes).toEqual([
+      {
+        sessionId: threadId,
+        sessionGeneration: `orchestration:${threadId}:${now}`,
+        status: "pending",
+        detail: null,
+        updatedAt: now,
+      },
+    ]);
+    expect(plan.pendingActivityCommand.activity.id).toBe(`${plan.requestId}:pending`);
+
+    // impl-05 contract unchanged: an idle enable has no provider outcome to
+    // wait for and still settles immediately.
+    const enable = planSynaraMcpCommand({
+      command: turnCommand("/Enable Synara MCP"),
+      readModel: await idleSessionReadModel(),
+      now: () => new Date(now),
+    });
+    expect(enable?.pending).toBe(false);
+    expect(enable?.operation.aggregateStatus).toBe("succeeded");
+    expect(enable?.operation.waitSet).toHaveLength(0);
+  });
+
+  it("resolves a no-wait disable to a succeeded operation and activity when the provider outcome is dormant", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const readModel = await idleSessionReadModel();
+    const plan = planSynaraMcpCommand({ command, readModel, now: () => new Date(now) });
+    if (!plan) throw new Error("Expected MCP command plan");
+
+    const terminal = planSynaraMcpDisableResolution({
+      plan,
+      project: { ...readModel.projects[0]!, synaraMcpActivationOperation: plan.operation },
+      outcome: { state: "dormant" },
+      now: () => new Date("2026-08-12T12:00:01.000Z"),
+    });
+
+    expect(terminal.projectCommand?.operation.aggregateStatus).toBe("succeeded");
+    expect(terminal.projectCommand?.operation.desiredState).toBe("disabled");
+    expect(terminal.projectCommand?.operation.outcomes).toHaveLength(1);
+    expect(terminal.projectCommand?.operation.outcomes[0]?.status).toBe("succeeded");
+    const activity = terminal.activityCommand.activity;
+    expect(activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(activity.kind).toBe("synara.mcp.command.succeeded");
+    expect(activity.turnId).toBeNull();
+    expect(activity.payload).toMatchObject({
+      requestId: plan.requestId,
+      command: "disable",
+      phase: "terminal",
+      status: "succeeded",
+      requestedState: "disabled",
+      finalState: "disabled",
+    });
+  });
+
+  it("resolves a no-wait disable to a failed disabled operation and activity when the provider outcome is unavailable", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const readModel = await idleSessionReadModel();
+    const plan = planSynaraMcpCommand({ command, readModel, now: () => new Date(now) });
+    if (!plan) throw new Error("Expected MCP command plan");
+
+    const terminal = planSynaraMcpDisableResolution({
+      plan,
+      project: { ...readModel.projects[0]!, synaraMcpActivationOperation: plan.operation },
+      outcome: {
+        state: "unavailable",
+        detail: `token=secret-value https://example.test/x /Users/private/file ${
+"x".repeat(2_000)}`,
+      },
+      now: () => new Date(now),
+    });
+
+    expect(terminal.projectCommand?.operation.aggregateStatus).toBe("failed");
+    expect(terminal.projectCommand?.operation.desiredState).toBe("disabled");
+    expect(terminal.projectCommand?.operation.outcomes).toHaveLength(1);
+    expect(terminal.projectCommand?.operation.outcomes[0]?.status).toBe("failed");
+    const activity = terminal.activityCommand.activity;
+    expect(activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(activity.kind).toBe("synara.mcp.command.failed");
+    expect(activity.turnId).toBeNull();
+    expect(activity.payload).toMatchObject({
+      requestId: plan.requestId,
+      command: "disable",
+      phase: "terminal",
+      status: "failed",
+      requestedState: "disabled",
+      finalState: "disabled",
+    });
+    const detail = String((activity.payload as { detail: string }).detail);
+    expect(new TextEncoder().encode(detail).byteLength).toBeLessThanOrEqual(1_024);
+    expect(detail).not.toContain("secret-value");
+    expect(detail).not.toContain("/Users/private/file");
+  });
+
+  it("resolves a no-wait disable timeout to the same failed disabled terminal", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const readModel = await idleSessionReadModel();
+    const plan = planSynaraMcpCommand({ command, readModel, now: () => new Date(now) });
+    if (!plan) throw new Error("Expected MCP command plan");
+
+    const timeoutDetail = "The Synara MCP disable did not complete before its deadline.";
+    const terminal = planSynaraMcpDisableResolution({
+      plan,
+      project: { ...readModel.projects[0]!, synaraMcpActivationOperation: plan.operation },
+      outcome: { state: "timeout", detail: timeoutDetail },
+      now: () => new Date("2026-08-12T12:00:01.000Z"),
+    });
+
+    expect(terminal.projectCommand?.operation.aggregateStatus).toBe("failed");
+    expect(terminal.projectCommand?.operation.desiredState).toBe("disabled");
+    expect(terminal.projectCommand?.operation.outcomes[0]?.status).toBe("failed");
+    const activity = terminal.activityCommand.activity;
+    expect(activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(activity.kind).toBe("synara.mcp.command.failed");
+    expect(activity.payload).toMatchObject({
+      status: "failed",
+      finalState: "disabled",
+      detail: timeoutDetail,
+    });
+  });
+
+  it("journals a no-wait disable success exactly once through the decider", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const readModel = await idleSessionReadModel();
+    const plan = planSynaraMcpCommand({ command, readModel, now: () => new Date(now) });
+    if (!plan || !plan.projectCommand) throw new Error("Expected an idle disable plan");
+
+    // Journal-first: the durable operation lands pending before any provider
+    // outcome is known.
+    const operationEvent = await Effect.runPromise(
+      decideOrchestrationCommand({ command: plan.projectCommand, readModel }),
+    );
+    const afterOperation = await Effect.runPromise(
+      projectEvent(readModel, {
+        ...(Array.isArray(operationEvent) ? operationEvent[0]! : operationEvent),
+        sequence: 4,
+      }),
+    );
+    expect(afterOperation.projects[0]!.synaraMcpActivationOperation?.aggregateStatus).toBe("pending");
+
+    const terminal = planSynaraMcpDisableResolution({
+      plan,
+      project: afterOperation.projects[0]!,
+      outcome: { state: "dormant" },
+      now: () => new Date("2026-08-12T12:00:01.000Z"),
+    });
+    expect(terminal.projectCommand).not.toBeNull();
+    const terminalOperationEvent = await Effect.runPromise(
+      decideOrchestrationCommand({ command: terminal.projectCommand!, readModel: afterOperation }),
+    );
+    const afterTerminalOperation = await Effect.runPromise(
+      projectEvent(afterOperation, {
+        ...(Array.isArray(terminalOperationEvent) ? terminalOperationEvent[0]! : terminalOperationEvent),
+        sequence: 5,
+      }),
+    );
+    expect(afterTerminalOperation.projects[0]!.synaraMcpActivationOperation?.aggregateStatus).toBe(
+      "succeeded",
+    );
+
+    const terminalActivityEvent = await Effect.runPromise(
+      decideOrchestrationCommand({ command: terminal.activityCommand, readModel: afterTerminalOperation }),
+    );
+    const afterTerminalActivity = await Effect.runPromise(
+      projectEvent(afterTerminalOperation, {
+        ...(Array.isArray(terminalActivityEvent) ? terminalActivityEvent[0]! : terminalActivityEvent),
+        sequence: 6,
+      }),
+    );
+    const thread = afterTerminalActivity.threads.find((candidate) => candidate.id === threadId)!;
+    expect(thread.messages).toHaveLength(0);
+    const terminalActivity = thread.activities.find(
+      (entry) => entry.id === `${plan.requestId}:terminal`,
+    )!;
+    expect(terminalActivity).toMatchObject({
+      kind: "synara.mcp.command.succeeded",
+      turnId: null,
+    });
+    expect(terminalActivity.payload as SynaraMcpCommandPayload).toMatchObject({
+      requestId: plan.requestId,
+      status: "succeeded",
+      finalState: "disabled",
+    });
+
+    // A duplicate resolution against the settled operation never re-transitions.
+    const duplicate = planSynaraMcpDisableResolution({
+      plan,
+      project: afterTerminalActivity.projects[0]!,
+      outcome: { state: "unavailable", detail: "late unavailable" },
+      now: () => new Date("2026-08-12T12:00:02.000Z"),
+    });
+    expect(duplicate.projectCommand).toBeNull();
+  });
+
+  it("never re-transitions a settled disable and replays the canonical terminal for a retried command", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const readModel = await idleSessionReadModel();
+    const plan = planSynaraMcpCommand({ command, readModel, now: () => new Date(now) });
+    if (!plan || !plan.projectCommand) throw new Error("Expected an idle disable plan");
+
+    // Journal the pending operation, then its failed terminal.
+    const operationEvent = await Effect.runPromise(
+      decideOrchestrationCommand({ command: plan.projectCommand, readModel }),
+    );
+    const afterOperation = await Effect.runPromise(
+      projectEvent(readModel, {
+        ...(Array.isArray(operationEvent) ? operationEvent[0]! : operationEvent),
+        sequence: 4,
+      }),
+    );
+    const failure = planSynaraMcpDisableResolution({
+      plan,
+      project: afterOperation.projects[0]!,
+      outcome: { state: "unavailable", detail: "The disable could not prove its cleanup." },
+      now: () => new Date("2026-08-12T12:00:01.000Z"),
+    });
+    expect(failure.projectCommand).not.toBeNull();
+    const failureEvent = await Effect.runPromise(
+      decideOrchestrationCommand({ command: failure.projectCommand!, readModel: afterOperation }),
+    );
+    const afterFailure = await Effect.runPromise(
+      projectEvent(afterOperation, {
+        ...(Array.isArray(failureEvent) ? failureEvent[0]! : failureEvent),
+        sequence: 5,
+      }),
+    );
+    expect(afterFailure.projects[0]!.synaraMcpActivationOperation?.aggregateStatus).toBe("failed");
+
+    // Re-planning the same command (a retry) sees the settled operation: the
+    // resolution can only replay the deterministic terminal, never
+    // re-transition the durable operation.
+    const retry = planSynaraMcpCommand({
+      command,
+      readModel: afterFailure,
+      now: () => new Date("2026-08-12T12:02:00.000Z"),
+    });
+    if (!retry) throw new Error("Expected retry plan");
+    expect(retry.pending).toBe(false);
+    const replay = planSynaraMcpDisableResolution({
+      plan: retry,
+      project: afterFailure.projects[0]!,
+      outcome: { state: "timeout", detail: "The Synara MCP disable did not complete before its deadline." },
+      now: () => new Date("2026-08-12T12:02:01.000Z"),
+    });
+    expect(replay.projectCommand).toBeNull();
+    expect(replay.activityCommand.activity.id).toBe(`${retry.requestId}:terminal`);
+    expect(replay.activityCommand.activity).toMatchObject({
+      kind: "synara.mcp.command.failed",
+      turnId: null,
+    });
+    expect(replay.activityCommand.activity.payload as SynaraMcpCommandPayload).toMatchObject({
+      status: "failed",
+      finalState: "disabled",
+      detail: "The disable could not prove its cleanup.",
+    });
   });
 });

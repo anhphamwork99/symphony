@@ -130,6 +130,36 @@ function activeWaitSet(readModel: OrchestrationReadModel, projectId: ProjectId) 
     .toSorted((left, right) => left.sessionId.localeCompare(right.sessionId));
 }
 
+/**
+ * Wait-set for a new Synara MCP operation. Enable waits only for in-flight
+ * sessions (safe-boundary deferral). A disable with no in-flight session must
+ * stay durably pending until the provider disable outcome is known (Decision
+ * 14: a timeout/uncertain result is failed-disabled, never clean success), and
+ * the contracts aggregate status derives from the wait-set outcomes, so the
+ * issuing session joins the wait-set as the single member whose outcome
+ * carries the provider result. A session-less issuing thread has no session to
+ * track; its provider disable outcome is dormant by construction (there is no
+ * live runtime to fence, drain, or revoke).
+ */
+function waitSetForCommand(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly thread: OrchestrationThread;
+  readonly project: OrchestrationProject;
+  readonly kind: SynaraMcpCommand;
+}): ProjectMcpActivationOperation["waitSet"] {
+  const active = activeWaitSet(input.readModel, input.project.id);
+  if (active.length > 0 || input.kind === "enable") return active;
+  return input.thread.session === null
+    ? active
+    : [
+        {
+          sessionId: input.thread.id,
+          // Same durable session snapshot token convention as activeWaitSet.
+          sessionGeneration: `orchestration:${input.thread.id}:${input.thread.session.updatedAt}`,
+        },
+      ];
+}
+
 function activityCommand(input: {
   readonly threadId: ThreadId;
   readonly requestId: string;
@@ -274,7 +304,12 @@ export function planSynaraMcpCommand(input: {
           project,
           requestId,
           desiredState: requestedState,
-          waitSet: activeWaitSet(input.readModel, project.id),
+          waitSet: waitSetForCommand({
+            readModel: input.readModel,
+            thread,
+            project,
+            kind,
+          }),
           createdAt,
         });
   const pending = operation.aggregateStatus === "pending";
@@ -467,6 +502,53 @@ export function planSynaraMcpDisableTerminal(input: {
     plan: input.plan,
     project: input.project,
     detail: input.outcome.detail ?? "The Synara MCP disable could not prove its cleanup.",
+    ...(input.now === undefined ? {} : { now: input.now }),
+  });
+}
+
+export type SynaraMcpDisableResolution =
+  | SynaraMcpDisableOutcome
+  | { readonly state: "timeout"; readonly detail: string };
+
+/**
+ * Shared impl-07 disable terminal planning for the command boundary (wsRpc
+ * inline and pending reconcile paths): maps a bounded provider disable result
+ * (dormant, unavailable, or a bounded-wait timeout) to the exactly-one
+ * terminal. A non-pending plan (a retried command whose operation already
+ * settled, or a session-less thread whose schema-valid aggregate is terminal)
+ * yields only the deterministic terminal replay and never re-transitions the
+ * durable operation, so duplicate resolutions stay idempotent. A pending plan
+ * journals the provider-driven terminal exactly once; the operation
+ * transition itself remains guarded by the current read model at the call
+ * site.
+ */
+export function planSynaraMcpDisableResolution(input: {
+  readonly plan: SynaraMcpCommandPlan;
+  readonly project: OrchestrationProject;
+  readonly outcome: SynaraMcpDisableResolution;
+  readonly now?: () => Date;
+}): {
+  readonly projectCommand: ProjectMcpActivationUpdateCommand | null;
+  readonly activityCommand: SynaraMcpActivityAppendCommand;
+} {
+  if (!input.plan.pending) {
+    return {
+      projectCommand: null,
+      activityCommand: input.plan.terminalActivityCommand,
+    };
+  }
+  if (input.outcome.state === "timeout") {
+    return planSynaraMcpFailure({
+      plan: input.plan,
+      project: input.project,
+      detail: input.outcome.detail,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+  }
+  return planSynaraMcpDisableTerminal({
+    plan: input.plan,
+    project: input.project,
+    outcome: input.outcome,
     ...(input.now === undefined ? {} : { now: input.now }),
   });
 }

@@ -53,6 +53,27 @@ per-session lifecycle coordinator through `piSynaraMcpDisable.ts`:
 impl-08 (project-wide fan-out/wait-set) and impl-09 (restart recovery) remain
 out of scope.
 
+**Follow-up (reviewer finding — no-wait/idle disable):** The reviewer found
+that a no-wait disable (empty wait-set) created the operation aggregate with
+`aggregateStatus: succeeded` before the provider outcome existed, so an
+unavailable/timeout provider result journaled a failed activity while the
+durable operation could never be updated (`planSynaraMcpFailure` only
+transitions pending operations). Decision 14 requires timeout/uncertain
+cleanup to be failed-disabled, never clean success. Fixed in
+`synaraMcpCommand.ts`/`wsRpc.ts`: an idle disable now joins the issuing
+session to the wait-set as its single member (the contracts aggregate status
+derives from wait-set outcomes, so pending/failed cannot be represented with
+an empty wait-set), keeping the operation pending until the provider outcome;
+the shared `planSynaraMcpDisableResolution` maps dormant -> succeeded,
+unavailable/timeout -> failed-disabled with a sanitized detail, replays the
+deterministic terminal for already-settled operations without re-transition,
+and is used by both the inline and pending provider-disable paths, removing
+the duplicated wsRpc orchestration shape found by standards review. Journal-
+first ordering and deterministic request/activity IDs are preserved; impl-05
+idle-enable immediate settlement is unchanged; a session-less issuing thread
+keeps its schema-valid terminal aggregate (its provider outcome is dormant by
+construction).
+
 **Focused verification:** `piSynaraMcpToolExecution.test.ts` 8/8,
 `piSynaraMcpLifecycle.test.ts` 35/35 (1 new Decision 14 exact-turn identity
 handoff test), `piSynaraMcpDisable.test.ts` 10/10 (2 new activeTurnId flow
@@ -61,11 +82,18 @@ Decision 14 retirement-ordering test; the AC2 test now runs through the
 mapped custom-tool seam with the exact structured failure, non-MCP turn
 continuity, and no session.abort), `ProviderService.test.ts` 87/87 (1 new
 AC1 behavioral test through the public disable into the real orchestration
-at the Pi adapter boundary), `synaraMcpCommand.test.ts` 8/8 (unchanged
-file), `wsRpc.auth.test.ts` 8/8 and `wsRpc.connectionLifecycle.test.ts`
-26/26 (unchanged files). Focused seam pass: 228/228. `git diff --check`
-passes. The workspace `bun run test` stalls in the server suite (same as
-impl-06's acceptance record, Decision 23).
+at the Pi adapter boundary), `synaraMcpCommand.test.ts` 14/14 (6 new
+Decision 14 no-wait/idle-disable regression tests: pending-until-outcome
+operation with the issuing session as its wait-set member, dormant ->
+succeeded operation/activity with `finalState: disabled`, unavailable and
+timeout -> failed operation/activity with `finalState: disabled` and bounded
+sanitized detail, exactly-once journaling through the decider, and
+idempotent terminal replay for settled operations), `wsRpc.auth.test.ts` 8/8
+and `wsRpc.connectionLifecycle.test.ts` 26/26 (unchanged test files;
+`wsRpc.ts` disable outcome handling now routes through the shared
+`planSynaraMcpDisableResolution` helper). Focused seam pass: 234/234. `git
+diff --check` passes. The workspace `bun run test` stalls in the server suite
+(same as impl-06's acceptance record, Decision 23).
 
 Full server suite evidence is inherited from the implementing agent's single
 completed run: `27 failed | 3851 passed | 16 skipped`, with all failures in

@@ -94,7 +94,7 @@ import {
   isSynaraMcpTurnCommand,
   parseSynaraMcpCommand,
   planSynaraMcpCompletion,
-  planSynaraMcpDisableTerminal,
+  planSynaraMcpDisableResolution,
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
   synaraMcpWaitStatus,
@@ -648,9 +648,12 @@ const makeWsRpcHandlersLayer = () =>
           if (!plan.pending) {
             if (command === "disable") {
               // impl-07: after the durable desired-disabled acceptance, disable
-              // the issuing session through the public provider boundary. An
-              // idle session has no in-flight turn, so its safe boundary is
-              // immediate and the disable resolves promptly.
+              // the issuing session through the public provider boundary. A
+              // fresh no-wait disable stays pending in the reconcile path below
+              // until the provider outcome is known; this branch only resolves
+              // retried commands whose operation already settled (deterministic
+              // terminal replay) and session-less threads whose schema-valid
+              // aggregate is terminal.
               const remainingMs = Math.max(
                 0,
                 Date.parse(plan.operation.absoluteDeadline) - Date.now(),
@@ -658,25 +661,21 @@ const makeWsRpcHandlersLayer = () =>
               const outcome = yield* providerService
                 .disableSynaraMcp({ threadId: plan.command.threadId })
                 .pipe(Effect.timeoutOption(remainingMs <= 0 ? "1 millis" : Duration.millis(remainingMs)));
-              if (Option.isNone(outcome)) {
-                return yield* dispatchOrchestrationCommand(
-                  planSynaraMcpFailure({
-                    plan,
-                    project: plan.project,
-                    detail: "The Synara MCP disable did not complete before its deadline.",
-                  }).activityCommand,
-                );
+              const terminal = planSynaraMcpDisableResolution({
+                plan,
+                project: plan.project,
+                outcome:
+                  Option.isNone(outcome)
+                    ? {
+                        state: "timeout",
+                        detail: "The Synara MCP disable did not complete before its deadline.",
+                      }
+                    : outcome.value,
+              });
+              if (terminal.projectCommand) {
+                yield* dispatchOrchestrationCommand(terminal.projectCommand);
               }
-              if (outcome.value.state === "unavailable") {
-                return yield* dispatchOrchestrationCommand(
-                  planSynaraMcpFailure({
-                    plan,
-                    project: plan.project,
-                    detail:
-                      outcome.value.detail ?? "The Synara MCP disable could not prove its cleanup.",
-                  }).activityCommand,
-                );
-              }
+              return yield* dispatchOrchestrationCommand(terminal.activityCommand);
             }
             return yield* dispatchOrchestrationCommand(plan.terminalActivityCommand);
           }
@@ -688,8 +687,10 @@ const makeWsRpcHandlersLayer = () =>
               // impl-07: the per-session disable fences immediately, settles
               // in-flight executions exactly once, drains the gateway within
               // the bounded window, revokes, clears, and reloads at the safe
-              // boundary (the current turn's end). Its outcome drives exactly
-              // one succeeded/failed terminal with finalState disabled.
+              // boundary (the current turn's end). The durable operation stays
+              // pending until the outcome is known; the shared resolution
+              // drives exactly one succeeded/failed terminal with finalState
+              // disabled, bounded by the project deadline.
               const remainingMs = Math.max(0, deadline - Date.now());
               const outcome = yield* providerService
                 .disableSynaraMcp({ threadId: plan.command.threadId })
@@ -698,22 +699,18 @@ const makeWsRpcHandlersLayer = () =>
               const currentProject = current.projects.find(
                 (project) => project.id === plan.project.id,
               );
-              const terminal =
-                Option.isNone(outcome) || outcome.value.state === "unavailable"
-                  ? planSynaraMcpFailure({
-                      plan,
-                      project: currentProject ?? plan.project,
-                      detail:
-                        Option.isNone(outcome)
-                          ? "The Synara MCP disable did not complete before the project deadline."
-                          : (outcome.value.detail ??
-                            "The Synara MCP disable could not prove its cleanup."),
-                    })
-                  : planSynaraMcpDisableTerminal({
-                      plan,
-                      project: currentProject ?? plan.project,
-                      outcome: outcome.value,
-                    });
+              const terminal = planSynaraMcpDisableResolution({
+                plan,
+                project: currentProject ?? plan.project,
+                outcome:
+                  Option.isNone(outcome)
+                    ? {
+                        state: "timeout",
+                        detail:
+                          "The Synara MCP disable did not complete before the project deadline.",
+                      }
+                    : outcome.value,
+              });
               if (
                 currentProject?.synaraMcpActivationOperation?.requestId === plan.requestId &&
                 terminal.projectCommand
