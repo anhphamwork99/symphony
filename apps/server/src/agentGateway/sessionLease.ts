@@ -151,10 +151,15 @@ export function acquireAgentGatewaySessionLease(
 ): AgentGatewaySessionLease | undefined {
   if (credentials === undefined) return undefined;
 
+  // Fail closed at issuance (Decision 21): without a server-minted
+  // subject-bound authority snapshot no shared-gateway credential is minted at
+  // all, so the provider session runs normally but can never enter shared
+  // Agent Gateway MCP admission. A missing binding is never inferred from the
+  // thread, provider, or session ids, and no identity is invented for it.
+  if (mcpAuthority === undefined || mcpAuthority === null) return undefined;
+
   // The credential carries the server-minted subject-bound authority snapshot
   // (Decision 21) so shared MCP admission can re-validate it at request time.
-  // A missing binding stays missing: admission fails closed and never invents
-  // an identity for this credential.
   const connection = credentials.connectionForThread(threadId, provider, mcpAuthority);
   let released = false;
 

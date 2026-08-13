@@ -1681,6 +1681,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                         ...(persistedBinding.resumeCursor !== undefined
                           ? { resumeCursor: persistedBinding.resumeCursor }
                           : {}),
+                        // The same trusted thread/session authority rides the
+                        // restored runtime (Decision 21); absent input authority
+                        // still fails closed with no gateway lease.
+                        ...(input.mcpAuthority !== undefined && input.mcpAuthority !== null
+                          ? { mcpAuthority: input.mcpAuthority }
+                          : {}),
                       });
                       if (restored.provider !== previousAdapter.provider) {
                         return yield* toValidationError(

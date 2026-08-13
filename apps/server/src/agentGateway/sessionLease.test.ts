@@ -12,17 +12,23 @@ import {
   withAgentGatewayTurnCancellation,
 } from "./sessionLease.ts";
 
+function mintTestBinding(): McpAuthorityBinding {
+  const registry = makeMcpSessionAuthorityRegistry();
+  const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+  const binding = registry.bindingFor(record.authorityId, {
+    threadId: "thread-1",
+    provider: "codex",
+    projectId: "project-1",
+    lifecycleGeneration: null,
+    credentialTtlMs: 60_000,
+  });
+  if (binding === null) throw new Error("test binding mint failed");
+  return binding;
+}
+
 describe("AgentGatewaySessionLease", () => {
   it("passes the server-minted authority binding into credential issuance", () => {
-    const registry = makeMcpSessionAuthorityRegistry();
-    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
-    const binding = registry.bindingFor(record.authorityId, {
-      threadId: "thread-1",
-      provider: "codex",
-      projectId: "project-1",
-      lifecycleGeneration: null,
-      credentialTtlMs: 60_000,
-    });
+    const binding = mintTestBinding();
     expect(binding).not.toBeNull();
 
     const connectionForThread = vi.fn((_threadId, _provider, _mcpAuthority) => ({
@@ -36,29 +42,13 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "codex",
-      binding as McpAuthorityBinding,
+      binding,
     );
 
     expect(connectionForThread).toHaveBeenCalledWith(
       ThreadId.makeUnsafe("thread-1"),
       "codex",
       binding,
-    );
-    // An omitted binding stays omitted: admission fails closed instead of
-    // inventing an identity for this credential.
-    connectionForThread.mockClear();
-    acquireAgentGatewaySessionLease(
-      {
-        connectionForThread,
-        revokeSessionToken: vi.fn(),
-      },
-      ThreadId.makeUnsafe("thread-1"),
-      "codex",
-    );
-    expect(connectionForThread).toHaveBeenCalledWith(
-      ThreadId.makeUnsafe("thread-1"),
-      "codex",
-      undefined,
     );
   });
 
@@ -75,6 +65,7 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "codex",
+      mintTestBinding(),
     );
 
     await lease?.cancelTurn("turn-exact");
@@ -100,6 +91,7 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "codex",
+      mintTestBinding(),
     );
 
     await lease?.retireTurn("turn-a");
@@ -302,6 +294,7 @@ describe("AgentGatewaySessionLease", () => {
       { connectionForThread, issueStdioBootstrapToken, revokeSessionToken },
       ThreadId.makeUnsafe("thread-1"),
       "cursor",
+      mintTestBinding(),
     );
 
     expect(lease?.connection).toEqual({
@@ -309,7 +302,11 @@ describe("AgentGatewaySessionLease", () => {
       bearerToken: "gateway-token",
     });
     expect(connectionForThread).toHaveBeenCalledOnce();
-    expect(connectionForThread).toHaveBeenCalledWith("thread-1", "cursor", undefined);
+    expect(connectionForThread).toHaveBeenCalledWith(
+      "thread-1",
+      "cursor",
+      expect.objectContaining({ authorityId: expect.any(String), subject: "user-1" }),
+    );
     expect(lease?.issueStdioBootstrapToken?.()).toBe("one-shot-bootstrap");
     expect(issueStdioBootstrapToken).toHaveBeenCalledWith("gateway-token");
 
@@ -332,8 +329,13 @@ describe("AgentGatewaySessionLease", () => {
     const credentials = { connectionForThread, revokeSessionToken };
     const threadId = ThreadId.makeUnsafe("thread-1");
 
-    const previous = acquireAgentGatewaySessionLease(credentials, threadId, "grok");
-    const replacement = acquireAgentGatewaySessionLease(credentials, threadId, "grok");
+    const previous = acquireAgentGatewaySessionLease(credentials, threadId, "grok", mintTestBinding());
+    const replacement = acquireAgentGatewaySessionLease(
+      credentials,
+      threadId,
+      "grok",
+      mintTestBinding(),
+    );
 
     previous?.release();
     expect(revokeSessionToken).toHaveBeenLastCalledWith("gateway-token-1");
@@ -350,6 +352,33 @@ describe("AgentGatewaySessionLease", () => {
     ).toBeUndefined();
   });
 
+  it("fails closed without a lease when the MCP authority binding is missing", () => {
+    const connectionForThread = vi.fn(() => ({
+      url: "http://127.0.0.1:48123/mcp",
+      bearerToken: "gateway-token",
+    }));
+    const revokeSessionToken = vi.fn();
+    const credentials = { connectionForThread, revokeSessionToken };
+
+    // Omitted binding: no credential is minted at all (Decision 21), so the
+    // provider session stays usable while never entering gateway admission.
+    expect(
+      acquireAgentGatewaySessionLease(credentials, ThreadId.makeUnsafe("thread-1"), "droid"),
+    ).toBeUndefined();
+    // An explicitly null binding fails exactly the same way.
+    expect(
+      acquireAgentGatewaySessionLease(
+        credentials,
+        ThreadId.makeUnsafe("thread-1"),
+        "droid",
+        null,
+      ),
+    ).toBeUndefined();
+    // A missing binding is never inferred from thread/provider/session state.
+    expect(connectionForThread).not.toHaveBeenCalled();
+    expect(revokeSessionToken).not.toHaveBeenCalled();
+  });
+
   it("marks the lease released before delegating to a throwing revoker", () => {
     const revokeSessionToken = vi.fn(() => {
       throw new Error("revoke failed");
@@ -364,6 +393,7 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "claudeAgent",
+      mintTestBinding(),
     );
 
     expect(() => lease?.release()).toThrow("revoke failed");
@@ -384,6 +414,7 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "cursor",
+      mintTestBinding(),
     );
 
     await Effect.runPromise(
@@ -427,6 +458,7 @@ describe("AgentGatewaySessionLease", () => {
       },
       ThreadId.makeUnsafe("thread-1"),
       "pi",
+      mintTestBinding(),
     );
 
     await Effect.runPromise(

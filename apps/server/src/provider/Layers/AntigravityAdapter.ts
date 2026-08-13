@@ -37,6 +37,7 @@ import {
   type AgentGatewaySessionLease,
   withAgentGatewayTurnCancellation,
 } from "../../agentGateway/sessionLease.ts";
+import type { McpAuthorityBinding } from "../../agentGateway/mcpSessionAuthority.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
@@ -100,6 +101,12 @@ type StoredTurn = {
 type AntigravitySessionContext = {
   session: ProviderSession;
   gatewaySessionLease?: AgentGatewaySessionLease;
+  /**
+   * Server-minted subject-bound authority snapshot resolved at session start
+   * (Decision 21). Antigravity mints its gateway lease lazily per turn, so the
+   * binding is carried here and never inferred from thread/provider state.
+   */
+  readonly mcpAuthority?: McpAuthorityBinding | null;
   harnessPolicyDelivered?: boolean;
   readonly lifecycleGeneration?: string;
   readonly binaryPath: string;
@@ -1023,6 +1030,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         };
         const context: AntigravitySessionContext = {
           session,
+          ...(input.mcpAuthority !== undefined && input.mcpAuthority !== null
+            ? { mcpAuthority: input.mcpAuthority }
+            : {}),
           ...(input.lifecycleGeneration !== undefined
             ? { lifecycleGeneration: input.lifecycleGeneration }
             : {}),
@@ -1084,7 +1094,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             issue: "A prompt or file attachment is required.",
           });
         }
-        const canBootstrapGateway = agentGatewayCredentials !== undefined;
+        const canBootstrapGateway =
+          agentGatewayCredentials !== undefined && context.mcpAuthority != null;
         const providerPrompt = buildAntigravityTurnPrompt(context, {
           prompt: normalizedPrompt,
           hasGatewaySessionLease: canBootstrapGateway,
@@ -1133,6 +1144,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           agentGatewayCredentials,
           input.threadId,
           PROVIDER,
+          context.mcpAuthority,
         );
         const gatewayBootstrapToken = gatewaySessionLease?.issueStdioBootstrapToken?.();
         if (gatewaySessionLease && !gatewayBootstrapToken) {
