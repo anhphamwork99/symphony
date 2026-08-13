@@ -34,6 +34,27 @@ const ProviderSessionStatus = Schema.Literals([
   "closed",
 ]);
 
+/**
+ * Opaque server-controlled snapshot of the session-local MCP authority record
+ * (Decision 21). It is minted only inside the trusted server and must never
+ * be accepted from clients, provider payloads, or request-supplied identity.
+ * Provider adapters pass it through to the shared Agent Gateway MCP admission
+ * boundary; admission re-validates the owning authority record at request time.
+ */
+export const McpAuthorityBinding = Schema.Struct({
+  authorityId: TrimmedNonEmptyString,
+  subject: TrimmedNonEmptyString,
+  kind: Schema.Union(Schema.Literal("authenticated"), Schema.Literal("local-owner")),
+  authSessionId: Schema.NullOr(TrimmedNonEmptyString),
+  authExpiresAt: Schema.NullOr(Schema.Number),
+  issuedAt: Schema.Number,
+  credentialExpiresAt: Schema.Number,
+  sessionGeneration: TrimmedNonEmptyString,
+  lifecycleGeneration: Schema.NullOr(TrimmedNonEmptyString),
+  projectId: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type McpAuthorityBinding = typeof McpAuthorityBinding.Type;
+
 export const ProviderSession = Schema.Struct({
   provider: ProviderKind,
   status: ProviderSessionStatus,
@@ -53,6 +74,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
   provider: Schema.optional(ProviderKind),
   lifecycleGeneration: Schema.optional(TrimmedNonEmptyString),
+  /** Optional server-minted subject-bound MCP authority (Decision 21). */
+  mcpAuthority: Schema.optional(McpAuthorityBinding),
   cwd: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
