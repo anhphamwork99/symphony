@@ -9,6 +9,13 @@
 // settled promise can never be resolved twice and the entry is removed from
 // the registry), and calls are never automatically retried or replayed.
 //
+// Admission is generation-scoped: `resetForFreshActivation` retires the
+// current generation and installs a fresh one only at a proven fresh
+// activation safe-boundary (the lifecycle coordinator's commit seam). The
+// retired generation stays fenced forever and keeps its own pending map, so
+// stale executions/callbacks from it can never enter or mutate the fresh
+// generation, and a re-enabled session admits mapped tool calls again.
+//
 // Gateway-side cancellation and drainage remain owned by the agent-gateway
 // in-flight request registry (see piSynaraMcpLifecycle.ts deactivation
 // seams); this module is strictly the Pi-facing settlement boundary.
@@ -64,6 +71,18 @@ export interface PiSynaraMcpToolExecutionRegistry {
   readonly inFlightCount: () => number;
   /** Executions settled as disabled (bounded diagnostics). */
   readonly disabledSettledCount: () => number;
+  /**
+   * Retire the current execution generation and install a fresh one. Must
+   * only be called at a proven fresh-activation safe-boundary (the lifecycle
+   * coordinator's commit seam): a re-enabled session admits mapped tool
+   * calls again, while the retired generation stays fenced forever with its
+   * own pending map, so stale executions/callbacks from it can never enter
+   * or mutate the fresh generation. `fenceNewGeneration` starts the fresh
+   * generation fenced; the coordinator requests it when a disable was
+   * requested while the activation ran, so no call can be admitted after
+   * that disable's fence began.
+   */
+  readonly resetForFreshActivation: (fenceNewGeneration: boolean) => void;
 }
 
 interface PendingExecution {
@@ -74,7 +93,22 @@ interface PendingExecution {
   settled: boolean;
 }
 
-export function makePiSynaraMcpToolExecutionRegistry(): PiSynaraMcpToolExecutionRegistry {
+/**
+ * One execution admission generation. Every closure below captures this
+ * generation's own `pending` map by value, so once a generation is retired
+ * its late callbacks and settlements can only ever touch this generation's
+ * state — never a later generation's.
+ */
+interface PiSynaraMcpToolExecutionGeneration {
+  readonly execute: (input: PiSynaraMcpToolExecutionInput) => Promise<unknown>;
+  readonly fence: () => void;
+  readonly isFenced: () => boolean;
+  readonly settleAll: () => Promise<void>;
+  readonly inFlightCount: () => number;
+  readonly disabledSettledCount: () => number;
+}
+
+function makeExecutionGeneration(): PiSynaraMcpToolExecutionGeneration {
   let fenced = false;
   let disabledSettled = 0;
   const pending = new Map<Promise<unknown>, PendingExecution>();
@@ -161,5 +195,27 @@ export function makePiSynaraMcpToolExecutionRegistry(): PiSynaraMcpToolExecution
     },
     inFlightCount: () => pending.size,
     disabledSettledCount: () => disabledSettled,
+  };
+}
+
+export function makePiSynaraMcpToolExecutionRegistry(): PiSynaraMcpToolExecutionRegistry {
+  let current = makeExecutionGeneration();
+  return {
+    execute: (input) => current.execute(input),
+    fence: () => current.fence(),
+    isFenced: () => current.isFenced(),
+    settleAll: () => current.settleAll(),
+    inFlightCount: () => current.inFlightCount(),
+    disabledSettledCount: () => current.disabledSettledCount(),
+    resetForFreshActivation: (fenceNewGeneration) => {
+      // Retire the current generation permanently (it was fenced by the
+      // disable that preceded this fresh activation; this is defensive and
+      // self-documenting), then install the fresh admission generation.
+      current.fence();
+      current = makeExecutionGeneration();
+      if (fenceNewGeneration) {
+        current.fence();
+      }
+    },
   };
 }

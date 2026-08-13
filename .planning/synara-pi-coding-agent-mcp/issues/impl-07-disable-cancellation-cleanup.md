@@ -122,6 +122,37 @@ fix: 234/234 (same per-file counts), plus the four affected test doubles
 `ProviderSessionReaper`) pass with the required `disableSynaraMcp` fake
 member. `git diff --check` passes.
 
+**Follow-up (post-acceptance blockers — fresh admission generation and
+thrown provider-disable terminals):** After Decision 24 acceptance, two
+material defects were confirmed. (1) The Pi-local execution registry
+(`piSynaraMcpToolExecution.ts`) carried a permanent fence with no
+reset/replacement; PiAdapter created one registry per session and
+`applyAtSafeBoundary` reused it, so disable -> enable -> tool call still
+rejected. The registry is now generation-scoped: `resetForFreshActivation`
+retires the current generation (permanently fenced, own pending map) and
+installs a fresh one only at the proven fresh-activation commit seam
+(`onActivationCommitted`), so stale executions/callbacks from the retired
+generation can never enter or mutate the fresh generation. When a disable is
+requested while an activation runs, the fresh generation starts fenced (the
+queued-disable fence is recorded synchronously and cleared when the request
+settles, including the idempotent duplicate and refusal paths) so no call can
+be admitted after the disable fence began. (2) Both `wsRpc.ts` disable
+branches yielded `ProviderService.disableSynaraMcp` directly, so a thrown
+provider failure escaped to the outer RPC error path and left the pending
+durable operation without a failed-disabled terminal. Both branches now run
+the provider disable through `runProviderSynaraMcpDisable`, which catches the
+failure locally, sanitizes/bounds the detail through the existing
+`sanitizeSynaraMcpDiagnostic`/`planSynaraMcpDisableResolution` helpers, and
+drives exactly one failed operation/activity with `finalState: disabled` in
+both the pending and non-pending (deterministic replay) command shapes.
+Focused regression suite: 498/498 across the 13 impl-07 files (10 new tests:
+registry generation isolation/reset, coordinator commit notification and
+queued-disable fence, PiAdapter mapped-tool re-enable with inert retired
+late callback, and thrown-failure failed-disabled terminals through the
+decider). Workspace typecheck still reports only the seven documented
+baseline errors; `git diff --check` passes. Decision 24 status is unchanged
+and is governed by Supervisor Reassessment.
+
 ## Testing Seams
 
 **Approval status:** Approved by owner on 2026-08-12, following designer review.

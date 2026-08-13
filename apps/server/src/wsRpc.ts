@@ -97,7 +97,9 @@ import {
   planSynaraMcpDisableResolution,
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
+  sanitizeSynaraMcpDiagnostic,
   synaraMcpWaitStatus,
+  type SynaraMcpDisableOutcome,
 } from "./orchestration/synaraMcpCommand";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
@@ -109,7 +111,7 @@ import { discoverSkillsCatalog, synaraSkillsDir } from "./provider/skillsCatalog
 import { recoverUnregisteredGitHubCheckout } from "./project/githubProjectRegistration";
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
-import { ProviderService } from "./provider/Services/ProviderService";
+import { ProviderService, type ProviderDisableSynaraMcpResult } from "./provider/Services/ProviderService";
 import { listProviderUsage } from "./providerUsage";
 import { getProviderUsageSnapshot } from "./providerUsageSnapshot";
 import { ProfileStatsQuery } from "./profileStats";
@@ -168,6 +170,32 @@ import {
 
 export function canManageExternalMcp(role: "owner" | "client"): boolean {
   return role === "owner";
+}
+
+/**
+ * Run the bounded per-session provider disable for the Synara MCP command
+ * boundary (impl-07). A bounded-wait timeout yields `Option.none` and the
+ * caller supplies the deadline-specific detail; a thrown provider disable
+ * failure is caught locally and normalized to an unavailable outcome with a
+ * sanitized bounded detail, so the durable operation always receives exactly
+ * one failed-disabled terminal instead of the failure escaping to the RPC
+ * error path and leaving a pending operation without a terminal.
+ */
+export function runProviderSynaraMcpDisable(input: {
+  readonly disable: Effect.Effect<ProviderDisableSynaraMcpResult, unknown>;
+  readonly remainingMs: number;
+}): Effect.Effect<Option.Option<SynaraMcpDisableOutcome>, never> {
+  return input.disable.pipe(
+    Effect.timeoutOption(input.remainingMs <= 0 ? "1 millis" : Duration.millis(input.remainingMs)),
+    Effect.catch((cause) =>
+      Effect.succeed<Option.Option<SynaraMcpDisableOutcome>>(
+        Option.some({
+          state: "unavailable" as const,
+          detail: sanitizeSynaraMcpDiagnostic(cause),
+        }),
+      ),
+    ),
+  );
 }
 
 const MAX_DIAGNOSTIC_CHILD_PROCESSES = 80;
@@ -658,9 +686,12 @@ const makeWsRpcHandlersLayer = () =>
                 0,
                 Date.parse(plan.operation.absoluteDeadline) - Date.now(),
               );
-              const outcome = yield* providerService
-                .disableSynaraMcp({ threadId: plan.command.threadId })
-                .pipe(Effect.timeoutOption(remainingMs <= 0 ? "1 millis" : Duration.millis(remainingMs)));
+              const outcome = yield* runProviderSynaraMcpDisable({
+                disable: providerService.disableSynaraMcp({
+                  threadId: plan.command.threadId,
+                }),
+                remainingMs,
+              });
               const terminal = planSynaraMcpDisableResolution({
                 plan,
                 project: plan.project,
@@ -692,9 +723,12 @@ const makeWsRpcHandlersLayer = () =>
               // drives exactly one succeeded/failed terminal with finalState
               // disabled, bounded by the project deadline.
               const remainingMs = Math.max(0, deadline - Date.now());
-              const outcome = yield* providerService
-                .disableSynaraMcp({ threadId: plan.command.threadId })
-                .pipe(Effect.timeoutOption(remainingMs <= 0 ? "1 millis" : Duration.millis(remainingMs)));
+              const outcome = yield* runProviderSynaraMcpDisable({
+                disable: providerService.disableSynaraMcp({
+                  threadId: plan.command.threadId,
+                }),
+                remainingMs,
+              });
               const current = yield* orchestrationEngine.getReadModel();
               const currentProject = current.projects.find(
                 (project) => project.id === plan.project.id,

@@ -34,6 +34,10 @@ interface Harness {
     authorityInput: unknown;
     applied: PiSynaraMcpStagedActivation[];
     cleaned: PiSynaraMcpStagedActivation[];
+    committed: Array<{
+      staged: PiSynaraMcpStagedActivation;
+      fenceFreshAdmission: boolean;
+    }>;
   };
   readonly seams: MutablePiSynaraMcpActivationSeams;
 }
@@ -50,6 +54,7 @@ const STAGE_NAMES: Record<keyof PiSynaraMcpActivationSeams, string> = {
   validateCatalog: "catalog",
   applyAtSafeBoundary: "apply",
   cleanup: "cleanup",
+  onActivationCommitted: "commit",
 };
 
 function makeHarness(
@@ -62,6 +67,10 @@ function makeHarness(
     authorityInput: undefined as unknown,
     applied: [] as PiSynaraMcpStagedActivation[],
     cleaned: [] as PiSynaraMcpStagedActivation[],
+    committed: [] as Array<{
+      staged: PiSynaraMcpStagedActivation;
+      fenceFreshAdmission: boolean;
+    }>,
   };
   const base: PiSynaraMcpActivationSeams = {
     validateAuthority: async (input) => {
@@ -77,6 +86,9 @@ function makeHarness(
     },
     cleanup: async (staged) => {
       received.cleaned.push(staged);
+    },
+    onActivationCommitted: (staged, options) => {
+      received.committed.push({ staged, fenceFreshAdmission: options.fenceFreshAdmission });
     },
   };
   // Every seam (including overrides) records its call, so call-order
@@ -198,8 +210,9 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     if (firstResult.ok && secondResult.ok) {
       expect(secondResult.lifecycleGeneration).toBe(firstResult.lifecycleGeneration);
     }
-    // Exactly one staged activation and one atomic exposure.
-    expect(harness.calls).toEqual(["authority", "credential", "connect", "discover", "catalog", "apply"]);
+    // Exactly one staged activation and one atomic exposure, followed by the
+    // proven-commit notification that installs the fresh admission generation.
+    expect(harness.calls).toEqual(["authority", "credential", "connect", "discover", "catalog", "apply", "commit"]);
     expect(harness.received.applied).toHaveLength(1);
   });
 
@@ -413,6 +426,92 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(harness.calls.filter((call) => call === "cleanup")).toHaveLength(1);
   });
 
+  it("notifies the caller exactly once at the proven commit (fresh execution admission generation)", async () => {
+    const harness = makeHarness();
+    const generation = await activateAndCommit(harness);
+
+    // The commit notification is the safe-boundary point where a fresh
+    // execution admission generation is installed; no earlier stage notifies.
+    expect(harness.received.committed).toEqual([
+      {
+        staged: expect.objectContaining({ lifecycleGeneration: generation }),
+        fenceFreshAdmission: false,
+      },
+    ]);
+
+    // An already-active duplicate activation does not re-notify: no fresh
+    // generation is installed because no fresh activation ran.
+    const duplicate = await harness.coordinator.activate(ACTIVATION_INPUT);
+    expect(duplicate).toMatchObject({ ok: true, state: "active", alreadyActive: true });
+    expect(harness.received.committed).toHaveLength(1);
+  });
+
+  it("never notifies on a rolled-back activation (no stale generation installation)", async () => {
+    const harness = makeHarness({
+      discover: async () => {
+        throw new Error("discovery exploded");
+      },
+    });
+    const result = await harness.coordinator.activate(ACTIVATION_INPUT);
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "discovery" });
+    expect(harness.received.committed).toEqual([]);
+    expect(harness.calls).not.toContain("commit");
+  });
+
+  it("starts the fresh admission generation fenced when a disable was queued while the activation ran", async () => {
+    const harness = makeHarness();
+    const activation = harness.coordinator.activate(ACTIVATION_INPUT);
+    await flush();
+    expect(harness.coordinator.state).toBe("activating");
+
+    // The disable request is queued behind the in-flight activation: its
+    // fence must apply to the fresh generation the activation is about to
+    // install at commit (no call may be admitted after the fence began).
+    const disable = harness.coordinator.beginDeactivation();
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+    expect(result).toMatchObject({ ok: true, state: "active" });
+    expect(harness.received.committed).toEqual([
+      {
+        staged: expect.objectContaining({ lifecycleGeneration: (result as { lifecycleGeneration: string }).lifecycleGeneration }),
+        fenceFreshAdmission: true,
+      },
+    ]);
+
+    // The queued disable then retires the freshly committed generation.
+    const handoff = await disable;
+    expect(handoff.generation).toBe(
+      (result as { lifecycleGeneration: string }).lifecycleGeneration,
+    );
+    expect(await handoff.complete({ awaitSafeBoundary: false })).toEqual({ state: "dormant" });
+  });
+
+  it("clears the queued-disable fence so a later fresh activation starts unfenced", async () => {
+    const harness = makeHarness();
+    const firstGeneration = await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+    // An idempotent duplicate disable while deactivating must not leak its
+    // queued-disable fence into a later activation either.
+    const duplicate = await harness.coordinator.beginDeactivation();
+    expect(duplicate).toBe(handoff);
+    expect(await handoff.complete({ awaitSafeBoundary: false })).toEqual({ state: "dormant" });
+
+    // The settled disable must not leak its fence into the next activation:
+    // re-enable installs an unfenced fresh admission generation.
+    const secondGeneration = await activateAndCommit(harness);
+    expect(harness.received.committed).toEqual([
+      {
+        staged: expect.objectContaining({ lifecycleGeneration: firstGeneration }),
+        fenceFreshAdmission: false,
+      },
+      {
+        staged: expect.objectContaining({ lifecycleGeneration: secondGeneration }),
+        fenceFreshAdmission: false,
+      },
+    ]);
+  });
+
   it("rejects deactivation when the session is not active", async () => {
     const harness = makeHarness();
     await expect(harness.coordinator.beginDeactivation()).rejects.toThrow(
@@ -561,7 +660,16 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
 
     const outcome = await handoff.complete();
     expect(outcome).toEqual({ state: "dormant" });
-    expect(harness.calls).toEqual(["authority", "credential", "connect", "discover", "catalog", "apply", "cleanup"]);
+    expect(harness.calls).toEqual([
+      "authority",
+      "credential",
+      "connect",
+      "discover",
+      "catalog",
+      "apply",
+      "commit",
+      "cleanup",
+    ]);
   });
 
   it("refuses activation while deactivating until the handoff completes", async () => {

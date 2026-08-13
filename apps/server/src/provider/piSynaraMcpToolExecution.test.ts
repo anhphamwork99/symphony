@@ -167,4 +167,93 @@ describe("makePiSynaraMcpToolExecutionRegistry", () => {
     await expect(a).resolves.toBe("a");
     expect(registry.inFlightCount()).toBe(0);
   });
+
+  it("reopens admission with a fresh generation after a fence and keeps the retired generation inert (re-enable regression)", async () => {
+    const registry = makePiSynaraMcpToolExecutionRegistry();
+    const release = deferred<{ content: Array<{ type: "text"; text: string }> }>();
+    const call = vi.fn(async (_signal?: AbortSignal) => release.promise);
+
+    // A disabled session: the fence rejects new admissions and settles the
+    // in-flight execution exactly once.
+    const retired = registry.execute({ call });
+    expect(registry.inFlightCount()).toBe(1);
+    registry.fence();
+    await expect(registry.execute({ call })).rejects.toMatchObject({
+      code: SYNARA_MCP_DISABLED_ERROR_CODE,
+    });
+    await registry.settleAll();
+    expect(registry.disabledSettledCount()).toBe(1);
+
+    // A fresh activation replaces the admission generation at the proven
+    // safe boundary: new calls are admitted again and the retired
+    // generation's counters are no longer visible.
+    registry.resetForFreshActivation(false);
+    expect(registry.isFenced()).toBe(false);
+    expect(registry.inFlightCount()).toBe(0);
+    expect(registry.disabledSettledCount()).toBe(0);
+    const freshCall = vi.fn(async () => ({ content: [{ type: "text", text: "fresh ok" }] }));
+    await expect(registry.execute({ call: freshCall })).resolves.toEqual({
+      content: [{ type: "text", text: "fresh ok" }],
+    });
+    expect(freshCall).toHaveBeenCalledTimes(1);
+
+    // The retired generation's late callback stays inert: it can neither
+    // mutate the fresh generation nor emit a duplicate result, and the
+    // retired execution keeps its once-only disabled settlement.
+    release.resolve({ content: [{ type: "text", text: "late retired result" }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(registry.inFlightCount()).toBe(0);
+    expect(registry.disabledSettledCount()).toBe(0);
+    await expect(retired).rejects.toMatchObject({ code: SYNARA_MCP_DISABLED_ERROR_CODE });
+
+    // Settling the fresh generation touches only fresh executions, never the
+    // retired one.
+    registry.fence();
+    await registry.settleAll();
+    expect(registry.disabledSettledCount()).toBe(0);
+    await expect(retired).rejects.toMatchObject({ code: SYNARA_MCP_DISABLED_ERROR_CODE });
+  });
+
+  it("starts the fresh generation fenced when requested (disable raced the activation)", async () => {
+    const registry = makePiSynaraMcpToolExecutionRegistry();
+    registry.fence();
+    await registry.settleAll();
+
+    registry.resetForFreshActivation(true);
+    expect(registry.isFenced()).toBe(true);
+    const call = vi.fn(async () => ({ ok: true }));
+    await expect(registry.execute({ call })).rejects.toMatchObject({
+      code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      message: PI_SYNARA_MCP_DISABLED_REFUSAL,
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(registry.inFlightCount()).toBe(0);
+  });
+
+  it("keeps a retired generation's in-flight execution isolated from a fresh generation's settlement", async () => {
+    const registry = makePiSynaraMcpToolExecutionRegistry();
+    const release = deferred<unknown>();
+    const retired = registry.execute({ call: async () => release.promise });
+    registry.fence();
+    await registry.settleAll();
+
+    registry.resetForFreshActivation(false);
+    const fresh = registry.execute({ call: async () => "fresh" });
+    await expect(fresh).resolves.toBe("fresh");
+    expect(registry.inFlightCount()).toBe(0);
+
+    // The fresh generation is settled: only fresh executions are affected;
+    // the retired promise remains settled exactly once with the disabled
+    // error and its late callback cannot re-enter the registry.
+    registry.fence();
+    await registry.settleAll();
+    expect(registry.disabledSettledCount()).toBe(0);
+    release.reject(new Error("late retired failure"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await expect(retired).rejects.toMatchObject({ code: SYNARA_MCP_DISABLED_ERROR_CODE });
+    expect(registry.inFlightCount()).toBe(0);
+    expect(registry.disabledSettledCount()).toBe(0);
+  });
 });

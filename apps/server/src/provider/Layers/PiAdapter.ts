@@ -762,6 +762,14 @@ export function makePiSessionSynaraMcpCoordinator(
     validateCatalog,
     applyAtSafeBoundary,
     cleanup,
+    // The fresh execution admission generation is installed only when the
+    // activation is proven at the safe-boundary commit: a re-enabled session
+    // admits mapped tool calls again, the retired generation stays fenced
+    // forever with its own pending map (stale executions/callbacks can never
+    // enter or mutate the fresh generation), and a fresh generation created
+    // while a disable was queued starts fenced.
+    onActivationCommitted: (_staged, options) =>
+      input.executions.resetForFreshActivation(options.fenceFreshAdmission),
   };
   return makePiSynaraMcpLifecycleCoordinator({
     adapter,

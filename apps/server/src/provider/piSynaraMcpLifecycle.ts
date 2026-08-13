@@ -133,6 +133,22 @@ export interface PiSynaraMcpActivationSeams {
   readonly applyAtSafeBoundary: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
   /** Idempotently revoke/close/discard candidate resources. */
   readonly cleanup: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
+  /**
+   * Synchronous notification that the activation is proven and committed at
+   * the safe boundary (after apply succeeded and no supersede/rollback can
+   * follow). The caller retires the current execution admission generation
+   * and installs a fresh one here, so a re-enabled session admits tool calls
+   * again while stale executions/callbacks of the retired generation stay
+   * isolated. `fenceFreshAdmission` is true when a disable was requested
+   * while this activation ran: the fresh generation must then start fenced
+   * so no call can be admitted after that disable's fence began. Must not
+   * throw; a throwing notification is recorded as a diagnostic and cannot
+   * roll back the commit.
+   */
+  readonly onActivationCommitted?: (
+    staged: PiSynaraMcpStagedActivation,
+    options: { readonly fenceFreshAdmission: boolean },
+  ) => void;
 }
 
 export type PiSynaraMcpActivationResult =
@@ -317,6 +333,12 @@ export function makePiSynaraMcpLifecycleCoordinator(
   let pendingHandoff: PendingHandoff | undefined;
   let boundaryResolve: (() => void) | undefined;
   let removeBoundaryListener: (() => void) | undefined;
+  // Set synchronously when a disable request is queued (beginDeactivation)
+  // and cleared when that request settles. A racing activation that commits
+  // while a disable is queued must start its fresh execution admission
+  // generation fenced (Decision 24: no call may be admitted after the
+  // disable fence began).
+  let deactivationRequested = false;
 
   // Promise-chain mutex: lifecycle operations serialize in call order.
   let tail: Promise<unknown> = Promise.resolve();
@@ -597,6 +619,23 @@ export function makePiSynaraMcpLifecycleCoordinator(
       committed = { generation, staged, exposed: attempt.exposed ?? false };
       pendingAttempt = undefined;
       adapter.transition("active");
+      // The activation is now proven: notify the caller so the execution
+      // admission generation is retired/replaced at this safe boundary. A
+      // disable requested while this activation ran (`deactivationRequested`)
+      // must start the fresh generation fenced. The notification is
+      // synchronous and must not throw; if it does, the commit is not rolled
+      // back and the failure is recorded as a diagnostic (the registry then
+      // stays on the retired, fenced generation: fail closed).
+      try {
+        seams.onActivationCommitted?.(staged, { fenceFreshAdmission: deactivationRequested });
+      } catch (cause) {
+        diagnostics.record({
+          kind: "activation.commit.notification.failed",
+          message: `fresh execution admission generation could not be installed: ${toErrorMessage(cause)}`,
+          state: "active",
+          generation,
+        });
+      }
       diagnostics.record({
         kind: "activation.committed",
         message: "activation committed",
@@ -606,26 +645,43 @@ export function makePiSynaraMcpLifecycleCoordinator(
       return { ok: true, state: "active", lifecycleGeneration: generation, alreadyActive: false };
     });
 
-  const beginDeactivation = (): Promise<PiSynaraMcpDeactivationHandoff> =>
-    enqueue(async () => {
+  const beginDeactivation = (): Promise<PiSynaraMcpDeactivationHandoff> => {
+    // Synchronously record the disable request before it is queued: a racing
+    // activation that commits while this request is queued must start its
+    // fresh execution admission generation fenced, so no call can be admitted
+    // after this disable's fence began.
+    deactivationRequested = true;
+    return enqueue(async () => {
       if (disposed || disposeRequested) {
+        deactivationRequested = false;
         throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
       }
       // Duplicate disable while deactivating is idempotent: return the same
-      // handoff so both callers observe the same terminal state.
+      // handoff so both callers observe the same terminal state. The original
+      // retirement already owns the admission fence, so the duplicate must
+      // not leak its queued-disable fence into a later activation.
       if (
         pendingHandoff !== undefined &&
         pendingHandoff.public !== undefined &&
         adapter.state === "deactivating"
       ) {
+        deactivationRequested = false;
         return pendingHandoff.public;
       }
       if (committed === undefined || adapter.state !== "active") {
+        // Nothing to retire: the disable is an idempotent no-op. A fresh
+        // admission generation installed by a racing activation commit is
+        // already fenced (see above), so later activations must not inherit
+        // the fence once this request settles.
+        deactivationRequested = false;
         throw new Error(PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE);
       }
       const { generation, staged } = committed;
       const exposed = committed.exposed === true;
       committed = undefined;
+      // The retirement now owns admission fencing through its own sequence
+      // (the fresh generation, if any, was already fenced at commit).
+      deactivationRequested = false;
       const handoff: PendingHandoff = { generation, staged, exposed };
       pendingHandoff = handoff;
       adapter.transition("deactivating");
@@ -669,6 +725,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
       handoff.public = publicHandoff;
       return publicHandoff;
     });
+  };
 
   const dispose = (): Promise<void> => {
     // Non-serialized abort: fence any in-flight activation so a stale

@@ -883,6 +883,92 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       });
       expect(call).not.toHaveBeenCalled();
     });
+
+    it("re-enables a disabled session so a mapped Synara MCP tool succeeds while the retired generation's late callback stays inert (re-enable regression)", async () => {
+      // The mapped custom-tool seam is the exact production path the Pi agent
+      // loop executes. After disable -> fresh enable, the coordinator must
+      // install a fresh execution admission generation at the proven commit:
+      // a newly mapped Synara MCP tool succeeds again, while the retired
+      // generation's in-flight execution keeps its once-only disabled
+      // settlement and its late gateway callback cannot replay or mutate the
+      // fresh generation.
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+
+      let gatewayCalls = 0;
+      let releaseOldCall!: () => void;
+      const oldCallGate = new Promise<void>((resolve) => {
+        releaseOldCall = resolve;
+      });
+      const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.method === "tools/call") {
+          gatewayCalls += 1;
+          if (gatewayCalls === 1) {
+            // The first (pre-disable) call stays in flight until released.
+            await oldCallGate;
+          }
+          return Response.json({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: { content: [{ type: "text", text: `gateway result ${gatewayCalls}` }] },
+          });
+        }
+        throw new Error(`unexpected gateway method ${body.method}`);
+      };
+      const mapTools = () =>
+        mapAgentGatewayMcpToolsToPiCustomTools({
+          tools: CATALOG_TOOLS,
+          connection: { url: "http://127.0.0.1:3773/mcp", bearerToken: "token-1" },
+          defineTool: (tool) => tool,
+          executions: harness.executions,
+          fetch,
+        });
+
+      // Turn 1: the mapped tool call runs against the first generation and
+      // stays in flight when the disable lands.
+      const oldMapped = mapTools()[0]!;
+      const oldExecution = oldMapped.execute("call-old", {}, undefined, undefined, {} as never);
+      expect(harness.executions.inFlightCount()).toBe(1);
+
+      await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+      await expect(oldExecution).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+        message: PI_SYNARA_MCP_DISABLED_REFUSAL,
+      });
+      expect(harness.executions.isFenced()).toBe(true);
+      expect(harness.executions.disabledSettledCount()).toBe(1);
+
+      // Turn 2: a fresh activation commits a fresh unfenced admission
+      // generation; a newly mapped tool executes successfully again.
+      await activateAndCommit(harness);
+      expect(harness.executions.isFenced()).toBe(false);
+      expect(harness.executions.disabledSettledCount()).toBe(0);
+      const freshMapped = mapTools()[0]!;
+      await expect(
+        freshMapped.execute("call-fresh", {}, undefined, undefined, {} as never),
+      ).resolves.toMatchObject({ content: [{ type: "text", text: "gateway result 2" }] });
+      expect(harness.executions.inFlightCount()).toBe(0);
+
+      // The retired generation's late callback stays inert: no replay (the
+      // old gateway call was aborted, never re-run), no duplicate result, and
+      // no mutation of the fresh generation's state.
+      expect(gatewayCalls).toBe(2);
+      releaseOldCall();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(gatewayCalls).toBe(2);
+      await expect(oldExecution).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      });
+      expect(harness.executions.inFlightCount()).toBe(0);
+      expect(harness.executions.disabledSettledCount()).toBe(0);
+      expect(harness.abort).not.toHaveBeenCalled();
+    });
   });
 });
 
