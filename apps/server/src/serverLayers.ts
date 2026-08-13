@@ -4,6 +4,7 @@ import { Layer } from "effect";
 import { AgentGatewayLive } from "./agentGateway/Layers/AgentGateway";
 import { AgentGatewayOperationRepositoryLive } from "./agentGateway/Layers/AgentGatewayOperationRepository";
 import { AgentGatewayCredentialsWithSecretsLive } from "./agentGateway/Layers/AgentGatewayCredentials";
+import { McpSessionAuthorityLive } from "./agentGateway/Layers/McpSessionAuthority";
 import { BrowserAutomationHostLive } from "./browserAutomation/Layers/BrowserAutomationHost";
 import { AutomationRunReactorLive } from "./automation/Layers/AutomationRunReactor";
 import { AutomationSchedulerLive } from "./automation/Layers/AutomationScheduler";
@@ -190,6 +191,7 @@ export function makeServerRuntimeServicesLayer(
   );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(agentGatewayCredentialsLayer),
+    Layer.provideMerge(McpSessionAuthorityLive),
     Layer.provideMerge(automationServiceLayer),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(GitCoreLive),
@@ -214,6 +216,7 @@ export function makeServerRuntimeServicesLayer(
   return Layer.mergeAll(
     agentGatewayCredentialsLayer,
     agentGatewayLayer,
+    McpSessionAuthorityLive,
     BrowserAutomationHostLive,
     automationServiceLayer,
     automationSchedulerLayer,

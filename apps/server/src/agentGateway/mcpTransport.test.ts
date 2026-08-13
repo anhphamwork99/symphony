@@ -8,16 +8,23 @@ import { BrowserHostRpcError } from "../browserAutomation/browserHostRpcClient.t
 import { makeAgentGatewaySessionRegistry } from "./Layers/AgentGatewaySessionRegistry.ts";
 import type { AgentGatewayCredentialsShape } from "./Services/AgentGatewayCredentials.ts";
 import { makeAgentGatewayInFlightRequestRegistry } from "./inFlightRequestRegistry.ts";
+import {
+  makeMcpSessionAuthorityRegistry,
+  type McpAuthorityBinding,
+  type McpSessionAuthorityRegistryShape,
+} from "./mcpSessionAuthority.ts";
 import { makeAgentGatewayMcpTransport } from "./mcpTransport.ts";
 import { acquireAgentGatewaySessionLease, type AgentGatewaySessionLease } from "./sessionLease.ts";
 import type { ToolEntry } from "./toolRuntime.ts";
 
 const NOW = "2026-07-22T03:00:00.000Z";
+const TEST_PROJECT_ID = "project-mcp-cancellation";
+const TEST_AUTHORITY_SUBJECT = "test-owner";
 
 function makeThread(threadId: string): OrchestrationThreadShell {
   return {
     id: ThreadId.makeUnsafe(threadId),
-    projectId: ProjectId.makeUnsafe("project-mcp-cancellation"),
+    projectId: ProjectId.makeUnsafe(TEST_PROJECT_ID),
     title: threadId,
     modelSelection: { provider: "codex", model: "gpt-5.6-sol" },
     runtimeMode: "full-access",
@@ -57,6 +64,12 @@ function makeThread(threadId: string): OrchestrationThreadShell {
 function makeTransport(input: {
   readonly tool: ToolEntry;
   readonly threads: ReadonlyArray<OrchestrationThreadShell>;
+  /**
+   * Shared authority registry for minting test credentials (Decision 21).
+   * Pass a registry with a controlled clock to drive expiry and staleness in
+   * admission tests; when omitted the harness mints its own live bindings.
+   */
+  readonly mcpSessionAuthority?: McpSessionAuthorityRegistryShape;
 }) {
   const threads = new Map(input.threads.map((thread) => [String(thread.id), thread]));
   let nextSession = 0;
@@ -72,6 +85,10 @@ function makeTransport(input: {
       return `token-${nextSession}`;
     },
   });
+  let nextAuthority = 0;
+  const mcpSessionAuthority =
+    input.mcpSessionAuthority ??
+    makeMcpSessionAuthorityRegistry({ randomId: () => `authority-${++nextAuthority}` });
   const inFlightRequests = makeAgentGatewayInFlightRequestRegistry();
   const credentials = {
     verifySession: sessionRegistry.verify,
@@ -96,8 +113,12 @@ function makeTransport(input: {
       sessionRegistry.revoke(token);
       if (session) inFlightRequests.revokeSession(session.sessionKey);
     },
-    connectionForThread: (threadId: ThreadId) => {
-      const issued = sessionRegistry.issue(threadId, "codex");
+    connectionForThread: (
+      threadId: ThreadId,
+      _provider: "codex",
+      mcpAuthority?: McpAuthorityBinding | null,
+    ) => {
+      const issued = sessionRegistry.issue(threadId, "codex", mcpAuthority ?? null);
       return {
         url: "http://127.0.0.1:48123/mcp",
         bearerToken: issued.token,
@@ -107,11 +128,30 @@ function makeTransport(input: {
   const tokenAliases = new Map<string, string>();
   const sessionKeyAliases = new Map<string, string>();
   const leases = new Map<string, AgentGatewaySessionLease>();
+  const mcpAuthorityForThread = new Map<string, McpAuthorityBinding>();
   const startRuntime = (threadId: string, tokenAlias: string): AgentGatewaySessionLease => {
+    // Every runtime gets a fresh server-minted authority record and resolves
+    // one credential snapshot from it, mirroring the trusted issuance path.
+    const record = mcpSessionAuthority.mint({
+      subject: TEST_AUTHORITY_SUBJECT,
+      kind: "local-owner",
+      authSessionId: null,
+      authExpiresAt: null,
+    });
+    const binding = mcpSessionAuthority.bindingFor(record.authorityId, {
+      threadId,
+      provider: "codex",
+      projectId: TEST_PROJECT_ID,
+      lifecycleGeneration: null,
+      credentialTtlMs: 300_000,
+    });
+    if (!binding) throw new Error("Expected an admittable authority binding");
+    mcpAuthorityForThread.set(threadId, binding);
     const lease = acquireAgentGatewaySessionLease(
       credentials,
       ThreadId.makeUnsafe(threadId),
       "codex",
+      binding,
     );
     if (!lease) throw new Error("Expected gateway session lease");
     tokenAliases.set(tokenAlias, lease.connection.bearerToken);
@@ -131,6 +171,7 @@ function makeTransport(input: {
 
   const transport = makeAgentGatewayMcpTransport({
     credentials,
+    mcpSessionAuthority,
     snapshotQuery,
     tools: [input.tool],
     instructions: "test",
@@ -141,6 +182,17 @@ function makeTransport(input: {
   });
   return Object.assign(transport, {
     resolveToken: (token: string) => tokenAliases.get(token) ?? token,
+    sessionKeyForToken: (token: string) => sessionRegistry.verify(token)?.sessionKey ?? null,
+    /**
+     * Mint a credential for an arbitrary authority binding (or none). Raw
+     * bearer tokens are valid directly in `post`.
+     */
+    issueCredential: (threadId: string, mcpAuthority?: McpAuthorityBinding | null) =>
+      sessionRegistry.issue(ThreadId.makeUnsafe(threadId), "codex", mcpAuthority ?? null).token,
+    /** Number of requests currently registered in-flight for one turn. */
+    inFlightCountFor: (sessionKey: string, turnId: string) =>
+      inFlightRequests.cancelTurn(sessionKey, turnId).count,
+    mcpSessionAuthority,
     cancelTurn: (sessionKey: string, turnId: string) =>
       inFlightRequests.cancelTurn(sessionKeyAliases.get(sessionKey) ?? sessionKey, turnId),
     setThreadTurnState: (
@@ -454,5 +506,353 @@ describe("makeAgentGatewayMcpTransport cancellation", () => {
         assert.equal(response.status, 200);
         assert.deepEqual(response.body, [{ jsonrpc: "2.0", id: "fast-batch", result: {} }]);
       }).pipe(Effect.timeout("2 seconds")),
+  );
+});
+
+describe("makeAgentGatewayMcpTransport subject-bound authority admission", () => {
+  const NOW_MS = 1_780_000_000_000;
+
+  function makeAuthorityFixture() {
+    let time = NOW_MS;
+    const registry = makeMcpSessionAuthorityRegistry({
+      randomId: () => "authority-fixed",
+      now: () => time,
+    });
+    return {
+      registry,
+      setTime: (value: number) => {
+        time = value;
+      },
+    };
+  }
+
+  function makeProbeTool(options: { readonly probeCalls: { count: number } }) {
+    const tool: ToolEntry = {
+      definition: {
+        name: "probe",
+        description: "test",
+        inputSchema: { type: "object" },
+      },
+      requiredCapability: "thread:read",
+      // A running turn is present in `makeThread`, so any reachable write
+      // authority would bind successfully. A denial therefore proves the
+      // admission gate ran first.
+      requiresActiveTurn: true,
+      handler: () => {
+        options.probeCalls.count += 1;
+        return Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] });
+      },
+    };
+    return tool;
+  }
+
+  function mintBinding(
+    registry: McpSessionAuthorityRegistryShape,
+    overrides: Partial<McpAuthorityBinding> = {},
+  ): McpAuthorityBinding {
+    const record = registry.mint({
+      subject: TEST_AUTHORITY_SUBJECT,
+      kind: "local-owner",
+      authSessionId: null,
+      authExpiresAt: null,
+    });
+    const binding = registry.bindingFor(record.authorityId, {
+      threadId: "thread-admission",
+      provider: "codex",
+      projectId: TEST_PROJECT_ID,
+      lifecycleGeneration: null,
+      credentialTtlMs: 300_000,
+    });
+    if (!binding) throw new Error("Expected an admittable authority binding");
+    return { ...binding, ...overrides };
+  }
+
+  /**
+   * Drives one denied request and proves the admission gate precedes write
+   * authority binding, in-flight registration, and handler execution.
+   */
+  async function expectDenied(
+    transport: ReturnType<typeof makeTransport>,
+    token: string,
+    reason: string,
+  ) {
+    const sessionKey = transport.sessionKeyForToken(token);
+    const body = {
+      jsonrpc: "2.0",
+      id: "probe",
+      method: "tools/call",
+      params: { name: "probe", arguments: {} },
+    };
+    const response = await Effect.runPromise(post(transport, token, body));
+    assert.equal(response.status, 401);
+    const message = (response.body as { error?: { message?: string } }).error?.message;
+    assert.isString(message);
+    assert.include(message, `mcp_authority_denied:${reason}`);
+    // The handler never started, so no request was ever registered in-flight
+    // and no write authority was ever bound for the running turn.
+    if (sessionKey !== null) {
+      assert.equal(transport.inFlightCountFor(sessionKey, "turn-thread-admission"), 0);
+    }
+    return message;
+  }
+
+  it.effect("admits a valid server-issued credential for the bound thread", () =>
+    Effect.gen(function* () {
+      const fixture = makeAuthorityFixture();
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let handlerCalls = 0;
+      const tool: ToolEntry = {
+        definition: {
+          name: "probe",
+          description: "test",
+          inputSchema: { type: "object" },
+        },
+        requiredCapability: "thread:read",
+        requiresActiveTurn: true,
+        handler: () => {
+          handlerCalls += 1;
+          return Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(
+              Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] }),
+            ),
+          );
+        },
+      };
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool,
+        mcpSessionAuthority: fixture.registry,
+      });
+      const binding = mintBinding(fixture.registry);
+      const token = transport.issueCredential("thread-admission", binding);
+      const sessionKey = transport.sessionKeyForToken(token);
+
+      const request = yield* post(transport, token, {
+        jsonrpc: "2.0",
+        id: "probe",
+        method: "tools/call",
+        params: { name: "probe", arguments: {} },
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      // The request is registered in-flight only after MCP authority admission
+      // approved the credential; write authority bound for the running turn.
+      assert.equal(transport.inFlightCountFor(sessionKey!, "turn-thread-admission"), 1);
+      assert.equal(handlerCalls, 1);
+      yield* Deferred.succeed(release, undefined);
+      const response = yield* Fiber.join(request);
+      assert.equal(response.status, 200);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a missing subject-bound authority before any side effect", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const unboundToken = transport.issueCredential("thread-admission", null);
+
+      const message = yield* Effect.promise(() =>
+        expectDenied(transport, unboundToken, "missing-binding"),
+      );
+      assert.equal(probeCalls.count, 0);
+      assert.include(message, "reissued");
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a revoked authority even though the bearer itself is still active", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const record = fixture.registry.mint({ subject: TEST_AUTHORITY_SUBJECT, kind: "local-owner" });
+      const binding = fixture.registry.bindingFor(record.authorityId, {
+        threadId: "thread-admission",
+        provider: "codex",
+        projectId: TEST_PROJECT_ID,
+        lifecycleGeneration: null,
+        credentialTtlMs: 300_000,
+      });
+      if (!binding) throw new Error("Expected an admittable authority binding");
+      fixture.registry.revoke(record.authorityId, "rotation");
+      const token = transport.issueCredential("thread-admission", binding);
+
+      yield* Effect.promise(() => expectDenied(transport, token, "revoked"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a credential whose bound authentication has expired", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const record = fixture.registry.mint({
+        subject: TEST_AUTHORITY_SUBJECT,
+        kind: "authenticated",
+        authSessionId: "session-auth",
+        // Beyond the credential TTL at issuance so `bindingFor` accepts it;
+        // the authentication then expires before the credential does.
+        authExpiresAt: NOW_MS + 400_000,
+      });
+      const binding = fixture.registry.bindingFor(record.authorityId, {
+        threadId: "thread-admission",
+        provider: "codex",
+        projectId: TEST_PROJECT_ID,
+        lifecycleGeneration: null,
+        credentialTtlMs: 300_000,
+      });
+      if (!binding) throw new Error("Expected an admittable authority binding");
+      const token = transport.issueCredential("thread-admission", binding);
+
+      fixture.setTime(NOW_MS + 450_000);
+      yield* Effect.promise(() => expectDenied(transport, token, "expired-auth"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a credential past its own expiry before handler work", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const record = fixture.registry.mint({ subject: TEST_AUTHORITY_SUBJECT, kind: "local-owner" });
+      const binding = fixture.registry.bindingFor(record.authorityId, {
+        threadId: "thread-admission",
+        provider: "codex",
+        projectId: TEST_PROJECT_ID,
+        lifecycleGeneration: null,
+        credentialTtlMs: 10_000,
+      });
+      if (!binding) throw new Error("Expected an admittable authority binding");
+      const token = transport.issueCredential("thread-admission", binding);
+
+      fixture.setTime(NOW_MS + 20_000);
+      yield* Effect.promise(() => expectDenied(transport, token, "expired-credential"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a stale session-generation snapshot deterministically", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const stale = {
+        ...mintBinding(fixture.registry),
+        sessionGeneration: "gen-from-revoked-session",
+      };
+      const token = transport.issueCredential("thread-admission", stale);
+
+      yield* Effect.promise(() => expectDenied(transport, token, "stale-session-generation"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a mismatched subject or kind snapshot deterministically", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const mismatchedSubject = { ...mintBinding(fixture.registry), subject: "another-user" };
+      const mismatchedKind = { ...mintBinding(fixture.registry), kind: "authenticated" as const };
+      const subjectToken = transport.issueCredential("thread-admission", mismatchedSubject);
+      const kindToken = transport.issueCredential("thread-admission", mismatchedKind);
+
+      yield* Effect.promise(() => expectDenied(transport, subjectToken, "subject-mismatch"));
+      yield* Effect.promise(() => expectDenied(transport, kindToken, "kind-mismatch"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a credential bound to a different project than the invoking thread", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const wrongProject = { ...mintBinding(fixture.registry), projectId: "project-other" };
+      const token = transport.issueCredential("thread-admission", wrongProject);
+
+      yield* Effect.promise(() => expectDenied(transport, token, "project-mismatch"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies an unknown or future-dated authority deterministically", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const unknown = { ...mintBinding(fixture.registry), authorityId: "mcp-authority-elsewhere" };
+      const unknownToken = transport.issueCredential("thread-admission", unknown);
+      yield* Effect.promise(() => expectDenied(transport, unknownToken, "unknown-authority"));
+
+      const futureDated = mintBinding(fixture.registry);
+      const futureToken = transport.issueCredential("thread-admission", futureDated);
+      fixture.setTime(NOW_MS - 1_000);
+      yield* Effect.promise(() => expectDenied(transport, futureToken, "invalid-issuance"));
+      assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies with a deterministic status before any registration even for read-only tools", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const token = transport.issueCredential("thread-admission", null);
+
+      // A batch keeps ping (read-only, non-turn) in the same request: the
+      // denial must short-circuit the whole request without dispatching ping.
+      const response = yield* post(transport, token, [
+        { jsonrpc: "2.0", id: "probe", method: "tools/call", params: { name: "probe", arguments: {} } },
+        { jsonrpc: "2.0", id: "ping", method: "ping" },
+      ]);
+      assert.equal(response.status, 401);
+      assert.include(
+        (response.body as { error?: { message?: string } }).error?.message ?? "",
+        "mcp_authority_denied:missing-binding",
+      );
+      assert.equal(probeCalls.count, 0);
+      const sessionKey = transport.sessionKeyForToken(token);
+      assert.equal(transport.inFlightCountFor(sessionKey!, "turn-thread-admission"), 0);
+    }).pipe(Effect.timeout("2 seconds")),
   );
 });

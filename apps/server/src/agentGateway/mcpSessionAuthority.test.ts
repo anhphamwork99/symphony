@@ -4,6 +4,22 @@ import { makeMcpSessionAuthorityRegistry } from "./mcpSessionAuthority.ts";
 
 const NOW = 1_780_000_000_000;
 
+function authorityFixture() {
+  let time = NOW;
+  let next = 0;
+  const registry = makeMcpSessionAuthorityRegistry({
+    randomId: () => `id-${++next}`,
+    now: () => time,
+  });
+  return {
+    registry,
+    now: () => time,
+    setTime: (value: number) => {
+      time = value;
+    },
+  };
+}
+
 describe("makeMcpSessionAuthorityRegistry", () => {
   it("mints records bound to the subject with unguessable authorityId and sessionGeneration", () => {
     let next = 0;
@@ -189,5 +205,154 @@ describe("makeMcpSessionAuthorityRegistry", () => {
     expect(registry.resolveForCommand("command-3", "thread-x")?.authorityId).toBe(
       record.authorityId,
     );
+  });
+});
+
+describe("assertAdmittable", () => {
+  const DISPATCH = {
+    threadId: "thread-1",
+    provider: "codex",
+    projectId: "project-1",
+    lifecycleGeneration: "gen-7",
+    credentialTtlMs: 300_000,
+  };
+
+  function bind(registry: ReturnType<typeof authorityFixture>["registry"], record: {
+    authorityId: string;
+  }) {
+    return registry.bindingFor(record.authorityId, DISPATCH);
+  }
+
+  it("admits a live binding derived from an active record", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "authenticated", authExpiresAt: NOW + 3_600_000 });
+
+    const binding = bind(registry, record);
+    expect(binding).not.toBeNull();
+    expect(
+      registry.assertAdmittable(binding!, { projectId: "project-1", lifecycleGeneration: "gen-7" }),
+    ).toBeNull();
+  });
+
+  it("fails closed for an unknown authorityId", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+
+    expect(
+      registry.assertAdmittable({ ...binding!, authorityId: "mcp-authority-elsewhere" }),
+    ).toBe("unknown-authority");
+  });
+
+  it("fails closed for a revoked record even with an otherwise valid snapshot", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+    expect(registry.revoke(record.authorityId, "rotation")).toBe(true);
+
+    expect(registry.assertAdmittable(binding!, { projectId: "project-1" })).toBe("revoked");
+  });
+
+  it("fails closed after the authentication expires", () => {
+    const { registry, setTime } = authorityFixture();
+    // The auth horizon outlives the credential TTL at issuance so a binding
+    // can exist; it then expires before the credential would.
+    const record = registry.mint({
+      subject: "user-1",
+      kind: "authenticated",
+      authExpiresAt: NOW + 400_000,
+    });
+    const binding = bind(registry, record);
+
+    setTime(NOW + 450_000);
+    expect(registry.assertAdmittable(binding!, { projectId: "project-1" })).toBe("expired-auth");
+  });
+
+  it("fails closed after the credential expires independently of the authentication", () => {
+    const { registry, setTime } = authorityFixture();
+    // Local-owner records never expire their authentication, so only the
+    // credential TTL can trip this arm.
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = registry.bindingFor(record.authorityId, {
+      ...DISPATCH,
+      credentialTtlMs: 10_000,
+    });
+
+    setTime(NOW + 20_000);
+    expect(registry.assertAdmittable(binding!, { projectId: "project-1" })).toBe(
+      "expired-credential",
+    );
+  });
+
+  it("fails closed for a snapshot stamped after admission time", () => {
+    const { registry, setTime } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+
+    setTime(NOW - 1_000);
+    expect(registry.assertAdmittable(binding!, { projectId: "project-1" })).toBe(
+      "invalid-issuance",
+    );
+  });
+
+  it("fails closed for a stale session generation snapshot", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+
+    expect(
+      registry.assertAdmittable({ ...binding!, sessionGeneration: "gen-from-old-session" }),
+    ).toBe("stale-session-generation");
+  });
+
+  it("fails closed for a credential bound to an older lifecycle generation", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+
+    expect(
+      registry.assertAdmittable(binding!, {
+        projectId: "project-1",
+        lifecycleGeneration: "gen-8",
+      }),
+    ).toBe("stale-lifecycle-generation");
+    // Unknown lifecycle state never fabricates a mismatch.
+    expect(
+      registry.assertAdmittable(binding!, { projectId: "project-1", lifecycleGeneration: null }),
+    ).toBeNull();
+  });
+
+  it("fails closed for subject, auth-session, and kind mismatches", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({
+      subject: "user-1",
+      kind: "authenticated",
+      authSessionId: "session-9",
+    });
+    const binding = bind(registry, record);
+
+    expect(registry.assertAdmittable({ ...binding!, subject: "user-2" })).toBe(
+      "subject-mismatch",
+    );
+    expect(
+      registry.assertAdmittable({ ...binding!, authSessionId: "session-other" }),
+    ).toBe("subject-mismatch");
+    expect(registry.assertAdmittable({ ...binding!, kind: "local-owner" })).toBe(
+      "kind-mismatch",
+    );
+  });
+
+  it("fails closed when the credential's project binding disagrees with the trusted thread", () => {
+    const { registry } = authorityFixture();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = bind(registry, record);
+
+    expect(registry.assertAdmittable(binding!, { projectId: "project-2" })).toBe(
+      "project-mismatch",
+    );
+    expect(registry.assertAdmittable(binding!, { projectId: null })).toBeNull();
+    // A binding that was never project-bound cannot be mismatched.
+    const unbound = registry.bindingFor(record.authorityId, { ...DISPATCH, projectId: null });
+    expect(registry.assertAdmittable(unbound!, { projectId: "project-2" })).toBeNull();
   });
 });

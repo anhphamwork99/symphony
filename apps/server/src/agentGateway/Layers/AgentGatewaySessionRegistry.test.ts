@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ThreadId } from "@synara/contracts";
 
+import type { McpAuthorityBinding } from "../mcpSessionAuthority.ts";
+import { makeMcpSessionAuthorityRegistry } from "../mcpSessionAuthority.ts";
 import { makeAgentGatewaySessionRegistry } from "./AgentGatewaySessionRegistry.ts";
 
 describe("AgentGatewaySessionRegistry", () => {
@@ -84,5 +86,45 @@ describe("AgentGatewaySessionRegistry", () => {
     assert.match(issued.token, /^sagw_session_/);
     assert.notProperty(verified, "token");
     assert.notInclude(JSON.stringify(verified), issued.token);
+  });
+
+  it("issues unbound credentials by default so admission fails closed", () => {
+    const registry = makeAgentGatewaySessionRegistry({ randomId: () => "unbound" });
+    const issued = registry.issue(ThreadId.makeUnsafe("thread-1"), "codex");
+
+    assert.isNull(issued.mcpAuthority);
+    assert.isNull(registry.verify(issued.token)?.mcpAuthority);
+    // The absence is surfaced exactly as stored: the MCP admission seam maps
+    // a null binding to its own deterministic "missing-binding" denial.
+    assert.match(JSON.stringify(registry.verify(issued.token)), /"mcpAuthority":null/);
+  });
+
+  it("carries the server-minted authority binding in the verified identity", () => {
+    const authority = makeMcpSessionAuthorityRegistry({
+      randomId: () => "authority-1",
+      now: () => 1_780_000_000_000,
+    });
+    const record = authority.mint({ subject: "user-1", kind: "authenticated", authExpiresAt: 1_780_000_000_000 + 3_600_000 });
+    const binding = authority.bindingFor(record.authorityId, {
+      threadId: "thread-1",
+      provider: "codex",
+      projectId: "project-1",
+      lifecycleGeneration: "gen-2",
+      credentialTtlMs: 300_000,
+    });
+    assert.isNotNull(binding);
+
+    const sessionRegistry = makeAgentGatewaySessionRegistry({ randomId: () => "bound" });
+    const issued = sessionRegistry.issue(ThreadId.makeUnsafe("thread-1"), "codex", binding);
+    const verified = sessionRegistry.verify(issued.token);
+
+    assert.equal(verified?.mcpAuthority, binding);
+    assert.equal(verified?.mcpAuthority?.subject, "user-1");
+    assert.equal(verified?.mcpAuthority?.projectId, "project-1");
+    // The binding stays admittable while its record is active.
+    assert.isNull(authority.assertAdmittable(verified!.mcpAuthority!, { projectId: "project-1" }));
+    // Revoking the authority record fails the same credential closed.
+    authority.revoke(record.authorityId, "rotation");
+    assert.equal(authority.assertAdmittable(verified!.mcpAuthority!), "revoked");
   });
 });

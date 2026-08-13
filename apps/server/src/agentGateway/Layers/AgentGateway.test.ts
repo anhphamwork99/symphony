@@ -53,11 +53,13 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AgentGateway } from "../Services/AgentGateway.ts";
 import { AgentGatewayCredentials } from "../Services/AgentGatewayCredentials.ts";
+import { McpSessionAuthority } from "../Services/McpSessionAuthority.ts";
 import {
   AgentGatewayOperationRepository,
   type AgentGatewayOperationRecord,
 } from "../Services/AgentGatewayOperationRepository.ts";
 import { AgentGatewayLive } from "./AgentGateway.ts";
+import { makeMcpSessionAuthorityRegistry, type McpAuthorityBinding } from "../mcpSessionAuthority.ts";
 import { recordCreatedWorktreeInPlan } from "../operationPlan.ts";
 import { makeAgentGatewayInFlightRequestRegistry } from "../inFlightRequestRegistry.ts";
 
@@ -311,6 +313,37 @@ function makeHarnessLayer(
   }
   const verifiedOwnershipTokens = new Set(options.verifiedOwnershipTokens ?? []);
 
+  // Trusted authority registry shared by the credentials stub and the gateway
+  // transport: every valid token resolves to one server-minted local-owner
+  // binding, so pre-existing capability/turn tests keep running against an
+  // admittable authority (Decision 21).
+  let nextAuthority = 0;
+  const mcpSessionAuthorityRegistry = makeMcpSessionAuthorityRegistry({
+    randomId: () => `test-authority-${++nextAuthority}`,
+  });
+  const authorityBindingByToken = new Map<string, McpAuthorityBinding>();
+  const bindingForToken = (token: string): McpAuthorityBinding | null => {
+    if (!VALID_TOKENS[token]) return null;
+    const existing = authorityBindingByToken.get(token);
+    if (existing) return existing;
+    const record = mcpSessionAuthorityRegistry.mint({
+      subject: "test-owner",
+      kind: "local-owner",
+      authSessionId: null,
+      authExpiresAt: null,
+    });
+    const binding = mcpSessionAuthorityRegistry.bindingFor(record.authorityId, {
+      threadId: VALID_TOKENS[token],
+      provider: "codex",
+      projectId: String(PROJECT_ID),
+      lifecycleGeneration: null,
+      credentialTtlMs: 300_000,
+    });
+    if (!binding) throw new Error("Expected an admittable authority binding");
+    authorityBindingByToken.set(token, binding);
+    return binding;
+  };
+
   const credentialsLayer = Layer.succeed(AgentGatewayCredentials, {
     mcpEndpointUrl: "http://127.0.0.1:3773/mcp",
     setListeningPort: () => undefined,
@@ -325,6 +358,9 @@ function makeHarnessLayer(
             provider:
               token === "token-parent-claude" ? ("claudeAgent" as const) : ("codex" as const),
             issuedAt: 0,
+            // Server-minted subject-bound authority snapshot (Decision 21):
+            // requests without one are denied at admission, never inferred.
+            mcpAuthority: bindingForToken(token),
             capabilities:
               token === "token-parent-readonly"
                 ? new Set(["thread:read"] as const)
@@ -1121,6 +1157,12 @@ function makeHarnessLayer(
 
   const gatewayLayer = AgentGatewayLive.pipe(
     Layer.provide(credentialsLayer),
+    Layer.provide(
+      Layer.succeed(
+        McpSessionAuthority,
+        mcpSessionAuthorityRegistry as unknown as (typeof McpSessionAuthority)["Service"],
+      ),
+    ),
     Layer.provide(snapshotLayer),
     Layer.provide(engineLayer),
     Layer.provide(automationLayer),

@@ -2,6 +2,8 @@ import { ThreadId } from "@synara/contracts";
 import { Deferred, Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
+import type { McpAuthorityBinding } from "./mcpSessionAuthority.ts";
+import { makeMcpSessionAuthorityRegistry } from "./mcpSessionAuthority.ts";
 import {
   acquireAgentGatewaySessionLease,
   cancelAgentGatewayTurn,
@@ -11,6 +13,55 @@ import {
 } from "./sessionLease.ts";
 
 describe("AgentGatewaySessionLease", () => {
+  it("passes the server-minted authority binding into credential issuance", () => {
+    const registry = makeMcpSessionAuthorityRegistry();
+    const record = registry.mint({ subject: "user-1", kind: "local-owner" });
+    const binding = registry.bindingFor(record.authorityId, {
+      threadId: "thread-1",
+      provider: "codex",
+      projectId: "project-1",
+      lifecycleGeneration: null,
+      credentialTtlMs: 60_000,
+    });
+    expect(binding).not.toBeNull();
+
+    const connectionForThread = vi.fn((_threadId, _provider, _mcpAuthority) => ({
+      url: "http://127.0.0.1:48123/mcp",
+      bearerToken: "gateway-token",
+    }));
+    acquireAgentGatewaySessionLease(
+      {
+        connectionForThread,
+        revokeSessionToken: vi.fn(),
+      },
+      ThreadId.makeUnsafe("thread-1"),
+      "codex",
+      binding as McpAuthorityBinding,
+    );
+
+    expect(connectionForThread).toHaveBeenCalledWith(
+      ThreadId.makeUnsafe("thread-1"),
+      "codex",
+      binding,
+    );
+    // An omitted binding stays omitted: admission fails closed instead of
+    // inventing an identity for this credential.
+    connectionForThread.mockClear();
+    acquireAgentGatewaySessionLease(
+      {
+        connectionForThread,
+        revokeSessionToken: vi.fn(),
+      },
+      ThreadId.makeUnsafe("thread-1"),
+      "codex",
+    );
+    expect(connectionForThread).toHaveBeenCalledWith(
+      ThreadId.makeUnsafe("thread-1"),
+      "codex",
+      undefined,
+    );
+  });
+
   it("cancels one exact turn while the provider session lease is live", async () => {
     const cancelSessionTurnRequests = vi.fn(() => Promise.resolve());
     const lease = acquireAgentGatewaySessionLease(
@@ -258,7 +309,7 @@ describe("AgentGatewaySessionLease", () => {
       bearerToken: "gateway-token",
     });
     expect(connectionForThread).toHaveBeenCalledOnce();
-    expect(connectionForThread).toHaveBeenCalledWith("thread-1", "cursor");
+    expect(connectionForThread).toHaveBeenCalledWith("thread-1", "cursor", undefined);
     expect(lease?.issueStdioBootstrapToken?.()).toBe("one-shot-bootstrap");
     expect(issueStdioBootstrapToken).toHaveBeenCalledWith("gateway-token");
 

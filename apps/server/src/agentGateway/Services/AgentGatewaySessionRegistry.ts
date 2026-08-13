@@ -1,7 +1,7 @@
 import type { ProviderKind, ThreadId } from "@synara/contracts";
 import { ServiceMap } from "effect";
 
-import type { McpAuthorityBinding } from "./../mcpSessionAuthority.ts";
+import type { McpAuthorityBinding } from "../mcpSessionAuthority.ts";
 
 export type AgentGatewayCapability =
   | "thread:read"

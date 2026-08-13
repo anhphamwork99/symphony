@@ -44,7 +44,7 @@ const ProviderSessionStatus = Schema.Literals([
 export const McpAuthorityBinding = Schema.Struct({
   authorityId: TrimmedNonEmptyString,
   subject: TrimmedNonEmptyString,
-  kind: Schema.Union(Schema.Literal("authenticated"), Schema.Literal("local-owner")),
+  kind: Schema.Union([Schema.Literal("authenticated"), Schema.Literal("local-owner")]),
   authSessionId: Schema.NullOr(TrimmedNonEmptyString),
   authExpiresAt: Schema.NullOr(Schema.Number),
   issuedAt: Schema.Number,

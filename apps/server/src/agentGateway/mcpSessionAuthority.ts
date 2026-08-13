@@ -78,6 +78,7 @@ export type McpAuthorityAdmissionFailure =
   | "expired-credential"
   | "invalid-issuance"
   | "stale-session-generation"
+  | "stale-lifecycle-generation"
   | "subject-mismatch"
   | "kind-mismatch"
   | "project-mismatch";
@@ -85,6 +86,13 @@ export type McpAuthorityAdmissionFailure =
 export interface McpAuthorityAdmissionContext {
   /** Trusted project of the invoking thread; null when not resolvable. */
   readonly projectId: string | null;
+  /**
+   * Trusted current MCP lifecycle generation of the owning runtime, when the
+   * admission site can observe it (Decision 21 item 4). Omitted or null means
+   * "unknown", so this arm is skipped; the transport only supplies it once the
+   * lifecycle coordinator wires current generation state (impl-04 WP3).
+   */
+  readonly lifecycleGeneration?: string | null;
 }
 
 export interface McpSessionAuthorityRegistryShape {
@@ -194,6 +202,12 @@ export function makeMcpSessionAuthorityRegistry(options: {
     if (binding.credentialExpiresAt <= at) return "expired-credential";
     if (record.sessionGeneration !== binding.sessionGeneration) {
       return "stale-session-generation";
+    }
+    if (
+      context?.lifecycleGeneration != null &&
+      binding.lifecycleGeneration !== context.lifecycleGeneration
+    ) {
+      return "stale-lifecycle-generation";
     }
     if (record.subject !== binding.subject) return "subject-mismatch";
     if (record.kind !== binding.kind) return "kind-mismatch";
