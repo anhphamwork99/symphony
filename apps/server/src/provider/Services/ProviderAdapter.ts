@@ -47,6 +47,19 @@ import type { Stream } from "effect";
 export type ProviderSessionModelSwitchMode = "in-session" | "restart-session" | "unsupported";
 
 /**
+ * Per-session Synara MCP disable outcome (impl-07). `dormant` means the
+ * session reached the dormant surface with proven cleanup; `unavailable`
+ * means cleanup/reload could not be proven (fail-closed, Decisions 13/14).
+ */
+export interface ProviderDisableSynaraMcpResult {
+  readonly state: "dormant" | "unavailable";
+  /** True when the session was already disabled (idempotent duplicate). */
+  readonly alreadyDisabled?: boolean;
+  /** Stable sanitized detail when cleanup could not be proven. */
+  readonly detail?: string;
+}
+
+/**
  * Per-adapter ingress budget. A bounded queue makes a slow durable consumer
  * apply backpressure to the provider instead of growing the process heap
  * without limit during a persistence outage.
@@ -177,8 +190,17 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<void, TError>;
 
   /**
-   * Stop one provider session.
+   * Disable the per-session Synara MCP integration (impl-07): synchronously
+   * fence new MCP admission, settle in-flight Pi-facing executions exactly
+   * once, cancel/drain the gateway within the bounded window, revoke
+   * credentials, clear resources, and reload at the safe boundary — without
+   * aborting the Pi turn. Idempotent; adapters without a Synara MCP runtime
+   * omit the operation.
    */
+  readonly disableSynaraMcp?: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ProviderDisableSynaraMcpResult, TError>;
+
   /**
    * Stop and release every resource owned by a thread.
    *

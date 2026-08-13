@@ -433,6 +433,44 @@ export function planSynaraMcpCompletion(input: {
   };
 }
 
+export type SynaraMcpDisableOutcome =
+  | { readonly state: "dormant" }
+  | { readonly state: "unavailable"; readonly detail?: string };
+
+/**
+ * Plan the exactly-one terminal for a per-session disable (impl-07): a proven
+ * dormant outcome journals the succeeded terminal with `finalState: disabled`
+ * through the normal completion path, and an unavailable outcome journals the
+ * failed terminal with `finalState: disabled` and a sanitized bounded detail.
+ */
+export function planSynaraMcpDisableTerminal(input: {
+  readonly plan: SynaraMcpCommandPlan;
+  readonly project: OrchestrationProject;
+  readonly outcome: SynaraMcpDisableOutcome;
+  readonly now?: () => Date;
+}): {
+  readonly projectCommand: ProjectMcpActivationUpdateCommand | null;
+  readonly activityCommand: SynaraMcpActivityAppendCommand;
+} {
+  if (input.outcome.state === "dormant") {
+    const completion = planSynaraMcpCompletion({
+      plan: input.plan,
+      project: input.project,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+    return {
+      projectCommand: completion.projectCommand,
+      activityCommand: completion.terminalActivityCommand,
+    };
+  }
+  return planSynaraMcpFailure({
+    plan: input.plan,
+    project: input.project,
+    detail: input.outcome.detail ?? "The Synara MCP disable could not prove its cleanup.",
+    ...(input.now === undefined ? {} : { now: input.now }),
+  });
+}
+
 function truncateUtf8(text: string, maxBytes: number): string {
   const bytes = new TextEncoder().encode(text);
   if (bytes.byteLength <= maxBytes) return text;

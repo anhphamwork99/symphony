@@ -33,7 +33,7 @@ import {
   type ServerLifecycleStreamEvent,
 } from "@synara/contracts";
 import { clamp } from "effect/Number";
-import { Effect, FileSystem, Layer, Option, Path, Queue, Schema, Scope, Stream } from "effect";
+import { Duration, Effect, FileSystem, Layer, Option, Path, Queue, Schema, Scope, Stream } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcMiddleware, RpcSchema, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -92,7 +92,9 @@ import { McpSessionAuthority } from "./agentGateway/Services/McpSessionAuthority
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
 import {
   isSynaraMcpTurnCommand,
+  parseSynaraMcpCommand,
   planSynaraMcpCompletion,
+  planSynaraMcpDisableTerminal,
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
   synaraMcpWaitStatus,
@@ -638,17 +640,89 @@ const makeWsRpcHandlersLayer = () =>
             return yield* dispatchOrchestrationCommand(decision.activityCommand);
           }
           const plan = decision.plan;
+          const command = parseSynaraMcpCommand(plan.command.message.text)!;
 
           let result = plan.projectCommand
             ? yield* dispatchOrchestrationCommand(plan.projectCommand)
             : { sequence: readModel.snapshotSequence };
           if (!plan.pending) {
+            if (command === "disable") {
+              // impl-07: after the durable desired-disabled acceptance, disable
+              // the issuing session through the public provider boundary. An
+              // idle session has no in-flight turn, so its safe boundary is
+              // immediate and the disable resolves promptly.
+              const remainingMs = Math.max(
+                0,
+                Date.parse(plan.operation.absoluteDeadline) - Date.now(),
+              );
+              const outcome = yield* providerService
+                .disableSynaraMcp({ threadId: plan.command.threadId })
+                .pipe(Effect.timeoutOption(remainingMs <= 0 ? "1 millis" : Duration.millis(remainingMs)));
+              if (Option.isNone(outcome)) {
+                return yield* dispatchOrchestrationCommand(
+                  planSynaraMcpFailure({
+                    plan,
+                    project: plan.project,
+                    detail: "The Synara MCP disable did not complete before its deadline.",
+                  }).activityCommand,
+                );
+              }
+              if (outcome.value.state === "unavailable") {
+                return yield* dispatchOrchestrationCommand(
+                  planSynaraMcpFailure({
+                    plan,
+                    project: plan.project,
+                    detail:
+                      outcome.value.detail ?? "The Synara MCP disable could not prove its cleanup.",
+                  }).activityCommand,
+                );
+              }
+            }
             return yield* dispatchOrchestrationCommand(plan.terminalActivityCommand);
           }
 
           result = yield* dispatchOrchestrationCommand(plan.pendingActivityCommand);
           const reconcile = Effect.gen(function* () {
             const deadline = Date.parse(plan.operation.absoluteDeadline);
+            if (command === "disable") {
+              // impl-07: the per-session disable fences immediately, settles
+              // in-flight executions exactly once, drains the gateway within
+              // the bounded window, revokes, clears, and reloads at the safe
+              // boundary (the current turn's end). Its outcome drives exactly
+              // one succeeded/failed terminal with finalState disabled.
+              const remainingMs = Math.max(0, deadline - Date.now());
+              const outcome = yield* providerService
+                .disableSynaraMcp({ threadId: plan.command.threadId })
+                .pipe(Effect.timeoutOption(remainingMs <= 0 ? "1 millis" : Duration.millis(remainingMs)));
+              const current = yield* orchestrationEngine.getReadModel();
+              const currentProject = current.projects.find(
+                (project) => project.id === plan.project.id,
+              );
+              const terminal =
+                Option.isNone(outcome) || outcome.value.state === "unavailable"
+                  ? planSynaraMcpFailure({
+                      plan,
+                      project: currentProject ?? plan.project,
+                      detail:
+                        Option.isNone(outcome)
+                          ? "The Synara MCP disable did not complete before the project deadline."
+                          : (outcome.value.detail ??
+                            "The Synara MCP disable could not prove its cleanup."),
+                    })
+                  : planSynaraMcpDisableTerminal({
+                      plan,
+                      project: currentProject ?? plan.project,
+                      outcome: outcome.value,
+                    });
+              if (
+                currentProject?.synaraMcpActivationOperation?.requestId === plan.requestId &&
+                terminal.projectCommand
+              ) {
+                yield* dispatchOrchestrationCommand(terminal.projectCommand);
+              }
+              yield* dispatchOrchestrationCommand(terminal.activityCommand);
+              return;
+            }
             while (Date.now() < deadline) {
               const current = yield* orchestrationEngine.getReadModel();
               const currentProject = current.projects.find(

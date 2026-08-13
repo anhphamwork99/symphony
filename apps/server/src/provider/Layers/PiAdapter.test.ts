@@ -36,6 +36,11 @@ import {
   PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
   type PiSynaraMcpLifecycleCoordinator,
 } from "../piSynaraMcpLifecycle";
+import { disablePiSynaraMcpSession, PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL } from "../piSynaraMcpDisable";
+import {
+  makePiSynaraMcpToolExecutionRegistry,
+  SYNARA_MCP_DISABLED_ERROR_CODE,
+} from "../piSynaraMcpToolExecution";
 
 describe("Pi native Synara gateway tools", () => {  it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {
     const requests: Array<{ readonly token: string | null; readonly body: any }> = [];
@@ -185,11 +190,13 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     readonly adapter: PiSynaraMcpDormantAdapter;
     readonly coordinator: PiSynaraMcpLifecycleCoordinator;
     readonly stagedTools: any[];
+    readonly executions: ReturnType<typeof makePiSynaraMcpToolExecutionRegistry>;
     readonly minted: Array<{ readonly url: string; readonly bearerToken: string }>;
     readonly mintedAuthorities: McpAuthorityBinding[];
     readonly revoked: string[];
     readonly requests: Array<{ readonly token: string | null; readonly method: string }>;
     readonly reload: ReturnType<typeof vi.fn>;
+    readonly abort: ReturnType<typeof vi.fn>;
   }
 
   function makeCoordinatorHarness(options: {
@@ -200,9 +207,17 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     readonly failReload?: Error;
     readonly failRevoke?: Error;
     readonly discoveryGate?: Promise<void>;
+    readonly gatewayCancel?: {
+      readonly verifySession?: (token: string) => { readonly sessionKey: string } | null;
+      readonly cancelInFlightRequests?: (selector: {
+        readonly sessionKey: string;
+      }) => { readonly count: number; readonly settled: Promise<void> };
+    };
+    readonly drainTimeoutMs?: number;
   } = {}): CoordinatorHarness {
     const { adapter } = makePiSynaraMcpDormantExtension();
     const stagedTools: any[] = [];
+    const executions = makePiSynaraMcpToolExecutionRegistry();
       const minted: Array<{ url: string; bearerToken: string }> = [];
       const mintedAuthorities: McpAuthorityBinding[] = [];
     const revoked: string[] = [];
@@ -254,18 +269,27 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         }
         revoked.push(token);
       },
+      ...(options.gatewayCancel === undefined
+        ? {}
+        : {
+            verifySession: options.gatewayCancel.verifySession,
+            cancelInFlightRequests: options.gatewayCancel.cancelInFlightRequests,
+          }),
     };
     const reload = vi.fn(async () => {
       if (options.failReload !== undefined) {
         throw options.failReload;
       }
     });
+    const abort = vi.fn(async () => undefined);
     const coordinator = makePiSessionSynaraMcpCoordinator({
       threadId: "thread-pi-1" as ThreadId,
       adapter,
       stagedTools,
-      runtime: { session: { reload } },
+      executions,
+      runtime: { session: { reload, abort } },
       mcpAuthority: options.mcpAuthority,
+      ...(options.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: options.drainTimeoutMs }),
       ...(options.withCredentials === false ? {} : { credentials }),
       fetch,
     });
@@ -273,11 +297,13 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         adapter,
         coordinator,
         stagedTools,
+        executions,
         minted,
         mintedAuthorities,
         revoked,
         requests,
         reload,
+        abort,
       };
   }
 
@@ -445,7 +471,10 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       expect(harness.coordinator.state).toBe("dormant");
       expect(harness.revoked).toEqual(["token-1"]);
       expect(harness.stagedTools).toEqual([]);
-      expect(harness.reload).toHaveBeenCalledTimes(2);
+      // Dispose tears the runtime down immediately: the apply reload ran once
+      // and teardown performs no redundant reload (impl-07 boundary reload is
+      // reserved for the disable path).
+      expect(harness.reload).toHaveBeenCalledTimes(1);
   });
 
   it("supersedes an in-flight activation on dispose so stale completion exposes nothing", async () => {
@@ -493,6 +522,228 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     expect(harness.coordinator.state).toBe("dormant");
     expect(harness.stagedTools).toEqual([]);
     expect(harness.revoked).toEqual(["token-1"]);
+  });
+
+  describe("disablePiSynaraMcpSession at the Pi provider/session boundary (impl-07 AC1)", () => {
+    const deferred = <T = void>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    };
+
+    it("fences new calls synchronously and settles in-flight executions with the structured disabled error", async () => {
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+      const gate = deferred<unknown>();
+      const inFlight = harness.executions.execute({ call: async () => gate.promise });
+      expect(harness.executions.inFlightCount()).toBe(1);
+
+      const disable = disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+      // The fence is installed synchronously by the disable call itself.
+      expect(harness.executions.isFenced()).toBe(true);
+      const racingCall = harness.executions.execute({ call: async () => "late" });
+      await expect(racingCall).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+        message: PI_SYNARA_MCP_DISABLED_REFUSAL,
+      });
+
+      await expect(disable).resolves.toEqual({ state: "dormant" });
+      await expect(inFlight).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+        message: PI_SYNARA_MCP_DISABLED_REFUSAL,
+      });
+      expect(harness.executions.inFlightCount()).toBe(0);
+      expect(harness.executions.disabledSettledCount()).toBe(1);
+      expect(harness.revoked).toEqual(["token-1"]);
+      expect(harness.reload).toHaveBeenCalledTimes(2);
+      expect(harness.coordinator.state).toBe("dormant");
+    });
+
+    it("cancels and drains gateway requests before revoking the credential", async () => {
+      const drainGate = deferred();
+      const cancelled: Array<{ readonly sessionKey: string }> = [];
+      const harness = makeCoordinatorHarness({
+        mcpAuthority: AUTHORITY_BINDING,
+        gatewayCancel: {
+          verifySession: (token) =>
+            token === "token-1" ? { sessionKey: "session-key-1" } : null,
+          cancelInFlightRequests: (selector) => {
+            cancelled.push(selector);
+            return { count: 1, settled: drainGate.promise };
+          },
+        },
+      });
+      await activateAndCommit(harness);
+
+      const disable = disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // The gateway drain barrier is still pending: revocation must wait.
+      expect(cancelled).toEqual([{ sessionKey: "session-key-1" }]);
+      expect(harness.revoked).toEqual([]);
+
+      drainGate.resolve();
+      await expect(disable).resolves.toEqual({ state: "dormant" });
+      expect(harness.revoked).toEqual(["token-1"]);
+      expect(harness.coordinator.state).toBe("dormant");
+    });
+
+    it("reloads the runtime only at the safe boundary when a turn is active", async () => {
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+
+      const disable = disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(harness.reload).toHaveBeenCalledTimes(1);
+      expect(harness.coordinator.state).toBe("deactivating");
+
+      await harness.adapter.notifySafeBoundary();
+      await expect(disable).resolves.toEqual({ state: "dormant" });
+      expect(harness.reload).toHaveBeenCalledTimes(2);
+      expect(harness.coordinator.state).toBe("dormant");
+    });
+
+    it("suppresses late callbacks so they cannot mutate state or emit duplicate results", async () => {
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+      const gate = deferred<unknown>();
+      const inFlight = harness.executions.execute({ call: async () => gate.promise });
+
+      await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+      await expect(inFlight).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      });
+
+      // The abandoned gateway call resolves late: the Pi-facing execution is
+      // already settled once, the registry entry is gone, and no duplicate
+      // result or state mutation can occur.
+      gate.resolve({ content: [{ type: "text", text: "late" }] });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(harness.executions.inFlightCount()).toBe(0);
+      expect(harness.executions.disabledSettledCount()).toBe(1);
+      await expect(inFlight).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      });
+    });
+
+    it("is idempotent for duplicate disables", async () => {
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+
+      const first = await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+      const duplicate = await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+
+      expect(first).toEqual({ state: "dormant" });
+      expect(duplicate).toEqual({ state: "dormant", alreadyDisabled: true });
+      expect(harness.revoked).toEqual(["token-1"]);
+      expect(harness.reload).toHaveBeenCalledTimes(2);
+      expect(harness.coordinator.state).toBe("dormant");
+    });
+
+    it("leaves the session unavailable on a drain timeout while still revoking best-effort", async () => {
+      const harness = makeCoordinatorHarness({
+        mcpAuthority: AUTHORITY_BINDING,
+        drainTimeoutMs: 25,
+        gatewayCancel: {
+          verifySession: () => ({ sessionKey: "session-key-1" }),
+          cancelInFlightRequests: () => ({
+            count: 1,
+            settled: new Promise<void>(() => undefined),
+          }),
+        },
+      });
+      await activateAndCommit(harness);
+
+      const outcome = await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+
+      expect(outcome).toEqual({
+        state: "unavailable",
+        detail: PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL,
+      });
+      expect(harness.coordinator.state).toBe("unavailable");
+      // Authority is still revoked and the project stays disabled.
+      expect(harness.revoked).toEqual(["token-1"]);
+      expect(
+        harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.drain.timeout"),
+      ).toBe(true);
+    });
+
+    it("leaves the session unavailable when cleanup cannot be proven", async () => {
+      const harness = makeCoordinatorHarness({
+        mcpAuthority: AUTHORITY_BINDING,
+        failRevoke: new Error("cannot prove cleanup"),
+      });
+      await activateAndCommit(harness);
+
+      const outcome = await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+
+      expect(outcome).toEqual({
+        state: "unavailable",
+        detail: PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL,
+      });
+      expect(harness.coordinator.state).toBe("unavailable");
+      expect(
+        harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "cleanup.uncertain"),
+      ).toBe(true);
+    });
+
+    it("never aborts the Pi session and leaves non-MCP work usable (AC2 turn continuity)", async () => {
+      const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+      await activateAndCommit(harness);
+
+      await disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+      });
+
+      // The disable path never touches session.abort: the Pi turn continues
+      // with coding-agent tools after the structured disabled result.
+      expect(harness.abort).not.toHaveBeenCalled();
+      // Non-MCP work is unaffected: a plain coding-agent tool call still runs.
+      await expect(Promise.resolve("coding-agent-tool-ok")).resolves.toBe("coding-agent-tool-ok");
+      // A later Synara admission is fenced and rejected before its handler runs.
+      const call = vi.fn(async () => "gateway");
+      await expect(harness.executions.execute({ call })).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      });
+      expect(call).not.toHaveBeenCalled();
+    });
   });
 });
 

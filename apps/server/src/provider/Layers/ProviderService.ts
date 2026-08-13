@@ -55,7 +55,11 @@ import { nonEmptyTrimmed } from "@synara/shared/text";
 
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
-import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import {
+  ProviderService,
+  type ProviderServiceShape,
+  type ProviderDisableSynaraMcpResult,
+} from "../Services/ProviderService.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -2331,6 +2335,31 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         payload: rawInput,
       }).pipe(Effect.flatMap((input) => respondToInteraction({ kind: "userInput", input })));
 
+    const ProviderDisableSynaraMcpInput = Schema.Struct({ threadId: ThreadId });
+
+    const disableSynaraMcp: ProviderServiceShape["disableSynaraMcp"] = (rawInput) =>
+      Effect.gen(function* () {
+        const input = yield* decodeInputOrValidationError({
+          operation: "ProviderService.disableSynaraMcp",
+          schema: ProviderDisableSynaraMcpInput,
+          payload: rawInput,
+        });
+        const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+        if (binding === undefined) {
+          // No persisted binding: no provider runtime exists to disable. The
+          // durable desired-disabled acceptance is already journaled by the
+          // command boundary, so this is an idempotent no-op.
+          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+        }
+        const adapter = yield* registry.getByProvider(binding.provider);
+        if (adapter.disableSynaraMcp === undefined) {
+          // Providers without a Synara MCP runtime have nothing to fence,
+          // drain, or revoke: the project-level acceptance already applied.
+          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+        }
+        return yield* adapter.disableSynaraMcp({ threadId: input.threadId });
+      });
+
     const stopSession: ProviderServiceShape["stopSession"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -2790,6 +2819,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       steerSubagent,
       respondToRequest,
       respondToUserInput,
+      disableSynaraMcp,
       stopSession,
       stopRuntimeSession,
       hasLiveRuntimeTasks,

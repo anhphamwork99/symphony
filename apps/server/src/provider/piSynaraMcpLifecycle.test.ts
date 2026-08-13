@@ -7,8 +7,10 @@ import {
   PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE,
   PI_SYNARA_MCP_DIAGNOSTIC_LIMIT,
   PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT,
+  PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS,
   PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
   type PiSynaraMcpActivationSeams,
+  type PiSynaraMcpDeactivationSeams,
   type PiSynaraMcpLifecycleCoordinator,
   type PiSynaraMcpStagedActivation,
 } from "./piSynaraMcpLifecycle.ts";
@@ -50,7 +52,10 @@ const STAGE_NAMES: Record<keyof PiSynaraMcpActivationSeams, string> = {
   cleanup: "cleanup",
 };
 
-function makeHarness(overrides: Partial<PiSynaraMcpActivationSeams> = {}): Harness {
+function makeHarness(
+  overrides: Partial<PiSynaraMcpActivationSeams> = {},
+  deactivation: PiSynaraMcpDeactivationSeams = {},
+): Harness {
   const adapter = makePiSynaraMcpDormantExtension().adapter;
   const calls: string[] = [];
   const received = {
@@ -93,7 +98,7 @@ function makeHarness(overrides: Partial<PiSynaraMcpActivationSeams> = {}): Harne
       wrap(key, combined[key]),
     ]),
   ) as unknown as MutablePiSynaraMcpActivationSeams;
-  const coordinator = makePiSynaraMcpLifecycleCoordinator({ adapter, seams });
+  const coordinator = makePiSynaraMcpLifecycleCoordinator({ adapter, seams, deactivation });
   return { adapter, coordinator, calls, received, seams };
 }
 
@@ -591,6 +596,255 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     });
     expect(diagnostics.entries[4]?.message.length).toBeLessThanOrEqual(PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT);
     expect(diagnostics.entries[4]?.message.endsWith("…")).toBe(true);
+  });
+
+  it("orders disable settlement, gateway drain, cleanup, and boundary reload during deactivation", async () => {
+    const order: string[] = [];
+    const harness = makeHarness({}, {
+      settleExecutions: async () => {
+        order.push("settle");
+      },
+      cancelGatewayRequests: async () => {
+        order.push("cancel");
+      },
+      reloadAtSafeBoundary: async () => {
+        order.push("reload");
+      },
+    });
+    await activateAndCommit(harness);
+
+    const handoff = await harness.coordinator.beginDeactivation();
+    const outcome = await handoff.complete({ awaitSafeBoundary: false });
+
+    expect(outcome).toEqual({ state: "dormant" });
+    expect(order).toEqual(["settle", "cancel", "reload"]);
+    expect(harness.calls).toContain("cleanup");
+    // Settlement and drain happen before the revoke/clear cleanup.
+    expect(order.indexOf("settle")).toBeLessThan(harness.calls.indexOf("cleanup"));
+    expect(order.indexOf("cancel")).toBeLessThan(harness.calls.indexOf("cleanup"));
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("revokes credentials only after the gateway drain barrier settles", async () => {
+    const order: string[] = [];
+    let releaseDrain!: () => void;
+    const drainGate = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+    const harness = makeHarness({}, {
+      settleExecutions: async () => {
+        order.push("settle");
+      },
+      cancelGatewayRequests: async () => {
+        order.push("cancel");
+        await drainGate;
+      },
+      reloadAtSafeBoundary: async () => {
+        order.push("reload");
+      },
+    });
+    await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+
+    const completion = handoff.complete({ awaitSafeBoundary: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The drain barrier is still pending: cleanup (revoke) must not run yet.
+    expect(order).toEqual(["settle", "cancel"]);
+    expect(harness.calls).not.toContain("cleanup");
+
+    releaseDrain();
+    await expect(completion).resolves.toEqual({ state: "dormant" });
+    expect(harness.calls).toContain("cleanup");
+    expect(order).toEqual(["settle", "cancel", "reload"]);
+  });
+
+  it("treats a gateway drain timeout as not clean success and leaves the session unavailable", async () => {
+    const harness = makeHarness({}, {
+      settleExecutions: async () => undefined,
+      cancelGatewayRequests: async () => {
+        // The gateway drain never settles within the configured bound.
+        await new Promise<void>(() => undefined);
+      },
+      drainTimeoutMs: 25,
+      reloadAtSafeBoundary: async () => undefined,
+    });
+    await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+
+    const outcome = await handoff.complete({ awaitSafeBoundary: false });
+
+    expect(outcome).toEqual({ state: "unavailable" });
+    expect(harness.coordinator.state).toBe("unavailable");
+    // Revocation/cleanup still ran best-effort after the drain timeout.
+    expect(harness.calls).toContain("cleanup");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.drain.timeout"),
+    ).toBe(true);
+    expect(PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS).toBe(2_000);
+  });
+
+  it("waits for the safe boundary before the reload when awaited, and reloads immediately otherwise", async () => {
+    const reloads: string[] = [];
+    const harness = makeHarness({}, {
+      reloadAtSafeBoundary: async () => {
+        reloads.push("reload");
+      },
+    });
+    await activateAndCommit(harness);
+
+    const awaitedHandoff = await harness.coordinator.beginDeactivation();
+    const awaited = awaitedHandoff.complete({ awaitSafeBoundary: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reloads).toEqual([]);
+    await harness.adapter.notifySafeBoundary();
+    await expect(awaited).resolves.toEqual({ state: "dormant" });
+    expect(reloads).toEqual(["reload"]);
+    expect(harness.coordinator.state).toBe("dormant");
+
+    const harness2 = makeHarness({}, {
+      reloadAtSafeBoundary: async () => {
+        reloads.push("reload-immediate");
+      },
+    });
+    await activateAndCommit(harness2);
+    const immediateHandoff = await harness2.coordinator.beginDeactivation();
+    await expect(immediateHandoff.complete({ awaitSafeBoundary: false })).resolves.toEqual({
+      state: "dormant",
+    });
+    expect(reloads).toEqual(["reload", "reload-immediate"]);
+  });
+
+  it("leaves the session unavailable when the boundary reload cannot be proven", async () => {
+    const harness = makeHarness({}, {
+      reloadAtSafeBoundary: async () => {
+        throw new Error("reload exploded");
+      },
+    });
+    await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+
+    const outcome = await handoff.complete({ awaitSafeBoundary: false });
+
+    expect(outcome).toEqual({ state: "unavailable" });
+    expect(harness.coordinator.state).toBe("unavailable");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.reload.uncertain"),
+    ).toBe(true);
+  });
+
+  it("leaves the session unavailable when in-flight settlement cannot be proven", async () => {
+    const harness = makeHarness({}, {
+      settleExecutions: async () => {
+        throw new Error("settle exploded");
+      },
+      reloadAtSafeBoundary: async () => undefined,
+    });
+    await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+
+    const outcome = await handoff.complete({ awaitSafeBoundary: false });
+
+    expect(outcome).toEqual({ state: "unavailable" });
+    expect(harness.coordinator.state).toBe("unavailable");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.settle.uncertain"),
+    ).toBe(true);
+  });
+
+  it("returns the same handoff for a duplicate deactivation while deactivating", async () => {
+    const harness = makeHarness();
+    await activateAndCommit(harness);
+
+    const first = await harness.coordinator.beginDeactivation();
+    const duplicate = await harness.coordinator.beginDeactivation();
+
+    expect(duplicate).toBe(first);
+    expect(harness.coordinator.state).toBe("deactivating");
+    expect(await first.complete()).toEqual({ state: "dormant" });
+    expect(await duplicate.complete()).toEqual({ state: "dormant" });
+    expect(harness.calls.filter((call) => call === "cleanup")).toHaveLength(1);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("dispose during deactivation releases the boundary wait and finalizes without a reload", async () => {
+    const reloads: string[] = [];
+    const harness = makeHarness({}, {
+      reloadAtSafeBoundary: async () => {
+        reloads.push("reload");
+      },
+    });
+    await activateAndCommit(harness);
+    const handoff = await harness.coordinator.beginDeactivation();
+
+    // The awaited deactivation is parked on the safe boundary; dispose must
+    // release it instead of waiting for the next agent_end forever.
+    const completion = handoff.complete({ awaitSafeBoundary: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const disposePromise = harness.coordinator.dispose();
+    await expect(completion).resolves.toEqual({ state: "dormant" });
+    await disposePromise;
+
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(reloads).toEqual(["reload"]);
+    await expect(harness.coordinator.activate(ACTIVATION_INPUT)).rejects.toThrow(
+      PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
+    );
+  });
+
+  it("rolls back an apply failure with an immediate reload when the catalog was exposed", async () => {
+    const order: string[] = [];
+    const harness = makeHarness({}, {
+      reloadAtSafeBoundary: async () => {
+        order.push("reload");
+      },
+    });
+    harness.seams.applyAtSafeBoundary = async () => {
+      harness.calls.push("apply");
+      throw new Error("apply failed");
+    };
+
+    const activation = harness.coordinator.activate(ACTIVATION_INPUT);
+    await flush();
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "apply" });
+    expect(harness.calls).toContain("cleanup");
+    expect(order).toEqual(["reload"]);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("never reloads for a superseded staging rollback that exposed no catalog", async () => {
+    const order: string[] = [];
+    let releaseDiscover!: () => void;
+    const discoverGate = new Promise<void>((resolve) => {
+      releaseDiscover = resolve;
+    });
+    const harness = makeHarness(
+      {
+        discover: async () => {
+          await discoverGate;
+          return CATALOG;
+        },
+      },
+      {
+        reloadAtSafeBoundary: async () => {
+          order.push("reload");
+        },
+      },
+    );
+
+    const activation = harness.coordinator.activate(ACTIVATION_INPUT);
+    await flush();
+    const disposePromise = harness.coordinator.dispose();
+    releaseDiscover();
+    const result = await activation;
+    await disposePromise;
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "superseded" });
+    expect(order).toEqual([]);
+    expect(harness.calls).not.toContain("apply");
   });
 
   it("keeps the coordinator's default diagnostics bounded", async () => {

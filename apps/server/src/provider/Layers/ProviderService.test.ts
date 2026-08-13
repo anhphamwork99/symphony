@@ -49,9 +49,13 @@ import {
   ProviderSessionDirectoryPersistenceError,
   ProviderUnsupportedError,
   ProviderValidationError,
+  ProviderAdapterRequestError,
   type ProviderAdapterError,
 } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type {
+  ProviderAdapterShape,
+  ProviderDisableSynaraMcpResult,
+} from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -272,6 +276,13 @@ function makeFakeCodexAdapter(
       }),
   );
 
+  const disableSynaraMcp = vi.fn(
+    (_input: { readonly threadId: ThreadId }): Effect.Effect<
+      ProviderDisableSynaraMcpResult,
+      ProviderAdapterError
+    > => Effect.succeed({ state: "dormant", alreadyDisabled: true }),
+  );
+
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
     capabilities: {
@@ -288,6 +299,7 @@ function makeFakeCodexAdapter(
     interruptTurn,
     respondToRequest,
     respondToUserInput,
+    disableSynaraMcp,
     stopSession,
     listSessions,
     hasSession,
@@ -334,6 +346,7 @@ function makeFakeCodexAdapter(
     interruptTurn,
     respondToRequest,
     respondToUserInput,
+    disableSynaraMcp,
     stopSession,
     listSessions,
     hasSession,
@@ -3457,6 +3470,115 @@ piInteractionRouting.layer("ProviderServiceLive Pi interaction generation", (it)
       piInteractionRouting.pi.startSession.mockClear();
       piInteractionRouting.pi.respondToUserInput.mockClear();
       piInteractionRouting.pi.stopSession.mockClear();
+    }),
+  );
+});
+
+const piDisableRouting = makeProviderServiceLayer(undefined, { includePi: true });
+piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routing (impl-07)", (it) => {
+  it.effect("delegates the per-session disable to the routed Pi adapter", () =>
+    Effect.gen(function* () {
+      piDisableRouting.pi.adapter.disableSynaraMcp?.mockClear();
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-pi-disable");
+      yield* provider.startSession(threadId, {
+        provider: "pi",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      const disable = piDisableRouting.pi.adapter.disableSynaraMcp as typeof piDisableRouting.pi.adapter.disableSynaraMcp;
+      assert.equal(typeof disable, "function");
+
+      const result = yield* provider.disableSynaraMcp({ threadId });
+
+      assert.deepEqual(result, { state: "dormant", alreadyDisabled: true });
+      assert.equal(disable?.mock.calls.length ?? 0, 1);
+      assert.deepEqual(disable?.mock.calls[0]?.[0], { threadId });
+    }),
+  );
+
+  it.effect("passes an unavailable adapter outcome through", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-pi-disable-unavailable");
+      yield* provider.startSession(threadId, {
+        provider: "pi",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
+        (): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
+          Effect.succeed({
+            state: "unavailable",
+            detail: "Synara MCP cleanup could not be proven.",
+          }),
+      );
+
+      const result = yield* provider.disableSynaraMcp({ threadId });
+
+      assert.deepEqual(result, {
+        state: "unavailable",
+        detail: "Synara MCP cleanup could not be proven.",
+      });
+    }),
+  );
+
+  it.effect("returns an idempotent success when no provider binding exists", () =>
+    Effect.gen(function* () {
+      piDisableRouting.pi.adapter.disableSynaraMcp?.mockClear();
+      const provider = yield* ProviderService;
+      const result = yield* provider.disableSynaraMcp({ threadId: asThreadId("thread-never-started") });
+      assert.deepEqual(result, { state: "dormant", alreadyDisabled: true });
+      assert.equal(piDisableRouting.pi.adapter.disableSynaraMcp?.mock.calls.length ?? 0, 0);
+    }),
+  );
+
+  it.effect("returns an idempotent success for adapters without a Synara MCP runtime", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-codex-disable");
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      const codexAdapter = piDisableRouting.codex.adapter as ProviderAdapterShape<ProviderAdapterError> & {
+        disableSynaraMcp?: unknown;
+      };
+      delete codexAdapter.disableSynaraMcp;
+
+      const result = yield* provider.disableSynaraMcp({ threadId });
+
+      assert.deepEqual(result, { state: "dormant", alreadyDisabled: true });
+    }),
+  );
+
+  it.effect("propagates adapter failures without a terminal", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-pi-disable-failure");
+      yield* provider.startSession(threadId, {
+        provider: "pi",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
+        (): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
+          Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: "pi",
+              method: "synara-mcp/disable",
+              detail: "disable exploded",
+            }),
+          ),
+      );
+
+      const failure = yield* Effect.exit(provider.disableSynaraMcp({ threadId }));
+      assert.equal(Exit.isFailure(failure), true);
     }),
   );
 });

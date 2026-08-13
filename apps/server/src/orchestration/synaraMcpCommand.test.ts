@@ -18,6 +18,7 @@ import {
   parseSynaraMcpCommand,
   planSynaraMcpCommand,
   planSynaraMcpCompletion,
+  planSynaraMcpDisableTerminal,
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
   sanitizeSynaraMcpDiagnostic,
@@ -405,5 +406,71 @@ describe("Synara MCP command boundary and durable activity contract", () => {
     const replayedThread = replayed.threads.find((candidate) => candidate.id === threadId)!;
     expect(replayedThread.messages).toHaveLength(0);
     expect(replayedThread.activities).toHaveLength(1);
+  });
+
+  it("plans exactly one succeeded terminal with finalState disabled for a proven disable", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const active = await baseReadModel({ active: true });
+    const plan = planSynaraMcpCommand({ command, readModel: active, now: () => new Date(now) });
+    if (!plan) throw new Error("Expected MCP command plan");
+
+    const terminal = planSynaraMcpDisableTerminal({
+      plan,
+      project: { ...active.projects[0]!, synaraMcpActivationOperation: plan.operation },
+      outcome: { state: "dormant" },
+      now: () => new Date("2026-08-12T12:00:01.000Z"),
+    });
+
+    expect(terminal.projectCommand?.operation.aggregateStatus).toBe("succeeded");
+    expect(terminal.projectCommand?.operation.desiredState).toBe("disabled");
+    const activity = terminal.activityCommand.activity;
+    expect(activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(activity.kind).toBe("synara.mcp.command.succeeded");
+    expect(activity.turnId).toBeNull();
+    expect(activity.payload).toMatchObject({
+      requestId: plan.requestId,
+      command: "disable",
+      phase: "terminal",
+      status: "succeeded",
+      requestedState: "disabled",
+      finalState: "disabled",
+    });
+  });
+
+  it("plans exactly one failed terminal with finalState disabled when the disable is unavailable", async () => {
+    const command = turnCommand("/Disable Synara MCP");
+    const active = await baseReadModel({ active: true });
+    const plan = planSynaraMcpCommand({ command, readModel: active, now: () => new Date(now) });
+    if (!plan) throw new Error("Expected MCP command plan");
+
+    const terminal = planSynaraMcpDisableTerminal({
+      plan,
+      project: { ...active.projects[0]!, synaraMcpActivationOperation: plan.operation },
+      outcome: {
+        state: "unavailable",
+        detail: `token=secret-value https://example.test/x /Users/private/file ${
+"x".repeat(2_000)}`,
+      },
+      now: () => new Date(now),
+    });
+
+    expect(terminal.projectCommand?.operation.aggregateStatus).toBe("failed");
+    expect(terminal.projectCommand?.operation.desiredState).toBe("disabled");
+    const activity = terminal.activityCommand.activity;
+    expect(activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(activity.kind).toBe("synara.mcp.command.failed");
+    expect(activity.turnId).toBeNull();
+    expect(activity.payload).toMatchObject({
+      requestId: plan.requestId,
+      command: "disable",
+      phase: "terminal",
+      status: "failed",
+      requestedState: "disabled",
+      finalState: "disabled",
+    });
+    const detail = String((activity.payload as { detail: string }).detail);
+    expect(new TextEncoder().encode(detail).byteLength).toBeLessThanOrEqual(1_024);
+    expect(detail).not.toContain("secret-value");
+    expect(detail).not.toContain("/Users/private/file");
   });
 });

@@ -67,6 +67,7 @@ import {
 import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter.ts";
 import {
   PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  type ProviderDisableSynaraMcpResult,
   type ProviderThreadSnapshot,
 } from "../Services/ProviderAdapter.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
@@ -91,10 +92,16 @@ import {
   type PiSynaraMcpActivationSeams,
   type PiSynaraMcpAuthorityValidation,
   type PiSynaraMcpCatalogValidation,
+  type PiSynaraMcpDeactivationSeams,
   type PiSynaraMcpDiagnostics,
   type PiSynaraMcpLifecycleCoordinator,
   type PiSynaraMcpStagedActivation,
 } from "../piSynaraMcpLifecycle.ts";
+import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
+import {
+  makePiSynaraMcpToolExecutionRegistry,
+  type PiSynaraMcpToolExecutionRegistry,
+} from "../piSynaraMcpToolExecution.ts";
 import {
   teardownChildProcessTree,
   teardownProviderProcessTree,
@@ -340,6 +347,8 @@ interface PiSessionContext {
   readonly gatewayControlAvailable: boolean;
   readonly synaraMcp: PiSynaraMcpDormantAdapter;
   readonly synaraMcpCoordinator: PiSynaraMcpLifecycleCoordinator;
+  /** impl-07: Pi-local execution registry for Synara MCP tool calls. */
+  readonly synaraMcpExecutions: PiSynaraMcpToolExecutionRegistry;
   readonly lifecycleGeneration?: string;
   runtime: PiAgentRuntime;
   readonly processSupervisor: PiBashProcessSupervisor;
@@ -466,13 +475,16 @@ function piGatewayToolResult(result: unknown): AgentToolResult<unknown> {
  * custom-tool API. Tool schemas and execution both remain owned by the
  * gateway; Pi only adapts the provider boundary. Used by the activation
  * apply seam so the staged catalog is exposed atomically through the
- * extension reload boundary without a second discovery round-trip.
+ * extension reload boundary without a second discovery round-trip. When an
+ * execution registry is supplied (impl-07), every execution is fenced and
+ * settled through it so disable cancels the Pi-facing call exactly once.
  */
 export function mapAgentGatewayMcpToolsToPiCustomTools(input: {
   readonly tools: ReadonlyArray<AgentGatewayMcpToolDescriptor>;
   readonly connection: AgentGatewayMcpConnection;
   readonly defineTool: (tool: ToolDefinition) => ToolDefinition;
   readonly fetch?: AgentGatewayMcpFetch;
+  readonly executions?: PiSynaraMcpToolExecutionRegistry;
 }): ReadonlyArray<ToolDefinition> {
   return input.tools.map((tool) =>
     input.defineTool({
@@ -480,16 +492,21 @@ export function mapAgentGatewayMcpToolsToPiCustomTools(input: {
       label: tool.name,
       description: tool.description,
       parameters: tool.inputSchema as ToolDefinition["parameters"],
-      execute: async (_toolCallId, params, signal) =>
-        piGatewayToolResult(
-          await callAgentGatewayMcpTool({
+      execute: async (_toolCallId, params, signal) => {
+        const call = (abortSignal?: AbortSignal) =>
+          callAgentGatewayMcpTool({
             connection: input.connection,
             name: tool.name,
             arguments: params as Record<string, unknown>,
             ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
-            ...(signal === undefined ? {} : { signal }),
-          }),
-        ),
+            ...(abortSignal === undefined ? {} : { signal: abortSignal }),
+          });
+        const result =
+          input.executions === undefined
+            ? await call(signal)
+            : await input.executions.execute({ call, signal });
+        return piGatewayToolResult(result);
+      },
     }),
   );
 }
@@ -532,16 +549,30 @@ export interface PiSessionSynaraMcpCoordinatorInput {
   readonly adapter: PiSynaraMcpDormantAdapter;
   /** Staged-tool registry bound to the session's dormant extension factory. */
   readonly stagedTools: ToolDefinition[];
+  /**
+   * impl-07 Pi-local execution registry; the apply seam routes every Synara
+   * MCP tool execution through it so disable fences and settles them.
+   */
+  readonly executions: PiSynaraMcpToolExecutionRegistry;
   /** Live Pi session runtime; the apply seam reloads it at the safe boundary. */
   readonly runtime: { readonly session: { readonly reload: () => Promise<void> } };
   /** Trusted server-minted subject-bound MCP authority (Decision 21); absent fails closed. */
   readonly mcpAuthority: McpAuthorityBinding | null | undefined;
-  /** Shared gateway credentials; absent fails closed at the credential stage. */
+  /**
+   * Shared gateway credentials; absent fails closed at the credential stage.
+   * The optional verify/cancel members (impl-07) drive the session-scoped
+   * gateway registry cancellation and drain barrier.
+   */
   readonly credentials?: Pick<
     AgentGatewayCredentialsShape,
     "connectionForThread" | "revokeSessionToken"
-  >;
+  > &
+    Partial<
+      Pick<AgentGatewayCredentialsShape, "verifySession" | "cancelInFlightRequests">
+    >;
   readonly fetch?: AgentGatewayMcpFetch;
+  /** Drain bound for the gateway cancellation barrier (default 2000ms). */
+  readonly drainTimeoutMs?: number;
   /** Optional bounded diagnostics; a per-session default is created when omitted. */
   readonly diagnostics?: PiSynaraMcpDiagnostics;
 }
@@ -653,6 +684,7 @@ export function makePiSessionSynaraMcpCoordinator(
       tools: staged.catalog as ReadonlyArray<AgentGatewayMcpToolDescriptor>,
       connection: staged.connection as AgentGatewayMcpConnection,
       defineTool: (tool) => tool,
+      executions: input.executions,
       ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     });
     // Install the complete catalog, then reload so the extension factory
@@ -662,19 +694,46 @@ export function makePiSessionSynaraMcpCoordinator(
   };
 
   const cleanup = async (staged: PiSynaraMcpStagedActivation) => {
-    // Discard the staged registration and reload when a catalog had reached
-    // the extension registry. This removes tools from the live runtime after
-    // deactivation and after an apply/reload failure; clearing the array alone
-    // would affect only a future reload.
-    const catalogMayBeRegistered = stagedTools.length > 0;
+    // Discard the staged registration so no later load exposes Synara tools.
+    // The credential is revoked here only after the disable orchestrator has
+    // settled and drained the gateway (Decision 14 ordering); the runtime
+    // reload that removes the live tool surface happens through the
+    // deactivation reload seam at the safe boundary (or immediately for
+    // activation rollback after the apply seam already ran).
     stagedTools.splice(0, stagedTools.length);
     const connection = staged.credential;
     if (isRecord(connection) && typeof connection.bearerToken === "string") {
       credentials?.revokeSessionToken(connection.bearerToken);
     }
-    if (catalogMayBeRegistered) {
-      await runtime.session.reload();
-    }
+  };
+
+  const deactivation: PiSynaraMcpDeactivationSeams = {
+    // Settle every in-flight Pi-facing execution exactly once with the
+    // structured `synara_mcp_disabled` result (Decision 14 step 3).
+    settleExecutions: () => input.executions.settleAll(),
+    // Cancel and drain gateway-side in-flight requests through the shared
+    // in-flight request registry, keyed by the session identity of the
+    // retired credential (the gateway registry owns the cancellation and its
+    // drain barrier; the coordinator bounds it with the 2s timeout).
+    cancelGatewayRequests: async (staged) => {
+      const connection = staged.credential;
+      if (!isRecord(connection) || typeof connection.bearerToken !== "string") {
+        return;
+      }
+      if (credentials === undefined) {
+        return;
+      }
+      const identity = credentials.verifySession?.(connection.bearerToken) ?? null;
+      if (identity === null) {
+        return;
+      }
+      await credentials.cancelInFlightRequests?.({ sessionKey: identity.sessionKey }).settled;
+    },
+    ...(input.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: input.drainTimeoutMs }),
+    // Reload the runtime so the cleared staged-tool registry unregisters the
+    // Synara surface; the coordinator defers this to the safe boundary when
+    // a turn is active.
+    reloadAtSafeBoundary: () => runtime.session.reload(),
   };
 
   const seams: PiSynaraMcpActivationSeams = {
@@ -689,6 +748,7 @@ export function makePiSessionSynaraMcpCoordinator(
   return makePiSynaraMcpLifecycleCoordinator({
     adapter,
     seams,
+    deactivation,
     diagnostics: input.diagnostics ?? makePiSynaraMcpDiagnostics(),
   });
 }
@@ -1947,8 +2007,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       context.unsubscribe?.();
       context.unsubscribe = undefined;
       // Fence and finalize the Synara MCP lifecycle before the runtime dies:
-      // pending activations are superseded, candidate credentials revoked,
-      // and the staged-tool registry cleared.
+      // new MCP admissions fail fast, pending activations are superseded,
+      // in-flight executions are settled exactly once, candidate credentials
+      // revoked, and the staged-tool registry cleared.
+      context.synaraMcpExecutions.fence();
       await context.synaraMcpCoordinator.dispose();
       for (const pending of Array.from(context.pendingUserInputs.values())) {
         pending.resolve({});
@@ -2410,11 +2472,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // One lifecycle coordinator per Pi session, created with the dormant
         // extension and owned for the whole session lifetime: safe-boundary
         // notifications reach it through the extension's agent_end hook, and
-        // session disposal disposes it before the runtime tears down.
+        // session disposal disposes it before the runtime tears down. The
+        // execution registry fences and settles Synara MCP tool calls on
+        // disable (impl-07).
+        const synaraMcpExecutions = makePiSynaraMcpToolExecutionRegistry();
         const synaraMcpCoordinator = makePiSessionSynaraMcpCoordinator({
           threadId: input.threadId,
           adapter: synaraMcp.adapter,
           stagedTools: synaraMcp.stagedTools,
+          executions: synaraMcpExecutions,
           runtime,
           mcpAuthority: input.mcpAuthority,
           ...(agentGatewayCredentials === undefined
@@ -2448,6 +2514,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           gatewayControlAvailable: false,
           synaraMcp: synaraMcp.adapter,
           synaraMcpCoordinator,
+          synaraMcpExecutions,
           processSupervisor,
           modelRegistry,
           session,
@@ -2834,6 +2901,40 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         } satisfies ProviderRuntimeEvent);
       });
 
+    const disableSynaraMcp: NonNullable<PiAdapterShape["disableSynaraMcp"]> = (input) =>
+      Effect.gen(function* () {
+        const context = sessions.get(input.threadId);
+        if (context === undefined) {
+          // No live Pi session: nothing to fence, drain, or revoke. The
+          // durable desired-disabled acceptance is already journaled by the
+          // command boundary; this is an idempotent no-op.
+          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+        }
+        const outcome = yield* Effect.tryPromise({
+          try: () =>
+            disablePiSynaraMcpSession({
+              coordinator: context.synaraMcpCoordinator,
+              executions: context.synaraMcpExecutions,
+              // A running turn keeps its tool surface until agent_end; an idle
+              // session has no active turn, so the safe boundary is immediate.
+              awaitSafeBoundary: context.activeTurnId !== undefined,
+            }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "synara-mcp/disable",
+              detail: toMessage(cause, "Failed to disable Synara MCP for the Pi session."),
+              cause,
+            }),
+        });
+        if (outcome.state === "unavailable") {
+          yield* Effect.logWarning("pi.synara_mcp_disable_unavailable", {
+            threadId: input.threadId,
+          });
+        }
+        return outcome;
+      });
+
     const listSessions: PiAdapterShape["listSessions"] = () =>
       Effect.sync(() => Array.from(sessions.values()).map(makeSessionSnapshot));
 
@@ -3106,6 +3207,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       respondToRequest: (threadId) => respondUnsupported(threadId, "request/respond"),
       respondToUserInput,
       stopSession,
+      disableSynaraMcp,
       listSessions,
       hasSession,
       readThread,

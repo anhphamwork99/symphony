@@ -20,6 +20,14 @@ export const PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE =
 export const PI_SYNARA_MCP_DEACTIVATION_IN_PROGRESS_REFUSAL =
   "Pi Synara MCP deactivation is in progress; retry after it completes";
 
+/**
+ * Bounded gateway drainage window (Decision 14): the existing two-second
+ * timeout applied to the gateway registry drain barrier. A drain timeout is
+ * not clean success — authority is still revoked best-effort, but the session
+ * stays unavailable.
+ */
+export const PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS = 2_000;
+
 /** One bounded diagnostic record; state is the lifecycle state associated with the entry. */
 export interface PiSynaraMcpDiagnosticEntry {
   readonly at: string;
@@ -144,9 +152,9 @@ export type PiSynaraMcpActivationResult =
 
 /**
  * Deactivation handoff contract. impl-07 owns the cancellation/drain/revoke
- * ordering around {@link PiSynaraMcpDeactivationHandoff.cleanup}; WP1 only
- * retires the generation, fences admission, and finalizes the state through
- * {@link PiSynaraMcpDeactivationHandoff.complete}.
+ * ordering around {@link PiSynaraMcpDeactivationHandoff.cleanup}; the
+ * coordinator retires the generation, fences admission, and finalizes the
+ * state through {@link PiSynaraMcpDeactivationHandoff.complete}.
  */
 export interface PiSynaraMcpDeactivationHandoff {
   /** Lifecycle generation being retired; stale completions are no-ops. */
@@ -158,15 +166,45 @@ export interface PiSynaraMcpDeactivationHandoff {
   /** Bound cleanup entry point for impl-07 to order around cancel/drain/revoke. */
   readonly cleanup: () => Promise<void>;
   /**
-   * Runs the bound cleanup and finalizes the state: `dormant` when cleanup is
-   * proven, `unavailable` when it cannot be proven. Idempotent.
+   * Runs the ordered disable sequence (settle -> gateway drain -> cleanup ->
+   * boundary reload) and finalizes the state: `dormant` when every step is
+   * proven, `unavailable` when any step cannot be proven. Idempotent.
+   * `awaitSafeBoundary` (default true) parks the runtime reload on the next
+   * safe boundary instead of reloading immediately.
    */
-  readonly complete: () => Promise<{ readonly state: "dormant" | "unavailable" }>;
+  readonly complete: (options?: {
+    readonly awaitSafeBoundary?: boolean;
+  }) => Promise<{ readonly state: "dormant" | "unavailable" }>;
+}
+
+/**
+ * impl-07 deactivation seams. All seams are owned by the coordinator's caller
+ * and are optional so dormant/plain coordinators behave unchanged. The
+ * coordinator guarantees the Decision 14 ordering: settle in-flight
+ * Pi-facing executions exactly once, cancel and drain the gateway with the
+ * bounded timeout, revoke/clear through the activation cleanup seam, then
+ * reload the runtime only at the safe boundary. Any unproven step leaves the
+ * session unavailable.
+ */
+export interface PiSynaraMcpDeactivationSeams {
+  /** Settle every in-flight Pi-facing execution exactly once (structured disabled error). */
+  readonly settleExecutions?: () => Promise<void>;
+  /**
+   * Cancel matching gateway-side in-flight requests and resolve when the
+   * registry drain barrier settles (e.g. session-scoped registry cancel).
+   */
+  readonly cancelGatewayRequests?: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
+  /** Drain bound for {@link PiSynaraMcpDeactivationSeams.cancelGatewayRequests}. */
+  readonly drainTimeoutMs?: number;
+  /** Reload the runtime so the cleared surface applies; deferred to the safe boundary when awaited. */
+  readonly reloadAtSafeBoundary?: () => Promise<void>;
 }
 
 export interface PiSynaraMcpLifecycleOptions {
   readonly adapter: PiSynaraMcpLifecycleAdapter;
   readonly seams: PiSynaraMcpActivationSeams;
+  /** impl-07 ordered disable seams; optional so dormant/plain coordinators stay unchanged. */
+  readonly deactivation?: PiSynaraMcpDeactivationSeams;
   /** Optional bounded diagnostics; a bounded default is created when omitted. */
   readonly diagnostics?: PiSynaraMcpDiagnostics;
 }
@@ -219,6 +257,8 @@ function truncateDiagnosticMessage(message: string): string {
 interface PendingAttempt {
   readonly generation: string;
   readonly staged: PiSynaraMcpStagedActivation;
+  /** True once the apply seam started, so a rollback knows the runtime may carry the catalog. */
+  exposed?: boolean;
 }
 
 /** Mutable internal view of the staged record; the coordinator fills candidates in place. */
@@ -233,7 +273,10 @@ interface MutableStagedActivation {
 interface PendingHandoff {
   readonly generation: string;
   readonly staged: PiSynaraMcpStagedActivation;
+  /** True when the committed activation exposed the catalog to the runtime. */
+  readonly exposed: boolean;
   final?: "dormant" | "unavailable";
+  public?: PiSynaraMcpDeactivationHandoff;
 }
 
 /**
@@ -246,6 +289,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
   options: PiSynaraMcpLifecycleOptions,
 ): PiSynaraMcpLifecycleCoordinator {
   const { adapter, seams } = options;
+  const deactivationSeams = options.deactivation ?? {};
   const diagnostics = options.diagnostics ?? makePiSynaraMcpDiagnostics();
 
   let disposed = false;
@@ -302,11 +346,101 @@ export function makePiSynaraMcpLifecycleCoordinator(
     }
   };
 
-  const finalizeDeactivation = async (handoff: PendingHandoff): Promise<"dormant" | "unavailable"> => {
+  /**
+   * Cancel and drain gateway-side in-flight requests within the bounded
+   * window. A drain timeout or failure is not clean success (Decision 14):
+   * cleanup still proceeds best-effort, but the final state is unavailable.
+   */
+  const drainGatewayRequests = async (
+    staged: PiSynaraMcpStagedActivation,
+    generation: string,
+  ): Promise<boolean> => {
+    const cancel = deactivationSeams.cancelGatewayRequests;
+    if (cancel === undefined) return true;
+    const timeoutMs = Math.max(
+      1,
+      deactivationSeams.drainTimeoutMs ?? PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS,
+    );
+    const outcome = await Promise.race([
+      cancel(staged).then(
+        () => "drained" as const,
+        (cause) => ({ kind: "failed" as const, cause }),
+      ),
+      new Promise<{ readonly kind: "timeout" }>((resolve) =>
+        setTimeout(() => resolve({ kind: "timeout" }), timeoutMs),
+      ),
+    ]);
+    if (outcome === "drained") return true;
+    diagnostics.record({
+      kind: outcome.kind === "timeout" ? "disable.drain.timeout" : "disable.drain.failed",
+      message:
+        outcome.kind === "timeout"
+          ? `gateway drain exceeded the ${timeoutMs}ms bound`
+          : `gateway drain failed: ${toErrorMessage(outcome.cause)}`,
+      state: "deactivating",
+      generation,
+    });
+    return false;
+  };
+
+  /**
+   * Decision 14 disable sequence: settle Pi-facing executions exactly once,
+   * drain the gateway with the bounded timeout, revoke/clear, then reload at
+   * the safe boundary. Only a fully proven sequence finalizes dormant; every
+   * uncertainty leaves the session unavailable.
+   */
+  const finalizeDeactivation = async (
+    handoff: PendingHandoff,
+    options: { readonly awaitSafeBoundary: boolean; readonly reload: boolean },
+  ): Promise<"dormant" | "unavailable"> => {
     if (handoff.final !== undefined) {
       return handoff.final;
     }
-    const outcome = await runCleanup(handoff.staged, handoff.generation);
+
+    let settlementProven = true;
+    if (deactivationSeams.settleExecutions !== undefined) {
+      try {
+        await deactivationSeams.settleExecutions();
+      } catch (cause) {
+        settlementProven = false;
+        diagnostics.record({
+          kind: "disable.settle.uncertain",
+          message: `in-flight MCP settlement could not be proven: ${toErrorMessage(cause)}`,
+          state: "deactivating",
+          generation: handoff.generation,
+        });
+      }
+    }
+
+    const drained = await drainGatewayRequests(handoff.staged, handoff.generation);
+    const cleanupProven = (await runCleanup(handoff.staged, handoff.generation)) === "dormant";
+
+    let reloadProven = true;
+    if (
+      options.reload &&
+      handoff.exposed &&
+      deactivationSeams.reloadAtSafeBoundary !== undefined
+    ) {
+      if (options.awaitSafeBoundary) {
+        await waitForSafeBoundary();
+      }
+      try {
+        await deactivationSeams.reloadAtSafeBoundary();
+      } catch (cause) {
+        reloadProven = false;
+        diagnostics.record({
+          kind: "disable.reload.uncertain",
+          message: `runtime reload at the safe boundary could not be proven: ${toErrorMessage(cause)}`,
+          state: "deactivating",
+          generation: handoff.generation,
+        });
+      } finally {
+        clearBoundaryWait();
+      }
+    }
+
+    const outcome =
+      settlementProven && drained && cleanupProven && reloadProven ? "dormant" : "unavailable";
     handoff.final = outcome;
     pendingHandoff = undefined;
     adapter.transition(outcome);
@@ -354,7 +488,23 @@ export function makePiSynaraMcpLifecycleCoordinator(
         reason: string,
       ): Promise<PiSynaraMcpActivationResult> => {
         clearBoundaryWait();
-        const outcome = await runCleanup(staged, generation);
+        let outcome = await runCleanup(staged, generation);
+        // When the apply seam already ran, the runtime may carry the staged
+        // catalog: reload immediately (the rollback context is the same safe
+        // boundary where apply ran) so no partial tool surface survives.
+        if (attempt.exposed === true && deactivationSeams.reloadAtSafeBoundary !== undefined) {
+          try {
+            await deactivationSeams.reloadAtSafeBoundary();
+          } catch (cause) {
+            outcome = "unavailable";
+            diagnostics.record({
+              kind: "activation.reload.uncertain",
+              message: `reload after rollback could not be proven: ${toErrorMessage(cause)}`,
+              state: "unavailable",
+              generation,
+            });
+          }
+        }
         pendingAttempt = undefined;
         adapter.transition(outcome);
         diagnostics.record({
@@ -409,6 +559,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
           return await rollback("superseded", SUPERSEDED_MESSAGE);
         }
 
+        attempt.exposed = true;
         await step("apply", () => seams.applyAtSafeBoundary(staged));
         if (!fenced()) {
           return await rollback("superseded", SUPERSEDED_MESSAGE);
@@ -425,7 +576,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
         throw cause;
       }
 
-      committed = { generation, staged };
+      committed = { generation, staged, exposed: attempt.exposed ?? false };
       pendingAttempt = undefined;
       adapter.transition("active");
       diagnostics.record({
@@ -442,12 +593,22 @@ export function makePiSynaraMcpLifecycleCoordinator(
       if (disposed || disposeRequested) {
         throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
       }
+      // Duplicate disable while deactivating is idempotent: return the same
+      // handoff so both callers observe the same terminal state.
+      if (
+        pendingHandoff !== undefined &&
+        pendingHandoff.public !== undefined &&
+        adapter.state === "deactivating"
+      ) {
+        return pendingHandoff.public;
+      }
       if (committed === undefined || adapter.state !== "active") {
         throw new Error(PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE);
       }
       const { generation, staged } = committed;
+      const exposed = committed.exposed === true;
       committed = undefined;
-      const handoff: PendingHandoff = { generation, staged };
+      const handoff: PendingHandoff = { generation, staged, exposed };
       pendingHandoff = handoff;
       adapter.transition("deactivating");
       diagnostics.record({
@@ -457,7 +618,9 @@ export function makePiSynaraMcpLifecycleCoordinator(
         generation,
       });
 
-      const complete = (): Promise<{ readonly state: "dormant" | "unavailable" }> =>
+      const complete = (options?: {
+        readonly awaitSafeBoundary?: boolean;
+      }): Promise<{ readonly state: "dormant" | "unavailable" }> =>
         enqueue(async () => {
           if (handoff.final !== undefined) {
             return { state: handoff.final };
@@ -465,19 +628,26 @@ export function makePiSynaraMcpLifecycleCoordinator(
           if (pendingHandoff !== handoff) {
             // Another path (dispose) already finalized this handoff; its
             // outcome is recorded on the handoff itself.
-            return { state: handoff.final ?? (adapter.state === "unavailable" ? "unavailable" : "dormant") };
+            return {
+              state: handoff.final ?? (adapter.state === "unavailable" ? "unavailable" : "dormant"),
+            };
           }
-          const outcome = await finalizeDeactivation(handoff);
+          const outcome = await finalizeDeactivation(handoff, {
+            awaitSafeBoundary: options?.awaitSafeBoundary ?? true,
+            reload: true,
+          });
           return { state: outcome };
         });
 
-      return {
+      const publicHandoff: PiSynaraMcpDeactivationHandoff = {
         generation,
         authority: staged.authority,
         staged,
         cleanup: () => seams.cleanup(staged),
         complete,
       };
+      handoff.public = publicHandoff;
+      return publicHandoff;
     });
 
   const dispose = (): Promise<void> => {
@@ -493,8 +663,9 @@ export function makePiSynaraMcpLifecycleCoordinator(
     return enqueue(async () => {
       if (adapter.state === "active" && committed !== undefined) {
         const { generation, staged } = committed;
+        const exposed = committed.exposed === true;
         committed = undefined;
-        const handoff: PendingHandoff = { generation, staged };
+        const handoff: PendingHandoff = { generation, staged, exposed };
         pendingHandoff = handoff;
         adapter.transition("deactivating");
         diagnostics.record({
@@ -503,9 +674,11 @@ export function makePiSynaraMcpLifecycleCoordinator(
           state: "deactivating",
           generation,
         });
-        await finalizeDeactivation(handoff);
+        // Teardown finalizes immediately: the runtime is being disposed, so
+        // no boundary reload is needed or safe.
+        await finalizeDeactivation(handoff, { awaitSafeBoundary: false, reload: false });
       } else if (adapter.state === "deactivating" && pendingHandoff !== undefined) {
-        await finalizeDeactivation(pendingHandoff);
+        await finalizeDeactivation(pendingHandoff, { awaitSafeBoundary: false, reload: false });
       }
       disposed = true;
       diagnostics.record({

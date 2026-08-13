@@ -36,7 +36,8 @@ import type { Effect, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
 import type { PersistedProviderRuntimeEvent } from "../../persistence/Services/ProviderRuntimeEvents.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { ProviderAdapterCapabilities, ProviderDisableSynaraMcpResult } from "./ProviderAdapter.ts";
+export type { ProviderDisableSynaraMcpResult };
 
 export type ProviderRuntimeEventPumpStatus = "starting" | "healthy" | "recovering" | "degraded";
 
@@ -136,6 +137,16 @@ export interface ProviderServiceShape {
   readonly respondToUserInput: (
     input: ProviderRespondToUserInputInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Disable the per-session Synara MCP integration (impl-07). The command
+   * boundary journals the durable desired-disabled acceptance before invoking
+   * this operation; the routed adapter fences, cancels/drains, revokes,
+   * clears, and reloads at the safe boundary. Idempotent.
+   */
+  readonly disableSynaraMcp: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ProviderDisableSynaraMcpResult, ProviderServiceError>;
 
   /**
    * Stop a provider session.
