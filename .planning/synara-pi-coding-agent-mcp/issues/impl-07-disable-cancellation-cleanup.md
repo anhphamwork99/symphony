@@ -6,8 +6,9 @@
 
 **Status:** done
 
-**Final acceptance:** Accepted at `fe0c6ba7` by
-[Decision 24](../decisions/24-impl-07-final-acceptance.md).
+**Final acceptance:** Accepted at corrected HEAD `531b719a` by
+[Decision 24](../decisions/24-impl-07-final-acceptance.md), as amended by
+[Decision 25](../decisions/25-impl-07-corrective-reassessment.md).
 
 - [x] Fence new calls before asynchronous cleanup starts.
 - [x] Cancel and drain active Synara MCP calls, then revoke credentials before reload/clear.
