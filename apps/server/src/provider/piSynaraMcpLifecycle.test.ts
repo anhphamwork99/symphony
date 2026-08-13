@@ -458,6 +458,70 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     await expect(harness.coordinator.dispose()).resolves.toBeUndefined();
   });
 
+  it("fences an activation already queued before dispose is requested", async () => {
+    const harness = makeHarness();
+    await activateAndCommit(harness);
+
+    const queuedActivation = harness.coordinator.activate(ACTIVATION_INPUT);
+    const disposePromise = harness.coordinator.dispose();
+
+    await expect(queuedActivation).rejects.toThrow(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
+    await disposePromise;
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.received.applied).toHaveLength(1);
+    await harness.adapter.notifySafeBoundary();
+    expect(harness.calls.filter((call) => call === "apply")).toHaveLength(1);
+  });
+
+  it("fences a queued activation behind an in-flight one so dispose never stalls", async () => {
+    let releaseDiscover!: () => void;
+    const discoverGate = new Promise<void>((resolve) => {
+      releaseDiscover = resolve;
+    });
+    const harness = makeHarness({
+      discover: async () => {
+        await discoverGate;
+        return CATALOG;
+      },
+    });
+
+    const inFlight = harness.coordinator.activate(ACTIVATION_INPUT);
+    await flush();
+    expect(harness.calls).toContain("discover");
+
+    const queued = harness.coordinator.activate(ACTIVATION_INPUT);
+    const disposePromise = harness.coordinator.dispose();
+
+    releaseDiscover();
+    const inFlightResult = await inFlight;
+    expect(inFlightResult).toMatchObject({ ok: false, state: "dormant", stage: "superseded" });
+
+    // Without the dispose fence the queued activation would re-arm itself,
+    // wait forever on the safe boundary, and block dispose behind it.
+    const queuedOutcome = await Promise.race([
+      queued.then(
+        (result) => ({ kind: "resolved" as const, result }),
+        (error) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ readonly kind: "pending" }>((resolve) =>
+        setTimeout(() => resolve({ kind: "pending" }), 500),
+      ),
+    ]);
+    expect(queuedOutcome.kind).toBe("rejected");
+    if (queuedOutcome.kind === "rejected") {
+      expect((queuedOutcome.error as Error).message).toBe(
+        PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
+      );
+    }
+    await disposePromise;
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.calls).not.toContain("apply");
+
+    // A boundary firing after dispose exposes nothing.
+    await harness.adapter.notifySafeBoundary();
+    expect(harness.calls).not.toContain("apply");
+  });
+
   it("serializes deactivation behind an in-flight activation", async () => {
     const harness = makeHarness();
     let releaseApply!: () => void;

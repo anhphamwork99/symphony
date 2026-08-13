@@ -3,6 +3,7 @@ import {
   SessionManager,
   createAgentSessionFromServices,
   createAgentSessionServices,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
@@ -128,6 +129,98 @@ describe("Pi Synara MCP dormant extension", () => {
     expect(notifications).toBe(1);
     expect(adapter.state).toBe("dormant");
     removeListener();
+  });
+});
+
+describe("Pi Synara MCP staged-tool reload seam", () => {
+  const makeSynaraTool = (name: string): ToolDefinition => ({
+    name,
+    label: name,
+    description: `Synara tool ${name}.`,
+    parameters: { type: "object", properties: {} } as ToolDefinition["parameters"],
+    execute: async () => ({
+      content: [{ type: "text", text: "ok" }],
+      details: {},
+    }),
+  });
+
+  async function makeSessionWithSynaraExtension(stagedTools: ToolDefinition[]) {
+    const { adapter, extension, stagedTools: registry } = makePiSynaraMcpDormantExtension(
+      undefined,
+      { stagedTools },
+    );
+    const cwd = "/tmp";
+    const agentDir = "/tmp/synara-pi-staged-tools-test";
+    const modelRuntime = await ModelRuntime.create({
+      authPath: `${agentDir}/auth.json`,
+      modelsPath: null,
+    });
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      modelRuntime,
+      resourceLoaderOptions: { extensionFactories: [extension] },
+    });
+    const { session } = await createAgentSessionFromServices({
+      services,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    await session.bindExtensions({});
+    return { adapter, session, registry };
+  }
+
+  it("registers the complete staged catalog only after a reload", async () => {
+    const stagedTools: ToolDefinition[] = [];
+    const { session, registry } = await makeSessionWithSynaraExtension(stagedTools);
+
+    const before = session.getAllTools().map((tool) => tool.name);
+    expect(before.some((name) => name.startsWith("synara_"))).toBe(false);
+    expect(before).toEqual(
+      expect.arrayContaining(["read", "bash", "edit", "write"]),
+    );
+
+    // Stage the complete catalog and reload: the factory re-runs and
+    // registers exactly the staged set atomically.
+    stagedTools.push(makeSynaraTool("synara_list_threads"), makeSynaraTool("synara_invoke"));
+    await session.reload();
+
+    const after = session.getAllTools().map((tool) => tool.name);
+    expect(after).toEqual(
+      expect.arrayContaining([
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "synara_list_threads",
+        "synara_invoke",
+      ]),
+    );
+    // No partial or duplicate registration from the reload.
+    expect(after.filter((name) => name === "synara_list_threads")).toHaveLength(1);
+    expect(after.filter((name) => name === "synara_invoke")).toHaveLength(1);
+
+    // Clearing the staged registry and reloading removes the catalog and
+    // leaves the normal coding-agent tools intact.
+    registry.length = 0;
+    await session.reload();
+    const cleared = session.getAllTools().map((tool) => tool.name);
+    expect(cleared.some((name) => name.startsWith("synara_"))).toBe(false);
+    expect(cleared).toEqual(expect.arrayContaining(["read", "bash", "edit", "write"]));
+
+    session.dispose();
+  });
+
+  it("keeps the dormant default when the registry is empty across reloads", async () => {
+    const { session } = await makeSessionWithSynaraExtension([]);
+
+    await session.reload();
+    await session.reload();
+
+    const names = session.getAllTools().map((tool) => tool.name);
+    expect(names.some((name) => name.startsWith("synara_"))).toBe(false);
+    expect(names).toEqual(expect.arrayContaining(["read", "bash", "edit", "write"]));
+
+    session.dispose();
   });
 });
 

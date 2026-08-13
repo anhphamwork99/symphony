@@ -1,4 +1,4 @@
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { InlineExtension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 /** Stable refusal for an adapter call that arrives before explicit activation. */
 export const PI_SYNARA_MCP_DISABLED_REFUSAL =
@@ -76,9 +76,22 @@ export interface PiSynaraMcpLifecycleAdapter {
  */
 export type PiSynaraMcpDormantAdapter = PiSynaraMcpLifecycleAdapter;
 
+export interface PiSynaraMcpDormantExtensionOptions {
+  /**
+   * Mutable staged-tool registry consulted by the extension factory on every
+   * load/reload. The lifecycle apply seam installs the complete validated
+   * catalog here and then reloads the Pi runtime so the factory re-runs and
+   * registers the tools atomically; cleanup clears the registry so later
+   * loads register nothing. Defaults to a fresh internal array.
+   */
+  readonly stagedTools?: ToolDefinition[];
+}
+
 export interface PiSynaraMcpDormantExtension {
   readonly adapter: PiSynaraMcpDormantAdapter;
   readonly extension: InlineExtension;
+  /** The staged-tool registry bound to the extension factory. */
+  readonly stagedTools: ToolDefinition[];
 }
 
 /**
@@ -86,13 +99,18 @@ export interface PiSynaraMcpDormantExtension {
  * Loading and binding only installs the safe-boundary notification handler;
  * it does not connect, discover, mint credentials, register tools, retry, or
  * schedule delayed work. The adapter starts dormant and exposes the
- * coordinator-owned lifecycle state boundary.
+ * coordinator-owned lifecycle state boundary. When a catalog is staged in
+ * {@link PiSynaraMcpDormantExtension.stagedTools}, every load/reload of the
+ * factory registers exactly that complete set; with no staged catalog the
+ * factory registers nothing.
  */
 export function makePiSynaraMcpDormantExtension(
   _boundaries?: PiSynaraMcpDormantBoundaries,
+  options?: PiSynaraMcpDormantExtensionOptions,
 ): PiSynaraMcpDormantExtension {
   let state: PiSynaraMcpLifecycleState = "dormant";
   const safeBoundaryListeners = new Set<PiSynaraMcpSafeBoundaryListener>();
+  const stagedTools = options?.stagedTools ?? [];
 
   const adapter: PiSynaraMcpDormantAdapter = {
     get state() {
@@ -129,11 +147,18 @@ export function makePiSynaraMcpDormantExtension(
 
   return {
     adapter,
+    stagedTools,
     extension: {
       name: "synara-mcp-dormant",
       hidden: true,
       factory: (pi) => {
         pi.on("agent_end", async () => adapter.notifySafeBoundary());
+        // Register exactly the staged catalog (empty while dormant). The
+        // factory re-runs on every resource reload, which is the atomic
+        // tool-surface apply boundary for the lifecycle coordinator.
+        for (const tool of stagedTools) {
+          pi.registerTool(tool);
+        }
       },
     },
   };

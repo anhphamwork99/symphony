@@ -12,7 +12,8 @@ import path from "node:path";
 
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import type { McpAuthorityBinding, ThreadId } from "@synara/contracts";
+import { describe, expect, it, vi } from "vitest";
 import {
   createPiModelRuntime,
   ensurePiAnthropicCatalogModels,
@@ -21,13 +22,22 @@ import {
   buildPiAgentGatewayCustomTools,
   makePiBashProcessSupervisor,
   makePiRuntimeEventBase,
+  makePiSessionSynaraMcpCoordinator,
   makePiUserInputOptions,
   PLAIN_PI_EXTENSION_THEME,
   toPiProviderModelDescriptor,
 } from "./PiAdapter";
+import {
+  makePiSynaraMcpDormantExtension,
+  PI_SYNARA_MCP_DISABLED_REFUSAL,
+  type PiSynaraMcpDormantAdapter,
+} from "../piSynaraMcpExtension";
+import {
+  PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
+  type PiSynaraMcpLifecycleCoordinator,
+} from "../piSynaraMcpLifecycle";
 
-describe("Pi native Synara gateway tools", () => {
-  it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {
+describe("Pi native Synara gateway tools", () => {  it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {
     const requests: Array<{ readonly token: string | null; readonly body: any }> = [];
     const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
@@ -142,6 +152,313 @@ describe("Pi native Synara gateway tools", () => {
     await expect(execution).rejects.toMatchObject({ name: "AbortError" });
     expect(callSignal).toBe(controller.signal);
     expect(controller.signal.aborted).toBe(true);
+  });
+});
+
+describe("makePiSessionSynaraMcpCoordinator", () => {
+  const AUTHORITY_BINDING: McpAuthorityBinding = {
+    authorityId: "mcp-authority-test-1",
+    subject: "subject-1",
+    kind: "authenticated",
+    authSessionId: "auth-session-1",
+    authExpiresAt: Date.now() + 60_000,
+    issuedAt: Date.now(),
+    credentialExpiresAt: Date.now() + 60_000,
+    sessionGeneration: "gen-1",
+    lifecycleGeneration: null,
+    projectId: null,
+  };
+  const CATALOG_TOOLS = [
+    {
+      name: "synara_list_threads",
+      description: "List Synara threads.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "synara_invoke",
+      description: "Invoke a Synara operation.",
+      inputSchema: { type: "object", properties: {} },
+    },
+  ];
+
+  interface CoordinatorHarness {
+    readonly adapter: PiSynaraMcpDormantAdapter;
+    readonly coordinator: PiSynaraMcpLifecycleCoordinator;
+    readonly stagedTools: any[];
+    readonly minted: Array<{ readonly url: string; readonly bearerToken: string }>;
+    readonly revoked: string[];
+    readonly requests: Array<{ readonly token: string | null; readonly method: string }>;
+    readonly reload: ReturnType<typeof vi.fn>;
+  }
+
+  function makeCoordinatorHarness(options: {
+    readonly mcpAuthority?: McpAuthorityBinding | null;
+    readonly withCredentials?: boolean;
+    readonly catalogTools?: unknown[];
+    readonly failDiscovery?: Error;
+    readonly failReload?: Error;
+    readonly failRevoke?: Error;
+    readonly discoveryGate?: Promise<void>;
+  } = {}): CoordinatorHarness {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+    const stagedTools: any[] = [];
+    const minted: Array<{ url: string; bearerToken: string }> = [];
+    const revoked: string[] = [];
+    const requests: Array<{ token: string | null; method: string }> = [];
+    const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      if (options.discoveryGate !== undefined) {
+        await options.discoveryGate;
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push({
+        token: new Headers(init?.headers).get("Authorization"),
+        method: body.method,
+      });
+      if (options.failDiscovery !== undefined) {
+        throw options.failDiscovery;
+      }
+      return Response.json({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools: options.catalogTools ?? CATALOG_TOOLS },
+      });
+    };
+    const credentials = {
+      connectionForThread: () => {
+        const connection = {
+          url: "http://127.0.0.1:3773/mcp",
+          bearerToken: `token-${minted.length + 1}`,
+        };
+        minted.push(connection);
+        return connection;
+      },
+      revokeSessionToken: (token: string) => {
+        if (options.failRevoke !== undefined) {
+          throw options.failRevoke;
+        }
+        revoked.push(token);
+      },
+    };
+    const reload = vi.fn(async () => {
+      if (options.failReload !== undefined) {
+        throw options.failReload;
+      }
+    });
+    const coordinator = makePiSessionSynaraMcpCoordinator({
+      threadId: "thread-pi-1" as ThreadId,
+      adapter,
+      stagedTools,
+      runtime: { session: { reload } },
+      mcpAuthority: options.mcpAuthority,
+      ...(options.withCredentials === false ? {} : { credentials }),
+      fetch,
+    });
+    return { adapter, coordinator, stagedTools, minted, revoked, requests, reload };
+  }
+
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  async function activateAndCommit(harness: CoordinatorHarness): Promise<void> {
+    const activation = harness.coordinator.activate({});
+    await flush();
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+    expect(result).toMatchObject({ ok: true, state: "active" });
+  }
+
+  it("creates one dormant coordinator with zero MCP activity and no staged tools", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.adapter.state).toBe("dormant");
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.minted).toEqual([]);
+    expect(harness.requests).toEqual([]);
+    await expect(harness.adapter.invoke({ method: "tools/list" })).rejects.toThrow(
+      PI_SYNARA_MCP_DISABLED_REFUSAL,
+    );
+  });
+
+  it("stages identity, credentials, connection, and discovery before applying the complete catalog at the safe boundary", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+
+    const activation = harness.coordinator.activate({});
+    await flush();
+
+    // Staging: one fresh credential minted, one canonical discovery call.
+    expect(harness.minted).toHaveLength(1);
+    expect(harness.requests.map((request) => request.method)).toEqual(["tools/list"]);
+    expect(harness.requests[0]?.token).toBe("Bearer token-1");
+    // Nothing is exposed before the safe boundary.
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.reload).not.toHaveBeenCalled();
+    expect(harness.coordinator.state).toBe("activating");
+
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+
+    expect(result).toMatchObject({ ok: true, state: "active", alreadyActive: false });
+    expect(harness.coordinator.state).toBe("active");
+    expect(harness.stagedTools.map((tool) => tool.name)).toEqual([
+      "synara_list_threads",
+      "synara_invoke",
+    ]);
+    expect(harness.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed at the authority stage when no server-minted binding exists", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: undefined });
+
+    const result = await harness.coordinator.activate({});
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "authority" });
+    expect(harness.minted).toEqual([]);
+    expect(harness.requests).toEqual([]);
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "activation.failed"),
+    ).toBe(true);
+  });
+
+  it("fails closed at the credential stage when the gateway layer is absent", async () => {
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      withCredentials: false,
+    });
+
+    const result = await harness.coordinator.activate({});
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "credential" });
+    expect(harness.requests).toEqual([]);
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("rolls back discovery failure to dormant without partial tools and revokes the candidate credential", async () => {
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      failDiscovery: new Error("gateway unavailable"),
+    });
+
+    const result = await harness.coordinator.activate({});
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "discovery" });
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.reload).not.toHaveBeenCalled();
+    expect(harness.revoked).toEqual(["token-1"]);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("rejects an empty catalog without exposure", async () => {
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      catalogTools: [],
+    });
+
+    const result = await harness.coordinator.activate({});
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "catalog" });
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.reload).not.toHaveBeenCalled();
+    expect(harness.revoked).toEqual(["token-1"]);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("rolls back apply failure without partial tools and revokes the candidate credential", async () => {
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      failReload: new Error("reload failed"),
+    });
+
+    const activation = harness.coordinator.activate({});
+    await flush();
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "apply" });
+    // The staged registry is cleared by rollback cleanup, so no later load
+    // can expose a partial catalog.
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.revoked).toEqual(["token-1"]);
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "activation.failed"),
+    ).toBe(true);
+  });
+
+  it("leaves the session unavailable with diagnostics when cleanup cannot be proven", async () => {
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      failDiscovery: new Error("gateway unavailable"),
+      failRevoke: new Error("cannot prove cleanup"),
+    });
+
+    const result = await harness.coordinator.activate({});
+
+    expect(result).toMatchObject({ ok: false, state: "unavailable", stage: "discovery" });
+    expect(harness.coordinator.state).toBe("unavailable");
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "cleanup.uncertain"),
+    ).toBe(true);
+  });
+
+  it("dispose deactivates an active session, revokes the credential, and clears the registry", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+    await activateAndCommit(harness);
+
+    await harness.coordinator.dispose();
+
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.revoked).toEqual(["token-1"]);
+    expect(harness.stagedTools).toEqual([]);
+  });
+
+  it("supersedes an in-flight activation on dispose so stale completion exposes nothing", async () => {
+    let releaseDiscovery!: () => void;
+    const discoveryGate = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+    const harness = makeCoordinatorHarness({
+      mcpAuthority: AUTHORITY_BINDING,
+      discoveryGate,
+    });
+
+    const activation = harness.coordinator.activate({});
+    await flush();
+    // Staging reached the gated discovery: one credential was minted and the
+    // discovery request is still in flight.
+    expect(harness.minted).toHaveLength(1);
+
+    const disposePromise = harness.coordinator.dispose();
+    releaseDiscovery();
+    const result = await activation;
+
+    expect(result).toMatchObject({ ok: false, state: "dormant", stage: "superseded" });
+    await disposePromise;
+    expect(harness.requests.map((request) => request.method)).toEqual(["tools/list"]);
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.revoked).toEqual(["token-1"]);
+    expect(harness.reload).not.toHaveBeenCalled();
+
+    // A boundary firing after dispose exposes nothing.
+    await harness.adapter.notifySafeBoundary();
+    expect(harness.reload).not.toHaveBeenCalled();
+    expect(harness.stagedTools).toEqual([]);
+  });
+
+  it("refuses an activation queued behind dispose without exposure", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+    await activateAndCommit(harness);
+
+    const queued = harness.coordinator.activate({});
+    const disposePromise = harness.coordinator.dispose();
+
+    await expect(queued).rejects.toThrow(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
+    await disposePromise;
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.revoked).toEqual(["token-1"]);
   });
 });
 

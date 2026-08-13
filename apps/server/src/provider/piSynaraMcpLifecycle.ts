@@ -249,6 +249,12 @@ export function makePiSynaraMcpLifecycleCoordinator(
   const diagnostics = options.diagnostics ?? makePiSynaraMcpDiagnostics();
 
   let disposed = false;
+  // Set synchronously when disposal is requested, before the serialized
+  // dispose operation reaches the queue. This fences lifecycle operations
+  // that were queued earlier but have not started yet, so a pending
+  // activation can never re-arm itself after dispose and stall the queue
+  // (e.g. waiting on a safe boundary that dispose would otherwise supersede).
+  let disposeRequested = false;
   let pendingAttempt: PendingAttempt | undefined;
   let committed: PendingAttempt | undefined;
   let pendingHandoff: PendingHandoff | undefined;
@@ -315,7 +321,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
 
   const activate = (input: unknown): Promise<PiSynaraMcpActivationResult> =>
     enqueue(async () => {
-      if (disposed) {
+      if (disposed || disposeRequested) {
         throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
       }
       if (adapter.state === "deactivating") {
@@ -433,7 +439,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
 
   const beginDeactivation = (): Promise<PiSynaraMcpDeactivationHandoff> =>
     enqueue(async () => {
-      if (disposed) {
+      if (disposed || disposeRequested) {
         throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
       }
       if (committed === undefined || adapter.state !== "active") {
@@ -478,7 +484,10 @@ export function makePiSynaraMcpLifecycleCoordinator(
     // Non-serialized abort: fence any in-flight activation so a stale
     // completion can never commit after dispose. The fenced attempt performs
     // its own rollback inside the queue; this body then finalizes whatever
-    // state remains.
+    // state remains. Operations still queued behind the fence observe
+    // disposeRequested and refuse to start, so dispose never waits on an
+    // activation that is waiting for a safe boundary.
+    disposeRequested = true;
     pendingAttempt = undefined;
     boundaryResolve?.();
     return enqueue(async () => {

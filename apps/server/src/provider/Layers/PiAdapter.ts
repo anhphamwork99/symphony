@@ -23,6 +23,7 @@ import {
   ApprovalRequestId,
   type ChatAttachment,
   EventId,
+  type McpAuthorityBinding,
   type ProviderComposerCapabilities,
   type ProviderListCommandsResult,
   type ProviderListModelsResult,
@@ -38,15 +39,20 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@synara/contracts";
-import { Effect, FileSystem, Layer, Queue, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
 
 import { takeSynaraHarnessPolicyForProviderSession } from "../../agentGateway/harnessPolicy.ts";
 import {
   callAgentGatewayMcpTool,
   listAgentGatewayMcpTools,
   type AgentGatewayMcpFetch,
+  type AgentGatewayMcpToolDescriptor,
 } from "../../agentGateway/mcpInjection.ts";
-import type { AgentGatewayMcpConnection } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
+import {
+  AgentGatewayCredentials,
+  type AgentGatewayCredentialsShape,
+  type AgentGatewayMcpConnection,
+} from "../../agentGateway/Services/AgentGatewayCredentials.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import { ServerConfig } from "../../config.ts";
 import { lazyModule } from "../../lazyModule.ts";
@@ -78,6 +84,16 @@ import {
   makePiSynaraMcpDormantExtension,
   type PiSynaraMcpDormantAdapter,
 } from "../piSynaraMcpExtension.ts";
+import {
+  makePiSynaraMcpDiagnostics,
+  makePiSynaraMcpLifecycleCoordinator,
+  type PiSynaraMcpActivationSeams,
+  type PiSynaraMcpAuthorityValidation,
+  type PiSynaraMcpCatalogValidation,
+  type PiSynaraMcpDiagnostics,
+  type PiSynaraMcpLifecycleCoordinator,
+  type PiSynaraMcpStagedActivation,
+} from "../piSynaraMcpLifecycle.ts";
 import {
   teardownChildProcessTree,
   teardownProviderProcessTree,
@@ -322,6 +338,7 @@ interface PiSessionContext {
   harnessPolicyDelivered?: boolean;
   readonly gatewayControlAvailable: boolean;
   readonly synaraMcp: PiSynaraMcpDormantAdapter;
+  readonly synaraMcpCoordinator: PiSynaraMcpLifecycleCoordinator;
   readonly lifecycleGeneration?: string;
   runtime: PiAgentRuntime;
   readonly processSupervisor: PiBashProcessSupervisor;
@@ -386,6 +403,8 @@ export interface PiUserInputOptionMapping {
 export interface PiSynaraMcpSessionLifecycle {
   readonly threadId: ThreadId;
   readonly adapter: PiSynaraMcpDormantAdapter;
+  /** The session's lifecycle coordinator; owns every Synara MCP transition. */
+  readonly coordinator: PiSynaraMcpLifecycleCoordinator;
 }
 
 export interface PiAdapterLiveOptions {
@@ -442,23 +461,19 @@ function piGatewayToolResult(result: unknown): AgentToolResult<unknown> {
 }
 
 /**
- * Project the canonical MCP catalog into Pi's native custom-tool API. Tool
- * schemas and execution both remain owned by the gateway; Pi only adapts the
- * provider boundary.
+ * Map an already-discovered canonical gateway catalog into Pi's native
+ * custom-tool API. Tool schemas and execution both remain owned by the
+ * gateway; Pi only adapts the provider boundary. Used by the activation
+ * apply seam so the staged catalog is exposed atomically through the
+ * extension reload boundary without a second discovery round-trip.
  */
-export async function buildPiAgentGatewayCustomTools(input: {
+export function mapAgentGatewayMcpToolsToPiCustomTools(input: {
+  readonly tools: ReadonlyArray<AgentGatewayMcpToolDescriptor>;
   readonly connection: AgentGatewayMcpConnection;
   readonly defineTool: (tool: ToolDefinition) => ToolDefinition;
   readonly fetch?: AgentGatewayMcpFetch;
-}): Promise<ReadonlyArray<ToolDefinition>> {
-  const tools = await listAgentGatewayMcpTools({
-    connection: input.connection,
-    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
-  });
-  if (tools.length === 0) {
-    throw new Error("Synara MCP returned an empty tool catalog.");
-  }
-  return tools.map((tool) =>
+}): ReadonlyArray<ToolDefinition> {
+  return input.tools.map((tool) =>
     input.defineTool({
       name: tool.name,
       label: tool.name,
@@ -476,6 +491,194 @@ export async function buildPiAgentGatewayCustomTools(input: {
         ),
     }),
   );
+}
+
+/**
+ * Project the canonical MCP catalog into Pi's native custom-tool API. Tool
+ * schemas and execution both remain owned by the gateway; Pi only adapts the
+ * provider boundary.
+ */
+export async function buildPiAgentGatewayCustomTools(input: {
+  readonly connection: AgentGatewayMcpConnection;
+  readonly defineTool: (tool: ToolDefinition) => ToolDefinition;
+  readonly fetch?: AgentGatewayMcpFetch;
+}): Promise<ReadonlyArray<ToolDefinition>> {
+  const tools = await listAgentGatewayMcpTools({
+    connection: input.connection,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+  });
+  if (tools.length === 0) {
+    throw new Error("Synara MCP returned an empty tool catalog.");
+  }
+  return mapAgentGatewayMcpToolsToPiCustomTools({
+    tools,
+    connection: input.connection,
+    defineTool: input.defineTool,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+  });
+}
+
+/**
+ * Session-scoped inputs for {@link makePiSessionSynaraMcpCoordinator}. The
+ * session's trusted authority is the server-minted subject-bound MCP binding
+ * captured at session start (Decision 21); identity is never taken from an
+ * activation request. Credentials are optional so activation fails closed at
+ * the credential stage when the shared gateway layer is absent.
+ */
+export interface PiSessionSynaraMcpCoordinatorInput {
+  readonly threadId: ThreadId;
+  /** The session's dormant adapter; the coordinator owns its transitions. */
+  readonly adapter: PiSynaraMcpDormantAdapter;
+  /** Staged-tool registry bound to the session's dormant extension factory. */
+  readonly stagedTools: ToolDefinition[];
+  /** Live Pi session runtime; the apply seam reloads it at the safe boundary. */
+  readonly runtime: { readonly session: { readonly reload: () => Promise<void> } };
+  /** Trusted server-minted subject-bound MCP authority (Decision 21); absent fails closed. */
+  readonly mcpAuthority: McpAuthorityBinding | null | undefined;
+  /** Shared gateway credentials; absent fails closed at the credential stage. */
+  readonly credentials?: Pick<
+    AgentGatewayCredentialsShape,
+    "connectionForThread" | "revokeSessionToken"
+  >;
+  readonly fetch?: AgentGatewayMcpFetch;
+  /** Optional bounded diagnostics; a per-session default is created when omitted. */
+  readonly diagnostics?: PiSynaraMcpDiagnostics;
+}
+
+/**
+ * Build the one lifecycle coordinator owned by a Pi session, wired to the
+ * dormant extension's adapter and staged-tool registry with production
+ * seams over the existing public authority/credential/catalog/reload
+ * boundaries:
+ *
+ * - authority: the server-minted {@link McpAuthorityBinding} captured at
+ *   session start, fail-closed when missing or expired (the live registry
+ *   re-validates the binding at every gateway admission).
+ * - credential: a fresh per-activation bearer minted through
+ *   {@link AgentGatewayCredentialsShape.connectionForThread}, revoked by
+ *   {@link AgentGatewayCredentialsShape.revokeSessionToken} on cleanup.
+ * - connection/discovery: the canonical gateway JSON-RPC seam
+ *   {@link listAgentGatewayMcpTools}.
+ * - catalog: complete, validated before any exposure; empty or malformed
+ *   catalogs are rejected.
+ * - apply: the complete staged catalog is installed into the extension's
+ *   staged-tool registry and the Pi runtime is reloaded at the safe
+ *   boundary, so the extension factory registers exactly that set
+ *   atomically; cleanup clears the registry so later loads register nothing.
+ */
+export function makePiSessionSynaraMcpCoordinator(
+  input: PiSessionSynaraMcpCoordinatorInput,
+): PiSynaraMcpLifecycleCoordinator {
+  const { adapter, stagedTools, runtime, threadId } = input;
+  const credentials = input.credentials;
+  const mcpAuthority = input.mcpAuthority;
+
+  const validateAuthority = async (): Promise<PiSynaraMcpAuthorityValidation> => {
+    // Fail closed: without a server-minted binding no activation may start.
+    // The snapshot was minted server-side at session establishment, so the
+    // activation request supplies no identity here.
+    if (mcpAuthority === undefined || mcpAuthority === null) {
+      return {
+        ok: false,
+        reason: "No subject-bound MCP authority is bound to this Pi session.",
+      };
+    }
+    const now = Date.now();
+    if (mcpAuthority.authExpiresAt !== null && mcpAuthority.authExpiresAt <= now) {
+      return { ok: false, reason: "The bound MCP authority authentication has expired." };
+    }
+    if (mcpAuthority.credentialExpiresAt <= now) {
+      return { ok: false, reason: "The bound MCP authority credential has expired." };
+    }
+    return { ok: true, authority: mcpAuthority };
+  };
+
+  const issueCredential = async (staged: PiSynaraMcpStagedActivation) => {
+    if (credentials === undefined) {
+      throw new Error("Agent gateway credentials are unavailable for this Pi session.");
+    }
+    // Fresh identity-bound bearer minted for this activation attempt only.
+    return credentials.connectionForThread(
+      threadId,
+      PROVIDER,
+      staged.authority as McpAuthorityBinding,
+    );
+  };
+
+  const connect = async (staged: PiSynaraMcpStagedActivation) => {
+    // The gateway connection is the stateless streamable-HTTP endpoint plus
+    // the per-thread bearer; the credential stage already mints it, so
+    // connecting stages and validates that minted connection.
+    const connection = staged.credential;
+    if (
+      !isRecord(connection) ||
+      typeof connection.url !== "string" ||
+      typeof connection.bearerToken !== "string"
+    ) {
+      throw new Error("The staged Synara MCP connection is invalid.");
+    }
+    return connection;
+  };
+
+  const discover = async (staged: PiSynaraMcpStagedActivation) =>
+    listAgentGatewayMcpTools({
+      connection: staged.connection as AgentGatewayMcpConnection,
+      ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    });
+
+  const validateCatalog = async (catalog: unknown): Promise<PiSynaraMcpCatalogValidation> => {
+    if (!Array.isArray(catalog) || catalog.length === 0) {
+      return { ok: false, reason: "Synara MCP returned an empty tool catalog." };
+    }
+    for (const tool of catalog) {
+      if (
+        !isRecord(tool) ||
+        typeof tool.name !== "string" ||
+        typeof tool.description !== "string" ||
+        !isRecord(tool.inputSchema)
+      ) {
+        return { ok: false, reason: "Synara MCP returned an invalid tool descriptor." };
+      }
+    }
+    return { ok: true };
+  };
+
+  const applyAtSafeBoundary = async (staged: PiSynaraMcpStagedActivation) => {
+    const tools = mapAgentGatewayMcpToolsToPiCustomTools({
+      tools: staged.catalog as ReadonlyArray<AgentGatewayMcpToolDescriptor>,
+      connection: staged.connection as AgentGatewayMcpConnection,
+      defineTool: (tool) => tool,
+      ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    });
+    // Install the complete catalog, then reload so the extension factory
+    // registers exactly this set atomically at the safe boundary.
+    stagedTools.splice(0, stagedTools.length, ...tools);
+    await runtime.session.reload();
+  };
+
+  const cleanup = async (staged: PiSynaraMcpStagedActivation) => {
+    // Discard the staged registration so no later load exposes the catalog.
+    stagedTools.splice(0, stagedTools.length);
+    const connection = staged.credential;
+    if (isRecord(connection) && typeof connection.bearerToken === "string") {
+      credentials?.revokeSessionToken(connection.bearerToken);
+    }
+  };
+
+  const seams: PiSynaraMcpActivationSeams = {
+    validateAuthority,
+    issueCredential,
+    connect,
+    discover,
+    validateCatalog,
+    applyAtSafeBoundary,
+    cleanup,
+  };
+  return makePiSynaraMcpLifecycleCoordinator({
+    adapter,
+    seams,
+    diagnostics: input.diagnostics ?? makePiSynaraMcpDiagnostics(),
+  });
 }
 
 function toMessage(cause: unknown, fallback: string): string {
@@ -1340,6 +1543,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
+    // Optional so adapter tests can run without the gateway layer; when
+    // present, activation mints per-attempt Synara MCP credentials through it.
+    const agentGatewayCredentials = Option.getOrUndefined(
+      yield* Effect.serviceOption(AgentGatewayCredentials),
+    );
     const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
@@ -1726,6 +1934,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const disposeSessionContext = async (context: PiSessionContext) => {
       context.unsubscribe?.();
       context.unsubscribe = undefined;
+      // Fence and finalize the Synara MCP lifecycle before the runtime dies:
+      // pending activations are superseded, candidate credentials revoked,
+      // and the staged-tool registry cleared.
+      await context.synaraMcpCoordinator.dispose();
       for (const pending of Array.from(context.pendingUserInputs.values())) {
         pending.resolve({});
       }
@@ -2183,6 +2395,23 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               cause,
             }),
         });
+        // One lifecycle coordinator per Pi session, created with the dormant
+        // extension and owned for the whole session lifetime: safe-boundary
+        // notifications reach it through the extension's agent_end hook, and
+        // session disposal disposes it before the runtime tears down.
+        const synaraMcpCoordinator = makePiSessionSynaraMcpCoordinator({
+          threadId: input.threadId,
+          adapter: synaraMcp.adapter,
+          stagedTools: synaraMcp.stagedTools,
+          runtime,
+          mcpAuthority: input.mcpAuthority,
+          ...(agentGatewayCredentials === undefined
+            ? {}
+            : { credentials: agentGatewayCredentials }),
+          ...(options?.agentGatewayFetch === undefined
+            ? {}
+            : { fetch: options.agentGatewayFetch }),
+        });
         const now = new Date().toISOString();
         const model = runtime.session.model
           ? `${runtime.session.model.provider}/${runtime.session.model.id}`
@@ -2206,6 +2435,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           runtime,
           gatewayControlAvailable: false,
           synaraMcp: synaraMcp.adapter,
+          synaraMcpCoordinator,
           processSupervisor,
           modelRegistry,
           session,
@@ -2256,6 +2486,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         options?.onSynaraMcpSession?.({
           threadId: input.threadId,
           adapter: synaraMcp.adapter,
+          coordinator: synaraMcpCoordinator,
         });
         const loadedExtensions = runtime.session.resourceLoader.getExtensions().extensions;
         if (loadedExtensions.length > 0) {
