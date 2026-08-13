@@ -160,6 +160,9 @@ export function makeServerRuntimeServicesLayer(
     authControlPlaneLayer,
     serverAuthLayer,
   );
+  const mcpSessionAuthorityLayer = McpSessionAuthorityLive.pipe(
+    Layer.provide(ServerSecretStoreLive),
+  );
   const automationServiceLayer = AutomationServiceLive.pipe(
     Layer.provideMerge(AutomationRepositoryLive),
     Layer.provideMerge(ProjectionTurnRepositoryLive),
@@ -191,7 +194,7 @@ export function makeServerRuntimeServicesLayer(
   );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(agentGatewayCredentialsLayer),
-    Layer.provideMerge(McpSessionAuthorityLive),
+    Layer.provideMerge(mcpSessionAuthorityLayer),
     Layer.provideMerge(automationServiceLayer),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(GitCoreLive),
@@ -216,7 +219,7 @@ export function makeServerRuntimeServicesLayer(
   return Layer.mergeAll(
     agentGatewayCredentialsLayer,
     agentGatewayLayer,
-    McpSessionAuthorityLive,
+    mcpSessionAuthorityLayer,
     BrowserAutomationHostLive,
     automationServiceLayer,
     automationSchedulerLayer,
