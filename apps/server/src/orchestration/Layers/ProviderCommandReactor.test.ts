@@ -22,6 +22,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  type McpAuthorityBinding,
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProjectId,
@@ -30,6 +31,7 @@ import {
 } from "@synara/contracts";
 import { PROVIDER_DELIVERY_BLOCK_SUMMARY } from "@synara/shared/providerDeliveryBlock";
 import {
+  DateTime,
   Duration,
   Effect,
   Exit,
@@ -45,6 +47,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentGatewayOperationRepositoryLive } from "../../agentGateway/Layers/AgentGatewayOperationRepository.ts";
 import { AgentGatewayOperationRepository } from "../../agentGateway/Services/AgentGatewayOperationRepository.ts";
+import { makeMcpSessionAuthorityRegistry } from "../../agentGateway/mcpSessionAuthority.ts";
+import {
+  McpSessionAuthority,
+  type McpSessionAuthorityShape,
+} from "../../agentGateway/Services/McpSessionAuthority.ts";
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../../git/Errors.ts";
 import {
@@ -168,6 +175,33 @@ async function waitFor(
   return poll();
 }
 
+/**
+ * Deterministic in-memory MCP session authority service (Decision 21 slice
+ * A). The reactor resolves trusted bindings through it on every session
+ * start; tests pre-bind commandId/threadId before dispatching, or leave the
+ * registry empty to prove fail-closed (no binding minted).
+ */
+function makeTestMcpSessionAuthorityShape(): McpSessionAuthorityShape {
+  const registry = makeMcpSessionAuthorityRegistry();
+  return {
+    ...registry,
+    mintForLocalOwner: () =>
+      registry.mint({
+        subject: "local-owner:test",
+        kind: "local-owner",
+        authSessionId: null,
+        authExpiresAt: null,
+      }),
+    mintForAuthenticated: (session) =>
+      registry.mint({
+        subject: session.subject,
+        kind: "authenticated",
+        authSessionId: session.sessionId,
+        authExpiresAt: session.expiresAt ? DateTime.toEpochMillis(session.expiresAt) : null,
+      }),
+  };
+}
+
 describe("ProviderCommandReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
     OrchestrationEngineService | ProviderCommandReactor,
@@ -216,6 +250,11 @@ describe("ProviderCommandReactor", () => {
     const { stateDir } = deriveServerPathsSync(baseDir, undefined);
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
+    // Decision 21 slice A: the reactor layer now resolves trusted MCP
+    // authority through this service on every session start, so the harness
+    // provides a deterministic in-memory registry. Empty by default: existing
+    // tests keep their unbound behavior (no mcpAuthority on start).
+    const mcpSessionAuthority = makeTestMcpSessionAuthorityShape();
     let nextSessionIndex = 1;
     const runtimeSessions: Array<ProviderSession> = [];
     const listSessions = vi.fn<ProviderServiceShape["listSessions"]>(() =>
@@ -533,6 +572,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
       Layer.provideMerge(AgentGatewayOperationRepositoryLive),
+      Layer.provideMerge(Layer.succeed(McpSessionAuthority, mcpSessionAuthority)),
       Layer.provideMerge(SqlitePersistenceMemory),
     );
     const runtime = ManagedRuntime.make(layer);
@@ -621,6 +661,7 @@ describe("ProviderCommandReactor", () => {
     return {
       engine,
       reactor,
+      mcpSessionAuthority,
       startSession,
       listSessions,
       sendTurn,
@@ -9290,5 +9331,174 @@ describe("ProviderCommandReactor", () => {
     });
     // With no active turn the same event applies by ensuring the session.
     expect(harness.startSession.mock.calls.length).toBe(1);
+  });
+
+  describe("MCP authority resolution on session start (Decision 21)", () => {
+    const dispatchedTurn = (commandId: string, messageId = "authority-user-message-1") => ({
+      type: "thread.turn.start" as const,
+      commandId: CommandId.makeUnsafe(commandId),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      message: {
+        messageId: asMessageId(messageId),
+        role: "user" as const,
+        text: "hello authority",
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required" as const,
+      createdAt: new Date().toISOString(),
+    });
+    const startInputOf = (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      harness.startSession.mock.calls[0]?.[1] as { readonly mcpAuthority?: McpAuthorityBinding };
+
+    it("mints the exact command binding into the session-start mcpAuthority", async () => {
+      const harness = await createHarness();
+      const record = harness.mcpSessionAuthority.mint({
+        subject: "user-alice",
+        kind: "authenticated",
+        authSessionId: "session-alice",
+      });
+      harness.mcpSessionAuthority.bindDispatch("cmd-turn-bound", record.authorityId);
+      harness.mcpSessionAuthority.bindThread("thread-1", record.authorityId);
+
+      await Effect.runPromise(harness.engine.dispatch(dispatchedTurn("cmd-turn-bound")));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      const authority = startInputOf(harness).mcpAuthority;
+      expect(authority).toBeDefined();
+      expect(authority).toMatchObject({
+        authorityId: record.authorityId,
+        subject: "user-alice",
+        kind: "authenticated",
+        authSessionId: "session-alice",
+        sessionGeneration: record.sessionGeneration,
+        lifecycleGeneration: null,
+        projectId: "project-1",
+      });
+      expect(authority?.credentialExpiresAt).toBeGreaterThan(Date.now());
+    });
+
+    it("resolves the command binding first and never infers identity from the thread binding", async () => {
+      const harness = await createHarness();
+      const threadRecord = harness.mcpSessionAuthority.mint({
+        subject: "user-thread",
+        kind: "authenticated",
+        authSessionId: "session-thread",
+      });
+      harness.mcpSessionAuthority.bindThread("thread-1", threadRecord.authorityId);
+      const commandRecord = harness.mcpSessionAuthority.mint({
+        subject: "user-command",
+        kind: "authenticated",
+        authSessionId: "session-command",
+      });
+      harness.mcpSessionAuthority.bindDispatch("cmd-turn-wins", commandRecord.authorityId);
+
+      await Effect.runPromise(harness.engine.dispatch(dispatchedTurn("cmd-turn-wins")));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      expect(startInputOf(harness).mcpAuthority).toMatchObject({
+        authorityId: commandRecord.authorityId,
+        subject: "user-command",
+        authSessionId: "session-command",
+      });
+    });
+
+    it("falls back to the trusted thread binding for server continuations without a bound command", async () => {
+      const harness = await createHarness();
+      const record = harness.mcpSessionAuthority.mint({
+        subject: "user-continuation",
+        kind: "local-owner",
+        authSessionId: null,
+      });
+      harness.mcpSessionAuthority.bindThread("thread-1", record.authorityId);
+      // Queued-turn promotion / edit-resend commands are server-minted at
+      // dispatch time and never reach the registry: only the thread binding
+      // stays, so Decision 21 resolves that trusted continuation authority.
+      await Effect.runPromise(
+        harness.engine.dispatch(dispatchedTurn("server:dispatch-queued-turn:42")),
+      );
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      expect(startInputOf(harness).mcpAuthority).toMatchObject({
+        authorityId: record.authorityId,
+        subject: "user-continuation",
+        kind: "local-owner",
+        authSessionId: null,
+      });
+    });
+
+    it("starts the session without mcpAuthority when no binding exists (fail closed)", async () => {
+      const harness = await createHarness();
+
+      await Effect.runPromise(harness.engine.dispatch(dispatchedTurn("cmd-never-bound")));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      expect(startInputOf(harness).mcpAuthority).toBeUndefined();
+    });
+
+    it("does not issue a credential binding for an expired authority record", async () => {
+      const harness = await createHarness();
+      const record = harness.mcpSessionAuthority.mint({
+        subject: "user-expired",
+        kind: "authenticated",
+        authSessionId: "session-expired",
+        authExpiresAt: Date.now() - 60_000,
+      });
+      expect(record.status).toBe("expired");
+      harness.mcpSessionAuthority.bindDispatch("cmd-turn-expired", record.authorityId);
+      harness.mcpSessionAuthority.bindThread("thread-1", record.authorityId);
+
+      await Effect.runPromise(harness.engine.dispatch(dispatchedTurn("cmd-turn-expired")));
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      expect(startInputOf(harness).mcpAuthority).toBeUndefined();
+    });
+
+    it("re-resolves the trusted binding when a runtime-mode change restarts the session", async () => {
+      const harness = await createHarness();
+      const record = harness.mcpSessionAuthority.mint({
+        subject: "user-restart",
+        kind: "authenticated",
+        authSessionId: "session-restart",
+      });
+      harness.mcpSessionAuthority.bindDispatch("cmd-mode-set-auth", record.authorityId);
+      harness.mcpSessionAuthority.bindThread("thread-1", record.authorityId);
+      const now = new Date().toISOString();
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("cmd-session-set-auth"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.makeUnsafe("cmd-mode-set-auth"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+      expect(startInputOf(harness).mcpAuthority).toMatchObject({
+        authorityId: record.authorityId,
+        subject: "user-restart",
+        authSessionId: "session-restart",
+      });
+    });
   });
 });

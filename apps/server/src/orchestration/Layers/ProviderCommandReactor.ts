@@ -18,6 +18,7 @@ import {
   type ProviderStartOptions,
   type ProviderSkillReference,
   type ProviderTurnStartResult,
+  type ProjectId,
   type OrchestrationSession,
   type OrchestrationProjectShell,
   type OrchestrationThread,
@@ -557,13 +558,6 @@ const make = Effect.gen(function* () {
   // projected thread metadata so an option changed mid-turn is still compared
   // against the old subprocess configuration before the next turn starts.
   const threadSessionModelSelections = new Map<string, ModelSelection>();
-  // The authenticated subject whose session-local MCP authority owns each
-  // live provider session (Decision 21). A session started under one subject
-  // must never serve a turn from a different subject without a fresh restart
-  // and lifecycle generation; the same subject keeps its session across
-  // dispatches and reconnects. "No entry" means the reactor has not yet
-  // observed a subject-owned session for this thread (restart/resume).
-  const threadSessionControllingSubjects = new Map<string, string>();
   // Seeded from the engine's in-memory command read model, not a second snapshot query.
   // The engine loads that model once after the projection bootstrap and keeps it current
   // as commands commit, so reading it here is both free and strictly fresher than
@@ -916,7 +910,6 @@ const make = Effect.gen(function* () {
     Effect.sync(() => {
       threadProviderOptions.delete(threadId);
       threadSessionModelSelections.delete(threadId);
-      threadSessionControllingSubjects.delete(threadId);
       const editResendPrefix = `${threadId}:`;
       for (const key of editResendTurnStartKeys) {
         if (key.startsWith(editResendPrefix)) {
@@ -1224,12 +1217,6 @@ const make = Effect.gen(function* () {
             projectId: thread.projectId,
           });
 
-    const recordControllingSubject = (subject: string | null) => {
-      if (subject !== null) {
-        threadSessionControllingSubjects.set(threadId, subject);
-      }
-    };
-
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
@@ -1240,6 +1227,11 @@ const make = Effect.gen(function* () {
         ...providerSessionOptions,
         ...(preferredProvider ? { provider: preferredProvider } : {}),
         ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+        // Decision 21: the resolved trusted binding (or nothing, when no
+        // authority could be resolved) rides the session-start contract so
+        // provider adapters can mint subject-bound gateway credentials. The
+        // binding is never taken from callers or provider payloads.
+        ...(mcpAuthority !== null ? { mcpAuthority } : {}),
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -1430,6 +1422,13 @@ const make = Effect.gen(function* () {
     readonly interactionMode?: "default" | "plan";
     readonly dispatchMode?: "queue" | "steer";
     readonly createdAt: string;
+    /**
+     * Command that drove this turn, for subject-bound MCP authority
+     * resolution (exact command binding first, thread binding fallback;
+     * Decision 21). Null or absent means no authoritative identity is
+     * available and the session starts without a gateway credential.
+     */
+    readonly commandId: string | null;
   }) {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
@@ -1522,6 +1521,7 @@ const make = Effect.gen(function* () {
         ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+        commandId: input.commandId,
       },
     );
     if (input.providerOptions !== undefined) {
@@ -1802,6 +1802,7 @@ const make = Effect.gen(function* () {
         ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+        commandId: input.commandId,
       });
       const replayWithTranscriptBootstrap = (
         cause: ProviderServiceError,
@@ -2392,6 +2393,7 @@ const make = Effect.gen(function* () {
         interactionMode: event.payload.interactionMode,
         dispatchMode: immediateDispatchMode,
         createdAt: event.payload.createdAt,
+        commandId: event.commandId,
       }).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -3484,6 +3486,10 @@ const make = Effect.gen(function* () {
             ...(cachedProviderOptions !== undefined
               ? { providerOptions: cachedProviderOptions }
               : {}),
+            // The meta-update was itself dispatched from a connection-scoped
+            // authority context (or a server continuation), so its command id
+            // resolves the trusted binding for the restarted session.
+            commandId: event.commandId,
           });
           threadSessionModelSelections.set(event.payload.threadId, event.payload.modelSelection);
           return;
@@ -3507,6 +3513,9 @@ const make = Effect.gen(function* () {
               : {}),
             modelSelection: thread.modelSelection,
             runtimeMode: event.payload.runtimeMode,
+            // Same trusted resolution as the meta-update restart above: the
+            // mode-set command's authority binding drives the new session.
+            commandId: event.commandId,
           });
           return;
         }

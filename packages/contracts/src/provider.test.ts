@@ -86,6 +86,77 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.providerOptions?.claudeAgent?.maxThinkingTokens).toBe(12_000);
     expect(parsed.runtimeMode).toBe("full-access");
   });
+
+  it("decodes a server-minted mcpAuthority binding (Decision 21)", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "codex",
+      runtimeMode: "full-access",
+      mcpAuthority: {
+        authorityId: "mcp-authority-authority-1",
+        subject: "local-owner:stable-principal",
+        kind: "local-owner",
+        authSessionId: null,
+        authExpiresAt: null,
+        issuedAt: 1_770_000_000_000,
+        credentialExpiresAt: 1_770_003_600_000,
+        sessionGeneration: "gen-session-1",
+        lifecycleGeneration: "gen-lifecycle-1",
+        projectId: "project-1",
+      },
+    });
+    expect(parsed.mcpAuthority).toMatchObject({
+      authorityId: "mcp-authority-authority-1",
+      subject: "local-owner:stable-principal",
+      kind: "local-owner",
+      sessionGeneration: "gen-session-1",
+      lifecycleGeneration: "gen-lifecycle-1",
+      projectId: "project-1",
+    });
+  });
+
+  it("rejects an mcpAuthority binding without the trusted authority id", () => {
+    expect(() =>
+      decodeProviderSessionStartInput({
+        threadId: "thread-1",
+        provider: "codex",
+        runtimeMode: "full-access",
+        mcpAuthority: {
+          subject: "local-owner:stable-principal",
+          kind: "local-owner",
+          authSessionId: null,
+          authExpiresAt: null,
+          issuedAt: 1_770_000_000_000,
+          credentialExpiresAt: 1_770_003_600_000,
+          sessionGeneration: "gen-session-1",
+          lifecycleGeneration: null,
+          projectId: null,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an mcpAuthority binding with an unknown kind literal", () => {
+    expect(() =>
+      decodeProviderSessionStartInput({
+        threadId: "thread-1",
+        provider: "codex",
+        runtimeMode: "full-access",
+        mcpAuthority: {
+          authorityId: "mcp-authority-authority-2",
+          subject: "user-alice",
+          kind: "browser",
+          authSessionId: "session-1",
+          authExpiresAt: null,
+          issuedAt: 1_770_000_000_000,
+          credentialExpiresAt: 1_770_003_600_000,
+          sessionGeneration: "gen-session-1",
+          lifecycleGeneration: null,
+          projectId: "project-1",
+        },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("ProviderSendTurnInput", () => {
