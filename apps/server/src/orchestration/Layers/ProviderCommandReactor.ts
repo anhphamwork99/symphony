@@ -85,6 +85,11 @@ import {
 } from "../../git/Services/TextGeneration.ts";
 import { resolveTextGenerationInputForSelection } from "../../git/textGenerationSelection.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
+import {
+  MCP_AUTHORITY_CREDENTIAL_TTL_MS,
+  type McpAuthorityBinding,
+} from "../../agentGateway/mcpSessionAuthority.ts";
 import { resolveProviderDispatchAttachments } from "../../provider/providerAttachmentPaths.ts";
 import { OrchestrationEventDeliveryRepositoryLive } from "../../persistence/Layers/OrchestrationEventDeliveries.ts";
 import { ProjectionPendingInteractionRepositoryLive } from "../../persistence/Layers/ProjectionPendingInteractions.ts";
@@ -552,6 +557,13 @@ const make = Effect.gen(function* () {
   // projected thread metadata so an option changed mid-turn is still compared
   // against the old subprocess configuration before the next turn starts.
   const threadSessionModelSelections = new Map<string, ModelSelection>();
+  // The authenticated subject whose session-local MCP authority owns each
+  // live provider session (Decision 21). A session started under one subject
+  // must never serve a turn from a different subject without a fresh restart
+  // and lifecycle generation; the same subject keeps its session across
+  // dispatches and reconnects. "No entry" means the reactor has not yet
+  // observed a subject-owned session for this thread (restart/resume).
+  const threadSessionControllingSubjects = new Map<string, string>();
   // Seeded from the engine's in-memory command read model, not a second snapshot query.
   // The engine loads that model once after the projection bootstrap and keeps it current
   // as commands commit, so reading it here is both free and strictly fresher than
@@ -904,6 +916,7 @@ const make = Effect.gen(function* () {
     Effect.sync(() => {
       threadProviderOptions.delete(threadId);
       threadSessionModelSelections.delete(threadId);
+      threadSessionControllingSubjects.delete(threadId);
       const editResendPrefix = `${threadId}:`;
       for (const key of editResendTurnStartKeys) {
         if (key.startsWith(editResendPrefix)) {
@@ -1091,6 +1104,37 @@ const make = Effect.gen(function* () {
     clearWorkspaceIndexCache(plan.cwd);
   });
 
+  /**
+   * Resolve the trusted server-side MCP authority for one turn (Decision 21).
+   * The exact dispatch command binding wins; the thread binding is the
+   * fail-closed fallback for explicitly server-generated continuations
+   * (queued-turn promotion, edit-resend, automation) that were dispatched
+   * without a connection. No identity is ever inferred from payloads,
+   * provider state, or thread metadata. A missing or unresolvable binding
+   * yields `null`: the coding session still starts but no shared Agent
+   * Gateway credential is minted.
+   */
+  const resolveMcpAuthorityBinding = Effect.fnUntraced(function* (input: {
+    readonly commandId: string | null;
+    readonly threadId: ThreadId;
+    readonly provider: ProviderKind;
+    readonly projectId: ProjectId | null;
+  }) {
+    const mcpSessionAuthority = yield* McpSessionAuthority;
+    const record = mcpSessionAuthority.resolveForCommand(
+      input.commandId ?? "",
+      input.threadId,
+    );
+    if (record === undefined) return null;
+    return mcpSessionAuthority.bindingFor(record.authorityId, {
+      threadId: input.threadId,
+      provider: input.provider,
+      projectId: input.projectId,
+      lifecycleGeneration: null,
+      credentialTtlMs: MCP_AUTHORITY_CREDENTIAL_TTL_MS,
+    });
+  });
+
   const ensureSessionForThread = Effect.fnUntraced(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -1098,6 +1142,13 @@ const make = Effect.gen(function* () {
       readonly modelSelection?: ModelSelection;
       readonly providerOptions?: ProviderStartOptions;
       readonly runtimeMode?: RuntimeMode;
+      /**
+       * Command that drove this turn/ensure, for subject-bound MCP authority
+       * resolution (exact command binding, else thread binding). Absent means
+       * no authoritative identity is available: the session still starts but
+       * issues no shared gateway credential.
+       */
+      readonly commandId?: string | null;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -1159,6 +1210,24 @@ const make = Effect.gen(function* () {
       modelSelection: desiredModelSelection,
       providerOptions: resolvedProviderOptions,
       runtimeMode: desiredRuntimeMode,
+    };
+
+    // Resolve the trusted authority for this turn exactly once; the resolved
+    // snapshot (or null) is reused by every session-start path below.
+    const mcpAuthority: McpAuthorityBinding | null =
+      options?.commandId === undefined
+        ? null
+        : yield* resolveMcpAuthorityBinding({
+            commandId: options.commandId,
+            threadId,
+            provider: preferredProvider,
+            projectId: thread.projectId,
+          });
+
+    const recordControllingSubject = (subject: string | null) => {
+      if (subject !== null) {
+        threadSessionControllingSubjects.set(threadId, subject);
+      }
     };
 
     const resolveActiveSession = (threadId: ThreadId) =>

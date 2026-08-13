@@ -113,6 +113,8 @@ export const ProviderForkThreadInput = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   providerOptions: Schema.optional(ProviderStartOptions),
   runtimeMode: RuntimeMode,
+  /** Optional server-minted subject-bound MCP authority (Decision 21). */
+  mcpAuthority: Schema.optional(McpAuthorityBinding),
 });
 export type ProviderForkThreadInput = typeof ProviderForkThreadInput.Type;
 

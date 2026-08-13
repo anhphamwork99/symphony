@@ -134,9 +134,24 @@ export interface McpSessionAuthorityRegistryShape {
     commandId: string,
     threadId: string,
   ) => McpSessionAuthorityRecord | undefined;
+  /**
+   * Resolve only the current trusted server-written thread binding. Used by
+   * resume/recovery sites that have no dispatch command (provider-session
+   * rotation restarts), so they never reuse a stale credential or invent an
+   * identity; the thread binding itself is written only at trusted dispatch.
+   */
+  readonly resolveForThread: (threadId: string) => McpSessionAuthorityRecord | undefined;
 }
 
 export const MCP_AUTHORITY_ID_PREFIX = "mcp-authority-";
+
+/**
+ * Default lifetime of a credential binding snapshot minted from an authority
+ * record before it is re-issued at the next session start (Decision 21).
+ * Credentials are additionally clamped to their bound authentication expiry,
+ * and admission re-validates the owning record at request time.
+ */
+export const MCP_AUTHORITY_CREDENTIAL_TTL_MS = 60 * 60 * 1_000;
 
 const DEFAULT_MAX_DISPATCH_BINDINGS = 300;
 const DEFAULT_DISPATCH_BINDING_TTL_MS = 60 * 60 * 1_000;
@@ -282,6 +297,10 @@ export function makeMcpSessionAuthorityRegistry(options: {
     resolveForCommand: (commandId, threadId) => {
       const byCommand = commandAuthority.get(commandId);
       const authorityId = byCommand?.authorityId ?? threadAuthority.get(threadId)?.authorityId;
+      return authorityId === undefined ? undefined : records.get(authorityId);
+    },
+    resolveForThread: (threadId) => {
+      const authorityId = threadAuthority.get(threadId)?.authorityId;
       return authorityId === undefined ? undefined : records.get(authorityId);
     },
   };
