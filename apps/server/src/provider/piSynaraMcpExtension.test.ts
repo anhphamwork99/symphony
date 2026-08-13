@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   makePiSynaraMcpDormantExtension,
   PI_SYNARA_MCP_DISABLED_REFUSAL,
+  PI_SYNARA_MCP_INVOKE_UNROUTED_REFUSAL,
 } from "./piSynaraMcpExtension.ts";
 
 describe("Pi Synara MCP dormant extension", () => {
@@ -127,5 +128,65 @@ describe("Pi Synara MCP dormant extension", () => {
     expect(notifications).toBe(1);
     expect(adapter.state).toBe("dormant");
     removeListener();
+  });
+});
+
+describe("Pi Synara MCP lifecycle state boundary", () => {
+  it("starts dormant and enforces the coordinator-owned transition graph", () => {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+    expect(adapter.state).toBe("dormant");
+    expect(() => adapter.transition("active")).toThrow(
+      /Illegal Pi Synara MCP lifecycle transition: dormant -> active/,
+    );
+    expect(() => adapter.transition("deactivating")).toThrow(
+      /Illegal Pi Synara MCP lifecycle transition: dormant -> deactivating/,
+    );
+
+    adapter.transition("activating");
+    expect(adapter.state).toBe("activating");
+    adapter.transition("active");
+    expect(adapter.state).toBe("active");
+    expect(() => adapter.transition("dormant")).toThrow(
+      /Illegal Pi Synara MCP lifecycle transition: active -> dormant/,
+    );
+    expect(() => adapter.transition("activating")).toThrow(
+      /Illegal Pi Synara MCP lifecycle transition: active -> activating/,
+    );
+
+    adapter.transition("deactivating");
+    expect(adapter.state).toBe("deactivating");
+    adapter.transition("dormant");
+    expect(adapter.state).toBe("dormant");
+    adapter.transition("unavailable");
+    expect(adapter.state).toBe("unavailable");
+    adapter.transition("activating");
+    expect(adapter.state).toBe("activating");
+  });
+
+  it("treats a same-state transition as a no-op", () => {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+    adapter.transition("dormant");
+    expect(adapter.state).toBe("dormant");
+    adapter.transition("activating");
+    adapter.transition("activating");
+    expect(adapter.state).toBe("activating");
+  });
+
+  it("keeps the stable disabled refusal across non-active states and fails closed while active", async () => {
+    const { adapter } = makePiSynaraMcpDormantExtension();
+    const request = { method: "tools/list" };
+
+    for (const next of ["activating", "unavailable"] as const) {
+      adapter.transition(next);
+      await expect(adapter.invoke(request)).rejects.toThrow(PI_SYNARA_MCP_DISABLED_REFUSAL);
+    }
+
+    adapter.transition("activating");
+    adapter.transition("active");
+    // WP1 installs no invocation routing; an active adapter fails closed.
+    await expect(adapter.invoke(request)).rejects.toThrow(PI_SYNARA_MCP_INVOKE_UNROUTED_REFUSAL);
+
+    adapter.transition("deactivating");
+    await expect(adapter.invoke(request)).rejects.toThrow(PI_SYNARA_MCP_DISABLED_REFUSAL);
   });
 });

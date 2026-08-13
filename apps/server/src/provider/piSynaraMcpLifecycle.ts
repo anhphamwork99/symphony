@@ -1,0 +1,519 @@
+import { randomUUID } from "node:crypto";
+
+import type { PiSynaraMcpLifecycleAdapter, PiSynaraMcpLifecycleState } from "./piSynaraMcpExtension.ts";
+
+/** Maximum diagnostics entries retained (newest win, oldest dropped). */
+export const PI_SYNARA_MCP_DIAGNOSTIC_LIMIT = 25;
+
+/** Maximum message length retained per diagnostics entry. */
+export const PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT = 240;
+
+/** Stable refusal for lifecycle operations issued after the coordinator is disposed. */
+export const PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL =
+  "Pi Synara MCP lifecycle coordinator is disposed";
+
+/** Stable refusal for deactivation while the session is not active. */
+export const PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE =
+  "Pi Synara MCP deactivation requires an active session";
+
+/** Stable refusal for activation while a deactivation handoff is outstanding. */
+export const PI_SYNARA_MCP_DEACTIVATION_IN_PROGRESS_REFUSAL =
+  "Pi Synara MCP deactivation is in progress; retry after it completes";
+
+/** One bounded diagnostic record; state is the lifecycle state associated with the entry. */
+export interface PiSynaraMcpDiagnosticEntry {
+  readonly at: string;
+  readonly kind: string;
+  readonly message: string;
+  readonly state: PiSynaraMcpLifecycleState;
+  readonly generation?: string;
+}
+
+/**
+ * Bounded diagnostics sink. {@link PiSynaraMcpDiagnostics.entries} never grows
+ * beyond the configured limit and messages are truncated to
+ * {@link PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT}.
+ */
+export interface PiSynaraMcpDiagnostics {
+  readonly entries: readonly PiSynaraMcpDiagnosticEntry[];
+  readonly record: (entry: {
+    readonly kind: string;
+    readonly message: string;
+    readonly state: PiSynaraMcpLifecycleState;
+    readonly generation?: string;
+  }) => void;
+  readonly clear: () => void;
+}
+
+/** Bounded ring-buffer diagnostics; keeps the newest `limit` entries. */
+export function makePiSynaraMcpDiagnostics(
+  limit: number = PI_SYNARA_MCP_DIAGNOSTIC_LIMIT,
+): PiSynaraMcpDiagnostics {
+  const entries: PiSynaraMcpDiagnosticEntry[] = [];
+  const boundedLimit = Math.max(1, Math.floor(limit));
+  return {
+    get entries() {
+      return entries;
+    },
+    record: (entry) => {
+      entries.push({
+        at: new Date().toISOString(),
+        kind: entry.kind,
+        message: truncateDiagnosticMessage(entry.message),
+        state: entry.state,
+        ...(entry.generation === undefined ? {} : { generation: entry.generation }),
+      });
+      if (entries.length > boundedLimit) {
+        entries.splice(0, entries.length - boundedLimit);
+      }
+    },
+    clear: () => {
+      entries.length = 0;
+    },
+  };
+}
+
+/**
+ * Candidate resources accumulated by one activation attempt, bound to the
+ * attempt's lifecycle generation. Seams receive the record as it evolves;
+ * cleanup receives whatever candidates exist when the attempt ends.
+ */
+export interface PiSynaraMcpStagedActivation {
+  readonly lifecycleGeneration: string;
+  readonly authority?: unknown;
+  readonly credential?: unknown;
+  readonly connection?: unknown;
+  readonly catalog?: unknown;
+}
+
+export type PiSynaraMcpAuthorityValidation =
+  | { readonly ok: true; readonly authority: unknown }
+  | { readonly ok: false; readonly reason: string };
+
+export type PiSynaraMcpCatalogValidation =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/** The staged step (or fencing condition) an activation attempt failed at. */
+export type PiSynaraMcpActivationStage =
+  | "authority"
+  | "credential"
+  | "connection"
+  | "discovery"
+  | "catalog"
+  | "apply"
+  | "superseded";
+
+/**
+ * Dependency-injected public seams for one activation attempt. All seams are
+ * owned by the coordinator's caller; the coordinator never reaches into
+ * private Pi SDK reload helpers. Cleanup must resolve only when cleanup is
+ * proven and reject when it cannot be proven.
+ */
+export interface PiSynaraMcpActivationSeams {
+  /** Trusted authority validation; fail-closed. The input is passed through untouched. */
+  readonly validateAuthority: (input: unknown) => Promise<PiSynaraMcpAuthorityValidation>;
+  /** Stage fresh identity-bound credentials for the validated authority. */
+  readonly issueCredential: (staged: PiSynaraMcpStagedActivation) => Promise<unknown>;
+  /** Stage the MCP connection and initialization. */
+  readonly connect: (staged: PiSynaraMcpStagedActivation) => Promise<unknown>;
+  /** Stage complete catalog discovery. */
+  readonly discover: (staged: PiSynaraMcpStagedActivation) => Promise<unknown>;
+  /** Validate the discovered catalog (schema and completeness); empty/malformed catalogs must be rejected. */
+  readonly validateCatalog: (catalog: unknown) => Promise<PiSynaraMcpCatalogValidation>;
+  /** Atomically expose the complete staged catalog at the safe boundary. */
+  readonly applyAtSafeBoundary: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
+  /** Idempotently revoke/close/discard candidate resources. */
+  readonly cleanup: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
+}
+
+export type PiSynaraMcpActivationResult =
+  | {
+      readonly ok: true;
+      readonly state: "active";
+      readonly lifecycleGeneration: string;
+      /** True when the session was already active and no new activation ran. */
+      readonly alreadyActive: boolean;
+    }
+  | {
+      readonly ok: false;
+      readonly state: "dormant" | "unavailable";
+      readonly stage: PiSynaraMcpActivationStage;
+      readonly reason: string;
+    };
+
+/**
+ * Deactivation handoff contract. impl-07 owns the cancellation/drain/revoke
+ * ordering around {@link PiSynaraMcpDeactivationHandoff.cleanup}; WP1 only
+ * retires the generation, fences admission, and finalizes the state through
+ * {@link PiSynaraMcpDeactivationHandoff.complete}.
+ */
+export interface PiSynaraMcpDeactivationHandoff {
+  /** Lifecycle generation being retired; stale completions are no-ops. */
+  readonly generation: string;
+  /** Trusted authority of the retired session (opaque to the coordinator). */
+  readonly authority: unknown;
+  /** Candidate resources of the retired session, bound to the generation. */
+  readonly staged: PiSynaraMcpStagedActivation;
+  /** Bound cleanup entry point for impl-07 to order around cancel/drain/revoke. */
+  readonly cleanup: () => Promise<void>;
+  /**
+   * Runs the bound cleanup and finalizes the state: `dormant` when cleanup is
+   * proven, `unavailable` when it cannot be proven. Idempotent.
+   */
+  readonly complete: () => Promise<{ readonly state: "dormant" | "unavailable" }>;
+}
+
+export interface PiSynaraMcpLifecycleOptions {
+  readonly adapter: PiSynaraMcpLifecycleAdapter;
+  readonly seams: PiSynaraMcpActivationSeams;
+  /** Optional bounded diagnostics; a bounded default is created when omitted. */
+  readonly diagnostics?: PiSynaraMcpDiagnostics;
+}
+
+export interface PiSynaraMcpLifecycleCoordinator {
+  readonly state: PiSynaraMcpLifecycleState;
+  readonly diagnostics: PiSynaraMcpDiagnostics;
+  /**
+   * Serialized activation. Stages identity validation, credentials,
+   * connection, discovery, and catalog validation, defers application to the
+   * safe boundary, then commits atomically. Already-active sessions return an
+   * idempotent success without re-running staging.
+   */
+  readonly activate: (input: unknown) => Promise<PiSynaraMcpActivationResult>;
+  /**
+   * Serialized deactivation handoff. Requires an active session; returns a
+   * handoff that retires the current generation and fences admission while
+   * deactivating.
+   */
+  readonly beginDeactivation: () => Promise<PiSynaraMcpDeactivationHandoff>;
+  /** Serialized dispose; supersedes pending activation and finalizes every state. */
+  readonly dispose: () => Promise<void>;
+}
+
+const SUPERSEDED_MESSAGE = "activation superseded before completion";
+
+class StagedActivationError extends Error {
+  constructor(
+    readonly stage: PiSynaraMcpActivationStage,
+    readonly cause: unknown,
+  ) {
+    super(`activation stage ${stage} failed`);
+  }
+}
+
+function toErrorMessage(cause: unknown): string {
+  if (cause instanceof Error && cause.message.length > 0) {
+    return cause.message;
+  }
+  return String(cause);
+}
+
+function truncateDiagnosticMessage(message: string): string {
+  if (message.length <= PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT) {
+    return message;
+  }
+  return `${message.slice(0, PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT - 1)}…`;
+}
+
+interface PendingAttempt {
+  readonly generation: string;
+  readonly staged: PiSynaraMcpStagedActivation;
+}
+
+/** Mutable internal view of the staged record; the coordinator fills candidates in place. */
+interface MutableStagedActivation {
+  readonly lifecycleGeneration: string;
+  authority?: unknown;
+  credential?: unknown;
+  connection?: unknown;
+  catalog?: unknown;
+}
+
+interface PendingHandoff {
+  readonly generation: string;
+  readonly staged: PiSynaraMcpStagedActivation;
+  final?: "dormant" | "unavailable";
+}
+
+/**
+ * Per-session Pi Synara MCP lifecycle coordinator. Owns the dormant,
+ * activating, active, deactivating, and unavailable transitions for one
+ * adapter, serializes every lifecycle operation, and fences stale completions
+ * by generation so a superseded activation can never expose tools.
+ */
+export function makePiSynaraMcpLifecycleCoordinator(
+  options: PiSynaraMcpLifecycleOptions,
+): PiSynaraMcpLifecycleCoordinator {
+  const { adapter, seams } = options;
+  const diagnostics = options.diagnostics ?? makePiSynaraMcpDiagnostics();
+
+  let disposed = false;
+  let pendingAttempt: PendingAttempt | undefined;
+  let committed: PendingAttempt | undefined;
+  let pendingHandoff: PendingHandoff | undefined;
+  let boundaryResolve: (() => void) | undefined;
+  let removeBoundaryListener: (() => void) | undefined;
+
+  // Promise-chain mutex: lifecycle operations serialize in call order.
+  let tail: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const run = tail.then(operation, operation);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
+  const clearBoundaryWait = () => {
+    removeBoundaryListener?.();
+    removeBoundaryListener = undefined;
+    boundaryResolve = undefined;
+  };
+
+  const waitForSafeBoundary = () =>
+    new Promise<void>((resolve) => {
+      boundaryResolve = resolve;
+      removeBoundaryListener = adapter.onSafeBoundary(() => resolve());
+    });
+
+  const runCleanup = async (
+    staged: PiSynaraMcpStagedActivation,
+    generation: string,
+  ): Promise<"dormant" | "unavailable"> => {
+    try {
+      await seams.cleanup(staged);
+      return "dormant";
+    } catch (cause) {
+      diagnostics.record({
+        kind: "cleanup.uncertain",
+        message: `cleanup could not be proven: ${toErrorMessage(cause)}`,
+        state: "unavailable",
+        generation,
+      });
+      return "unavailable";
+    }
+  };
+
+  const finalizeDeactivation = async (handoff: PendingHandoff): Promise<"dormant" | "unavailable"> => {
+    if (handoff.final !== undefined) {
+      return handoff.final;
+    }
+    const outcome = await runCleanup(handoff.staged, handoff.generation);
+    handoff.final = outcome;
+    pendingHandoff = undefined;
+    adapter.transition(outcome);
+    diagnostics.record({
+      kind: "deactivation.completed",
+      message: "deactivation completed",
+      state: outcome,
+      generation: handoff.generation,
+    });
+    return outcome;
+  };
+
+  const activate = (input: unknown): Promise<PiSynaraMcpActivationResult> =>
+    enqueue(async () => {
+      if (disposed) {
+        throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
+      }
+      if (adapter.state === "deactivating") {
+        throw new Error(PI_SYNARA_MCP_DEACTIVATION_IN_PROGRESS_REFUSAL);
+      }
+      if (committed !== undefined && adapter.state === "active") {
+        return {
+          ok: true,
+          state: "active",
+          lifecycleGeneration: committed.generation,
+          alreadyActive: true,
+        };
+      }
+
+      const generation = randomUUID();
+      const staged: MutableStagedActivation = { lifecycleGeneration: generation };
+      const attempt: PendingAttempt = { generation, staged };
+      pendingAttempt = attempt;
+      adapter.transition("activating");
+      diagnostics.record({
+        kind: "activation.started",
+        message: "activation started",
+        state: "activating",
+        generation,
+      });
+
+      const fenced = () => pendingAttempt === attempt;
+      const rollback = async (
+        stage: PiSynaraMcpActivationStage,
+        reason: string,
+      ): Promise<PiSynaraMcpActivationResult> => {
+        clearBoundaryWait();
+        const outcome = await runCleanup(staged, generation);
+        pendingAttempt = undefined;
+        adapter.transition(outcome);
+        diagnostics.record({
+          kind: "activation.failed",
+          message: `activation failed at ${stage}: ${reason}`,
+          state: outcome,
+          generation,
+        });
+        return { ok: false, state: outcome, stage, reason };
+      };
+      const step = async <T>(stage: PiSynaraMcpActivationStage, run: () => Promise<T>): Promise<T> => {
+        try {
+          return await run();
+        } catch (cause) {
+          throw new StagedActivationError(stage, cause);
+        }
+      };
+
+      try {
+        const validation = await step("authority", () => seams.validateAuthority(input));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        if (!validation.ok) {
+          return await rollback("authority", validation.reason);
+        }
+        staged.authority = validation.authority;
+
+        staged.credential = await step("credential", () => seams.issueCredential(staged));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        staged.connection = await step("connection", () => seams.connect(staged));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        staged.catalog = await step("discovery", () => seams.discover(staged));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        const catalogValidation = await step("catalog", () => seams.validateCatalog(staged.catalog));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        if (!catalogValidation.ok) {
+          return await rollback("catalog", catalogValidation.reason);
+        }
+
+        // All candidates staged and validated: defer exposure to the safe boundary.
+        await waitForSafeBoundary();
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+
+        await step("apply", () => seams.applyAtSafeBoundary(staged));
+        if (!fenced()) {
+          return await rollback("superseded", SUPERSEDED_MESSAGE);
+        }
+        clearBoundaryWait();
+      } catch (cause) {
+        clearBoundaryWait();
+        if (cause instanceof StagedActivationError) {
+          if (!fenced()) {
+            return await rollback("superseded", SUPERSEDED_MESSAGE);
+          }
+          return await rollback(cause.stage, toErrorMessage(cause.cause));
+        }
+        throw cause;
+      }
+
+      committed = { generation, staged };
+      pendingAttempt = undefined;
+      adapter.transition("active");
+      diagnostics.record({
+        kind: "activation.committed",
+        message: "activation committed",
+        state: "active",
+        generation,
+      });
+      return { ok: true, state: "active", lifecycleGeneration: generation, alreadyActive: false };
+    });
+
+  const beginDeactivation = (): Promise<PiSynaraMcpDeactivationHandoff> =>
+    enqueue(async () => {
+      if (disposed) {
+        throw new Error(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
+      }
+      if (committed === undefined || adapter.state !== "active") {
+        throw new Error(PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE);
+      }
+      const { generation, staged } = committed;
+      committed = undefined;
+      const handoff: PendingHandoff = { generation, staged };
+      pendingHandoff = handoff;
+      adapter.transition("deactivating");
+      diagnostics.record({
+        kind: "deactivation.started",
+        message: "deactivation started",
+        state: "deactivating",
+        generation,
+      });
+
+      const complete = (): Promise<{ readonly state: "dormant" | "unavailable" }> =>
+        enqueue(async () => {
+          if (handoff.final !== undefined) {
+            return { state: handoff.final };
+          }
+          if (pendingHandoff !== handoff) {
+            // Another path (dispose) already finalized this handoff; its
+            // outcome is recorded on the handoff itself.
+            return { state: handoff.final ?? (adapter.state === "unavailable" ? "unavailable" : "dormant") };
+          }
+          const outcome = await finalizeDeactivation(handoff);
+          return { state: outcome };
+        });
+
+      return {
+        generation,
+        authority: staged.authority,
+        staged,
+        cleanup: () => seams.cleanup(staged),
+        complete,
+      };
+    });
+
+  const dispose = (): Promise<void> => {
+    // Non-serialized abort: fence any in-flight activation so a stale
+    // completion can never commit after dispose. The fenced attempt performs
+    // its own rollback inside the queue; this body then finalizes whatever
+    // state remains.
+    pendingAttempt = undefined;
+    boundaryResolve?.();
+    return enqueue(async () => {
+      if (adapter.state === "active" && committed !== undefined) {
+        const { generation, staged } = committed;
+        committed = undefined;
+        const handoff: PendingHandoff = { generation, staged };
+        pendingHandoff = handoff;
+        adapter.transition("deactivating");
+        diagnostics.record({
+          kind: "deactivation.started",
+          message: "deactivation started",
+          state: "deactivating",
+          generation,
+        });
+        await finalizeDeactivation(handoff);
+      } else if (adapter.state === "deactivating" && pendingHandoff !== undefined) {
+        await finalizeDeactivation(pendingHandoff);
+      }
+      disposed = true;
+      diagnostics.record({
+        kind: "disposed",
+        message: "lifecycle coordinator disposed",
+        state: adapter.state,
+      });
+    });
+  };
+
+  return {
+    get state() {
+      return adapter.state;
+    },
+    diagnostics,
+    activate,
+    beginDeactivation,
+    dispose,
+  };
+}
