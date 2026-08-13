@@ -4,7 +4,7 @@
 
 **Blocked by:** impl-03 — Remove default Synara tools and add dormant MCP extension; impl-04 — Bind Synara MCP authority to the authenticated subject.
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Implement dormant, activating, active, deactivating, and unavailable transitions.
 - [x] Stage identity, credentials, connection, discovery, and schema validation before exposure.
@@ -22,6 +22,9 @@ Focused verification passed 61 tests across `piSynaraMcpLifecycle.test.ts`,
 The standalone server typecheck still reports pre-existing errors outside the
 impl-06 change surface in agent-gateway, orchestration, and WebSocket files;
 all impl-06-local type errors found during this ticket were fixed.
+
+**Final acceptance:** Accepted at `3dfc98d1` by
+[Decision 23](../decisions/23-impl-06-final-acceptance.md).
 
 ## Testing Seams
 
