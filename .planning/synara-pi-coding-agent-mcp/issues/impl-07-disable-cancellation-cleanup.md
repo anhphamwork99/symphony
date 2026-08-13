@@ -28,9 +28,11 @@ per-session lifecycle coordinator through `piSynaraMcpDisable.ts`:
   message `Synara MCP is disabled; ask the user to run /Enable Synara MCP`;
   late gateway callbacks are suppressed and calls are never replayed.
 - Gateway-side cancellation and drainage use the shared agent-gateway
-  in-flight request registry (session-scoped cancel keyed by the retired
-  credential's session identity) with the existing two-second bounded
-  timeout; credentials are revoked only after the drain barrier settles, or
+  in-flight request registry: the exact active turn's write authority is
+  retired first (`retireSessionTurn(token, turnId)`, tombstones the bearer
+  synchronously and returns the exact-turn drain barrier), awaited inside
+  the bounded drain, then the session-scoped cancel settles the remaining
+  requests; credentials are revoked only after the drain barrier settles, or
   best-effort after the drain timeout.
 - Resources are cleared immediately; the runtime reload that removes the live
   tool surface runs only at the safe boundary (`agent_end`) when a turn is
@@ -52,14 +54,18 @@ impl-08 (project-wide fan-out/wait-set) and impl-09 (restart recovery) remain
 out of scope.
 
 **Focused verification:** `piSynaraMcpToolExecution.test.ts` 8/8,
-`piSynaraMcpLifecycle.test.ts` 34/34, `piSynaraMcpDisable.test.ts` 8/8,
-`piSynaraMcpExtension.test.ts` 9/9, `PiAdapter.test.ts` 36/36 (8 new AC1
-tests), `ProviderService.test.ts` 86/86 (5 new AC1 routing tests),
-`synaraMcpCommand.test.ts` 8/8 (2 new terminal tests), `wsRpc.auth.test.ts`
-8/8 and `wsRpc.connectionLifecycle.test.ts` 26/26 (unchanged files). Focused
-seam pass: 223/223. `git diff --check` passes. The workspace `bun run test`
-stalls in the server suite (same as impl-06's acceptance record, Decision
-23).
+`piSynaraMcpLifecycle.test.ts` 35/35 (1 new Decision 14 exact-turn identity
+handoff test), `piSynaraMcpDisable.test.ts` 10/10 (2 new activeTurnId flow
+tests), `piSynaraMcpExtension.test.ts` 9/9, `PiAdapter.test.ts` 37/37 (1 new
+Decision 14 retirement-ordering test; the AC2 test now runs through the
+mapped custom-tool seam with the exact structured failure, non-MCP turn
+continuity, and no session.abort), `ProviderService.test.ts` 87/87 (1 new
+AC1 behavioral test through the public disable into the real orchestration
+at the Pi adapter boundary), `synaraMcpCommand.test.ts` 8/8 (unchanged
+file), `wsRpc.auth.test.ts` 8/8 and `wsRpc.connectionLifecycle.test.ts`
+26/26 (unchanged files). Focused seam pass: 228/228. `git diff --check`
+passes. The workspace `bun run test` stalls in the server suite (same as
+impl-06's acceptance record, Decision 23).
 
 Full server suite evidence is inherited from the implementing agent's single
 completed run: `27 failed | 3851 passed | 16 skipped`, with all failures in

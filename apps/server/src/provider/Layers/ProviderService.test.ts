@@ -20,6 +20,7 @@ import type {
 import {
   ApprovalRequestId,
   EventId,
+  type McpAuthorityBinding,
   type ProviderKind,
   ProviderSessionStartInput,
   ThreadId,
@@ -64,6 +65,10 @@ import {
   PROVIDER_RUNTIME_QUARANTINE_CAUSE_MAX_BYTES,
   summarizeProviderRuntimeQuarantineCause,
 } from "./ProviderService.ts";
+import { makePiSessionSynaraMcpCoordinator } from "./PiAdapter.ts";
+import { makePiSynaraMcpDormantExtension } from "../piSynaraMcpExtension.ts";
+import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
+import { makePiSynaraMcpToolExecutionRegistry } from "../piSynaraMcpToolExecution.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -3476,6 +3481,136 @@ piInteractionRouting.layer("ProviderServiceLive Pi interaction generation", (it)
 
 const piDisableRouting = makeProviderServiceLayer(undefined, { includePi: true });
 piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routing (impl-07)", (it) => {
+  it.effect("runs the real disable orchestration at the Pi adapter boundary through the public operation (AC1 behavioral)", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-pi-disable-behavior");
+      yield* provider.startSession(threadId, {
+        provider: "pi",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      // Real impl-07 disable machinery mounted behind the routed Pi adapter
+      // boundary: a real lifecycle coordinator, real execution registry, real
+      // disable orchestration, and a fake gateway credentials boundary. Only
+      // the public ProviderService.disableSynaraMcp operation drives it.
+      const { adapter: dormantAdapter } = makePiSynaraMcpDormantExtension();
+      const stagedTools: unknown[] = [];
+      const executions = makePiSynaraMcpToolExecutionRegistry();
+      const revoked: string[] = [];
+      const retired: Array<{ readonly token: string; readonly turnId: string }> = [];
+      const cancelled: Array<{ readonly sessionKey: string }> = [];
+      const authority: McpAuthorityBinding = {
+        authorityId: "mcp-authority-behavior",
+        subject: "subject-1",
+        kind: "authenticated",
+        authSessionId: "auth-session-1",
+        authExpiresAt: Date.now() + 60_000,
+        issuedAt: Date.now(),
+        credentialExpiresAt: Date.now() + 60_000,
+        sessionGeneration: "gen-1",
+        lifecycleGeneration: null,
+        projectId: null,
+      };
+      const coordinator = makePiSessionSynaraMcpCoordinator({
+        threadId,
+        adapter: dormantAdapter,
+        stagedTools,
+        executions,
+        runtime: { session: { reload: async () => undefined } },
+        mcpAuthority: authority,
+        credentials: {
+          connectionForThread: () => ({
+            url: "http://127.0.0.1:3773/mcp",
+            bearerToken: "token-behavior",
+          }),
+          revokeSessionToken: (token) => {
+            revoked.push(token);
+          },
+          verifySession: (token) =>
+            token === "token-behavior" ? { sessionKey: "session-behavior" } : null,
+          retireSessionTurn: async (token, turnId) => {
+            retired.push({ token, turnId });
+          },
+          cancelInFlightRequests: (selector) => {
+            cancelled.push(selector);
+            return { count: 1, settled: Promise.resolve() };
+          },
+        },
+        fetch: async (_input, init) => {
+          const body = JSON.parse(String(init?.body));
+          return Response.json({
+            jsonrpc: "2.0",
+            id: body.id,
+            result:
+              body.method === "initialize"
+                ? {
+                    protocolVersion: "2025-06-18",
+                    capabilities: {},
+                    serverInfo: { name: "synara", version: "1.0.0" },
+                  }
+                : {
+                    tools: [
+                      {
+                        name: "synara_list_threads",
+                        description: "List Synara threads.",
+                        inputSchema: { type: "object", properties: {} },
+                      },
+                    ],
+                  },
+          });
+        },
+      });
+      // Activate through the real coordinator at the safe boundary.
+      const activation = coordinator.activate({});
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+      yield* Effect.promise(() => dormantAdapter.notifySafeBoundary());
+      const activationResult = yield* Effect.promise(() => activation);
+      assert.equal(activationResult.ok, true);
+      assert.equal(activationResult.state, "active");
+      assert.equal(activationResult.alreadyActive, false);
+      assert.equal(stagedTools.length, 1);
+
+      // Mount the real disable operation at the adapter boundary, exactly as
+      // the production PiAdapter wires it (including the exact active turn).
+      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
+        (
+          _input: { readonly threadId: ThreadId },
+        ): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
+          Effect.tryPromise({
+            try: () =>
+              disablePiSynaraMcpSession({
+                coordinator,
+                executions,
+                awaitSafeBoundary: false,
+                activeTurnId: "turn-active-1" as TurnId,
+              }),
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: "pi",
+                method: "synara-mcp/disable",
+                detail: "disable exploded",
+                cause,
+              }),
+          }),
+      );
+
+      const result = yield* provider.disableSynaraMcp({ threadId });
+
+      // The public operation drove the real boundary: the synchronous fence,
+      // exact-turn retirement, session cancellation, and revocation all ran
+      // in Decision 14 order and the terminal result is dormant.
+      assert.deepEqual(result, { state: "dormant" });
+      assert.equal(executions.isFenced(), true);
+      assert.deepEqual(retired, [{ token: "token-behavior", turnId: "turn-active-1" }]);
+      assert.deepEqual(cancelled, [{ sessionKey: "session-behavior" }]);
+      assert.deepEqual(revoked, ["token-behavior"]);
+      assert.equal(coordinator.state, "dormant");
+    }),
+  );
+
   it.effect("delegates the per-session disable to the routed Pi adapter", () =>
     Effect.gen(function* () {
       piDisableRouting.pi.adapter.disableSynaraMcp?.mockClear();

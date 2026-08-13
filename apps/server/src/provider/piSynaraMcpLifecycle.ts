@@ -174,6 +174,11 @@ export interface PiSynaraMcpDeactivationHandoff {
    */
   readonly complete: (options?: {
     readonly awaitSafeBoundary?: boolean;
+    /**
+     * Exact active turn identity at disable time (Decision 14 step 2); the
+     * cancel seam retires this turn's write authority before cancellation.
+     */
+    readonly turnId?: string;
   }) => Promise<{ readonly state: "dormant" | "unavailable" }>;
 }
 
@@ -192,8 +197,16 @@ export interface PiSynaraMcpDeactivationSeams {
   /**
    * Cancel matching gateway-side in-flight requests and resolve when the
    * registry drain barrier settles (e.g. session-scoped registry cancel).
+   * `options.turnId` is the exact active turn identity at disable time
+   * (Decision 14 step 2): the seam must retire that turn's write authority
+   * (e.g. `AgentGatewayCredentialsShape.retireSessionTurn`) before the
+   * session-wide cancellation and await its drain barrier inside the bounded
+   * drain so revocation cannot race a live write.
    */
-  readonly cancelGatewayRequests?: (staged: PiSynaraMcpStagedActivation) => Promise<void>;
+  readonly cancelGatewayRequests?: (
+    staged: PiSynaraMcpStagedActivation,
+    options?: { readonly turnId?: string },
+  ) => Promise<void>;
   /** Drain bound for {@link PiSynaraMcpDeactivationSeams.cancelGatewayRequests}. */
   readonly drainTimeoutMs?: number;
   /** Reload the runtime so the cleared surface applies; deferred to the safe boundary when awaited. */
@@ -354,6 +367,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
   const drainGatewayRequests = async (
     staged: PiSynaraMcpStagedActivation,
     generation: string,
+    turnId: string | undefined,
   ): Promise<boolean> => {
     const cancel = deactivationSeams.cancelGatewayRequests;
     if (cancel === undefined) return true;
@@ -362,7 +376,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
       deactivationSeams.drainTimeoutMs ?? PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS,
     );
     const outcome = await Promise.race([
-      cancel(staged).then(
+      cancel(staged, { turnId }).then(
         () => "drained" as const,
         (cause) => ({ kind: "failed" as const, cause }),
       ),
@@ -391,7 +405,11 @@ export function makePiSynaraMcpLifecycleCoordinator(
    */
   const finalizeDeactivation = async (
     handoff: PendingHandoff,
-    options: { readonly awaitSafeBoundary: boolean; readonly reload: boolean },
+    options: {
+      readonly awaitSafeBoundary: boolean;
+      readonly reload: boolean;
+      readonly turnId?: string;
+    },
   ): Promise<"dormant" | "unavailable"> => {
     if (handoff.final !== undefined) {
       return handoff.final;
@@ -412,7 +430,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
       }
     }
 
-    const drained = await drainGatewayRequests(handoff.staged, handoff.generation);
+    const drained = await drainGatewayRequests(handoff.staged, handoff.generation, options.turnId);
     const cleanupProven = (await runCleanup(handoff.staged, handoff.generation)) === "dormant";
 
     let reloadProven = true;
@@ -620,6 +638,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
 
       const complete = (options?: {
         readonly awaitSafeBoundary?: boolean;
+        readonly turnId?: string;
       }): Promise<{ readonly state: "dormant" | "unavailable" }> =>
         enqueue(async () => {
           if (handoff.final !== undefined) {
@@ -635,6 +654,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
           const outcome = await finalizeDeactivation(handoff, {
             awaitSafeBoundary: options?.awaitSafeBoundary ?? true,
             reload: true,
+            turnId: options?.turnId,
           });
           return { state: outcome };
         });

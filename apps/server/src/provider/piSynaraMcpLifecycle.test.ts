@@ -625,6 +625,24 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(harness.coordinator.state).toBe("dormant");
   });
 
+  it("passes the exact active turn identity into the gateway cancel seam (Decision 14)", async () => {
+    const cancelOptions: Array<{ readonly turnId?: string }> = [];
+    const harness = makeHarness({}, {
+      cancelGatewayRequests: async (_staged, options) => {
+        cancelOptions.push(options ?? {});
+      },
+    });
+    await activateAndCommit(harness);
+
+    const handoff = await harness.coordinator.beginDeactivation();
+    const outcome = await handoff.complete({ awaitSafeBoundary: false, turnId: "turn-exact-1" });
+
+    expect(outcome).toEqual({ state: "dormant" });
+    // The handoff carries the disable-time turn identity to the cancel seam
+    // so it can retire exact-turn write authority before cancellation.
+    expect(cancelOptions).toEqual([{ turnId: "turn-exact-1" }]);
+  });
+
   it("revokes credentials only after the gateway drain barrier settles", async () => {
     const order: string[] = [];
     let releaseDrain!: () => void;

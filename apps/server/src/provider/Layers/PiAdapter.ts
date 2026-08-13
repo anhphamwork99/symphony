@@ -560,15 +560,22 @@ export interface PiSessionSynaraMcpCoordinatorInput {
   readonly mcpAuthority: McpAuthorityBinding | null | undefined;
   /**
    * Shared gateway credentials; absent fails closed at the credential stage.
-   * The optional verify/cancel members (impl-07) drive the session-scoped
-   * gateway registry cancellation and drain barrier.
+   * The optional verify/cancel/retire members (impl-07) drive the
+   * session-scoped gateway registry cancellation and drain barrier; the
+   * retire member tombstones the exact active turn's write authority before
+   * cancellation (Decision 14 step 2).
    */
   readonly credentials?: Pick<
     AgentGatewayCredentialsShape,
     "connectionForThread" | "revokeSessionToken"
   > &
     Partial<
-      Pick<AgentGatewayCredentialsShape, "verifySession" | "cancelInFlightRequests">
+      Pick<
+        AgentGatewayCredentialsShape,
+        | "verifySession"
+        | "cancelInFlightRequests"
+        | "retireSessionTurn"
+      >
     >;
   readonly fetch?: AgentGatewayMcpFetch;
   /** Drain bound for the gateway cancellation barrier (default 2000ms). */
@@ -714,8 +721,12 @@ export function makePiSessionSynaraMcpCoordinator(
     // Cancel and drain gateway-side in-flight requests through the shared
     // in-flight request registry, keyed by the session identity of the
     // retired credential (the gateway registry owns the cancellation and its
-    // drain barrier; the coordinator bounds it with the 2s timeout).
-    cancelGatewayRequests: async (staged) => {
+    // drain barrier; the coordinator bounds it with the 2s timeout). When the
+    // exact active turn identity is known, retire that turn's write authority
+    // synchronously first (Decision 14 step 2) so a racing request can never
+    // bind this bearer to a later turn, and await the retirement barrier
+    // inside the bounded drain before the session-wide cancellation.
+    cancelGatewayRequests: async (staged, options) => {
       const connection = staged.credential;
       if (!isRecord(connection) || typeof connection.bearerToken !== "string") {
         return;
@@ -726,6 +737,10 @@ export function makePiSessionSynaraMcpCoordinator(
       const identity = credentials.verifySession?.(connection.bearerToken) ?? null;
       if (identity === null) {
         return;
+      }
+      const turnId = options?.turnId;
+      if (turnId !== undefined) {
+        await credentials.retireSessionTurn?.(connection.bearerToken, turnId);
       }
       await credentials.cancelInFlightRequests?.({ sessionKey: identity.sessionKey }).settled;
     },
@@ -2915,6 +2930,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             disablePiSynaraMcpSession({
               coordinator: context.synaraMcpCoordinator,
               executions: context.synaraMcpExecutions,
+              // The exact turn active at disable time: its write authority is
+              // retired before the gateway cancellation (Decision 14 step 2).
+              activeTurnId: context.activeTurnId,
               // A running turn keeps its tool surface until agent_end; an idle
               // session has no active turn, so the safe boundary is immediate.
               awaitSafeBoundary: context.activeTurnId !== undefined,

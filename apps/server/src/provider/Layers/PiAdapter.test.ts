@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { McpAuthorityBinding, ProviderKind, ThreadId } from "@synara/contracts";
+import type { McpAuthorityBinding, ProviderKind, ThreadId, TurnId } from "@synara/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   createPiModelRuntime,
@@ -20,6 +20,7 @@ import {
   getPiDiscoverableModels,
   getPiSupportedThinkingOptions,
   buildPiAgentGatewayCustomTools,
+  mapAgentGatewayMcpToolsToPiCustomTools,
   makePiBashProcessSupervisor,
   makePiRuntimeEventBase,
   makePiSessionSynaraMcpCoordinator,
@@ -194,6 +195,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     readonly minted: Array<{ readonly url: string; readonly bearerToken: string }>;
     readonly mintedAuthorities: McpAuthorityBinding[];
     readonly revoked: string[];
+    readonly retired: Array<{ readonly token: string; readonly turnId: string }>;
     readonly requests: Array<{ readonly token: string | null; readonly method: string }>;
     readonly reload: ReturnType<typeof vi.fn>;
     readonly abort: ReturnType<typeof vi.fn>;
@@ -212,6 +214,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       readonly cancelInFlightRequests?: (selector: {
         readonly sessionKey: string;
       }) => { readonly count: number; readonly settled: Promise<void> };
+      readonly retireSessionTurn?: (token: string, turnId: string) => Promise<void>;
     };
     readonly drainTimeoutMs?: number;
   } = {}): CoordinatorHarness {
@@ -221,6 +224,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       const minted: Array<{ url: string; bearerToken: string }> = [];
       const mintedAuthorities: McpAuthorityBinding[] = [];
     const revoked: string[] = [];
+    const retired: Array<{ readonly token: string; readonly turnId: string }> = [];
     const requests: Array<{ token: string | null; method: string }> = [];
     const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
       if (options.discoveryGate !== undefined) {
@@ -274,6 +278,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         : {
             verifySession: options.gatewayCancel.verifySession,
             cancelInFlightRequests: options.gatewayCancel.cancelInFlightRequests,
+            retireSessionTurn: options.gatewayCancel.retireSessionTurn,
           }),
     };
     const reload = vi.fn(async () => {
@@ -301,6 +306,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         minted,
         mintedAuthorities,
         revoked,
+        retired,
         requests,
         reload,
         abort,
@@ -598,6 +604,54 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       expect(harness.coordinator.state).toBe("dormant");
     });
 
+    it("retires the exact active turn write authority before the session cancel and revoke (Decision 14)", async () => {
+      const order: string[] = [];
+      const retired: Array<{ readonly token: string; readonly turnId: string }> = [];
+      const cancelled: Array<{ readonly sessionKey: string }> = [];
+      let releaseDrain!: () => void;
+      const drainGate = new Promise<void>((resolve) => {
+        releaseDrain = resolve;
+      });
+      const harness = makeCoordinatorHarness({
+        mcpAuthority: AUTHORITY_BINDING,
+        gatewayCancel: {
+          verifySession: (token) =>
+            token === "token-1" ? { sessionKey: "session-key-1" } : null,
+          retireSessionTurn: async (token, turnId) => {
+            retired.push({ token, turnId });
+            order.push("retire");
+          },
+          cancelInFlightRequests: (selector) => {
+            cancelled.push(selector);
+            order.push("cancel");
+            return { count: 1, settled: drainGate };
+          },
+        },
+      });
+      await activateAndCommit(harness);
+
+      const disable = disablePiSynaraMcpSession({
+        coordinator: harness.coordinator,
+        executions: harness.executions,
+        awaitSafeBoundary: false,
+        activeTurnId: "turn-active-1" as TurnId,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // The exact active turn was retired synchronously before the
+      // session-wide cancellation, whose drain barrier is still pending:
+      // revocation must wait (Decision 14 steps 2 -> 4 -> 5).
+      expect(retired).toEqual([{ token: "token-1", turnId: "turn-active-1" }]);
+      expect(order).toEqual(["retire", "cancel"]);
+      expect(cancelled).toEqual([{ sessionKey: "session-key-1" }]);
+      expect(harness.revoked).toEqual([]);
+
+      releaseDrain();
+      await expect(disable).resolves.toEqual({ state: "dormant" });
+      expect(harness.revoked).toEqual(["token-1"]);
+      expect(harness.coordinator.state).toBe("dormant");
+    });
+
     it("reloads the runtime only at the safe boundary when a turn is active", async () => {
       const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
       await activateAndCommit(harness);
@@ -722,25 +776,91 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       ).toBe(true);
     });
 
-    it("never aborts the Pi session and leaves non-MCP work usable (AC2 turn continuity)", async () => {
+    it("AC2: a mapped Synara MCP tool fails with the structured disabled result while the Pi turn continues without abort or replay", async () => {
+      // The mapped custom-tool seam is the exact production path the Pi agent
+      // loop executes: `mapAgentGatewayMcpToolsToPiCustomTools` wraps each
+      // gateway call with the session's execution registry. A disable must
+      // settle the in-flight execution with the exact structured
+      // `synara_mcp_disabled` failure, leave an ordinary non-MCP tool/turn
+      // path usable, never call session.abort, and never replay the call.
       const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
       await activateAndCommit(harness);
 
+      let gatewayCalls = 0;
+      let releaseCall!: () => void;
+      const callGate = new Promise<void>((resolve) => {
+        releaseCall = resolve;
+      });
+      const mappedTools = mapAgentGatewayMcpToolsToPiCustomTools({
+        tools: CATALOG_TOOLS,
+        connection: { url: "http://127.0.0.1:3773/mcp", bearerToken: "token-1" },
+        defineTool: (tool) => tool,
+        executions: harness.executions,
+        fetch: async (_input, init) => {
+          const body = JSON.parse(String(init?.body));
+          if (body.method === "tools/call") {
+            gatewayCalls += 1;
+            await callGate;
+            return Response.json({
+              jsonrpc: "2.0",
+              id: body.id,
+              result: { content: [{ type: "text", text: "late gateway result" }] },
+            });
+          }
+          throw new Error(`unexpected gateway method ${body.method}`);
+        },
+      });
+      const mappedTool = mappedTools[0];
+      expect(mappedTool).toBeDefined();
+
+      // The Pi turn runs the Synara MCP tool; the gateway call is in flight.
+      const execution = mappedTool.execute("call-ac2", {}, undefined, undefined, {} as never);
+      expect(harness.executions.inFlightCount()).toBe(1);
+
+      // Disable with the exact active turn identity, as the adapter does.
       await disablePiSynaraMcpSession({
         coordinator: harness.coordinator,
         executions: harness.executions,
         awaitSafeBoundary: false,
+        activeTurnId: "turn-active-1" as TurnId,
       });
 
-      // The disable path never touches session.abort: the Pi turn continues
-      // with coding-agent tools after the structured disabled result.
+      // The Pi-facing execution observes the exact structured disabled
+      // failure (code and message), not a generic rejection.
+      await expect(execution).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+        message: PI_SYNARA_MCP_DISABLED_REFUSAL,
+      });
+      expect(harness.executions.inFlightCount()).toBe(0);
+      expect(harness.executions.disabledSettledCount()).toBe(1);
+      // The gateway call was aborted, not replayed: exactly one tools/call
+      // reached the gateway and a late resolution mutates nothing.
+      expect(gatewayCalls).toBe(1);
+      releaseCall();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(gatewayCalls).toBe(1);
+      await expect(execution).rejects.toMatchObject({
+        code: SYNARA_MCP_DISABLED_ERROR_CODE,
+      });
+
+      // The Pi turn continues without a whole-session abort: session.abort
+      // was never called and an ordinary non-MCP tool path stays usable.
       expect(harness.abort).not.toHaveBeenCalled();
-      // Non-MCP work is unaffected: a plain coding-agent tool call still runs.
-      await expect(Promise.resolve("coding-agent-tool-ok")).resolves.toBe("coding-agent-tool-ok");
+      const codingAgentTool = {
+        name: "bash",
+        execute: async () => ({
+          content: [{ type: "text", text: "coding-agent-tool-ok" }],
+        }),
+      };
+      await expect(
+        codingAgentTool.execute("call-bash", { command: "echo ok" }, undefined, undefined, {} as never),
+      ).resolves.toMatchObject({ content: [{ type: "text", text: "coding-agent-tool-ok" }] });
       // A later Synara admission is fenced and rejected before its handler runs.
       const call = vi.fn(async () => "gateway");
       await expect(harness.executions.execute({ call })).rejects.toMatchObject({
         code: SYNARA_MCP_DISABLED_ERROR_CODE,
+        message: PI_SYNARA_MCP_DISABLED_REFUSAL,
       });
       expect(call).not.toHaveBeenCalled();
     });

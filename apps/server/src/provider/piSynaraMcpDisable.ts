@@ -6,6 +6,8 @@
 // gateway cancel/drain with the bounded timeout -> revoke/clear -> reload at
 // the safe boundary). It never aborts the Pi session/turn, never replays a
 // cancelled call, and duplicate disables are idempotent.
+import type { TurnId } from "@synara/contracts";
+
 import {
   PI_SYNARA_MCP_DEACTIVATION_REQUIRES_ACTIVE,
   PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
@@ -29,6 +31,13 @@ export interface PiSynaraMcpDisableInput {
    * reload runs immediately because no turn is running.
    */
   readonly awaitSafeBoundary?: boolean;
+  /**
+   * The exact active turn identity at disable time (Decision 14 step 2). The
+   * gateway cancel seam retires this turn's write authority before any
+   * cancellation so requests bound to the turn settle before revocation.
+   * Omitted when the session has no active turn (idle disable).
+   */
+  readonly activeTurnId?: TurnId;
 }
 
 export interface PiSynaraMcpDisableResult {
@@ -79,6 +88,7 @@ export async function disablePiSynaraMcpSession(
 
   const outcome = await handoff.complete({
     awaitSafeBoundary: input.awaitSafeBoundary ?? true,
+    turnId: input.activeTurnId,
   });
   if (outcome.state === "unavailable") {
     return { state: "unavailable", detail: PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL };

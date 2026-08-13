@@ -4,6 +4,8 @@
 // duplicate disables, and the fail-closed dormant/unavailable results.
 import { describe, expect, it, vi } from "vitest";
 
+import type { TurnId } from "@synara/contracts";
+
 import { PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL, disablePiSynaraMcpSession } from "./piSynaraMcpDisable.ts";
 import {
   makePiSynaraMcpLifecycleCoordinator,
@@ -124,6 +126,56 @@ describe("disablePiSynaraMcpSession", () => {
     expect(harness.reloads).toHaveBeenCalledTimes(1);
     expect(harness.coordinator.state).toBe("dormant");
     expect(harness.executions.disabledSettledCount()).toBe(1);
+  });
+
+  it("passes the exact active turn identity to the gateway cancel seam (Decision 14)", async () => {
+    const order: string[] = [];
+    const cancelOptions: Array<{ readonly turnId?: string }> = [];
+    const harness = makeHarness({
+      settleExecutions: async () => {
+        order.push("settle");
+        await harness.executions.settleAll();
+      },
+      cancelGatewayRequests: async (_staged, options) => {
+        cancelOptions.push(options ?? {});
+        order.push("cancel");
+      },
+    });
+    await activateAndCommit(harness);
+
+    const outcome = await disablePiSynaraMcpSession({
+      coordinator: harness.coordinator,
+      executions: harness.executions,
+      awaitSafeBoundary: false,
+      activeTurnId: "turn-disable-exact" as TurnId,
+    });
+
+    expect(outcome).toEqual({ state: "dormant" });
+    // The exact active turn identity is carried from the disable input
+    // through the handoff into the gateway cancel seam (Decision 14 step 2),
+    // and the ordered sequence still settles before the cancel.
+    expect(cancelOptions).toEqual([{ turnId: "turn-disable-exact" }]);
+    expect(order).toEqual(["settle", "cancel"]);
+    expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("omits the turn identity for an idle disable with no active turn", async () => {
+    const cancelOptions: Array<{ readonly turnId?: string }> = [];
+    const harness = makeHarness({
+      cancelGatewayRequests: async (_staged, options) => {
+        cancelOptions.push(options ?? {});
+      },
+    });
+    await activateAndCommit(harness);
+
+    const outcome = await disablePiSynaraMcpSession({
+      coordinator: harness.coordinator,
+      executions: harness.executions,
+      awaitSafeBoundary: false,
+    });
+
+    expect(outcome).toEqual({ state: "dormant" });
+    expect(cancelOptions).toEqual([{ turnId: undefined }]);
   });
 
   it("parks the runtime reload at the safe boundary when awaited", async () => {
