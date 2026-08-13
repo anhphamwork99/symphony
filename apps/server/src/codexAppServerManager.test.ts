@@ -18,6 +18,7 @@ import {
   BROWSER_TOOL_NAMES,
   ThreadId,
   TurnId,
+  type McpAuthorityBinding,
   type RuntimeMode,
 } from "@synara/contracts";
 
@@ -124,6 +125,141 @@ describe("Codex Synara harness policy", () => {
         process.env.SYNARA_HOME = previousSynaraHome;
       }
       rmSync(homePath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("MCP authority lease wiring (Decision 21)", () => {
+  // Server-minted subject-bound authority snapshot (Decision 21). The manager
+  // must forward the exact object into the lease seam; the seam fails closed
+  // when the binding is absent and never invents identity from thread ids.
+  const binding: McpAuthorityBinding = {
+    authorityId: "mcp-authority-manager-1",
+    subject: "user-alice",
+    kind: "authenticated",
+    authSessionId: "session-alice",
+    authExpiresAt: 1_770_003_600_000,
+    issuedAt: 1_770_000_000_000,
+    credentialExpiresAt: 1_770_003_600_000,
+    sessionGeneration: "gen-session-1",
+    lifecycleGeneration: null,
+    projectId: "project-1",
+  };
+
+  /**
+   * The lease seam is reached after the CLI version gate and before process
+   * spawn. A throwing probe proves the wiring without needing a Codex binary:
+   * startSession/forkThread reject, and the recorded call carries the exact
+   * binding (or explicit undefined when none was resolved).
+   */
+  const leaseProbeManager = () => {
+    const acquireSessionLease = vi.fn(
+      (_threadId: ThreadId, _mcpAuthority?: McpAuthorityBinding | null) => {
+        throw new Error("lease-wiring-probe");
+      },
+    );
+    const manager = new CodexAppServerManager(undefined, {
+      agentGatewayMcp: {
+        endpointUrl: () => "http://127.0.0.1:0/mcp",
+        acquireSessionLease,
+      },
+    });
+    return { manager, acquireSessionLease };
+  };
+
+  const passVersionGate = (manager: CodexAppServerManager) =>
+    vi
+      .spyOn(
+        manager as unknown as {
+          assertSupportedCodexCliVersion: (input: {
+            binaryPath: string;
+            cwd: string;
+            homePath?: string;
+          }) => Promise<void>;
+        },
+        "assertSupportedCodexCliVersion",
+      )
+      .mockResolvedValue(undefined);
+
+  it("passes the exact server-minted binding into the session lease on start", async () => {
+    const { manager, acquireSessionLease } = leaseProbeManager();
+    const versionCheck = passVersionGate(manager);
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("thread-leased-start"),
+          provider: "codex",
+          runtimeMode: "full-access",
+          mcpAuthority: binding,
+        }),
+      ).rejects.toThrow("lease-wiring-probe");
+      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(asThreadId("thread-leased-start"));
+      expect(acquireSessionLease.mock.calls[0]?.[1]).toBe(binding);
+    } finally {
+      versionCheck.mockRestore();
+      await manager.stopAll();
+    }
+  });
+
+  it("forwards an absent binding as undefined so issuance fails closed", async () => {
+    const { manager, acquireSessionLease } = leaseProbeManager();
+    const versionCheck = passVersionGate(manager);
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("thread-leased-unbound"),
+          provider: "codex",
+          runtimeMode: "full-access",
+        }),
+      ).rejects.toThrow("lease-wiring-probe");
+      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(asThreadId("thread-leased-unbound"));
+      expect(acquireSessionLease.mock.calls[0]?.[1]).toBeUndefined();
+    } finally {
+      versionCheck.mockRestore();
+      await manager.stopAll();
+    }
+  });
+
+  it("passes the exact server-minted binding into the session lease on fork", async () => {
+    const { manager, acquireSessionLease } = leaseProbeManager();
+    const versionCheck = passVersionGate(manager);
+    try {
+      await expect(
+        manager.forkThread({
+          sourceThreadId: asThreadId("thread-source"),
+          sourceResumeCursor: { threadId: "thread-source" },
+          threadId: asThreadId("thread-leased-fork"),
+          runtimeMode: "full-access",
+          mcpAuthority: binding,
+        }),
+      ).rejects.toThrow("lease-wiring-probe");
+      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(asThreadId("thread-leased-fork"));
+      expect(acquireSessionLease.mock.calls[0]?.[1]).toBe(binding);
+    } finally {
+      versionCheck.mockRestore();
+      await manager.stopAll();
+    }
+  });
+
+  it("forwards an absent binding as undefined on fork so issuance fails closed", async () => {
+    const { manager, acquireSessionLease } = leaseProbeManager();
+    const versionCheck = passVersionGate(manager);
+    try {
+      await expect(
+        manager.forkThread({
+          sourceThreadId: asThreadId("thread-source"),
+          sourceResumeCursor: { threadId: "thread-source" },
+          threadId: asThreadId("thread-leased-fork-unbound"),
+          runtimeMode: "full-access",
+        }),
+      ).rejects.toThrow("lease-wiring-probe");
+      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(
+        asThreadId("thread-leased-fork-unbound"),
+      );
+      expect(acquireSessionLease.mock.calls[0]?.[1]).toBeUndefined();
+    } finally {
+      versionCheck.mockRestore();
+      await manager.stopAll();
     }
   });
 });

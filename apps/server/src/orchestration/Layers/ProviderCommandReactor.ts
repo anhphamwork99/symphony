@@ -1350,6 +1350,10 @@ const make = Effect.gen(function* () {
       const forked = yield* providerService.forkThread({
         ...providerSessionOptions,
         sourceThreadId: thread.forkSourceThreadId,
+        // Decision 21: the same trusted binding resolved for this ensure rides
+        // the fork contract so the forked session mints subject-bound gateway
+        // credentials; absent authority still fails closed with no lease.
+        ...(mcpAuthority !== null ? { mcpAuthority } : {}),
       });
       if (forked) {
         if (

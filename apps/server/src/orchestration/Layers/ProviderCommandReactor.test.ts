@@ -616,7 +616,11 @@ describe("ProviderCommandReactor", () => {
     let reactorStarted = false;
     const startReactor = async () => {
       if (reactorStarted) return;
-      await Effect.runPromise(reactor.start.pipe(Scope.provide(scope!)));
+      // Run `reactor.start` inside the harness runtime: the layer's services
+      // (including the deterministic in-memory `McpSessionAuthority` fake) are
+      // resolved live from the fiber context at delivery time, and the global
+      // runtime used by `Effect.runPromise` carries none of them.
+      await runtime.runPromise(reactor.start.pipe(Scope.provide(scope!)));
       reactorStarted = true;
     };
     if (input?.startReactor !== false) {
@@ -661,6 +665,7 @@ describe("ProviderCommandReactor", () => {
     return {
       engine,
       reactor,
+      runtime,
       mcpSessionAuthority,
       startSession,
       listSessions,
@@ -1172,7 +1177,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.sendTurn).not.toHaveBeenCalled();
 
     rejectEnqueue = false;
-    const reconciled = await Effect.runPromise(
+    const reconciled = await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: queuedEvent.sequence,
         threadId,
@@ -1275,7 +1280,7 @@ describe("ProviderCommandReactor", () => {
     expect((await readHarnessThread(harness, threadId))?.deletedAt).not.toBeNull();
 
     rejectEnqueue = false;
-    const reconciled = await Effect.runPromise(
+    const reconciled = await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: queuedEvent.sequence,
         threadId,
@@ -1535,7 +1540,7 @@ describe("ProviderCommandReactor", () => {
     });
     expect(harness.stopTask.mock.calls.length).toBe(0);
 
-    const reconciliation = await Effect.runPromise(
+    const reconciliation = await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: blocker.pipe(Option.getOrThrow).eventSequence,
         threadId: ThreadId.makeUnsafe("thread-1"),
@@ -1692,7 +1697,7 @@ describe("ProviderCommandReactor", () => {
         }),
       )
     ).pipe(Option.getOrThrow);
-    const reconciled = await Effect.runPromise(
+    const reconciled = await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: blocker.eventSequence,
         threadId,
@@ -1795,7 +1800,7 @@ describe("ProviderCommandReactor", () => {
       )
     ).pipe(Option.getOrThrow);
 
-    const reconciled = await Effect.runPromise(
+    const reconciled = await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: requested.eventSequence,
         threadId,
@@ -5446,7 +5451,7 @@ describe("ProviderCommandReactor", () => {
         }),
       )
     ).pipe(Option.getOrThrow);
-    await Effect.runPromise(
+    await harness.runtime.runPromise(
       harness.reactor.reconcileDelivery({
         eventSequence: blocker.eventSequence,
         threadId: ThreadId.makeUnsafe("thread-1"),
@@ -9499,6 +9504,114 @@ describe("ProviderCommandReactor", () => {
         subject: "user-restart",
         authSessionId: "session-restart",
       });
+    });
+  });
+
+  describe("MCP authority propagation into provider forks (Decision 21)", () => {
+    const forkCreate = (threadId: ThreadId, commandId: string, createdAt: string) => ({
+      type: "thread.fork.create" as const,
+      commandId: CommandId.makeUnsafe(commandId),
+      threadId,
+      sourceThreadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: asProjectId("project-1"),
+      title: "Authority fork",
+      modelSelection: {
+        provider: "codex" as const,
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required" as const,
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      envMode: "local" as const,
+      branch: null,
+      worktreePath: null,
+      importedMessages: [],
+      createdAt,
+    });
+
+    it("forwards the exact command binding into the provider fork input", async () => {
+      const threadId = ThreadId.makeUnsafe("thread-fork-authority");
+      const harness = await createHarness({
+        forkThreadResult: {
+          threadId,
+          resumeCursor: { threadId: "forked-provider-thread" },
+        },
+      });
+      const record = harness.mcpSessionAuthority.mint({
+        subject: "user-alice",
+        kind: "authenticated",
+        authSessionId: "session-alice",
+      });
+      harness.mcpSessionAuthority.bindDispatch("cmd-fork-turn-bound", record.authorityId);
+      harness.mcpSessionAuthority.bindThread(String(threadId), record.authorityId);
+      const now = new Date().toISOString();
+
+      await Effect.runPromise(
+        harness.engine.dispatch(forkCreate(threadId, "cmd-fork-create", now)),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-fork-turn-bound"),
+          threadId,
+          message: {
+            messageId: asMessageId("fork-authority-user-1"),
+            role: "user",
+            text: "hello fork",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required" as const,
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.forkThread.mock.calls.length === 1);
+      const forkInput = harness.forkThread.mock.calls[0]?.[0];
+      expect(forkInput?.mcpAuthority).toBeDefined();
+      expect(forkInput?.mcpAuthority).toMatchObject({
+        authorityId: record.authorityId,
+        subject: "user-alice",
+        kind: "authenticated",
+        authSessionId: "session-alice",
+        sessionGeneration: record.sessionGeneration,
+        lifecycleGeneration: null,
+        projectId: "project-1",
+      });
+      expect(forkInput?.mcpAuthority?.credentialExpiresAt).toBeGreaterThan(Date.now());
+    });
+
+    it("forks without mcpAuthority when no binding exists (fail closed)", async () => {
+      const threadId = ThreadId.makeUnsafe("thread-fork-unbound");
+      const harness = await createHarness({
+        forkThreadResult: {
+          threadId,
+          resumeCursor: { threadId: "forked-provider-thread" },
+        },
+      });
+      const now = new Date().toISOString();
+
+      await Effect.runPromise(
+        harness.engine.dispatch(forkCreate(threadId, "cmd-fork-unbound-create", now)),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-fork-turn-unbound"),
+          threadId,
+          message: {
+            messageId: asMessageId("fork-unbound-user-1"),
+            role: "user",
+            text: "hello fork",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required" as const,
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.forkThread.mock.calls.length === 1);
+      expect(harness.forkThread.mock.calls[0]?.[0]?.mcpAuthority).toBeUndefined();
     });
   });
 });

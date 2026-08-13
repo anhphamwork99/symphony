@@ -4,6 +4,7 @@ import {
   ApprovalRequestId,
   EventId,
   ProviderItemId,
+  type McpAuthorityBinding,
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
@@ -246,6 +247,56 @@ validationLayer("CodexAdapterLive validation", (it) => {
         provider: "codex",
         threadId: asThreadId("thread-import"),
         forkSourceResumeCursor,
+        runtimeMode: "full-access",
+      });
+    }),
+  );
+  it.effect("forwards the exact server-minted mcpAuthority into the manager start input", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      const mcpAuthority: McpAuthorityBinding = {
+        authorityId: "mcp-authority-adapter-1",
+        subject: "user-alice",
+        kind: "authenticated",
+        authSessionId: "session-alice",
+        authExpiresAt: 1_770_003_600_000,
+        issuedAt: 1_770_000_000_000,
+        credentialExpiresAt: 1_770_003_600_000,
+        sessionGeneration: "gen-session-1",
+        lifecycleGeneration: null,
+        projectId: "project-1",
+      };
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        runtimeMode: "full-access",
+        mcpAuthority,
+      });
+
+      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        mcpAuthority,
+        runtimeMode: "full-access",
+      });
+    }),
+  );
+  it.effect("omits mcpAuthority from the manager start input when none was resolved", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        runtimeMode: "full-access",
+      });
+
+      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
     }),

@@ -1703,8 +1703,13 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               ? {
                   agentGatewayMcp: {
                     endpointUrl: () => agentGatewayCredentials.mcpEndpointUrl,
-                      acquireSessionLease: (threadId) =>
-                        acquireAgentGatewaySessionLease(agentGatewayCredentials, threadId, PROVIDER),
+                    acquireSessionLease: (threadId, mcpAuthority) =>
+                      acquireAgentGatewaySessionLease(
+                        agentGatewayCredentials,
+                        threadId,
+                        PROVIDER,
+                        mcpAuthority,
+                      ),
                   },
                 }
               : {}),
@@ -1861,6 +1866,13 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         runtimeMode: input.runtimeMode,
+        // Decision 21: the server-minted subject-bound binding (or nothing,
+        // when none was resolved) rides the manager start input so the lease
+        // seam mints gateway credentials only for trusted authority. A missing
+        // binding is never inferred from thread/provider state.
+        ...(input.mcpAuthority !== undefined && input.mcpAuthority !== null
+          ? { mcpAuthority: input.mcpAuthority }
+          : {}),
         ...codexModelSelectionOverrides(input.modelSelection),
       };
 

@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import { ProviderSendTurnInput, ProviderSessionStartInput } from "./provider";
+import {
+  ProviderForkThreadInput,
+  ProviderSendTurnInput,
+  ProviderSessionStartInput,
+} from "./provider";
 
 const decodeProviderSessionStartInput = Schema.decodeUnknownSync(ProviderSessionStartInput);
 const decodeProviderSendTurnInput = Schema.decodeUnknownSync(ProviderSendTurnInput);
+const decodeProviderForkThreadInput = Schema.decodeUnknownSync(ProviderForkThreadInput);
 
 describe("ProviderSessionStartInput", () => {
   it("accepts codex-compatible payloads", () => {
@@ -153,6 +158,66 @@ describe("ProviderSessionStartInput", () => {
           sessionGeneration: "gen-session-1",
           lifecycleGeneration: null,
           projectId: "project-1",
+        },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ProviderForkThreadInput", () => {
+  it("accepts a server-minted mcpAuthority binding (Decision 21)", () => {
+    const parsed = decodeProviderForkThreadInput({
+      sourceThreadId: "thread-1",
+      threadId: "thread-2",
+      runtimeMode: "full-access",
+      mcpAuthority: {
+        authorityId: "mcp-authority-fork-1",
+        subject: "local-owner:stable-principal",
+        kind: "local-owner",
+        authSessionId: null,
+        authExpiresAt: null,
+        issuedAt: 1_770_000_000_000,
+        credentialExpiresAt: 1_770_003_600_000,
+        sessionGeneration: "gen-session-1",
+        lifecycleGeneration: "gen-lifecycle-1",
+        projectId: "project-1",
+      },
+    });
+    expect(parsed.mcpAuthority).toMatchObject({
+      authorityId: "mcp-authority-fork-1",
+      subject: "local-owner:stable-principal",
+      kind: "local-owner",
+      sessionGeneration: "gen-session-1",
+      lifecycleGeneration: "gen-lifecycle-1",
+      projectId: "project-1",
+    });
+  });
+
+  it("stays unbound when no mcpAuthority is supplied", () => {
+    const parsed = decodeProviderForkThreadInput({
+      sourceThreadId: "thread-1",
+      threadId: "thread-2",
+      runtimeMode: "full-access",
+    });
+    expect(parsed.mcpAuthority).toBeUndefined();
+  });
+
+  it("rejects a malformed mcpAuthority binding", () => {
+    expect(() =>
+      decodeProviderForkThreadInput({
+        sourceThreadId: "thread-1",
+        threadId: "thread-2",
+        runtimeMode: "full-access",
+        mcpAuthority: {
+          subject: "local-owner:stable-principal",
+          kind: "local-owner",
+          authSessionId: null,
+          authExpiresAt: null,
+          issuedAt: 1_770_000_000_000,
+          credentialExpiresAt: 1_770_003_600_000,
+          sessionGeneration: "gen-session-1",
+          lifecycleGeneration: null,
+          projectId: null,
         },
       }),
     ).toThrow();

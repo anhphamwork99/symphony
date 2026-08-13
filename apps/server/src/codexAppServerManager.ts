@@ -6,6 +6,7 @@ import {
   ApprovalRequestId,
   BROWSER_TOOL_NAMES,
   EventId,
+  type McpAuthorityBinding,
   type ProviderComposerCapabilities,
   ProviderItemId,
   type ProviderListModelsResult,
@@ -268,6 +269,8 @@ export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
   readonly provider?: "codex";
   readonly lifecycleGeneration?: string;
+  /** Optional server-minted subject-bound MCP authority (Decision 21). */
+  readonly mcpAuthority?: McpAuthorityBinding | null;
   readonly cwd?: string;
   readonly model?: string;
   readonly serviceTier?: string;
@@ -967,7 +970,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly agentGatewayMcp:
     | {
         readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease | undefined;
+        readonly acquireSessionLease: (
+          threadId: ThreadId,
+          mcpAuthority?: McpAuthorityBinding | null,
+        ) => AgentGatewaySessionLease | undefined;
       }
     | undefined;
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
@@ -978,7 +984,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       readonly synaraSkillsDir?: string;
       readonly agentGatewayMcp?: {
         readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease | undefined;
+        readonly acquireSessionLease: (
+          threadId: ThreadId,
+          mcpAuthority?: McpAuthorityBinding | null,
+        ) => AgentGatewaySessionLease | undefined;
       };
       readonly teardownProcessTree?: typeof teardownProviderProcessTree;
       readonly taskCompleteFallbackGraceMs?: number;
@@ -1854,7 +1863,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
+      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(
+        threadId,
+        input.mcpAuthority,
+      );
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
