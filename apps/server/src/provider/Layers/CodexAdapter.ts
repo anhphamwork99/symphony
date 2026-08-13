@@ -1703,13 +1703,8 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               ? {
                   agentGatewayMcp: {
                     endpointUrl: () => agentGatewayCredentials.mcpEndpointUrl,
-                    acquireSessionLease: (threadId, mcpAuthority) =>
-                      acquireAgentGatewaySessionLease(
-                        agentGatewayCredentials,
-                        threadId,
-                        PROVIDER,
-                        mcpAuthority,
-                      )!,
+                      acquireSessionLease: (threadId) =>
+                        acquireAgentGatewaySessionLease(agentGatewayCredentials, threadId, PROVIDER),
                   },
                 }
               : {}),
@@ -1866,9 +1861,6 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         runtimeMode: input.runtimeMode,
-        ...(input.mcpAuthority !== undefined && input.mcpAuthority !== null
-          ? { mcpAuthority: input.mcpAuthority }
-          : {}),
         ...codexModelSelectionOverrides(input.modelSelection),
       };
 
