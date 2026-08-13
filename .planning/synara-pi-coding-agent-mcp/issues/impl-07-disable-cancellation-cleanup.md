@@ -105,6 +105,20 @@ same off-surface failure files failing before the stall
 surface file appears among any captured failure. Baseline equivalence of the
 remaining reported failures was not re-proven by the captured reruns.
 
+**Typecheck follow-up (impl-07 final verification):** the workspace
+`bun typecheck` now fails only on the seven documented pre-existing baseline
+errors (cb21f8e9: `agentGateway/httpRoute.test.ts` 37, `McpSessionAuthority.ts`
+23, `orchestration/decider.ts` 1119, `projectActivation.test.ts` 201,
+`synaraMcpCommand.ts` 417, `wsRpc.ts` 1360 and 2346); all impl-07-introduced
+errors are fixed. The critical `wsRpc.ts` disable path shadowed the
+`command` parameter with a later block-scoped `const command` (TDZ
+use-before-declaration on every Synara MCP command dispatch); the parsed
+command is renamed to `synaraMcpCommand`. Focused seam re-verified after the
+fix: 234/234 (same per-file counts), plus the four affected test doubles
+(`CheckpointReactor`, `ProviderCommandReactor`, `ProviderRuntimeIngestion`,
+`ProviderSessionReaper`) pass with the required `disableSynaraMcp` fake
+member. `git diff --check` passes.
+
 ## Testing Seams
 
 **Approval status:** Approved by owner on 2026-08-12, following designer review.

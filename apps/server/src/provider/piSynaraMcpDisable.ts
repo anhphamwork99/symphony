@@ -88,7 +88,7 @@ export async function disablePiSynaraMcpSession(
 
   const outcome = await handoff.complete({
     awaitSafeBoundary: input.awaitSafeBoundary ?? true,
-    turnId: input.activeTurnId,
+    ...(input.activeTurnId === undefined ? {} : { turnId: input.activeTurnId }),
   });
   if (outcome.state === "unavailable") {
     return { state: "unavailable", detail: PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL };

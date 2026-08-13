@@ -13,6 +13,7 @@ import path from "node:path";
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { McpAuthorityBinding, ProviderKind, ThreadId, TurnId } from "@synara/contracts";
+import type { AgentGatewaySessionIdentity } from "../../agentGateway/Services/AgentGatewaySessionRegistry";
 import { describe, expect, it, vi } from "vitest";
 import {
   createPiModelRuntime,
@@ -187,6 +188,15 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     },
   ];
 
+  const sessionIdentity = (sessionKey: string): AgentGatewaySessionIdentity => ({
+    sessionKey,
+    threadId: "thread-pi-1" as ThreadId,
+    provider: "pi",
+    issuedAt: Date.now(),
+    capabilities: new Set(["thread:read", "thread:write"] as const),
+    mcpAuthority: AUTHORITY_BINDING,
+  });
+
   interface CoordinatorHarness {
     readonly adapter: PiSynaraMcpDormantAdapter;
     readonly coordinator: PiSynaraMcpLifecycleCoordinator;
@@ -210,7 +220,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     readonly failRevoke?: Error;
     readonly discoveryGate?: Promise<void>;
     readonly gatewayCancel?: {
-      readonly verifySession?: (token: string) => { readonly sessionKey: string } | null;
+      readonly verifySession?: (token: string) => AgentGatewaySessionIdentity | null;
       readonly cancelInFlightRequests?: (selector: {
         readonly sessionKey: string;
       }) => { readonly count: number; readonly settled: Promise<void> };
@@ -276,9 +286,15 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       ...(options.gatewayCancel === undefined
         ? {}
         : {
-            verifySession: options.gatewayCancel.verifySession,
-            cancelInFlightRequests: options.gatewayCancel.cancelInFlightRequests,
-            retireSessionTurn: options.gatewayCancel.retireSessionTurn,
+            ...(options.gatewayCancel.verifySession === undefined
+              ? {}
+              : { verifySession: options.gatewayCancel.verifySession }),
+            ...(options.gatewayCancel.cancelInFlightRequests === undefined
+              ? {}
+              : { cancelInFlightRequests: options.gatewayCancel.cancelInFlightRequests }),
+            ...(options.gatewayCancel.retireSessionTurn === undefined
+              ? {}
+              : { retireSessionTurn: options.gatewayCancel.retireSessionTurn }),
           }),
     };
     const reload = vi.fn(async () => {
@@ -287,12 +303,17 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       }
     });
     const abort = vi.fn(async () => undefined);
+    // The Pi SDK session exposes both seams; the coordinator input only
+    // declares what it calls, so the harness passes the session as a value
+    // (excess properties are legal for variables) and keeps `abort`
+    // observable for the no-whole-session-abort assertions.
+    const session = { reload, abort };
     const coordinator = makePiSessionSynaraMcpCoordinator({
       threadId: "thread-pi-1" as ThreadId,
       adapter,
       stagedTools,
       executions,
-      runtime: { session: { reload, abort } },
+      runtime: { session },
       mcpAuthority: options.mcpAuthority,
       ...(options.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: options.drainTimeoutMs }),
       ...(options.withCredentials === false ? {} : { credentials }),
@@ -577,8 +598,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       const harness = makeCoordinatorHarness({
         mcpAuthority: AUTHORITY_BINDING,
         gatewayCancel: {
-          verifySession: (token) =>
-            token === "token-1" ? { sessionKey: "session-key-1" } : null,
+          verifySession: (token) => (token === "token-1" ? sessionIdentity("session-key-1") : null),
           cancelInFlightRequests: (selector) => {
             cancelled.push(selector);
             return { count: 1, settled: drainGate.promise };
@@ -615,8 +635,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       const harness = makeCoordinatorHarness({
         mcpAuthority: AUTHORITY_BINDING,
         gatewayCancel: {
-          verifySession: (token) =>
-            token === "token-1" ? { sessionKey: "session-key-1" } : null,
+          verifySession: (token) => (token === "token-1" ? sessionIdentity("session-key-1") : null),
           retireSessionTurn: async (token, turnId) => {
             retired.push({ token, turnId });
             order.push("retire");
@@ -726,7 +745,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         mcpAuthority: AUTHORITY_BINDING,
         drainTimeoutMs: 25,
         gatewayCancel: {
-          verifySession: () => ({ sessionKey: "session-key-1" }),
+          verifySession: () => sessionIdentity("session-key-1"),
           cancelInFlightRequests: () => ({
             count: 1,
             settled: new Promise<void>(() => undefined),
@@ -810,7 +829,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
           throw new Error(`unexpected gateway method ${body.method}`);
         },
       });
-      const mappedTool = mappedTools[0];
+      const mappedTool = mappedTools[0]!;
       expect(mappedTool).toBeDefined();
 
       // The Pi turn runs the Synara MCP tool; the gateway call is in flight.
@@ -849,7 +868,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       expect(harness.abort).not.toHaveBeenCalled();
       const codingAgentTool = {
         name: "bash",
-        execute: async () => ({
+        execute: async (..._args: unknown[]) => ({
           content: [{ type: "text", text: "coding-agent-tool-ok" }],
         }),
       };

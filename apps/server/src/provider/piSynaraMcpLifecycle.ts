@@ -376,7 +376,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
       deactivationSeams.drainTimeoutMs ?? PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS,
     );
     const outcome = await Promise.race([
-      cancel(staged, { turnId }).then(
+      cancel(staged, turnId === undefined ? undefined : { turnId }).then(
         () => "drained" as const,
         (cause) => ({ kind: "failed" as const, cause }),
       ),
@@ -654,7 +654,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
           const outcome = await finalizeDeactivation(handoff, {
             awaitSafeBoundary: options?.awaitSafeBoundary ?? true,
             reload: true,
-            turnId: options?.turnId,
+            ...(options?.turnId === undefined ? {} : { turnId: options.turnId }),
           });
           return { state: outcome };
         });

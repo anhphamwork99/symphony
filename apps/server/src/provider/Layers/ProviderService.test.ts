@@ -7,6 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+
 import type {
   ProviderApprovalDecision,
   ProviderForkThreadInput,
@@ -3497,7 +3499,7 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
       // disable orchestration, and a fake gateway credentials boundary. Only
       // the public ProviderService.disableSynaraMcp operation drives it.
       const { adapter: dormantAdapter } = makePiSynaraMcpDormantExtension();
-      const stagedTools: unknown[] = [];
+      const stagedTools: ToolDefinition[] = [];
       const executions = makePiSynaraMcpToolExecutionRegistry();
       const revoked: string[] = [];
       const retired: Array<{ readonly token: string; readonly turnId: string }> = [];
@@ -3530,7 +3532,16 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
             revoked.push(token);
           },
           verifySession: (token) =>
-            token === "token-behavior" ? { sessionKey: "session-behavior" } : null,
+            token === "token-behavior"
+              ? {
+                  sessionKey: "session-behavior",
+                  threadId,
+                  provider: "pi",
+                  issuedAt: Date.now(),
+                  capabilities: new Set(["thread:read", "thread:write"] as const),
+                  mcpAuthority: authority,
+                }
+              : null,
           retireSessionTurn: async (token, turnId) => {
             retired.push({ token, turnId });
           },
@@ -3569,32 +3580,34 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
       yield* Effect.promise(() => dormantAdapter.notifySafeBoundary());
       const activationResult = yield* Effect.promise(() => activation);
       assert.equal(activationResult.ok, true);
+      if (activationResult.ok !== true) {
+        // Narrow the union for the assertions below: a failed activation
+        // carries a reason on the ok:false member only.
+        throw new Error(`Synara MCP activation failed: ${activationResult.reason}`);
+      }
       assert.equal(activationResult.state, "active");
       assert.equal(activationResult.alreadyActive, false);
       assert.equal(stagedTools.length, 1);
 
       // Mount the real disable operation at the adapter boundary, exactly as
       // the production PiAdapter wires it (including the exact active turn).
-      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
-        (
-          _input: { readonly threadId: ThreadId },
-        ): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
-          Effect.tryPromise({
-            try: () =>
-              disablePiSynaraMcpSession({
-                coordinator,
-                executions,
-                awaitSafeBoundary: false,
-                activeTurnId: "turn-active-1" as TurnId,
-              }),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: "pi",
-                method: "synara-mcp/disable",
-                detail: "disable exploded",
-                cause,
-              }),
-          }),
+      piDisableRouting.pi.disableSynaraMcp.mockImplementation(() =>
+        Effect.tryPromise({
+          try: () =>
+            disablePiSynaraMcpSession({
+              coordinator,
+              executions,
+              awaitSafeBoundary: false,
+              activeTurnId: "turn-active-1" as TurnId,
+            }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: "pi",
+              method: "synara-mcp/disable",
+              detail: "disable exploded",
+              cause,
+            }),
+        }),
       );
 
       const result = yield* provider.disableSynaraMcp({ threadId });
@@ -3613,7 +3626,7 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
 
   it.effect("delegates the per-session disable to the routed Pi adapter", () =>
     Effect.gen(function* () {
-      piDisableRouting.pi.adapter.disableSynaraMcp?.mockClear();
+      piDisableRouting.pi.disableSynaraMcp.mockClear();
       const provider = yield* ProviderService;
       const threadId = asThreadId("thread-pi-disable");
       yield* provider.startSession(threadId, {
@@ -3622,14 +3635,14 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
-      const disable = piDisableRouting.pi.adapter.disableSynaraMcp as typeof piDisableRouting.pi.adapter.disableSynaraMcp;
+      const disable = piDisableRouting.pi.disableSynaraMcp;
       assert.equal(typeof disable, "function");
 
       const result = yield* provider.disableSynaraMcp({ threadId });
 
       assert.deepEqual(result, { state: "dormant", alreadyDisabled: true });
-      assert.equal(disable?.mock.calls.length ?? 0, 1);
-      assert.deepEqual(disable?.mock.calls[0]?.[0], { threadId });
+      assert.equal(disable.mock.calls.length, 1);
+      assert.deepEqual(disable.mock.calls[0]?.[0], { threadId });
     }),
   );
 
@@ -3643,12 +3656,11 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
-      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
-        (): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
-          Effect.succeed({
-            state: "unavailable",
-            detail: "Synara MCP cleanup could not be proven.",
-          }),
+      piDisableRouting.pi.disableSynaraMcp.mockImplementation(() =>
+        Effect.succeed({
+          state: "unavailable",
+          detail: "Synara MCP cleanup could not be proven.",
+        }),
       );
 
       const result = yield* provider.disableSynaraMcp({ threadId });
@@ -3662,11 +3674,11 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
 
   it.effect("returns an idempotent success when no provider binding exists", () =>
     Effect.gen(function* () {
-      piDisableRouting.pi.adapter.disableSynaraMcp?.mockClear();
+      piDisableRouting.pi.disableSynaraMcp.mockClear();
       const provider = yield* ProviderService;
       const result = yield* provider.disableSynaraMcp({ threadId: asThreadId("thread-never-started") });
       assert.deepEqual(result, { state: "dormant", alreadyDisabled: true });
-      assert.equal(piDisableRouting.pi.adapter.disableSynaraMcp?.mock.calls.length ?? 0, 0);
+      assert.equal(piDisableRouting.pi.disableSynaraMcp.mock.calls.length, 0);
     }),
   );
 
@@ -3701,15 +3713,14 @@ piDisableRouting.layer("ProviderServiceLive per-session Synara MCP disable routi
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
-      piDisableRouting.pi.adapter.disableSynaraMcp = vi.fn(
-        (): Effect.Effect<ProviderDisableSynaraMcpResult, ProviderAdapterError> =>
-          Effect.fail(
-            new ProviderAdapterRequestError({
-              provider: "pi",
-              method: "synara-mcp/disable",
-              detail: "disable exploded",
-            }),
-          ),
+      piDisableRouting.pi.disableSynaraMcp.mockImplementation(() =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "pi",
+            method: "synara-mcp/disable",
+            detail: "disable exploded",
+          }),
+        ),
       );
 
       const failure = yield* Effect.exit(provider.disableSynaraMcp({ threadId }));

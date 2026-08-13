@@ -504,7 +504,10 @@ export function mapAgentGatewayMcpToolsToPiCustomTools(input: {
         const result =
           input.executions === undefined
             ? await call(signal)
-            : await input.executions.execute({ call, signal });
+            : await input.executions.execute({
+                call,
+                ...(signal === undefined ? {} : { signal }),
+              });
         return piGatewayToolResult(result);
       },
     }),
@@ -2932,7 +2935,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               executions: context.synaraMcpExecutions,
               // The exact turn active at disable time: its write authority is
               // retired before the gateway cancellation (Decision 14 step 2).
-              activeTurnId: context.activeTurnId,
+              ...(context.activeTurnId === undefined ? {} : { activeTurnId: context.activeTurnId }),
               // A running turn keeps its tool surface until agent_end; an idle
               // session has no active turn, so the safe boundary is immediate.
               awaitSafeBoundary: context.activeTurnId !== undefined,

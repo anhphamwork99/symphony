@@ -685,7 +685,7 @@ describe("Synara MCP command boundary and durable activity contract", () => {
       kind: "synara.mcp.command.succeeded",
       turnId: null,
     });
-    expect(terminalActivity.payload as SynaraMcpCommandPayload).toMatchObject({
+    expect(terminalActivity.payload as unknown as SynaraMcpCommandPayload).toMatchObject({
       requestId: plan.requestId,
       status: "succeeded",
       finalState: "disabled",
@@ -757,7 +757,9 @@ describe("Synara MCP command boundary and durable activity contract", () => {
       kind: "synara.mcp.command.failed",
       turnId: null,
     });
-    expect(replay.activityCommand.activity.payload as SynaraMcpCommandPayload).toMatchObject({
+    expect(
+      replay.activityCommand.activity.payload as unknown as SynaraMcpCommandPayload,
+    ).toMatchObject({
       status: "failed",
       finalState: "disabled",
       detail: "The disable could not prove its cleanup.",

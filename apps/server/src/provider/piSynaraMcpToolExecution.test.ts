@@ -61,8 +61,8 @@ describe("makePiSynaraMcpToolExecutionRegistry", () => {
     const registry = makePiSynaraMcpToolExecutionRegistry();
     const signals: AbortSignal[] = [];
     const release = deferred<{ content: Array<{ type: "text"; text: string }> }>();
-    const call = vi.fn(async (signal: AbortSignal) => {
-      signals.push(signal);
+    const call = vi.fn(async (signal?: AbortSignal) => {
+      signals.push(signal!);
       return release.promise;
     });
     const first = registry.execute({ call });
@@ -110,15 +110,17 @@ describe("makePiSynaraMcpToolExecutionRegistry", () => {
 
   it("propagates the Pi SDK abort signal without a disabled settlement", async () => {
     const registry = makePiSynaraMcpToolExecutionRegistry();
-    const call = vi.fn(async (signal: AbortSignal) => {
+    const call = vi.fn(async (signal?: AbortSignal) => {
+      // The registry always links its own abort signal to the call.
+      const linked = signal!;
       await new Promise<never>((_resolve, reject) => {
         const onAbort = () =>
-          reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
-        if (signal.aborted) {
+          reject(linked.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+        if (linked.aborted) {
           onAbort();
           return;
         }
-        signal.addEventListener("abort", onAbort, { once: true });
+        linked.addEventListener("abort", onAbort, { once: true });
       });
     });
     const controller = new AbortController();

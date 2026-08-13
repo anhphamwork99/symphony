@@ -640,13 +640,13 @@ const makeWsRpcHandlersLayer = () =>
             return yield* dispatchOrchestrationCommand(decision.activityCommand);
           }
           const plan = decision.plan;
-          const command = parseSynaraMcpCommand(plan.command.message.text)!;
+          const synaraMcpCommand = parseSynaraMcpCommand(plan.command.message.text)!;
 
           let result = plan.projectCommand
             ? yield* dispatchOrchestrationCommand(plan.projectCommand)
             : { sequence: readModel.snapshotSequence };
           if (!plan.pending) {
-            if (command === "disable") {
+            if (synaraMcpCommand === "disable") {
               // impl-07: after the durable desired-disabled acceptance, disable
               // the issuing session through the public provider boundary. A
               // fresh no-wait disable stays pending in the reconcile path below
@@ -683,7 +683,7 @@ const makeWsRpcHandlersLayer = () =>
           result = yield* dispatchOrchestrationCommand(plan.pendingActivityCommand);
           const reconcile = Effect.gen(function* () {
             const deadline = Date.parse(plan.operation.absoluteDeadline);
-            if (command === "disable") {
+            if (synaraMcpCommand === "disable") {
               // impl-07: the per-session disable fences immediately, settles
               // in-flight executions exactly once, drains the gateway within
               // the bounded window, revokes, clears, and reloads at the safe

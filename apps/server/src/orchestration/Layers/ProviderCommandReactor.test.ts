@@ -510,6 +510,7 @@ describe("ProviderCommandReactor", () => {
       steerSubagent,
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
+      disableSynaraMcp: () => unsupported(),
       stopSession: stopSession as ProviderServiceShape["stopSession"],
       stopRuntimeSession: stopRuntimeSession as NonNullable<
         ProviderServiceShape["stopRuntimeSession"]
