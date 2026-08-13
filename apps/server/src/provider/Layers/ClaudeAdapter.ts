@@ -5191,9 +5191,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           env: claudeSdkEnv,
           spawnClaudeCodeProcess: bindClaudeProcessOwner(processOwner),
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
-          ...(agentGatewayCredentials
+          ...(agentGatewayCredentials && gatewaySessionLease
             ? {
-                mcpServers: buildClaudeMcpServers(gatewaySessionLease!.connection),
+                mcpServers: buildClaudeMcpServers(gatewaySessionLease.connection),
               }
             : {}),
         };

@@ -967,7 +967,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly agentGatewayMcp:
     | {
         readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease;
+        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease | undefined;
       }
     | undefined;
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
@@ -978,7 +978,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       readonly synaraSkillsDir?: string;
       readonly agentGatewayMcp?: {
         readonly endpointUrl: () => string;
-        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease;
+        readonly acquireSessionLease: (threadId: ThreadId) => AgentGatewaySessionLease | undefined;
       };
       readonly teardownProcessTree?: typeof teardownProviderProcessTree;
       readonly taskCompleteFallbackGraceMs?: number;

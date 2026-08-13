@@ -1703,8 +1703,8 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               ? {
                   agentGatewayMcp: {
                     endpointUrl: () => agentGatewayCredentials.mcpEndpointUrl,
-                    acquireSessionLease: (threadId) =>
-                      acquireAgentGatewaySessionLease(agentGatewayCredentials, threadId, PROVIDER)!,
+                      acquireSessionLease: (threadId) =>
+                        acquireAgentGatewaySessionLease(agentGatewayCredentials, threadId, PROVIDER),
                   },
                 }
               : {}),

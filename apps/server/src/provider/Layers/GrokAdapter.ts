@@ -1111,11 +1111,11 @@ export function makeGrokAdapter(
             // initialize.clientCapabilities. Re-send this on load/resume so a
             // reconnected session keeps the Plan-mode write gate.
             sessionMeta: GROK_SESSION_META,
-            ...(agentGatewayCredentials
-              ? {
+              ...(agentGatewayCredentials && gatewaySessionLease
+                ? {
                   buildMcpServers: (initializeResult) =>
                     buildAcpSynaraMcpServers({
-                      connection: gatewaySessionLease!.connection,
+                      connection: gatewaySessionLease.connection,
                       initializeResult,
                       stdioProxy: agentGatewayCredentials.stdioProxy,
                     }),
