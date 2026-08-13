@@ -4,12 +4,24 @@
 
 **Blocked by:** impl-03 — Remove default Synara tools and add dormant MCP extension; impl-04 — Bind Synara MCP authority to the authenticated subject.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
-- [ ] Implement dormant, activating, active, deactivating, and unavailable transitions.
-- [ ] Stage identity, credentials, connection, discovery, and schema validation before exposure.
-- [ ] Apply tool-surface changes only at a safe boundary.
-- [ ] Roll back failed activation to disabled without partial tools.
+- [x] Implement dormant, activating, active, deactivating, and unavailable transitions.
+- [x] Stage identity, credentials, connection, discovery, and schema validation before exposure.
+- [x] Apply tool-surface changes only at a safe boundary.
+- [x] Roll back failed activation to disabled without partial tools.
+
+**Implementation:** Coordinator core landed in `1975aa1f`; production Pi
+session wiring landed in `1e6411a6`. Each Pi session owns one lifecycle
+coordinator, stages a fresh subject-bound gateway credential and complete
+catalog, exposes the catalog through the extension reload boundary only after
+`agent_end`, and disposes/fences the coordinator before runtime teardown.
+Focused verification passed 61 tests across `piSynaraMcpLifecycle.test.ts`,
+`piSynaraMcpExtension.test.ts`, and `PiAdapter.test.ts`.
+
+The standalone server typecheck still reports pre-existing errors outside the
+impl-06 change surface in agent-gateway, orchestration, and WebSocket files;
+all impl-06-local type errors found during this ticket were fixed.
 
 ## Testing Seams
 

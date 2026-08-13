@@ -196,7 +196,7 @@ const SUPERSEDED_MESSAGE = "activation superseded before completion";
 class StagedActivationError extends Error {
   constructor(
     readonly stage: PiSynaraMcpActivationStage,
-    readonly cause: unknown,
+    override readonly cause: unknown,
   ) {
     super(`activation stage ${stage} failed`);
   }

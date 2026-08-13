@@ -44,6 +44,7 @@ import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
 import { takeSynaraHarnessPolicyForProviderSession } from "../../agentGateway/harnessPolicy.ts";
 import {
   callAgentGatewayMcpTool,
+  initializeAgentGatewayMcp,
   listAgentGatewayMcpTools,
   type AgentGatewayMcpFetch,
   type AgentGatewayMcpToolDescriptor,
@@ -598,11 +599,11 @@ export function makePiSessionSynaraMcpCoordinator(
       throw new Error("Agent gateway credentials are unavailable for this Pi session.");
     }
     // Fresh identity-bound bearer minted for this activation attempt only.
-    return credentials.connectionForThread(
-      threadId,
-      PROVIDER,
-      staged.authority as McpAuthorityBinding,
-    );
+    const authority = staged.authority as McpAuthorityBinding;
+    return credentials.connectionForThread(threadId, PROVIDER, {
+      ...authority,
+      lifecycleGeneration: staged.lifecycleGeneration,
+    });
   };
 
   const connect = async (staged: PiSynaraMcpStagedActivation) => {
@@ -617,6 +618,10 @@ export function makePiSessionSynaraMcpCoordinator(
     ) {
       throw new Error("The staged Synara MCP connection is invalid.");
     }
+    await initializeAgentGatewayMcp({
+      connection: connection as unknown as AgentGatewayMcpConnection,
+      ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    });
     return connection;
   };
 
@@ -657,11 +662,18 @@ export function makePiSessionSynaraMcpCoordinator(
   };
 
   const cleanup = async (staged: PiSynaraMcpStagedActivation) => {
-    // Discard the staged registration so no later load exposes the catalog.
+    // Discard the staged registration and reload when a catalog had reached
+    // the extension registry. This removes tools from the live runtime after
+    // deactivation and after an apply/reload failure; clearing the array alone
+    // would affect only a future reload.
+    const catalogMayBeRegistered = stagedTools.length > 0;
     stagedTools.splice(0, stagedTools.length);
     const connection = staged.credential;
     if (isRecord(connection) && typeof connection.bearerToken === "string") {
       credentials?.revokeSessionToken(connection.bearerToken);
+    }
+    if (catalogMayBeRegistered) {
+      await runtime.session.reload();
     }
   };
 

@@ -33,8 +33,12 @@ interface Harness {
     applied: PiSynaraMcpStagedActivation[];
     cleaned: PiSynaraMcpStagedActivation[];
   };
-  readonly seams: PiSynaraMcpActivationSeams;
+  readonly seams: MutablePiSynaraMcpActivationSeams;
 }
+
+type MutablePiSynaraMcpActivationSeams = {
+  -readonly [K in keyof PiSynaraMcpActivationSeams]: PiSynaraMcpActivationSeams[K];
+};
 
 const STAGE_NAMES: Record<keyof PiSynaraMcpActivationSeams, string> = {
   validateAuthority: "authority",
@@ -84,8 +88,11 @@ function makeHarness(overrides: Partial<PiSynaraMcpActivationSeams> = {}): Harne
     return wrapped as PiSynaraMcpActivationSeams[K];
   };
   const seams = Object.fromEntries(
-    (Object.keys(combined) as (keyof PiSynaraMcpActivationSeams)[]).map((key) => [key, wrap(key, combined[key])]),
-  ) as PiSynaraMcpActivationSeams;
+    (Object.keys(combined) as (keyof PiSynaraMcpActivationSeams)[]).map((key) => [
+      key,
+      wrap(key, combined[key]),
+    ]),
+  ) as unknown as MutablePiSynaraMcpActivationSeams;
   const coordinator = makePiSynaraMcpLifecycleCoordinator({ adapter, seams });
   return { adapter, coordinator, calls, received, seams };
 }

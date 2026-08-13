@@ -95,6 +95,23 @@ export type AgentGatewayMcpFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** Complete the MCP initialization handshake before catalog discovery. */
+export async function initializeAgentGatewayMcp(input: {
+  readonly connection: AgentGatewayMcpConnection;
+  readonly fetch?: AgentGatewayMcpFetch;
+  readonly signal?: AbortSignal;
+}): Promise<void> {
+  await postAgentGatewayJsonRpc({
+    ...input,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "synara-pi", version: "1.0.0" },
+    },
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
