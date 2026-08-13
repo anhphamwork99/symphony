@@ -23,9 +23,24 @@ export const CurrentWsSessionRole = ServiceMap.Reference<WsSessionRole>(
   { defaultValue: () => "client" },
 );
 
+/**
+ * Request-scoped MCP session authority id for the current connection (Decision
+ * 21). Set only at the trusted WS upgrade from a server-minted authority
+ * record; never from payloads, headers, or provider state. `null` when the
+ * fiber has no connection-scoped authority (no session key), leaving MCP
+ * admission fail-closed. Dispatch sites read it to write server-side
+ * `commandId`/`threadId` → `authorityId` bindings into the shared registry.
+ */
+export const CurrentMcpSessionAuthorityId = ServiceMap.Reference<string | null>(
+  "synara/ws/CurrentMcpSessionAuthorityId",
+  { defaultValue: () => null },
+);
+
 export interface WsConnectionSession {
   readonly role: WsSessionRole;
   readonly attachmentPrincipal: ManagedAttachmentPrincipal;
+  /** Authority record id minted for this trusted connection, or null. */
+  readonly mcpAuthorityId: string | null;
 }
 
 /**
@@ -78,6 +93,7 @@ export function provideWsConnectionSession<A, E, R>(
     ? effect.pipe(
         Effect.provideService(CurrentWsSessionRole, session.role),
         Effect.provideService(CurrentManagedAttachmentPrincipal, session.attachmentPrincipal),
+        Effect.provideService(CurrentMcpSessionAuthorityId, session.mcpAuthorityId),
       )
     : effect;
 }

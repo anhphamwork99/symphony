@@ -6,6 +6,7 @@ import {
   LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
 } from "./managedAttachmentPrincipal.ts";
 import {
+  CurrentMcpSessionAuthorityId,
   CurrentWsSessionRole,
   makeWsConnectionSessions,
   provideWsConnectionSession,
@@ -15,6 +16,7 @@ import {
 const OWNER_SESSION: WsConnectionSession = {
   role: "owner",
   attachmentPrincipal: LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
+  mcpAuthorityId: "mcp-authority-local-1",
 };
 
 describe("WsConnectionSessions", () => {
@@ -40,6 +42,7 @@ describe("WsConnectionSessions", () => {
         sessions.register({
           role: "client",
           attachmentPrincipal: { ownerKind: "session", ownerId: "session-1" },
+          mcpAuthorityId: "mcp-authority-session-1",
         }),
         scope,
       ),
@@ -50,11 +53,12 @@ describe("WsConnectionSessions", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
-  it("provides role and attachment principal to the wrapped effect", async () => {
+  it("provides the request-scoped role, principal, and mcp authority id to the wrapped effect", async () => {
     const read = Effect.gen(function* () {
       return {
         role: yield* CurrentWsSessionRole,
         principal: yield* CurrentManagedAttachmentPrincipal,
+        mcpAuthorityId: yield* CurrentMcpSessionAuthorityId,
       };
     });
 
@@ -62,11 +66,27 @@ describe("WsConnectionSessions", () => {
       provideWsConnectionSession(read, {
         role: "owner",
         attachmentPrincipal: { ownerKind: "session", ownerId: "session-9" },
+        mcpAuthorityId: "mcp-authority-session-9",
       }),
     );
     expect(withSession).toEqual({
       role: "owner",
       principal: { ownerKind: "session", ownerId: "session-9" },
+      mcpAuthorityId: "mcp-authority-session-9",
+    });
+
+    // A session carrying no authority keeps the conservative null default.
+    const withoutAuthority = await Effect.runPromise(
+      provideWsConnectionSession(read, {
+        role: "client",
+        attachmentPrincipal: { ownerKind: "session", ownerId: "session-10" },
+        mcpAuthorityId: null,
+      }),
+    );
+    expect(withoutAuthority).toEqual({
+      role: "client",
+      principal: { ownerKind: "session", ownerId: "session-10" },
+      mcpAuthorityId: null,
     });
 
     // Without a session the conservative defaults must apply.
@@ -74,6 +94,7 @@ describe("WsConnectionSessions", () => {
     expect(withoutSession).toEqual({
       role: "client",
       principal: LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
+      mcpAuthorityId: null,
     });
   });
 });

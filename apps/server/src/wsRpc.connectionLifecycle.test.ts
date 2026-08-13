@@ -21,6 +21,8 @@ import WebSocket, { type RawData } from "ws";
 
 import { ServerAuth, AuthError, type ServerAuthShape } from "./auth/Services/ServerAuth";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore";
+import { McpSessionAuthority, type McpSessionAuthorityShape } from "./agentGateway/Services/McpSessionAuthority";
+import { McpSessionAuthorityLive } from "./agentGateway/Layers/McpSessionAuthority";
 import {
   MAX_AUTHENTICATED_CONNECTIONS_PER_SESSION,
   SessionCredentialServiceLive,
@@ -60,6 +62,9 @@ interface RunningTestServer {
   readonly observedSlowRpc: { started: number; completed: number; finalized: number };
   readonly connectionSessions: WsConnectionSessionsShape;
   readonly observedConnectionSessionKeys: string[];
+  readonly authority: McpSessionAuthorityShape;
+  /** Number of authority records minted at trusted upgrades (wrapped shape). */
+  readonly minted: { count: number };
   readonly close: () => Promise<void>;
 }
 
@@ -182,7 +187,7 @@ function ping(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-async function startTestServer(): Promise<RunningTestServer> {
+async function startTestServer(options: { readonly host?: string } = {}): Promise<RunningTestServer> {
   const baseConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "synara-ws-lifecycle-test-",
   }).pipe(Layer.provide(NodeServices.layer));
@@ -190,7 +195,11 @@ async function startTestServer(): Promise<RunningTestServer> {
     ServerConfig,
     Effect.gen(function* () {
       const config = yield* ServerConfig;
-      return { ...config, authToken: "force-session-auth" };
+      return {
+        ...config,
+        authToken: "force-session-auth",
+        ...(options.host === undefined ? {} : { host: options.host }),
+      };
     }),
   ).pipe(Layer.provide(baseConfigLayer));
   const sessionsLayer = SessionCredentialServiceLive.pipe(
@@ -271,6 +280,36 @@ async function startTestServer(): Promise<RunningTestServer> {
     }),
   );
   const connectionSessions = await Effect.runPromise(makeWsConnectionSessions);
+  // One live MCP authority shape shared by the route layer (which mints at
+  // trusted establishment) and this test (which resolves the minted records),
+  // built from the real Live factory so the local-owner principal comes from
+  // the persisted secret store. The mint methods are wrapped so the tests can
+  // prove that refused upgrades mint nothing.
+  const minted = { count: 0 };
+  const authorityShape = await Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* McpSessionAuthority;
+    }).pipe(
+      Effect.provide(
+        McpSessionAuthorityLive.pipe(
+          Layer.provide(ServerSecretStoreLive),
+          Layer.provide(configLayer),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+  const authority: McpSessionAuthorityShape = {
+    ...authorityShape,
+    mintForLocalOwner: () => {
+      minted.count += 1;
+      return authorityShape.mintForLocalOwner();
+    },
+    mintForAuthenticated: (session) => {
+      minted.count += 1;
+      return authorityShape.mintForAuthenticated(session);
+    },
+  };
   const observedConnectionSessionKeys: string[] = [];
   const rpcHttpEffectSource = RpcServer.toHttpEffectWebsocket(PingRpcGroup).pipe(
     Effect.provide(handlerLayer.pipe(Layer.provideMerge(serializationLayer))),
@@ -295,7 +334,10 @@ async function startTestServer(): Promise<RunningTestServer> {
   const routeLayer = Layer.merge(
     makeWebsocketNegotiationRouteLayer(),
     makeWebsocketRpcRouteLayer(rpcHttpEffectSource),
-  ).pipe(Layer.provide(Layer.succeed(WsConnectionSessions, connectionSessions)));
+  ).pipe(
+    Layer.provide(Layer.succeed(WsConnectionSessions, connectionSessions)),
+    Layer.provide(Layer.succeed(McpSessionAuthority, authority)),
+  );
   const scope = await Effect.runPromise(Scope.make("sequential"));
   const context = await Effect.runPromise(
     Layer.buildWithScope(
@@ -334,6 +376,8 @@ async function startTestServer(): Promise<RunningTestServer> {
     observedSlowRpc,
     connectionSessions,
     observedConnectionSessionKeys,
+    authority,
+    minted,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   };
 }
@@ -365,6 +409,13 @@ async function connectExistingSession(
 function featureSocketUrl(server: RunningTestServer, token: string): string {
   const searchParams = makeCurrentWsFeatureCompatibilitySearchParams("test-client");
   searchParams.set("wsToken", token);
+  return `${server.origin}/ws?${searchParams.toString()}`;
+}
+
+/** Loopback-legacy `?token=` upgrade for the config's `authToken` value. */
+function loopbackLegacySocketUrl(server: RunningTestServer): string {
+  const searchParams = makeCurrentWsFeatureCompatibilitySearchParams("test-client");
+  searchParams.set("token", "force-session-auth");
   return `${server.origin}/ws?${searchParams.toString()}`;
 }
 
@@ -821,10 +872,22 @@ describe("websocketRpcRouteLayer connection lifecycle", () => {
 
       expect(server.observedConnectionSessionKeys).toHaveLength(1);
       const sessionKey = server.observedConnectionSessionKeys[0]!;
-      expect(server.connectionSessions.lookup(sessionKey)).toEqual({
+      const session = server.connectionSessions.lookup(sessionKey);
+      expect(session).toMatchObject({
         role: "owner",
         attachmentPrincipal: { ownerKind: "session", ownerId: issued.sessionId },
       });
+      expect(typeof session?.mcpAuthorityId).toBe("string");
+      // The authenticated upgrade minted one session-local authority record
+      // bound to the verified session's subject and expiry (Decision 21).
+      expect(server.authority.get(session!.mcpAuthorityId!)).toMatchObject({
+        kind: "authenticated",
+        subject: "browser",
+        authSessionId: issued.sessionId,
+      });
+      expect(server.authority.get(session!.mcpAuthorityId!)?.authExpiresAt).toBeGreaterThan(
+        Date.now(),
+      );
 
       socket.close();
       await waitForClose(socket);
@@ -833,6 +896,111 @@ describe("websocketRpcRouteLayer connection lifecycle", () => {
       await server.close();
     }
   }, 4_000);
+
+  it("reconnects the same session with fresh authority over the same subject", async () => {
+    const server = await startTestServer();
+    try {
+      const issued = await Effect.runPromise(server.sessions.issue());
+      const first = await connectExistingSession(server, issued.sessionId);
+      const second = await connectExistingSession(server, issued.sessionId);
+      await expect(ping(first.socket)).resolves.toBeUndefined();
+      await expect(ping(second.socket)).resolves.toBeUndefined();
+
+      const firstRecord = server.authority.get(
+        server.connectionSessions.lookup(server.observedConnectionSessionKeys[0]!)!.mcpAuthorityId!,
+      )!;
+      const secondRecord = server.authority.get(
+        server.connectionSessions.lookup(server.observedConnectionSessionKeys[1]!)!.mcpAuthorityId!,
+      )!;
+      // Reconnect or runtime recreation requires fresh authority (Decision
+      // 21): a new authority id and session generation, never a reused
+      // credential or record, but still the same bound subject.
+      expect(firstRecord.authorityId).not.toBe(secondRecord.authorityId);
+      expect(firstRecord.sessionGeneration).not.toBe(secondRecord.sessionGeneration);
+      expect(firstRecord.subject).toBe(secondRecord.subject);
+      expect(firstRecord.subject).toBe("browser");
+      expect(firstRecord.kind).toBe("authenticated");
+      expect(secondRecord.kind).toBe("authenticated");
+      expect(firstRecord.authSessionId).toBe(issued.sessionId);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("mints fresh local-owner authority for trusted loopback sessions over a stable principal", async () => {
+    const server = await startTestServer();
+    try {
+      const first = await connect(loopbackLegacySocketUrl(server));
+      await expect(ping(first)).resolves.toBeUndefined();
+      const second = await connect(loopbackLegacySocketUrl(server));
+      await expect(ping(second)).resolves.toBeUndefined();
+
+      const firstSession = server.connectionSessions.lookup(
+        server.observedConnectionSessionKeys[0]!,
+      )!;
+      const secondSession = server.connectionSessions.lookup(
+        server.observedConnectionSessionKeys[1]!,
+      )!;
+      expect(firstSession.role).toBe("owner");
+      expect(firstSession.attachmentPrincipal).toEqual({
+        ownerKind: "local-loopback",
+        ownerId: "local-loopback",
+      });
+
+      const firstRecord = server.authority.get(firstSession.mcpAuthorityId!)!;
+      const secondRecord = server.authority.get(secondSession.mcpAuthorityId!)!;
+      // Every trusted loopback connection gets a fresh authority record over
+      // the same server-minted local-owner principal (Decision 21).
+      expect(firstRecord.kind).toBe("local-owner");
+      expect(secondRecord.kind).toBe("local-owner");
+      expect(firstRecord.subject).toMatch(/^local-owner:/);
+      expect(firstRecord.subject).toBe(secondRecord.subject);
+      expect(firstRecord.authorityId).not.toBe(secondRecord.authorityId);
+      expect(firstRecord.sessionGeneration).not.toBe(secondRecord.sessionGeneration);
+      expect(firstRecord.authSessionId).toBeNull();
+      expect(firstRecord.authExpiresAt).toBeNull();
+      expect(server.minted.count).toBe(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("mints nothing for rejected non-loopback upgrades and mints on authenticated admission", async () => {
+    const server = await startTestServer({ host: "0.0.0.0" });
+    try {
+      // The legacy `?token=` shortcut is not accepted on a non-loopback bind:
+      // the upgrade is refused before any connection session or authority
+      // exists.
+      await expect(connect(loopbackLegacySocketUrl(server))).rejects.toThrow("401");
+      expect(server.observedConnectionSessionKeys).toHaveLength(0);
+      expect(server.minted.count).toBe(0);
+
+      // A rejected authenticated attempt mints no authority either.
+      await expect(connect(featureSocketUrl(server, "not-a-real-ticket"))).rejects.toThrow(
+        "401",
+      );
+      expect(server.observedConnectionSessionKeys).toHaveLength(0);
+      expect(server.minted.count).toBe(0);
+
+      // A valid authenticated upgrade on the same non-loopback bind mints the
+      // subject-bound authority.
+      const issued = await Effect.runPromise(server.sessions.issue());
+      const websocket = await Effect.runPromise(
+        server.sessions.issueWebSocketToken(issued.sessionId),
+      );
+      const socket = await connect(featureSocketUrl(server, websocket.token));
+      await expect(ping(socket)).resolves.toBeUndefined();
+
+      expect(server.minted.count).toBe(1);
+      const session = server.connectionSessions.lookup(server.observedConnectionSessionKeys[0]!)!;
+      const record = server.authority.get(session.mcpAuthorityId!)!;
+      expect(record.subject).toBe("browser");
+      expect(record.kind).toBe("authenticated");
+      expect(record.authSessionId).toBe(issued.sessionId);
+    } finally {
+      await server.close();
+    }
+  });
 
   it("closes with an established socket and finalizes its RPC work", async () => {
     const server = await startTestServer();

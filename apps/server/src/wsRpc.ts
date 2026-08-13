@@ -88,6 +88,7 @@ import {
   LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
 } from "./managedAttachmentPrincipal";
 import { Open, resolveAvailableEditors } from "./open";
+import { McpSessionAuthority } from "./agentGateway/Services/McpSessionAuthority";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
 import {
   isSynaraMcpTurnCommand,
@@ -135,6 +136,7 @@ import { ThreadDiagnosticsQuery } from "./diagnostics/Services/ThreadDiagnostics
 import { makeWsRequestAdmission } from "./wsRequestAdmission";
 import { voiceUploadAdmissionGate } from "./voiceUploadAdmission";
 import {
+  CurrentMcpSessionAuthorityId,
   CurrentWsSessionRole,
   provideWsConnectionSession,
   WS_CONNECTION_SESSION_HEADER,
@@ -596,6 +598,20 @@ const makeWsRpcHandlersLayer = () =>
       const dispatchOrchestrationCommand = (command: OrchestrationCommand) =>
         Effect.gen(function* () {
           const attachmentPrincipal = yield* CurrentManagedAttachmentPrincipal;
+          // Trusted dispatch-authority propagation (Decision 21): write the
+          // current connection's server-minted authority into the shared
+          // registry under this exact command id and its thread so the
+          // provider reactor can resolve it before a credential is issued.
+          // No subject or authority ever enters the command payload or a
+          // durable event; commands dispatched without a connection-scoped
+          // authority (server-internal or recovery paths) stay unbound and
+          // fail closed at MCP admission.
+          const mcpAuthorityId = yield* CurrentMcpSessionAuthorityId;
+          if (mcpAuthorityId !== null && "threadId" in command) {
+            const mcpSessionAuthority = yield* McpSessionAuthority;
+            mcpSessionAuthority.bindDispatch(command.commandId, mcpAuthorityId);
+            mcpSessionAuthority.bindThread(command.threadId, mcpAuthorityId);
+          }
           return yield* runtimeStartup.enqueueCommand(
             orchestrationEngine.dispatch(command, { attachmentPrincipal }),
           );
@@ -2189,6 +2205,7 @@ export function makeWebsocketRpcRouteLayer<R>(
     Effect.gen(function* () {
       const rpcWebSocketHttpEffect = yield* rpcWebSocketHttpEffectSource;
       const connectionSessions = yield* WsConnectionSessions;
+      const mcpSessionAuthority = yield* McpSessionAuthority;
       const router = yield* HttpRouter.HttpRouter;
       // RPC handlers run on fibers forked from the layer-build scope, not from
       // this per-connection fiber, so the authenticated session cannot be
@@ -2239,17 +2256,34 @@ export function makeWebsocketRpcRouteLayer<R>(
           });
 
           if (!authenticatedSession) {
+            // Trusted loopback: the server mints a fresh authority record
+            // bound to the stable server-minted local-owner principal. The
+            // principal is never accepted from any request surface (Decision
+            // 21); only this loopback boundary may take this path.
+            const localOwner = mcpSessionAuthority.mintForLocalOwner();
             return yield* runWithConnectionSession(request, {
               role: "owner",
               attachmentPrincipal: LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
+              mcpAuthorityId: localOwner.authorityId,
             });
           }
+
+          // Authenticated: one session-local authority record bound to the
+          // verified subject, session id, and authentication expiry (Decision
+          // 21). The record may outlive the socket; admission is governed by
+          // the authority expiry at the gateway boundary.
+          const authenticated = mcpSessionAuthority.mintForAuthenticated({
+            sessionId: authenticatedSession.sessionId,
+            subject: authenticatedSession.subject,
+            expiresAt: authenticatedSession.expiresAt,
+          });
 
           return yield* sessions.runAuthenticatedConnection(
             authenticatedSession.sessionId,
             runWithConnectionSession(request, {
               role: authenticatedSession.role,
               attachmentPrincipal: attachmentPrincipalForSession(authenticatedSession.sessionId),
+              mcpAuthorityId: authenticated.authorityId,
             }),
           );
         }).pipe(
