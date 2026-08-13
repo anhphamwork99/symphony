@@ -90,9 +90,15 @@ function makeTransport(input: {
     input.mcpSessionAuthority ??
     makeMcpSessionAuthorityRegistry({ randomId: () => `authority-${++nextAuthority}` });
   const inFlightRequests = makeAgentGatewayInFlightRequestRegistry();
+  // Counted so a denial can prove admission ran before any write-authority
+  // binding, not merely before the handler (Decision 21 / AC2).
+  const bindWriteAuthorityCalls: string[] = [];
   const credentials = {
     verifySession: sessionRegistry.verify,
-    bindWriteAuthority: sessionRegistry.bindWriteAuthority,
+    bindWriteAuthority: (token: string, turnId: string) => {
+      bindWriteAuthorityCalls.push(turnId);
+      return sessionRegistry.bindWriteAuthority(token, turnId);
+    },
     verifyWriteAuthority: sessionRegistry.verifyWriteAuthority,
     registerInFlightRequest: inFlightRequests.register,
     cancelInFlightRequests: inFlightRequests.cancel,
@@ -192,6 +198,8 @@ function makeTransport(input: {
     /** Number of requests currently registered in-flight for one turn. */
     inFlightCountFor: (sessionKey: string, turnId: string) =>
       inFlightRequests.cancelTurn(sessionKey, turnId).count,
+    /** How many times this transport bound write authority for a turn. */
+    bindWriteAuthorityCount: () => bindWriteAuthorityCalls.length,
     mcpSessionAuthority,
     cancelTurn: (sessionKey: string, turnId: string) =>
       inFlightRequests.cancelTurn(sessionKeyAliases.get(sessionKey) ?? sessionKey, turnId),
@@ -575,14 +583,15 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
     transport: ReturnType<typeof makeTransport>,
     token: string,
     reason: string,
-  ) {
-    const sessionKey = transport.sessionKeyForToken(token);
-    const body = {
+    body: unknown = {
       jsonrpc: "2.0",
       id: "probe",
       method: "tools/call",
       params: { name: "probe", arguments: {} },
-    };
+    },
+  ) {
+    const sessionKey = transport.sessionKeyForToken(token);
+    const bindsBefore = transport.bindWriteAuthorityCount();
     const response = await Effect.runPromise(post(transport, token, body));
     assert.equal(response.status, 401);
     const message = (response.body as { error?: { message?: string } }).error?.message;
@@ -593,6 +602,7 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
     if (sessionKey !== null) {
       assert.equal(transport.inFlightCountFor(sessionKey, "turn-thread-admission"), 0);
     }
+    assert.equal(transport.bindWriteAuthorityCount(), bindsBefore);
     return message;
   }
 
@@ -825,6 +835,192 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
       fixture.setTime(NOW_MS - 1_000);
       yield* Effect.promise(() => expectDenied(transport, futureToken, "invalid-issuance"));
       assert.equal(probeCalls.count, 0);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a stale MCP lifecycle generation surfaced by trusted runtime state", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      // The transport passes the trusted admission context through to the
+      // registry; it does not itself observe the runtime's current MCP
+      // lifecycle generation yet (that coordinator is impl-06's seam). This
+      // registry stands in for the trusted runtime supplying it, so the
+      // transport's handling of a `stale-lifecycle-generation` denial is
+      // proven end-to-end without changing lifecycle semantics here.
+      const currentLifecycleGeneration = "mcp-lifecycle-gen-2";
+      const registryWithLifecycleState: McpSessionAuthorityRegistryShape = {
+        ...fixture.registry,
+        assertAdmittable: (binding, context) =>
+          fixture.registry.assertAdmittable(binding, {
+            projectId: context?.projectId ?? null,
+            lifecycleGeneration: currentLifecycleGeneration,
+          }),
+      };
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: registryWithLifecycleState,
+      });
+      const stale = {
+        ...mintBinding(fixture.registry),
+        lifecycleGeneration: "mcp-lifecycle-gen-1",
+      };
+      const token = transport.issueCredential("thread-admission", stale);
+
+      yield* Effect.promise(() => expectDenied(transport, token, "stale-lifecycle-generation"));
+      assert.equal(probeCalls.count, 0);
+
+      // The same credential re-minted for the current generation is admitted,
+      // so the denial is generation-specific and not a blanket failure.
+      const currentToken = transport.issueCredential("thread-admission", {
+        ...stale,
+        lifecycleGeneration: currentLifecycleGeneration,
+      });
+      const admitted = yield* post(transport, currentToken, {
+        jsonrpc: "2.0",
+        id: "probe",
+        method: "tools/call",
+        params: { name: "probe", arguments: {} },
+      });
+      assert.equal(admitted.status, 200);
+      assert.equal(probeCalls.count, 1);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("never lets request-supplied identity override the trusted credential binding", () =>
+    Effect.gen(function* () {
+      const fixture = makeAuthorityFixture();
+      const observed: Array<{
+        readonly subject: unknown;
+        readonly sessionKey: string;
+        readonly threadId: string;
+      }> = [];
+      const tool: ToolEntry = {
+        definition: { name: "probe", description: "test", inputSchema: { type: "object" } },
+        requiredCapability: "thread:read",
+        requiresActiveTurn: true,
+        handler: (args, context) => {
+          observed.push({
+            subject: (args as { subject?: unknown }).subject,
+            sessionKey: context.callerSessionKey,
+            threadId: context.callerThreadId,
+          });
+          return Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] });
+        },
+      };
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool,
+        mcpSessionAuthority: fixture.registry,
+      });
+      const trusted = mintBinding(fixture.registry);
+      // Identity fields an attacker could try to smuggle through the request.
+      const spoofedIdentity = {
+        subject: "root",
+        authorityId: trusted.authorityId,
+        sessionGeneration: trusted.sessionGeneration,
+        kind: "authenticated",
+        authSessionId: "session-root",
+        projectId: TEST_PROJECT_ID,
+        mcpAuthority: trusted,
+        // A thread this credential is not bound to.
+        threadId: "thread-elsewhere",
+        callerThreadId: "thread-elsewhere",
+      };
+
+      // 1. A credential with no server-side binding stays denied no matter how
+      //    complete the request-supplied authority looks.
+      const unboundToken = transport.issueCredential("thread-admission", null);
+      yield* Effect.promise(() =>
+        expectDenied(transport, unboundToken, "missing-binding", {
+          jsonrpc: "2.0",
+          id: "probe",
+          method: "tools/call",
+          params: { name: "probe", arguments: spoofedIdentity, ...spoofedIdentity },
+        }),
+      );
+      assert.deepEqual(observed, []);
+
+      // 2. A credential whose server-side subject is mismatched stays denied
+      //    even when the request supplies the record's real subject.
+      const mismatchedToken = transport.issueCredential("thread-admission", {
+        ...mintBinding(fixture.registry),
+        subject: "another-user",
+      });
+      yield* Effect.promise(() =>
+        expectDenied(transport, mismatchedToken, "subject-mismatch", {
+          jsonrpc: "2.0",
+          id: "probe",
+          method: "tools/call",
+          params: {
+            name: "probe",
+            arguments: { ...spoofedIdentity, subject: TEST_AUTHORITY_SUBJECT },
+          },
+        }),
+      );
+      assert.deepEqual(observed, []);
+
+      // 3. On the admitted path the trusted credential — not the request —
+      //    still determines the caller principal.
+      const validToken = transport.issueCredential("thread-admission", trusted);
+      const admitted = yield* post(transport, validToken, {
+        jsonrpc: "2.0",
+        id: "probe",
+        method: "tools/call",
+        params: { name: "probe", arguments: spoofedIdentity },
+      });
+      assert.equal(admitted.status, 200);
+      assert.lengthOf(observed, 1);
+      assert.equal(observed[0]!.threadId, "thread-admission");
+      assert.equal(observed[0]!.sessionKey, transport.sessionKeyForToken(validToken));
+      assert.notEqual(observed[0]!.sessionKey, null);
+    }).pipe(Effect.timeout("2 seconds")),
+  );
+
+  it.effect("denies a spoofed bearer header carrying inline identity assertions", () =>
+    Effect.gen(function* () {
+      const probeCalls = { count: 0 };
+      const fixture = makeAuthorityFixture();
+      const transport = makeTransport({
+        threads: [makeThread("thread-admission")],
+        tool: makeProbeTool({ probeCalls }),
+        mcpSessionAuthority: fixture.registry,
+      });
+      const trusted = mintBinding(fixture.registry);
+      const validToken = transport.issueCredential("thread-admission", trusted);
+      const body = {
+        jsonrpc: "2.0",
+        id: "probe",
+        method: "tools/call",
+        params: { name: "probe", arguments: {} },
+      };
+
+      // Identity appended to the credential header is not parsed as identity;
+      // it only produces an unknown credential, which fails closed.
+      for (const header of [
+        `Bearer ${validToken}; subject=root`,
+        `Bearer ${validToken}, X-Synara-Subject: root`,
+        `Bearer subject=${TEST_AUTHORITY_SUBJECT}`,
+        `Bearer ${trusted.authorityId}`,
+      ]) {
+        const response = yield* transport({ authorizationHeader: header, body });
+        assert.equal(response.status, 401);
+        assert.include(
+          (response.body as { error?: { message?: string } }).error?.message ?? "",
+          "caller_session_inactive",
+        );
+      }
+      assert.equal(probeCalls.count, 0);
+      assert.equal(transport.bindWriteAuthorityCount(), 0);
+
+      // The unmodified header on the same credential still works.
+      const admitted = yield* transport({
+        authorizationHeader: `Bearer ${validToken}`,
+        body,
+      });
+      assert.equal(admitted.status, 200);
+      assert.equal(probeCalls.count, 1);
     }).pipe(Effect.timeout("2 seconds")),
   );
 

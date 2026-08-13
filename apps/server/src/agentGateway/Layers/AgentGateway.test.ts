@@ -59,7 +59,11 @@ import {
   type AgentGatewayOperationRecord,
 } from "../Services/AgentGatewayOperationRepository.ts";
 import { AgentGatewayLive } from "./AgentGateway.ts";
-import { makeMcpSessionAuthorityRegistry, type McpAuthorityBinding } from "../mcpSessionAuthority.ts";
+import {
+  makeMcpSessionAuthorityRegistry,
+  type McpAuthorityBinding,
+  type McpSessionAuthorityRegistryShape,
+} from "../mcpSessionAuthority.ts";
 import { recordCreatedWorktreeInPlan } from "../operationPlan.ts";
 import { makeAgentGatewayInFlightRequestRegistry } from "../inFlightRequestRegistry.ts";
 
@@ -174,6 +178,15 @@ interface GatewayHarness {
     readonly detailReads: number;
     readonly batchTurnReads: number;
   };
+  /** Trusted server-side MCP authority registry backing every credential. */
+  readonly mcpSessionAuthority: McpSessionAuthorityRegistryShape;
+  /**
+   * Replace the server-side authority snapshot a credential carries, so an
+   * admission failure can be induced for exactly one credential.
+   */
+  readonly setTokenAuthority: (token: string, binding: McpAuthorityBinding | null) => void;
+  /** Read the trusted binding currently attached to a credential. */
+  readonly authorityForToken: (token: string) => McpAuthorityBinding | null;
   readonly callTool: (input: {
     readonly token: string;
     readonly name: string;
@@ -225,6 +238,9 @@ const VALID_TOKENS: Record<string, string> = {
   "token-parent-claude": "thread-parent",
   "token-parent-readonly": "thread-parent",
   "token-ghost": "thread-ghost",
+  // Second credential on the caller thread, used by MCP authority admission
+  // tests that need to degrade one credential's authority in isolation.
+  "token-parent-authority": "thread-parent",
 };
 
 function makeHarnessLayer(
@@ -321,9 +337,11 @@ function makeHarnessLayer(
   const mcpSessionAuthorityRegistry = makeMcpSessionAuthorityRegistry({
     randomId: () => `test-authority-${++nextAuthority}`,
   });
-  const authorityBindingByToken = new Map<string, McpAuthorityBinding>();
+  const authorityBindingByToken = new Map<string, McpAuthorityBinding | null>();
+  const overriddenAuthorityTokens = new Set<string>();
   const bindingForToken = (token: string): McpAuthorityBinding | null => {
     if (!VALID_TOKENS[token]) return null;
+    if (overriddenAuthorityTokens.has(token)) return authorityBindingByToken.get(token) ?? null;
     const existing = authorityBindingByToken.get(token);
     if (existing) return existing;
     const record = mcpSessionAuthorityRegistry.mint({
@@ -1245,6 +1263,12 @@ function makeHarnessLayer(
         detailReads: threadDetailReads,
         batchTurnReads,
       }),
+      mcpSessionAuthority: mcpSessionAuthorityRegistry,
+      setTokenAuthority: (token, binding) => {
+        overriddenAuthorityTokens.add(token);
+        authorityBindingByToken.set(token, binding);
+      },
+      authorityForToken: (token) => bindingForToken(token),
       callTool,
       postRaw,
     } satisfies GatewayHarness;
@@ -4791,6 +4815,101 @@ describe("AgentGateway", () => {
       });
       assert.isTrue(isToolError(archive.result));
       assert.include(toolErrorText(archive.result), "full-access");
+      assert.equal(harness.dispatched.length, 0);
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("denies a revoked MCP authority before any dispatch or operation record", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const revoked = harness.authorityForToken("token-parent-authority");
+      assert.isNotNull(revoked);
+      harness.mcpSessionAuthority.revoke(revoked!.authorityId, "rotation");
+
+      const response = yield* harness.postRaw({
+        authorizationHeader: "Bearer token-parent-authority",
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "synara_create_thread",
+            arguments: { requestId: "revoked-authority", prompt: "must not run" },
+          },
+        },
+      });
+      assert.equal(response.status, 401);
+      assert.include(
+        (response.body as { error?: { message?: string } }).error?.message ?? "",
+        "mcp_authority_denied:revoked",
+      );
+      // Fail-closed before operation creation: no command dispatched and no
+      // durable operation record for the caller turn (Decision 21 / AC2).
+      assert.equal(harness.dispatched.length, 0);
+      assert.isNull(harness.getOperationStatus("turn-parent-active"));
+
+      // Authority is session-local: the sibling credential on the same thread
+      // keeps its own unrevoked record and still works.
+      const sibling = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_create_thread",
+        args: { requestId: "sibling-authority", prompt: "still allowed", provider: "codex" },
+      });
+      assert.isFalse(isToolError(sibling.result), toolErrorText(sibling.result));
+      assert.isAbove(harness.dispatched.length, 0);
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("ignores request-supplied identity when admitting or denying a credential", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const trusted = harness.authorityForToken("token-parent");
+      assert.isNotNull(trusted);
+      // Strip the unbound credential's server-side authority, then let the
+      // request assert a complete, otherwise-valid identity of its own.
+      harness.setTokenAuthority("token-parent-authority", null);
+      const spoofed = {
+        subject: "test-owner",
+        authorityId: trusted!.authorityId,
+        sessionGeneration: trusted!.sessionGeneration,
+        kind: trusted!.kind,
+        mcpAuthority: trusted,
+      };
+
+      const denied = yield* harness.postRaw({
+        authorizationHeader: "Bearer token-parent-authority",
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "synara_create_thread",
+            arguments: { requestId: "spoofed-identity", prompt: "must not run", ...spoofed },
+            ...spoofed,
+          },
+        },
+      });
+      assert.equal(denied.status, 401);
+      assert.include(
+        (denied.body as { error?: { message?: string } }).error?.message ?? "",
+        "mcp_authority_denied:missing-binding",
+      );
+      assert.equal(harness.dispatched.length, 0);
+      assert.isNull(harness.getOperationStatus("turn-parent-active"));
+
+      // The same supplied identity also cannot widen an admitted credential:
+      // the read-only credential stays capability-denied on its own record.
+      const capabilityDenied = yield* harness.callTool({
+        token: "token-parent-readonly",
+        name: "synara_create_thread",
+        args: { requestId: "spoofed-capability", prompt: "must not run", ...spoofed },
+      });
+      assert.equal(
+        (toolResultJson(capabilityDenied.result).error as { code: string }).code,
+        "capability_denied",
+      );
       assert.equal(harness.dispatched.length, 0);
     }).pipe(Effect.provide(gatewayLayer));
   });
