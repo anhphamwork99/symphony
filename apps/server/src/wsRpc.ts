@@ -33,7 +33,18 @@ import {
   type ServerLifecycleStreamEvent,
 } from "@synara/contracts";
 import { clamp } from "effect/Number";
-import { Duration, Effect, FileSystem, Layer, Option, Path, Queue, Schema, Scope, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Queue,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcMiddleware, RpcSchema, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -93,14 +104,16 @@ import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNo
 import {
   isSynaraMcpTurnCommand,
   parseSynaraMcpCommand,
-  planSynaraMcpCompletion,
   planSynaraMcpDisableResolution,
   planSynaraMcpDispatch,
-  planSynaraMcpFailure,
   sanitizeSynaraMcpDiagnostic,
-  synaraMcpWaitStatus,
   type SynaraMcpDisableOutcome,
 } from "./orchestration/synaraMcpCommand";
+import {
+  reconcileSynaraMcpProject,
+  SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL,
+  SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
+} from "./orchestration/synaraMcpProjectReconciliation";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
@@ -111,7 +124,11 @@ import { discoverSkillsCatalog, synaraSkillsDir } from "./provider/skillsCatalog
 import { recoverUnregisteredGitHubCheckout } from "./project/githubProjectRegistration";
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
-import { ProviderService, type ProviderDisableSynaraMcpResult } from "./provider/Services/ProviderService";
+import {
+  ProviderService,
+  type ProviderDisableSynaraMcpResult,
+  type ProviderEnableSynaraMcpResult,
+} from "./provider/Services/ProviderService";
 import { listProviderUsage } from "./providerUsage";
 import { getProviderUsageSnapshot } from "./providerUsageSnapshot";
 import { ProfileStatsQuery } from "./profileStats";
@@ -189,6 +206,32 @@ export function runProviderSynaraMcpDisable(input: {
     Effect.timeoutOption(input.remainingMs <= 0 ? "1 millis" : Duration.millis(input.remainingMs)),
     Effect.catch((cause) =>
       Effect.succeed<Option.Option<SynaraMcpDisableOutcome>>(
+        Option.some({
+          state: "unavailable" as const,
+          detail: sanitizeSynaraMcpDiagnostic(cause),
+        }),
+      ),
+    ),
+  );
+}
+
+/**
+ * Run the bounded per-session provider enable for the Synara MCP command
+ * boundary (impl-08). A bounded-wait timeout yields `Option.none` and the
+ * caller supplies the deadline-specific detail; a thrown provider enable
+ * failure is caught locally and normalized to an unavailable outcome with a
+ * sanitized bounded detail, so the durable operation always receives exactly
+ * one failed-disabled rollback terminal instead of the failure escaping to
+ * the RPC error path and leaving a pending operation without a terminal.
+ */
+export function runProviderSynaraMcpEnable(input: {
+  readonly enable: Effect.Effect<ProviderEnableSynaraMcpResult, unknown>;
+  readonly remainingMs: number;
+}): Effect.Effect<Option.Option<ProviderEnableSynaraMcpResult>, never> {
+  return input.enable.pipe(
+    Effect.timeoutOption(input.remainingMs <= 0 ? "1 millis" : Duration.millis(input.remainingMs)),
+    Effect.catch((cause) =>
+      Effect.succeed<Option.Option<ProviderEnableSynaraMcpResult>>(
         Option.some({
           state: "unavailable" as const,
           detail: sanitizeSynaraMcpDiagnostic(cause),
@@ -695,13 +738,12 @@ const makeWsRpcHandlersLayer = () =>
               const terminal = planSynaraMcpDisableResolution({
                 plan,
                 project: plan.project,
-                outcome:
-                  Option.isNone(outcome)
-                    ? {
-                        state: "timeout",
-                        detail: "The Synara MCP disable did not complete before its deadline.",
-                      }
-                    : outcome.value,
+                outcome: Option.isNone(outcome)
+                  ? {
+                      state: "timeout",
+                      detail: "The Synara MCP disable did not complete before its deadline.",
+                    }
+                  : outcome.value,
               });
               if (terminal.projectCommand) {
                 yield* dispatchOrchestrationCommand(terminal.projectCommand);
@@ -712,103 +754,75 @@ const makeWsRpcHandlersLayer = () =>
           }
 
           result = yield* dispatchOrchestrationCommand(plan.pendingActivityCommand);
-          const reconcile = Effect.gen(function* () {
-            const deadline = Date.parse(plan.operation.absoluteDeadline);
-            if (synaraMcpCommand === "disable") {
-              // impl-07: the per-session disable fences immediately, settles
-              // in-flight executions exactly once, drains the gateway within
-              // the bounded window, revokes, clears, and reloads at the safe
-              // boundary (the current turn's end). The durable operation stays
-              // pending until the outcome is known; the shared resolution
-              // drives exactly one succeeded/failed terminal with finalState
-              // disabled, bounded by the project deadline.
-              const remainingMs = Math.max(0, deadline - Date.now());
-              const outcome = yield* runProviderSynaraMcpDisable({
-                disable: providerService.disableSynaraMcp({
-                  threadId: plan.command.threadId,
-                }),
-                remainingMs,
-              });
-              const current = yield* orchestrationEngine.getReadModel();
-              const currentProject = current.projects.find(
-                (project) => project.id === plan.project.id,
-              );
-              const terminal = planSynaraMcpDisableResolution({
-                plan,
-                project: currentProject ?? plan.project,
-                outcome:
-                  Option.isNone(outcome)
-                    ? {
-                        state: "timeout",
-                        detail:
-                          "The Synara MCP disable did not complete before the project deadline.",
-                      }
-                    : outcome.value,
-              });
-              if (
-                currentProject?.synaraMcpActivationOperation?.requestId === plan.requestId &&
-                terminal.projectCommand
-              ) {
-                yield* dispatchOrchestrationCommand(terminal.projectCommand);
-              }
-              yield* dispatchOrchestrationCommand(terminal.activityCommand);
-              return;
-            }
-            while (Date.now() < deadline) {
-              const current = yield* orchestrationEngine.getReadModel();
-              const currentProject = current.projects.find(
-                (project) => project.id === plan.project.id,
-              );
-              const currentOperation = currentProject?.synaraMcpActivationOperation;
-              if (
-                currentOperation?.requestId !== plan.requestId ||
-                currentOperation.aggregateStatus !== "pending"
-              ) {
-                return;
-              }
-              const waitStatus = synaraMcpWaitStatus(current, currentOperation);
-              if (waitStatus === "waiting") {
-                yield* Effect.sleep("100 millis");
-                continue;
-              }
-              const completed =
-                waitStatus === "ready"
-                  ? planSynaraMcpCompletion({
-                      plan,
-                      project: currentProject!,
-                    })
-                  : planSynaraMcpFailure({
-                      plan,
-                      project: currentProject!,
-                      detail: "A project session disappeared before the safe boundary.",
-                    });
-              if (completed.projectCommand) {
-                yield* dispatchOrchestrationCommand(completed.projectCommand);
-              }
-              yield* dispatchOrchestrationCommand(
-                "activityCommand" in completed
-                  ? completed.activityCommand
-                  : completed.terminalActivityCommand,
-              );
-              return;
-            }
-            const current = yield* orchestrationEngine.getReadModel();
-            const currentProject = current.projects.find(
-              (project) => project.id === plan.project.id,
-            );
-            const timedOut = planSynaraMcpFailure({
+          // impl-08: the project-wide fan-out reconciliation drives every
+          // captured wait-set member through the public provider boundary,
+          // waits for all of them within the absolute 120-second deadline,
+          // and commits enabled only after every member succeeded. Any
+          // failure, timeout, or unsafe disappearance journals a durable
+          // failed-disabled operation, cleans every captured member through
+          // the disable fan-out, and emits exactly one terminal activity.
+          // Per-member provider calls are bounded by the remaining deadline
+          // and normalized locally (timeout/unavailable/throw), so the
+          // durable operation always receives exactly one terminal.
+          const mcpSessionAuthorityService = yield* McpSessionAuthority;
+          const attachmentPrincipalService = yield* CurrentManagedAttachmentPrincipal;
+          const reconcile = Effect.tryPromise(() =>
+            reconcileSynaraMcpProject({
               plan,
-              project: currentProject ?? plan.project,
-              detail: "The project safe-boundary wait expired before activation completed",
-            });
-            if (
-              currentProject?.synaraMcpActivationOperation?.requestId === plan.requestId &&
-              timedOut.projectCommand
-            ) {
-              yield* dispatchOrchestrationCommand(timedOut.projectCommand);
-            }
-            yield* dispatchOrchestrationCommand(timedOut.activityCommand);
-          }).pipe(
+              seams: {
+                now: () => new Date(),
+                getReadModel: () => Effect.runPromise(orchestrationEngine.getReadModel()),
+                dispatch: (command) =>
+                  Effect.runPromise(
+                    dispatchOrchestrationCommand(command).pipe(
+                      Effect.provideService(McpSessionAuthority, mcpSessionAuthorityService),
+                      Effect.provideService(
+                        CurrentManagedAttachmentPrincipal,
+                        attachmentPrincipalService,
+                      ),
+                    ),
+                  ),
+                enableMember: async ({ threadId, expectedSessionGeneration, remainingMs }) => {
+                  const enable = providerService.enableSynaraMcp;
+                  const outcome = await Effect.runPromise(
+                    runProviderSynaraMcpEnable({
+                      enable:
+                        enable === undefined
+                          ? Effect.succeed({
+                              state: "unavailable" as const,
+                              detail:
+                                "The provider service does not expose the Synara MCP enable operation.",
+                            })
+                          : enable({ threadId, expectedSessionGeneration }),
+                      remainingMs,
+                    }),
+                  );
+                  if (Option.isNone(outcome)) {
+                    return {
+                      state: "timeout" as const,
+                      detail: SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
+                    };
+                  }
+                  return outcome.value;
+                },
+                disableMember: async ({ threadId, remainingMs }) => {
+                  const outcome = await Effect.runPromise(
+                    runProviderSynaraMcpDisable({
+                      disable: providerService.disableSynaraMcp({ threadId }),
+                      remainingMs,
+                    }),
+                  );
+                  if (Option.isNone(outcome)) {
+                    return {
+                      state: "timeout" as const,
+                      detail: SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL,
+                    };
+                  }
+                  return outcome.value;
+                },
+              },
+            }),
+          ).pipe(
             Effect.catch((error) =>
               Effect.logWarning("Synara MCP command reconciliation failed", {
                 requestId: plan.requestId,
