@@ -4,7 +4,7 @@
 
 **Blocked by:** impl-02 — Persist project MCP activation operations; impl-05 — Implement Synara MCP commands and durable acknowledgements; impl-06 — Implement single-session MCP lifecycle; impl-07 — Cancel MCP calls and revoke authority on disable.
 
-**Status:** done
+**Status:** corrective-pending
 
 - [x] Snapshot the current session wait-set and exclude future sessions.
 - [x] Reconcile sessions independently with a 120-second absolute deadline.
