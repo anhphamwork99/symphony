@@ -48,6 +48,18 @@ export function validateProjectMcpActivationUpdate(input: {
     if (operation.operationGeneration !== 1) {
       return { ok: false, detail: "The first activation operation must use generation 1." };
     }
+    // impl-09: every newly created operation carries the recovery record.
+    // Without a recovery identity the operation cannot be recovered after a
+    // restart (legacy pending operations block startup instead), and without
+    // the issuing thread the deterministic terminal activity has no durable
+    // home. Fail closed at the write boundary so a new operation can never be
+    // created without them.
+    if (operation.recoveryIdentity === undefined || operation.issuingThreadId === undefined) {
+      return {
+        ok: false,
+        detail: "A new activation operation must carry a recovery identity and issuing thread.",
+      };
+    }
     return { ok: true };
   }
 
@@ -68,6 +80,12 @@ export function validateProjectMcpActivationUpdate(input: {
     }
     if (operation.operationGeneration !== currentOperation.operationGeneration) {
       return { ok: false, detail: "An operation request cannot change its generation." };
+    }
+    if (operation.recoveryIdentity !== currentOperation.recoveryIdentity) {
+      return { ok: false, detail: "An activation operation recovery identity is immutable." };
+    }
+    if (operation.issuingThreadId !== currentOperation.issuingThreadId) {
+      return { ok: false, detail: "An activation operation issuing thread is immutable." };
     }
     if (!sameJson(operation.waitSet, currentOperation.waitSet)) {
       return { ok: false, detail: "An activation operation wait-set is immutable." };
@@ -91,6 +109,12 @@ export function validateProjectMcpActivationUpdate(input: {
     return {
       ok: false,
       detail: "A new activation request must advance the operation generation.",
+    };
+  }
+  if (operation.recoveryIdentity === undefined || operation.issuingThreadId === undefined) {
+    return {
+      ok: false,
+      detail: "A new activation operation must carry a recovery identity and issuing thread.",
     };
   }
   return { ok: true };

@@ -24,6 +24,7 @@ import {
   planSynaraMcpFailure,
   planSynaraMcpMemberOutcome,
   synaraMcpMemberStatus,
+  synaraMcpSessionGeneration,
   type SynaraMcpCommandPlan,
 } from "./synaraMcpCommand.ts";
 
@@ -47,13 +48,12 @@ export const SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL =
 export const SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS = 30_000;
 
 /**
- * The durable wait-set session-generation token format. Must match the
- * planner's mint in `synaraMcpCommand.ts` (`orchestration:<threadId>:<session.updatedAt>`):
- * the live session generation derived at reconciliation time is validated
- * against the captured token by the provider enable boundary (F3).
+ * The durable wait-set session-generation token format is minted canonically
+ * by the planner (`synaraMcpSessionGeneration` in `synaraMcpCommand.ts`):
+ * `orchestration:<threadId>:<session.updatedAt>`. The live session generation
+ * derived at reconciliation time is validated against the captured token by
+ * the provider enable boundary (F3).
  */
-const synaraMcpSessionGeneration = (threadId: ThreadId, sessionUpdatedAt: string): string =>
-  `orchestration:${threadId}:${sessionUpdatedAt}`;
 
 /** Stable bounded detail for a wait-set member that disappeared before reconciliation. */
 export const SYNARA_MCP_PROJECT_SESSION_DISAPPEARED_DETAIL =

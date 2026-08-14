@@ -1,12 +1,14 @@
 import {
   CommandId,
   EventId,
+  makeProjectMcpActivationRecoveryIdentity,
   MessageId,
   ProjectId,
   ThreadId,
   type IsoDateTime,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type ProjectMcpActivationOperation,
 } from "@synara/contracts";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
@@ -24,9 +26,11 @@ import {
   planSynaraMcpDispatch,
   planSynaraMcpFailure,
   planSynaraMcpMemberOutcome,
+  planSynaraMcpRecovery,
   sanitizeSynaraMcpDiagnostic,
   synaraMcpMemberStatus,
   synaraMcpRequestId,
+  synaraMcpSessionGeneration,
   synaraMcpWaitStatus,
   type SynaraMcpCommandPayload,
 } from "./synaraMcpCommand.ts";
@@ -1474,5 +1478,140 @@ describe("Synara MCP command boundary and durable activity contract", () => {
       ),
     };
     expect(synaraMcpMemberStatus(sessionless, operation, operation.waitSet[1]!)).toBe("failed");
+  });
+
+  it("mints a deterministic recovery record on every newly created operation (impl-09)", async () => {
+    const readModel = await multiSessionReadModel();
+    const enable = planSynaraMcpCommand({
+      command: turnCommand("/Enable Synara MCP"),
+      readModel,
+      now: () => new Date(now),
+    });
+    if (!enable) throw new Error("Expected an enable plan");
+    const operation = enable.operation;
+    expect(operation.recoveryIdentity).toBe(
+      makeProjectMcpActivationRecoveryIdentity({
+        projectId,
+        requestId: enable.requestId,
+        operationGeneration: operation.operationGeneration,
+      }),
+    );
+    expect(operation.issuingThreadId).toBe(threadId);
+
+    // A fresh disable operation on the same project advances the generation
+    // and therefore mints a distinct recovery identity (the recovery record
+    // is bound to the operation's immutable identity).
+    const disable = planSynaraMcpCommand({
+      command: turnCommand("/Disable Synara MCP"),
+      readModel: {
+        ...readModel,
+        projects: readModel.projects.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                synaraMcpActivationVersion: operation.version,
+                synaraMcpActivationOperation: operation,
+                synaraMcpDesiredState: "enabled",
+              }
+            : project,
+        ),
+      },
+      now: () => new Date(now),
+    });
+    if (!disable) throw new Error("Expected a disable plan");
+    expect(disable.operation.operationGeneration).toBe(operation.operationGeneration + 1);
+    expect(disable.operation.recoveryIdentity).not.toBe(operation.recoveryIdentity);
+    expect(disable.operation.recoveryIdentity).toBe(
+      makeProjectMcpActivationRecoveryIdentity({
+        projectId,
+        requestId: disable.requestId,
+        operationGeneration: disable.operation.operationGeneration,
+      }),
+    );
+    expect(disable.operation.issuingThreadId).toBe(threadId);
+  });
+
+  it("re-derives a deterministic recovery plan from a durable pending operation (impl-09)", async () => {
+    const readModel = await multiSessionReadModel();
+    const plan = planSynaraMcpCommand({
+      command: turnCommand("/Enable Synara MCP"),
+      readModel,
+      now: () => new Date(now),
+    });
+    if (!plan) throw new Error("Expected an enable plan");
+
+    const recovery = planSynaraMcpRecovery({
+      project: plan.project,
+      operation: plan.operation,
+    });
+    expect(recovery).not.toBeNull();
+    expect(recovery!.requestId).toBe(plan.requestId);
+    expect(recovery!.operation.operationGeneration).toBe(plan.operation.operationGeneration);
+    expect(recovery!.command.threadId).toBe(threadId);
+    expect(recovery!.command.message.text).toBe("/Enable Synara MCP");
+    // The re-derived plan feeds the same terminal planners, so the terminal
+    // activity keeps its deterministic identity on the issuing thread.
+    expect(recovery!.terminalActivityCommand.activity.id).toBe(`${plan.requestId}:terminal`);
+    expect(recovery!.terminalActivityCommand.threadId).toBe(threadId);
+    expect(recovery!.terminalActivityCommand.activity.payload).toMatchObject({
+      requestId: plan.requestId,
+      command: "enable",
+      phase: "terminal",
+      requestedState: "enabled",
+    });
+    expect(recovery!.pendingActivityCommand.activity.id).toBe(`${plan.requestId}:pending`);
+
+    const completion = planSynaraMcpCompletion({
+      plan: recovery!,
+      project: {
+        ...plan.project,
+        synaraMcpActivationVersion: plan.operation.version,
+        synaraMcpActivationOperation: plan.operation,
+        synaraMcpDesiredState: "enabled",
+      },
+      now: () => new Date("2026-08-12T12:00:05.000Z"),
+    });
+    expect(completion.projectCommand?.operation.aggregateStatus).toBe("succeeded");
+    expect(completion.projectCommand?.operation.recoveryIdentity).toBe(
+      plan.operation.recoveryIdentity,
+    );
+    expect(completion.terminalActivityCommand.activity.id).toBe(`${plan.requestId}:terminal`);
+  });
+
+  it("refuses to re-derive a recovery plan for terminal or legacy operations (impl-09)", async () => {
+    const readModel = await multiSessionReadModel();
+    const plan = planSynaraMcpCommand({
+      command: turnCommand("/Enable Synara MCP"),
+      readModel,
+      now: () => new Date(now),
+    });
+    if (!plan) throw new Error("Expected an enable plan");
+
+    const terminal: ProjectMcpActivationOperation = {
+      ...plan.operation,
+      aggregateStatus: "succeeded",
+      desiredState: "enabled",
+      outcomes: plan.operation.outcomes.map((outcome) => ({
+        ...outcome,
+        status: "succeeded" as const,
+        detail: null,
+      })),
+    };
+    expect(planSynaraMcpRecovery({ project: plan.project, operation: terminal })).toBeNull();
+
+    const legacyPending: ProjectMcpActivationOperation = {
+      ...plan.operation,
+      recoveryIdentity: undefined,
+      issuingThreadId: undefined,
+    };
+    expect(
+      planSynaraMcpRecovery({ project: plan.project, operation: legacyPending }),
+    ).toBeNull();
+  });
+
+  it("mints the shared session-generation token from thread and session updatedAt (impl-08/09)", async () => {
+    expect(synaraMcpSessionGeneration(threadId, "2026-08-12T12:00:00.000Z")).toBe(
+      `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
+    );
   });
 });

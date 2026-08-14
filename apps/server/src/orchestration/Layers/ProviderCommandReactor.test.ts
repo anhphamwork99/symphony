@@ -22,6 +22,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  makeProjectMcpActivationRecoveryIdentity,
   type McpAuthorityBinding,
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -243,6 +244,7 @@ describe("ProviderCommandReactor", () => {
     readonly commandEventTimeout?: Duration.Duration;
     readonly gatewayOperationId?: string;
     readonly gitWritingModelSelection?: ModelSelection;
+    readonly enableSynaraMcp?: NonNullable<ProviderServiceShape["enableSynaraMcp"]>;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-"));
@@ -497,6 +499,10 @@ describe("ProviderCommandReactor", () => {
     };
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const enableSynaraMcp = vi.fn<NonNullable<ProviderServiceShape["enableSynaraMcp"]>>(
+      input?.enableSynaraMcp ??
+        (() => Effect.succeed({ state: "active", alreadyActive: false })),
+    );
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
@@ -510,6 +516,7 @@ describe("ProviderCommandReactor", () => {
       steerSubagent,
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
+      enableSynaraMcp,
       disableSynaraMcp: () => unsupported(),
       stopSession: stopSession as ProviderServiceShape["stopSession"],
       stopRuntimeSession: stopRuntimeSession as NonNullable<
@@ -674,6 +681,7 @@ describe("ProviderCommandReactor", () => {
       steerTurn,
       startReview,
       forkThread,
+      enableSynaraMcp,
       interruptTurn,
       stopTask,
       backgroundTask,
@@ -9613,6 +9621,172 @@ describe("ProviderCommandReactor", () => {
 
       await waitFor(() => harness.forkThread.mock.calls.length === 1);
       expect(harness.forkThread.mock.calls[0]?.[0]?.mcpAuthority).toBeUndefined();
+    });
+  });
+
+  describe("impl-09 AC2: Synara MCP session convergence at session ensure", () => {
+    const projectId = asProjectId("project-1");
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const requestId = "request-convergence-reactor";
+    const recoveryIdentity = makeProjectMcpActivationRecoveryIdentity({
+      projectId,
+      requestId,
+      operationGeneration: 1,
+    });
+
+    /** Seed the durable project activation operation through the decider. */
+    async function seedActivationOperation(
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      input: { readonly now: string; readonly terminal: boolean },
+    ) {
+      const waitSet = [
+        { sessionId: threadId, sessionGeneration: `orchestration:${threadId}:${input.now}` },
+      ];
+      const accepted = {
+        projectId,
+        requestId,
+        operationGeneration: 1,
+        recoveryIdentity,
+        issuingThreadId: threadId,
+        absoluteDeadline: new Date(Date.parse(input.now) + 120_000).toISOString(),
+        desiredState: "enabled" as const,
+        waitSet,
+        outcomes: [
+          {
+            sessionId: threadId,
+            sessionGeneration: `orchestration:${threadId}:${input.now}`,
+            status: "pending" as const,
+            detail: null,
+            updatedAt: input.now,
+          },
+        ],
+        aggregateStatus: "pending" as const,
+        version: 1,
+        createdAt: input.now,
+        updatedAt: input.now,
+      };
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "project.mcp-activation.update",
+          commandId: CommandId.makeUnsafe("cmd-convergence-accept"),
+          projectId,
+          desiredState: "enabled",
+          expectedVersion: 0,
+          operation: accepted,
+        }),
+      );
+      if (!input.terminal) {
+        return;
+      }
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "project.mcp-activation.update",
+          commandId: CommandId.makeUnsafe("cmd-convergence-terminal"),
+          projectId,
+          desiredState: "enabled",
+          expectedVersion: 1,
+          operation: {
+            ...accepted,
+            outcomes: [
+              {
+                sessionId: threadId,
+                sessionGeneration: `orchestration:${threadId}:${input.now}`,
+                status: "succeeded" as const,
+                detail: null,
+                updatedAt: input.now,
+              },
+            ],
+            aggregateStatus: "succeeded" as const,
+            version: 2,
+            updatedAt: input.now,
+          },
+        }),
+      );
+    }
+
+    async function dispatchTurn(
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      input: { readonly now: string; readonly commandId: string },
+    ) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe(input.commandId),
+          threadId,
+          message: {
+            messageId: asMessageId(`message-${input.commandId}`),
+            role: "user",
+            text: "hello convergence",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required" as const,
+          createdAt: input.now,
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    }
+
+    it("activates a recreated session only from a terminal-enabled project, with the exact fresh session generation", async () => {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      await seedActivationOperation(harness, { now, terminal: true });
+      await dispatchTurn(harness, { now, commandId: "cmd-convergence-turn-terminal" });
+
+      expect(harness.enableSynaraMcp).toHaveBeenCalledTimes(1);
+      const ensuredSession = await Effect.runPromise(
+        harness.startSession.mock.results[0]!.value,
+      );
+      const expectedGeneration = `orchestration:${threadId}:${ensuredSession.updatedAt}`;
+      expect(harness.enableSynaraMcp.mock.calls[0]?.[0]).toEqual({
+        threadId,
+        expectedSessionGeneration: expectedGeneration,
+        liveSessionGeneration: expectedGeneration,
+      });
+      // The convergence is awaited before the turn is dispatched, so the
+      // freshly ensured session carries the catalog into its first turn.
+      expect(
+        harness.enableSynaraMcp.mock.invocationCallOrder[0]! <
+          harness.sendTurn.mock.invocationCallOrder[0]!,
+      ).toBe(true);
+      // The convergence never mutates the durable project state.
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      expect(
+        readModel.projects[0]?.synaraMcpActivationOperation?.aggregateStatus,
+      ).toBe("succeeded");
+    });
+
+    it("waits for a pending operation and never activates before its exact terminal", async () => {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      await seedActivationOperation(harness, { now, terminal: false });
+      await dispatchTurn(harness, { now, commandId: "cmd-convergence-turn-pending" });
+
+      expect(harness.enableSynaraMcp).not.toHaveBeenCalled();
+      // The turn still proceeds: the session waits with a normal tool surface.
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it("stays dormant when the project has no activation operation", async () => {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      await dispatchTurn(harness, { now, commandId: "cmd-convergence-turn-dormant" });
+
+      expect(harness.enableSynaraMcp).not.toHaveBeenCalled();
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it("degrades to dormant without breaking the turn when the activation cannot be proven", async () => {
+      const harness = await createHarness({
+        enableSynaraMcp: () =>
+          Effect.succeed({ state: "unavailable", detail: "activation refused" }),
+      });
+      const now = new Date().toISOString();
+      await seedActivationOperation(harness, { now, terminal: true });
+      await dispatchTurn(harness, { now, commandId: "cmd-convergence-turn-unavailable" });
+
+      expect(harness.enableSynaraMcp).toHaveBeenCalledTimes(1);
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
     });
   });
 });

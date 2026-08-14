@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   IsoDateTime,
+  makeProjectMcpActivationRecoveryIdentity,
   OrchestrationEvent,
   ProjectId,
   ProjectMcpActivationOperation,
@@ -26,6 +27,12 @@ const operation = (overrides: Partial<ProjectMcpActivationOperation> = {}) =>
     projectId,
     requestId: "request-activation",
     operationGeneration: 1,
+    recoveryIdentity: makeProjectMcpActivationRecoveryIdentity({
+      projectId,
+      requestId: "request-activation",
+      operationGeneration: 1,
+    }),
+    issuingThreadId: sessionId,
     absoluteDeadline: "2026-08-12T12:02:00.000Z",
     desiredState: "enabled",
     waitSet: [{ sessionId, sessionGeneration: "runtime-1" }],
@@ -211,5 +218,147 @@ describe("project MCP activation persistence contract", () => {
     expect((isEventArray(rollbackEvent) ? rollbackEvent[0] : rollbackEvent)?.type).toBe(
       "project.mcp-activation-updated",
     );
+  });
+
+  it("rejects a new activation operation without the recovery record", async () => {
+    const initial = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            operation: operation({ recoveryIdentity: undefined }),
+          }),
+          readModel: initial,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "A new activation operation must carry a recovery identity and issuing thread.",
+    });
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            operation: operation({ issuingThreadId: undefined }),
+          }),
+          readModel: initial,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "A new activation operation must carry a recovery identity and issuing thread.",
+    });
+  });
+
+  it("keeps the recovery record immutable across same-request updates", async () => {
+    const initial = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
+    const firstActivation = await Effect.runPromise(
+      decideOrchestrationCommand({ command: command(), readModel: initial }),
+    );
+    const firstActivationEvent = Array.isArray(firstActivation)
+      ? firstActivation[0]!
+      : firstActivation;
+    const afterFirstActivation = await Effect.runPromise(
+      projectEvent(initial, { ...firstActivationEvent, sequence: 2 }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            expectedVersion: 1,
+            operation: operation({
+              version: 2,
+              recoveryIdentity: "synara-mcp-recovery:01234567",
+            }),
+          }),
+          readModel: afterFirstActivation,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "An activation operation recovery identity is immutable.",
+    });
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            expectedVersion: 1,
+            operation: operation({
+              version: 2,
+              issuingThreadId: ThreadId.makeUnsafe("other-issuing-thread"),
+            }),
+          }),
+          readModel: afterFirstActivation,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "An activation operation issuing thread is immutable.",
+    });
+  });
+
+  it("requires the recovery record on a new request after a terminal operation", async () => {
+    const initial = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
+    const accepted = await Effect.runPromise(
+      decideOrchestrationCommand({ command: command(), readModel: initial }),
+    );
+    const acceptedEvent = Array.isArray(accepted) ? accepted[0]! : accepted;
+    const afterFirst = await Effect.runPromise(
+      projectEvent(initial, { ...acceptedEvent, sequence: 2 }),
+    );
+    const terminal = operation({
+      aggregateStatus: "succeeded",
+      version: 2,
+      outcomes: [
+        {
+          sessionId,
+          sessionGeneration: "runtime-1",
+          status: "succeeded" as const,
+          detail: null,
+          updatedAt: now,
+        },
+      ],
+    });
+    const terminalEvent = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: command({
+          expectedVersion: 1,
+          operation: terminal,
+          commandId: CommandId.makeUnsafe("command-activation-terminal"),
+        }),
+        readModel: afterFirst,
+      }),
+    );
+    const afterTerminal = await Effect.runPromise(
+      projectEvent(afterFirst, {
+        ...(isEventArray(terminalEvent) ? terminalEvent[0]! : terminalEvent),
+        sequence: 3,
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: command({
+            expectedVersion: 2,
+            operation: operation({
+              requestId: "request-activation-2",
+              operationGeneration: 2,
+              recoveryIdentity: undefined,
+              version: 3,
+            }),
+            commandId: CommandId.makeUnsafe("command-activation-2"),
+          }),
+          readModel: afterTerminal,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      detail: "A new activation operation must carry a recovery identity and issuing thread.",
+    });
   });
 });

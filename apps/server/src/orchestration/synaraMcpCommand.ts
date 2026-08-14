@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   CommandId,
   EventId,
+  makeProjectMcpActivationRecoveryIdentity,
+  MessageId,
   PROJECT_MCP_ACTIVATION_DEADLINE_MS,
   type IsoDateTime,
   type OrchestrationCommand,
@@ -120,10 +122,24 @@ function currentSessionWaitSet(readModel: OrchestrationReadModel, projectId: Pro
       // generation the provider enable boundary validates against the live
       // session (impl-08); it is replaced by the provider lifecycle
       // generation when that lifecycle is fully exposed to orchestration.
-      sessionGeneration: `orchestration:${thread.id}:${thread.session!.updatedAt}`,
+      sessionGeneration: synaraMcpSessionGeneration(thread.id, thread.session!.updatedAt),
     }))
     .toSorted((left, right) => left.sessionId.localeCompare(right.sessionId));
 }
+
+/**
+ * The durable session-generation token format (impl-08 F3): the full token —
+ * thread identity AND the captured `session.updatedAt` — must match the live
+ * session generation exactly at the provider enable boundary, so a session
+ * recreated on the same thread after capture can never activate from a stale
+ * token. Shared by the planner (acceptance mint), the project reconciliation
+ * (live re-derivation), and the impl-09 session convergence (fresh exact
+ * generation after recreation).
+ */
+export const synaraMcpSessionGeneration = (
+  threadId: ThreadId,
+  sessionUpdatedAt: string,
+): string => `orchestration:${threadId}:${sessionUpdatedAt}`;
 
 /**
  * Wait-set for a new Synara MCP operation (impl-08): both enable and disable
@@ -191,6 +207,7 @@ function makeOperation(input: {
   readonly requestId: string;
   readonly desiredState: SynaraMcpRequestedState;
   readonly waitSet: ProjectMcpActivationOperation["waitSet"];
+  readonly issuingThreadId: ThreadId;
   readonly createdAt: IsoDateTime;
 }): ProjectMcpActivationOperation {
   const version = (input.project.synaraMcpActivationVersion ?? 0) + 1;
@@ -206,6 +223,17 @@ function makeOperation(input: {
     projectId: input.project.id,
     requestId: input.requestId,
     operationGeneration,
+    // impl-09: every newly created operation persists its deterministic
+    // recovery identity (bound to the immutable project/request/generation
+    // identity) and the issuing thread, so startup recovery can settle a
+    // pending operation with the same deterministic terminal IDs and place
+    // the terminal activity on the original command thread.
+    recoveryIdentity: makeProjectMcpActivationRecoveryIdentity({
+      projectId: input.project.id,
+      requestId: input.requestId,
+      operationGeneration,
+    }),
+    issuingThreadId: input.issuingThreadId,
     absoluteDeadline: new Date(
       Date.parse(input.createdAt) + PROJECT_MCP_ACTIVATION_DEADLINE_MS,
     ).toISOString(),
@@ -294,6 +322,7 @@ export function planSynaraMcpCommand(input: {
             project,
             kind,
           }),
+          issuingThreadId: thread.id,
           createdAt,
         });
   const pending = operation.aggregateStatus === "pending";
@@ -411,6 +440,85 @@ export function planSynaraMcpDispatch(input: {
     activityCommand: planSynaraMcpUnprocessableActivity({
       command: input.command,
       createdAt: isoNow(input.now),
+    }),
+  };
+}
+
+/**
+ * Reconstruct the deterministic command plan for a durable pending operation
+ * (impl-09 startup recovery). The original turn command is not persisted, so
+ * the plan is re-derived from the operation's own immutable identity: the
+ * recovery record (`recoveryIdentity` + `issuingThreadId`) proves the
+ * operation was created under the recoverable format and names the thread
+ * whose work log owns the deterministic terminal activity. The re-derived
+ * plan feeds the existing completion/failure planners so recovery settles the
+ * operation with exactly the same deterministic command/activity IDs a live
+ * resolution would have used (journal receipt deduplication then makes
+ * recovery replay-safe). Returns `null` for non-pending, legacy, or
+ * incomplete operations: recovery must never settle those.
+ */
+export function planSynaraMcpRecovery(input: {
+  readonly project: OrchestrationProject;
+  readonly operation: ProjectMcpActivationOperation;
+}): SynaraMcpCommandPlan | null {
+  const { project, operation } = input;
+  if (
+    operation.aggregateStatus !== "pending" ||
+    operation.recoveryIdentity === undefined ||
+    operation.issuingThreadId === undefined
+  ) {
+    return null;
+  }
+  const kind: SynaraMcpCommand = operation.desiredState === "enabled" ? "enable" : "disable";
+  const requestedState = synaraMcpRequestedState(kind);
+  const command: SynaraMcpTurnCommand = {
+    type: "thread.turn.start",
+    // Deterministic synthetic identity: the plan is only used to re-derive
+    // the durable operation/activity commands, never dispatched as a turn.
+    commandId: CommandId.makeUnsafe(`recovery:${operation.recoveryIdentity}`),
+    threadId: operation.issuingThreadId,
+    message: {
+      messageId: MessageId.makeUnsafe(`${operation.requestId}:recovery`),
+      role: "user",
+      text: kind === "enable" ? SYNARA_MCP_ENABLE_COMMAND : SYNARA_MCP_DISABLE_COMMAND,
+      attachments: [],
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    createdAt: operation.createdAt,
+  };
+  const createdAt = operation.updatedAt;
+  return {
+    command,
+    project,
+    requestId: operation.requestId,
+    operation,
+    projectCommand: null,
+    pending: true,
+    pendingActivityCommand: activityCommand({
+      threadId: operation.issuingThreadId,
+      requestId: operation.requestId,
+      command: kind,
+      requestedState,
+      phase: "pending",
+      status: "pending",
+      summary:
+        kind === "enable"
+          ? "Synara MCP will be enabled after the current turn completes"
+          : "Synara MCP will be disabled after the current turn completes",
+      createdAt,
+    }),
+    terminalActivityCommand: activityCommand({
+      threadId: operation.issuingThreadId,
+      requestId: operation.requestId,
+      command: kind,
+      requestedState,
+      phase: "terminal",
+      status: "succeeded",
+      finalState: requestedState,
+      summary:
+        kind === "enable" ? "Synara MCP is enabled for this project" : "Synara MCP is disabled",
+      createdAt,
     }),
   };
 }

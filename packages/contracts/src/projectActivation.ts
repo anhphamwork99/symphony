@@ -12,6 +12,39 @@ import {
 export const PROJECT_MCP_ACTIVATION_DEADLINE_MS = 120_000;
 export const PROJECT_MCP_ACTIVATION_WAIT_SET_MAX_SIZE = 256;
 export const PROJECT_MCP_ACTIVATION_DETAIL_MAX_LENGTH = 1_024;
+export const PROJECT_MCP_ACTIVATION_RECOVERY_IDENTITY_MAX_LENGTH = 128;
+
+/**
+ * Deterministic FNV-1a 32-bit hash (no `node:crypto`): contracts stay
+ * bundle-safe for browser consumers while the recovery identity remains
+ * stable and re-derivable from the operation identity it binds.
+ */
+const synaraMcpRecoveryHash = (text: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+/**
+ * Deterministic recovery identity for a project activation operation
+ * (impl-09). Bound to the operation's immutable identity (project, request,
+ * generation) so a recovery can never be correlated with a different
+ * operation, and its presence marks an operation as created under the
+ * recoverable (impl-09) format: a legacy pending operation without it blocks
+ * startup with a bounded diagnostic instead of being recovered blindly.
+ */
+export function makeProjectMcpActivationRecoveryIdentity(input: {
+  readonly projectId: ProjectId;
+  readonly requestId: string;
+  readonly operationGeneration: number;
+}): string {
+  return `synara-mcp-recovery:${synaraMcpRecoveryHash(
+    `${input.projectId}:${input.requestId}:${input.operationGeneration}`,
+  )}`;
+}
 
 export const ProjectMcpDesiredState = Schema.Literals(["disabled", "enabled"]);
 export type ProjectMcpDesiredState = typeof ProjectMcpDesiredState.Type;
@@ -65,6 +98,8 @@ const validateProjectMcpActivationOperation = Schema.makeFilter(
     readonly projectId: ProjectId;
     readonly requestId: string;
     readonly operationGeneration: number;
+    readonly recoveryIdentity?: string;
+    readonly issuingThreadId?: ThreadId;
     readonly absoluteDeadline: string;
     readonly desiredState: ProjectMcpDesiredState;
     readonly waitSet: ReadonlyArray<ProjectMcpActivationWaitSetEntry>;
@@ -154,6 +189,18 @@ export const ProjectMcpActivationOperation = Schema.Struct({
   projectId: ProjectId,
   requestId: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
   operationGeneration: PositiveInt,
+  // impl-09 recovery record. Optional at the schema level so pre-impl-09
+  // (legacy) terminal operations decode unchanged from the durable journal;
+  // newly created operations always carry both fields, and the server-side
+  // CAS validator rejects a new operation that omits them. A legacy pending
+  // operation without a recovery identity blocks startup with a bounded
+  // diagnostic (never recovered blindly).
+  recoveryIdentity: Schema.optional(
+    TrimmedNonEmptyString.check(
+      Schema.isMaxLength(PROJECT_MCP_ACTIVATION_RECOVERY_IDENTITY_MAX_LENGTH),
+    ),
+  ),
+  issuingThreadId: Schema.optional(ThreadId),
   absoluteDeadline: ProjectMcpActivationAbsoluteDeadline,
   desiredState: ProjectMcpDesiredState,
   waitSet: Schema.Array(ProjectMcpActivationWaitSetEntry).check(

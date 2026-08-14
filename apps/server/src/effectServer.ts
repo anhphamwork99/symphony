@@ -32,6 +32,7 @@ import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReac
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
+import { recoverSynaraMcpPendingOperations } from "./orchestration/synaraMcpStartupRecovery";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
 import { ProviderRuntimeReconciler } from "./provider/Services/ProviderRuntimeReconciler";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
@@ -221,6 +222,51 @@ export const createEffectServer = Effect.fn(function* (
   yield* recoverGitHandoffOperations((command) => orchestrationEngine.dispatch(command)).pipe(
     Effect.mapError(
       (cause) => new ServerLifecycleError({ operation: "recoverGitHandoffOperations", cause }),
+    ),
+  );
+  // impl-09 AC1: startup recovery of pending Synara MCP activation operations.
+  // Runs after the projection bootstrap and before markCommandReady, so the
+  // server is never command-ready (or marked ready for clients) with an
+  // unsettled pending operation. Recovery settles every durable pending
+  // operation from its persisted deadline with ZERO provider/MCP replay
+  // (pending enable rolls back failed-disabled because the pre-restart
+  // runtimes are gone; pending disable converges safely disabled), and a
+  // legacy pending operation without a recovery identity blocks startup with
+  // a bounded diagnostic instead of being recovered blindly.
+  yield* Effect.tryPromise(() =>
+    recoverSynaraMcpPendingOperations({
+      seams: {
+        now: () => new Date(),
+        getReadModel: () => Effect.runPromise(orchestrationEngine.getReadModel()),
+        dispatch: (command) => Effect.runPromise(orchestrationEngine.dispatch(command)),
+      },
+    }),
+  ).pipe(
+    Effect.flatMap((result) =>
+      result.kind === "blocked"
+        ? Effect.fail(
+            new ServerLifecycleError({
+              operation: "recoverSynaraMcpPendingOperations",
+              cause: new Error(result.detail),
+            }),
+          )
+        : Effect.succeed(result.operations),
+    ),
+    Effect.tap((operations) =>
+      operations.length === 0
+        ? Effect.void
+        : Effect.logWarning("Synara MCP startup recovery settled pending operations", {
+            operations: operations
+              .map(
+                (operation) =>
+                  `${operation.projectId}:${operation.requestId}->${operation.terminal}`,
+              )
+              .join(","),
+          }),
+    ),
+    Effect.mapError(
+      (cause) =>
+        new ServerLifecycleError({ operation: "recoverSynaraMcpPendingOperations", cause }),
     ),
   );
   yield* runtimeStartup.markCommandReady;

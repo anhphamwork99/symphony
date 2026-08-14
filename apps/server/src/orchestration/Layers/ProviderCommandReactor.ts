@@ -92,6 +92,11 @@ import {
   type McpAuthorityBinding,
 } from "../../agentGateway/mcpSessionAuthority.ts";
 import { resolveProviderDispatchAttachments } from "../../provider/providerAttachmentPaths.ts";
+import { runProviderSynaraMcpEnable } from "../../wsRpc.ts";
+import {
+  convergeSynaraMcpSession,
+  SYNARA_MCP_CONVERGENCE_ACTIVATION_BOUND_MS,
+} from "../synaraMcpSessionConvergence.ts";
 import { OrchestrationEventDeliveryRepositoryLive } from "../../persistence/Layers/OrchestrationEventDeliveries.ts";
 import { ProjectionPendingInteractionRepositoryLive } from "../../persistence/Layers/ProjectionPendingInteractions.ts";
 import { QueuedTurnPromotionRepositoryLive } from "../../persistence/Layers/QueuedTurnPromotions.ts";
@@ -1128,7 +1133,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const ensureSessionForThread = Effect.fnUntraced(function* (
+  const ensureSessionForThreadCore = Effect.fnUntraced(function* (
     threadId: ThreadId,
     createdAt: string,
     options?: {
@@ -1410,6 +1415,88 @@ const make = Effect.gen(function* () {
       activeSessionBeforeEnsure,
       activeSession: startedSession,
     };
+  });
+
+  /**
+   * impl-09 AC2: converge the session's Synara MCP lifecycle after every
+   * session ensure (create, resume, recreate, or reuse). The convergence
+   * reads the CURRENT durable project state only — a pending activation
+   * operation makes the session wait for the exact operation terminal, a
+   * terminal enabled state activates through the public provider boundary
+   * with the exact fresh session generation (the session that was just
+   * ensured), and every other state stays dormant. It never writes project
+   * state, so a stale or duplicate convergence can never restore enabled
+   * state or replay completed work; a failure degrades the session to
+   * dormant and is retried at the next ensure. Best-effort and bounded: a
+   * convergence failure must never break a session start.
+   */
+  const convergeSynaraMcpAfterSessionEnsure = Effect.fnUntraced(function* (session: ProviderSession) {
+    const enable = providerService.enableSynaraMcp;
+    if (enable === undefined) {
+      // Fail closed: no provider enable boundary, no convergence.
+      return;
+    }
+    yield* Effect.tryPromise(() =>
+      convergeSynaraMcpSession({
+        threadId: session.threadId,
+        sessionUpdatedAt: session.updatedAt,
+        seams: {
+          // Fresh projection state (the engine's in-memory command snapshot
+          // can lag the journal; convergence must decide from the current
+          // durable projection).
+          getReadModel: () =>
+            Effect.runPromise(projectionSnapshotQuery.getCommandReadModel()),
+          enable: async (input) => {
+            const outcome = await Effect.runPromise(
+              runProviderSynaraMcpEnable({
+                enable: enable({
+                  threadId: input.threadId,
+                  expectedSessionGeneration: input.expectedSessionGeneration,
+                  liveSessionGeneration: input.liveSessionGeneration,
+                }),
+                remainingMs: SYNARA_MCP_CONVERGENCE_ACTIVATION_BOUND_MS,
+              }),
+            );
+            if (Option.isNone(outcome)) {
+              return {
+                state: "unavailable" as const,
+                detail:
+                  "The Synara MCP activation did not complete within the convergence bound.",
+              };
+            }
+            return outcome.value;
+          },
+        },
+      }),
+    );
+  });
+
+  const ensureSessionForThread = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    createdAt: string,
+    options?: {
+      readonly modelSelection?: ModelSelection;
+      readonly providerOptions?: ProviderStartOptions;
+      readonly runtimeMode?: RuntimeMode;
+      /**
+       * Command that drove this turn/ensure, for subject-bound MCP authority
+       * resolution (exact command binding, else thread binding). Absent means
+       * no authoritative identity is available: the session still starts but
+       * issues no shared gateway credential.
+       */
+      readonly commandId?: string | null;
+    },
+  ) {
+    const ensured = yield* ensureSessionForThreadCore(threadId, createdAt, options);
+    yield* convergeSynaraMcpAfterSessionEnsure(ensured.activeSession).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Synara MCP session convergence failed", {
+          threadId: String(threadId),
+          detail: Cause.pretty(cause),
+        }),
+      ),
+    );
+    return ensured;
   });
 
   const dispatchTurnForThread = Effect.fnUntraced(function* (input: {
