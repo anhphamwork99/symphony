@@ -98,8 +98,8 @@ const validateProjectMcpActivationOperation = Schema.makeFilter(
     readonly projectId: ProjectId;
     readonly requestId: string;
     readonly operationGeneration: number;
-    readonly recoveryIdentity?: string;
-    readonly issuingThreadId?: ThreadId;
+      readonly recoveryIdentity?: string | undefined;
+      readonly issuingThreadId?: ThreadId | undefined;
     readonly absoluteDeadline: string;
     readonly desiredState: ProjectMcpDesiredState;
     readonly waitSet: ReadonlyArray<ProjectMcpActivationWaitSetEntry>;
