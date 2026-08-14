@@ -60,6 +60,21 @@ export interface ProviderDisableSynaraMcpResult {
 }
 
 /**
+ * Per-session Synara MCP enable outcome (impl-08). `active` means the
+ * session reached the active surface with proven activation; `unavailable`
+ * means activation could not be proven, the wait-set member is unsafe
+ * (missing session, stale/misrouted generation, mid-deactivation), or the
+ * session is fail-closed (Decisions 10/16/18).
+ */
+export interface ProviderEnableSynaraMcpResult {
+  readonly state: "active" | "unavailable";
+  /** True when the session was already active (idempotent duplicate). */
+  readonly alreadyActive?: boolean;
+  /** Stable sanitized detail when activation could not be proven. */
+  readonly detail?: string;
+}
+
+/**
  * Per-adapter ingress budget. A bounded queue makes a slow durable consumer
  * apply backpressure to the provider instead of growing the process heap
  * without limit during a persistence outage.
@@ -188,6 +203,20 @@ export interface ProviderAdapterShape<TError> {
     requestId: ApprovalRequestId,
     answers: ProviderUserInputAnswers,
   ) => Effect.Effect<void, TError>;
+
+  /**
+   * Enable the per-session Synara MCP integration (impl-08): drive the
+   * session's lifecycle coordinator activation through the existing
+   * `coordinator.activate` machinery, applying the safe boundary immediately
+   * for idle sessions. The durable wait-set member's session generation is
+   * validated before any staging (stale/misrouted generations are refused),
+   * and the result is bounded (active/unavailable); adapters without a
+   * Synara MCP runtime omit the operation.
+   */
+  readonly enableSynaraMcp?: (input: {
+    readonly threadId: ThreadId;
+    readonly expectedSessionGeneration: string;
+  }) => Effect.Effect<ProviderEnableSynaraMcpResult, TError>;
 
   /**
    * Disable the per-session Synara MCP integration (impl-07): synchronously

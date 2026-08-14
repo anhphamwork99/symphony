@@ -68,6 +68,7 @@ import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter.ts";
 import {
   PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
   type ProviderDisableSynaraMcpResult,
+  type ProviderEnableSynaraMcpResult,
   type ProviderThreadSnapshot,
 } from "../Services/ProviderAdapter.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
@@ -98,6 +99,10 @@ import {
   type PiSynaraMcpStagedActivation,
 } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
+import {
+  enablePiSynaraMcpSession,
+  PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
+} from "../piSynaraMcpEnable.ts";
 import {
   makePiSynaraMcpToolExecutionRegistry,
   type PiSynaraMcpToolExecutionRegistry,
@@ -575,9 +580,7 @@ export interface PiSessionSynaraMcpCoordinatorInput {
     Partial<
       Pick<
         AgentGatewayCredentialsShape,
-        | "verifySession"
-        | "cancelInFlightRequests"
-        | "retireSessionTurn"
+        "verifySession" | "cancelInFlightRequests" | "retireSessionTurn"
       >
     >;
   readonly fetch?: AgentGatewayMcpFetch;
@@ -2512,9 +2515,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ...(agentGatewayCredentials === undefined
             ? {}
             : { credentials: agentGatewayCredentials }),
-          ...(options?.agentGatewayFetch === undefined
-            ? {}
-            : { fetch: options.agentGatewayFetch }),
+          ...(options?.agentGatewayFetch === undefined ? {} : { fetch: options.agentGatewayFetch }),
         });
         const now = new Date().toISOString();
         const model = runtime.session.model
@@ -2927,6 +2928,47 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         } satisfies ProviderRuntimeEvent);
       });
 
+    const enableSynaraMcp: NonNullable<PiAdapterShape["enableSynaraMcp"]> = (input) =>
+      Effect.gen(function* () {
+        const context = sessions.get(input.threadId);
+        if (context === undefined) {
+          // No live Pi session: activation cannot be proven (fail-closed).
+          // The wait-set member is an unsafe disappearance for the
+          // operation and drives the project rollback (Decisions 10/16).
+          return {
+            state: "unavailable",
+            detail: PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
+          } satisfies ProviderEnableSynaraMcpResult;
+        }
+        const outcome = yield* Effect.tryPromise({
+          try: () =>
+            enablePiSynaraMcpSession({
+              threadId: input.threadId,
+              coordinator: context.synaraMcpCoordinator,
+              adapter: context.synaraMcp,
+              expectedSessionGeneration: input.expectedSessionGeneration,
+              // A running turn keeps its tool surface until agent_end; an
+              // idle session has no active turn, so the safe boundary is
+              // immediate (pumped locally by the enable helper).
+              ...(context.activeTurnId === undefined ? {} : { activeTurnId: context.activeTurnId }),
+              isStillIdle: () => context.activeTurnId === undefined,
+            }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "synara-mcp/enable",
+              detail: toMessage(cause, "Failed to enable Synara MCP for the Pi session."),
+              cause,
+            }),
+        });
+        if (outcome.state === "unavailable") {
+          yield* Effect.logWarning("pi.synara_mcp_enable_unavailable", {
+            threadId: input.threadId,
+          });
+        }
+        return outcome;
+      });
+
     const disableSynaraMcp: NonNullable<PiAdapterShape["disableSynaraMcp"]> = (input) =>
       Effect.gen(function* () {
         const context = sessions.get(input.threadId);
@@ -2934,7 +2976,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // No live Pi session: nothing to fence, drain, or revoke. The
           // durable desired-disabled acceptance is already journaled by the
           // command boundary; this is an idempotent no-op.
-          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+          return {
+            state: "dormant",
+            alreadyDisabled: true,
+          } satisfies ProviderDisableSynaraMcpResult;
         }
         const outcome = yield* Effect.tryPromise({
           try: () =>
@@ -3236,6 +3281,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       respondToRequest: (threadId) => respondUnsupported(threadId, "request/respond"),
       respondToUserInput,
       stopSession,
+      enableSynaraMcp,
       disableSynaraMcp,
       listSessions,
       hasSession,

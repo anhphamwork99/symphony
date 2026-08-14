@@ -36,8 +36,12 @@ import type { Effect, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
 import type { PersistedProviderRuntimeEvent } from "../../persistence/Services/ProviderRuntimeEvents.ts";
-import type { ProviderAdapterCapabilities, ProviderDisableSynaraMcpResult } from "./ProviderAdapter.ts";
-export type { ProviderDisableSynaraMcpResult };
+import type {
+  ProviderAdapterCapabilities,
+  ProviderDisableSynaraMcpResult,
+  ProviderEnableSynaraMcpResult,
+} from "./ProviderAdapter.ts";
+export type { ProviderDisableSynaraMcpResult, ProviderEnableSynaraMcpResult };
 
 export type ProviderRuntimeEventPumpStatus = "starting" | "healthy" | "recovering" | "degraded";
 
@@ -137,6 +141,19 @@ export interface ProviderServiceShape {
   readonly respondToUserInput: (
     input: ProviderRespondToUserInputInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Enable the per-session Synara MCP integration (impl-08). The command
+   * boundary drives one call per immutable wait-set member with the member's
+   * durable session generation; the routed adapter validates the generation
+   * against the live session and runs the lifecycle coordinator activation.
+   * Idempotent. The live service always provides this member; it is declared
+   * optional so minimal test doubles and non-Synara deployments can omit it.
+   */
+  readonly enableSynaraMcp?: (input: {
+    readonly threadId: ThreadId;
+    readonly expectedSessionGeneration: string;
+  }) => Effect.Effect<ProviderEnableSynaraMcpResult, ProviderServiceError>;
 
   /**
    * Disable the per-session Synara MCP integration (impl-07). The command

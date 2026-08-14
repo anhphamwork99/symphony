@@ -59,6 +59,7 @@ import {
   ProviderService,
   type ProviderServiceShape,
   type ProviderDisableSynaraMcpResult,
+  type ProviderEnableSynaraMcpResult,
 } from "../Services/ProviderService.ts";
 import {
   ProviderSessionDirectory,
@@ -66,6 +67,7 @@ import {
   type ProviderSessionDirectoryWriteError,
 } from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL } from "../piSynaraMcpEnable.ts";
 import { PersistenceDecodeError } from "../../persistence/Errors.ts";
 import {
   ProviderRuntimeEventRepository,
@@ -2337,6 +2339,41 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const ProviderDisableSynaraMcpInput = Schema.Struct({ threadId: ThreadId });
 
+    const ProviderEnableSynaraMcpInput = Schema.Struct({
+      threadId: ThreadId,
+      expectedSessionGeneration: Schema.NonEmptyString,
+    });
+
+    const enableSynaraMcp: ProviderServiceShape["enableSynaraMcp"] = (rawInput) =>
+      Effect.gen(function* () {
+        const input = yield* decodeInputOrValidationError({
+          operation: "ProviderService.enableSynaraMcp",
+          schema: ProviderEnableSynaraMcpInput,
+          payload: rawInput,
+        });
+        const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+        if (binding === undefined) {
+          // No persisted binding: no provider runtime exists to activate.
+          // Unlike disable (idempotent no-op), an enable that cannot prove
+          // activation is an unsafe wait-set member (Decisions 10/16):
+          // fail closed so the project operation rolls back to disabled.
+          return {
+            state: "unavailable",
+            detail: PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
+          } satisfies ProviderEnableSynaraMcpResult;
+        }
+        const adapter = yield* registry.getByProvider(binding.provider);
+        if (adapter.enableSynaraMcp === undefined) {
+          // Providers without a Synara MCP runtime have nothing to stage,
+          // fence, or expose: the wait-set member succeeds by construction.
+          return { state: "active", alreadyActive: true } satisfies ProviderEnableSynaraMcpResult;
+        }
+        return yield* adapter.enableSynaraMcp({
+          threadId: input.threadId,
+          expectedSessionGeneration: input.expectedSessionGeneration,
+        });
+      });
+
     const disableSynaraMcp: ProviderServiceShape["disableSynaraMcp"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -2349,13 +2386,19 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           // No persisted binding: no provider runtime exists to disable. The
           // durable desired-disabled acceptance is already journaled by the
           // command boundary, so this is an idempotent no-op.
-          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+          return {
+            state: "dormant",
+            alreadyDisabled: true,
+          } satisfies ProviderDisableSynaraMcpResult;
         }
         const adapter = yield* registry.getByProvider(binding.provider);
         if (adapter.disableSynaraMcp === undefined) {
           // Providers without a Synara MCP runtime have nothing to fence,
           // drain, or revoke: the project-level acceptance already applied.
-          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+          return {
+            state: "dormant",
+            alreadyDisabled: true,
+          } satisfies ProviderDisableSynaraMcpResult;
         }
         return yield* adapter.disableSynaraMcp({ threadId: input.threadId });
       });
@@ -2819,6 +2862,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       steerSubagent,
       respondToRequest,
       respondToUserInput,
+      enableSynaraMcp,
       disableSynaraMcp,
       stopSession,
       stopRuntimeSession,
