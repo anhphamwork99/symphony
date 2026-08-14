@@ -116,6 +116,7 @@ export async function recoverSynaraMcpPendingOperations(input: {
     const currentProject = current.projects.find((project) => project.id === projectId);
     const currentOperation = currentProject?.synaraMcpActivationOperation ?? null;
     if (
+      currentProject === undefined ||
       currentOperation === null ||
       currentOperation.requestId !== operation.requestId ||
       currentOperation.operationGeneration !== operation.operationGeneration ||

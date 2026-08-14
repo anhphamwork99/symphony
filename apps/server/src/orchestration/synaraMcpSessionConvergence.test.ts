@@ -27,6 +27,7 @@ import {
   SYNARA_MCP_CONVERGENCE_ACTIVATION_BOUND_MS,
   SYNARA_MCP_CONVERGENCE_ACTIVATION_TIMEOUT_DETAIL,
   type SynaraMcpSessionConvergenceEnableResolution,
+  type SynaraMcpSessionConvergenceSeams,
 } from "./synaraMcpSessionConvergence.ts";
 import { createEmptyReadModel } from "./projector.ts";
 
@@ -93,7 +94,7 @@ interface ConvergenceHarness {
     readonly expectedSessionGeneration: string;
     readonly liveSessionGeneration: string | undefined;
   }>;
-  readonly enable: ReturnType<typeof vi.fn>;
+  readonly enable: ReturnType<typeof vi.fn<SynaraMcpSessionConvergenceSeams["enable"]>>;
 }
 
 function makeHarness(options: {
@@ -104,7 +105,7 @@ function makeHarness(options: {
 }): ConvergenceHarness {
   let model = options.model;
   const enableCalls: ConvergenceHarness["enableCalls"] = [];
-  const enable = vi.fn(
+  const enable = vi.fn<SynaraMcpSessionConvergenceSeams["enable"]>(
     async (input: {
       threadId: ThreadId;
       expectedSessionGeneration: string;

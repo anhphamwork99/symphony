@@ -9734,9 +9734,11 @@ describe("ProviderCommandReactor", () => {
       await dispatchTurn(harness, { now, commandId: "cmd-convergence-turn-terminal" });
 
       expect(harness.enableSynaraMcp).toHaveBeenCalledTimes(1);
-      const ensuredSession = await Effect.runPromise(
-        harness.startSession.mock.results[0]!.value,
-      );
+      const startSessionResult = harness.startSession.mock.results[0];
+      if (startSessionResult === undefined || startSessionResult.type !== "return") {
+        throw new Error("Expected the startSession mock to have returned the ensured session.");
+      }
+      const ensuredSession = await Effect.runPromise(startSessionResult.value);
       const expectedGeneration = `orchestration:${threadId}:${ensuredSession.updatedAt}`;
       expect(harness.enableSynaraMcp.mock.calls[0]?.[0]).toEqual({
         threadId,

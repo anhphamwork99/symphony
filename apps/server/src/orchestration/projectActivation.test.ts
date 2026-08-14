@@ -335,7 +335,7 @@ describe("project MCP activation persistence contract", () => {
     );
     const afterTerminal = await Effect.runPromise(
       projectEvent(afterFirst, {
-        ...(isEventArray(terminalEvent) ? terminalEvent[0]! : terminalEvent),
+        ...(Array.isArray(terminalEvent) ? terminalEvent[0]! : terminalEvent),
         sequence: 3,
       }),
     );
