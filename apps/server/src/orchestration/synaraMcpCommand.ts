@@ -401,7 +401,7 @@ export function planSynaraMcpDispatch(input: {
   const plan = planSynaraMcpCommand({
     command: input.command,
     readModel: input.readModel,
-    now: input.now,
+    ...(input.now === undefined ? {} : { now: input.now }),
   });
   if (plan !== null) {
     return { kind: "plan", plan };

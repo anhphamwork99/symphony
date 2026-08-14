@@ -12,7 +12,7 @@ import { Buffer } from "node:buffer";
 
 import { DateTime, Effect, Layer } from "effect";
 
-import { ServerSecretStore } from "../../auth/Services/ServerSecretStore.ts";
+import { ServerSecretStore, SecretStoreError } from "../../auth/Services/ServerSecretStore.ts";
 import { makeMcpSessionAuthorityRegistry } from "../mcpSessionAuthority.ts";
 import {
   MCP_AUTHORITY_LOCAL_OWNER_SECRET_NAME,
@@ -20,40 +20,42 @@ import {
   type McpSessionAuthorityShape,
 } from "../Services/McpSessionAuthority.ts";
 
-export const makeMcpSessionAuthorityLive: Effect.Effect<McpSessionAuthorityShape> = Effect.gen(
-  function* () {
-    const secretStore = yield* ServerSecretStore;
-    const registry = makeMcpSessionAuthorityRegistry();
+export const makeMcpSessionAuthorityLive: Effect.Effect<
+  McpSessionAuthorityShape,
+  SecretStoreError,
+  ServerSecretStore
+> = Effect.gen(function* () {
+  const secretStore = yield* ServerSecretStore;
+  const registry = makeMcpSessionAuthorityRegistry();
 
-    const principalBytes = yield* secretStore.getOrCreateRandom(
-      MCP_AUTHORITY_LOCAL_OWNER_SECRET_NAME,
-      32,
-    );
-    const localOwnerSubject = `local-owner:${Buffer.from(principalBytes).toString("base64url")}`;
+  const principalBytes = yield* secretStore.getOrCreateRandom(
+    MCP_AUTHORITY_LOCAL_OWNER_SECRET_NAME,
+    32,
+  );
+  const localOwnerSubject = `local-owner:${Buffer.from(principalBytes).toString("base64url")}`;
 
-    const mintForLocalOwner = () =>
-      registry.mint({
-        subject: localOwnerSubject,
-        kind: "local-owner",
-        authSessionId: null,
-        authExpiresAt: null,
-      });
+  const mintForLocalOwner = () =>
+    registry.mint({
+      subject: localOwnerSubject,
+      kind: "local-owner",
+      authSessionId: null,
+      authExpiresAt: null,
+    });
 
-    const mintForAuthenticated: McpSessionAuthorityShape["mintForAuthenticated"] = (session) =>
-      registry.mint({
-        subject: session.subject,
-        kind: "authenticated",
-        authSessionId: session.sessionId,
-        authExpiresAt: session.expiresAt ? DateTime.toEpochMillis(session.expiresAt) : null,
-      });
+  const mintForAuthenticated: McpSessionAuthorityShape["mintForAuthenticated"] = (session) =>
+    registry.mint({
+      subject: session.subject,
+      kind: "authenticated",
+      authSessionId: session.sessionId,
+      authExpiresAt: session.expiresAt ? DateTime.toEpochMillis(session.expiresAt) : null,
+    });
 
-    return {
-      ...registry,
-      mintForLocalOwner,
-      mintForAuthenticated,
-    };
-  },
-);
+  return {
+    ...registry,
+    mintForLocalOwner,
+    mintForAuthenticated,
+  };
+});
 
 export const McpSessionAuthorityLive = Layer.effect(
   McpSessionAuthority,

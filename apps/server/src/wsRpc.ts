@@ -1079,6 +1079,12 @@ const makeWsRpcHandlersLayer = () =>
         }
       });
 
+      // Stream handlers run under the RPC server's Scope and cannot require
+      // services in their environment, so capture the shared MCP authority
+      // service here and provide it to the provision stream's dispatch
+      // critical section below (same pattern as the impl-08 reconcile path).
+      const mcpSessionAuthority = yield* McpSessionAuthority;
+
       return AdmittedWsFeatureRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           rpcEffect(
@@ -1501,6 +1507,7 @@ const makeWsRpcHandlersLayer = () =>
                 });
                 yield* Queue.end(queue);
               }).pipe(
+                Effect.provideService(McpSessionAuthority, mcpSessionAuthority),
                 Effect.catch((cause) =>
                   Queue.fail(queue, toProjectProvisionRpcError(cause)).pipe(Effect.asVoid),
                 ),
@@ -2399,7 +2406,9 @@ export function makeWebsocketRpcRouteLayer<R>(
           const authenticated = mcpSessionAuthority.mintForAuthenticated({
             sessionId: authenticatedSession.sessionId,
             subject: authenticatedSession.subject,
-            expiresAt: authenticatedSession.expiresAt,
+            ...(authenticatedSession.expiresAt === undefined
+              ? {}
+              : { expiresAt: authenticatedSession.expiresAt }),
           });
 
           return yield* sessions.runAuthenticatedConnection(

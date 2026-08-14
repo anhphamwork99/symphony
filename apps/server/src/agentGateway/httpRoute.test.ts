@@ -40,6 +40,9 @@ async function withGatewayServer(
               threadId,
               provider: "cursor",
               issuedAt: 1,
+              // Legacy/unbound fixture credential: the route layer only checks
+              // identity presence; MCP admission rejects null bindings elsewhere.
+              mcpAuthority: null,
               capabilities: new Set([
                 "thread:read",
                 "thread:write",

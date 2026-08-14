@@ -80,6 +80,12 @@ const event = (overrides: Partial<Extract<OrchestrationEvent, { type: "project.c
     ...overrides,
   }) as Extract<OrchestrationEvent, { type: "project.created" }>;
 
+// Array.isArray does not narrow readonly arrays out of a union (the decider
+// returns `event | readonly event[]`), so the assertions below use this guard
+// to reach a precise element type in both branches.
+const isEventArray = (value: unknown): value is readonly Omit<OrchestrationEvent, "sequence">[] =>
+  Array.isArray(value);
+
 describe("project MCP activation persistence contract", () => {
   it("decides, validates, projects, and replays the complete operation identity", async () => {
     const initial = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
@@ -89,20 +95,24 @@ describe("project MCP activation persistence contract", () => {
     const activationEvent = Array.isArray(decided) ? decided[0]! : decided;
 
     expect(activationEvent.type).toBe("project.mcp-activation-updated");
-    const projected = await Effect.runPromise(projectEvent(initial, {
-      ...activationEvent,
-      sequence: 2,
-    }));
+    const projected = await Effect.runPromise(
+      projectEvent(initial, {
+        ...activationEvent,
+        sequence: 2,
+      }),
+    );
     const hydrated = projected.projects[0]!;
     expect(hydrated.synaraMcpDesiredState).toBe("enabled");
     expect(hydrated.synaraMcpActivationOperation).toEqual(operation());
     expect(hydrated.synaraMcpActivationVersion).toBe(1);
 
     const replayed = await Effect.runPromise(projectEvent(createEmptyReadModel(now), event()));
-    const replayedWithActivation = await Effect.runPromise(projectEvent(replayed, {
-      ...activationEvent,
-      sequence: 2,
-    }));
+    const replayedWithActivation = await Effect.runPromise(
+      projectEvent(replayed, {
+        ...activationEvent,
+        sequence: 2,
+      }),
+    );
     expect(replayedWithActivation.projects[0]?.synaraMcpActivationOperation).toEqual(
       hydrated.synaraMcpActivationOperation,
     );
@@ -118,17 +128,15 @@ describe("project MCP activation persistence contract", () => {
       const replayed = yield* Stream.runCollect(store.readFromSequence(saved.sequence - 1, 10));
       return Array.from(replayed);
     }).pipe(
-      Effect.provide(
-        OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-      ),
+      Effect.provide(OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
     );
 
     const replayed = await Effect.runPromise(program);
     expect(replayed).toHaveLength(1);
     expect(replayed[0]?.type).toBe("project.mcp-activation-updated");
     expect(
-      (replayed[0] as Extract<OrchestrationEvent, { type: "project.mcp-activation-updated" }>).payload
-        .operation,
+      (replayed[0] as Extract<OrchestrationEvent, { type: "project.mcp-activation-updated" }>)
+        .payload.operation,
     ).toEqual(operation());
   });
 
@@ -150,7 +158,9 @@ describe("project MCP activation persistence contract", () => {
     const firstActivation = await Effect.runPromise(
       decideOrchestrationCommand({ command: command(), readModel: initial }),
     );
-    const firstActivationEvent = Array.isArray(firstActivation) ? firstActivation[0]! : firstActivation;
+    const firstActivationEvent = Array.isArray(firstActivation)
+      ? firstActivation[0]!
+      : firstActivation;
     const afterFirstActivation = await Effect.runPromise(
       projectEvent(initial, { ...firstActivationEvent, sequence: 2 }),
     );
@@ -198,7 +208,7 @@ describe("project MCP activation persistence contract", () => {
         readModel: afterFirstActivation,
       }),
     );
-    expect(Array.isArray(rollbackEvent) ? rollbackEvent[0]?.type : rollbackEvent.type).toBe(
+    expect((isEventArray(rollbackEvent) ? rollbackEvent[0] : rollbackEvent)?.type).toBe(
       "project.mcp-activation-updated",
     );
   });

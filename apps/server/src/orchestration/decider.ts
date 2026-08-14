@@ -1116,8 +1116,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.sidechatSourceThreadId
             ? command.title
             : buildForkThreadTitle(
-                sourceThread,
-                listThreadsByProjectId(readModel, command.projectId),
+                {
+                  id: sourceThread.id,
+                  projectId: sourceThread.projectId,
+                  title: sourceThread.title,
+                  // Normalize the read-model's optional `| undefined` lineage
+                  // fields to explicit null so the lineage walker sees the
+                  // same falsy root sentinel for absent and null sources.
+                  forkSourceThreadId: sourceThread.forkSourceThreadId ?? null,
+                  sidechatSourceThreadId: sourceThread.sidechatSourceThreadId ?? null,
+                },
+                listThreadsByProjectId(readModel, command.projectId).map((thread) => ({
+                  id: thread.id,
+                  projectId: thread.projectId,
+                  title: thread.title,
+                  forkSourceThreadId: thread.forkSourceThreadId ?? null,
+                  sidechatSourceThreadId: thread.sidechatSourceThreadId ?? null,
+                })),
               ),
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
