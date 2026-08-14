@@ -28,9 +28,6 @@ export const PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL =
 /** Idle-boundary pump cadence: no real deadline is involved, only the local apply boundary. */
 export const PI_SYNARA_MCP_ENABLE_IDLE_BOUNDARY_PUMP_MS = 25;
 
-/** The durable wait-set session-generation format the orchestration planner binds. */
-const SESSION_GENERATION_PREFIX = "orchestration:";
-
 export interface PiSynaraMcpEnableInput {
   /** The session's thread; the expected generation must be bound to it. */
   readonly threadId: ThreadId;
@@ -44,9 +41,20 @@ export interface PiSynaraMcpEnableInput {
   readonly adapter: PiSynaraMcpDormantAdapter;
   /**
    * The durable wait-set session generation this activation is bound to
-   * (impl-08). A stale or misrouted generation is refused before any staging.
+   * (impl-08). The FULL token — including the captured `session.updatedAt` —
+   * must match the live session generation exactly; a stale or misrouted
+   * token (including a session recreated on the same thread after capture)
+   * is refused before any staging (Decision 18, F3).
    */
   readonly expectedSessionGeneration: string;
+  /**
+   * The live session generation derived from the authoritative read model at
+   * reconciliation time (the same token the planner mints from the current
+   * `thread.session.updatedAt`). The enable is refused unless the expected
+   * token equals it exactly; `undefined` (no live binding) fails closed
+   * rather than degrading to a weaker check.
+   */
+  readonly liveSessionGeneration: string | undefined;
   /**
    * The session's exact active turn at enable time. When undefined the
    * session is idle and its safe boundary is immediate (pumped locally);
@@ -79,22 +87,27 @@ function mapActivationResult(result: PiSynaraMcpActivationResult): PiSynaraMcpEn
 
 /**
  * Enable one Pi session's Synara MCP integration. The activation is refused
- * before any staging when the expected session generation does not bind to
- * this thread (a stale wait-set member must never activate a different or
- * recreated session), and a session that is mid-deactivation or disposed
- * cannot be enabled (fail-closed: the disable wins). Idle sessions receive a
+ * before any staging when the expected session generation does not exactly
+ * match the live session generation (a stale wait-set token — including one
+ * captured for a session recreated on the same thread — must never activate
+ * this session), and a session that is mid-deactivation or disposed cannot
+ * be enabled (fail-closed: the disable wins). Idle sessions receive a
  * bounded local boundary pump; sessions with an active turn wait for the
  * natural `agent_end` boundary. Duplicate enables are idempotent.
  */
 export async function enablePiSynaraMcpSession(
   input: PiSynaraMcpEnableInput,
 ): Promise<PiSynaraMcpEnableResult> {
-  // Stale/misrouted generation refusal: the durable wait-set token captured
-  // for this session must identify exactly this thread. Anything else is a
-  // stale generation from an older operation or a different session and can
-  // never activate this session.
+  // Stale/misrouted generation refusal: the full durable wait-set token
+  // captured for this session must exactly match the live session generation
+  // (F3). A prefix match on the thread alone would let a session recreated on
+  // the same thread after capture activate from the stale token; matching the
+  // complete token — thread AND captured session.updatedAt — binds the
+  // activation to the exact live session (Decision 18). A missing live
+  // binding also fails closed.
   if (
-    !input.expectedSessionGeneration.startsWith(`${SESSION_GENERATION_PREFIX}${input.threadId}:`)
+    input.liveSessionGeneration === undefined ||
+    input.expectedSessionGeneration !== input.liveSessionGeneration
   ) {
     return { state: "unavailable", detail: PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL };
   }

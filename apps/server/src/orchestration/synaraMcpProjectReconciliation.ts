@@ -35,6 +35,26 @@ export const SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL =
 export const SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL =
   "The Synara MCP disable did not complete before its deadline.";
 
+/**
+ * Bounded cleanup grace budget for one rollback disable fan-out (impl-08 F1,
+ * Decisions 16/18, AC2 checklist item 4). Independent of the elapsed
+ * activation deadline: an expired operation must still attempt to clean every
+ * captured member, so each rollback disable call is bounded by this budget
+ * instead of by the (possibly already elapsed) activation deadline. The total
+ * cleanup window is bounded by wait-set size times this budget; every call is
+ * bounded, so the rollback can never hang.
+ */
+export const SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS = 30_000;
+
+/**
+ * The durable wait-set session-generation token format. Must match the
+ * planner's mint in `synaraMcpCommand.ts` (`orchestration:<threadId>:<session.updatedAt>`):
+ * the live session generation derived at reconciliation time is validated
+ * against the captured token by the provider enable boundary (F3).
+ */
+const synaraMcpSessionGeneration = (threadId: ThreadId, sessionUpdatedAt: string): string =>
+  `orchestration:${threadId}:${sessionUpdatedAt}`;
+
 /** Stable bounded detail for a wait-set member that disappeared before reconciliation. */
 export const SYNARA_MCP_PROJECT_SESSION_DISAPPEARED_DETAIL =
   "A project session disappeared before the safe boundary.";
@@ -62,6 +82,15 @@ export interface SynaraMcpProjectReconciliationSeams {
   readonly enableMember: (input: {
     readonly threadId: ThreadId;
     readonly expectedSessionGeneration: string;
+    /**
+     * The live session generation derived from the current authoritative
+     * read model (the same token the planner mints from the live
+     * `thread.session.updatedAt`). The provider enable boundary refuses the
+     * enable unless the expected (captured) token equals it exactly, so a
+     * session recreated on the same thread after capture can never activate
+     * from the stale wait-set token (F3, Decision 18).
+     */
+    readonly liveSessionGeneration: string | undefined;
     readonly remainingMs: number;
   }) => Promise<SynaraMcpEnableMemberResolution>;
   readonly disableMember: (input: {
@@ -150,6 +179,12 @@ export async function reconcileSynaraMcpProject(input: {
       const resolution = await seams.enableMember({
         threadId: member.sessionId,
         expectedSessionGeneration: member.sessionGeneration,
+        // The live session generation from the current authoritative read
+        // model: the provider boundary matches the full captured token
+        // against it (F3) so a recreated same-thread session is refused
+        // before any staging. The member-liveness check above guarantees a
+        // live session here; undefined stays fail-closed at the boundary.
+        liveSessionGeneration: synaraMcpLiveSessionGeneration(current, member.sessionId),
         remainingMs,
       });
       if (resolution.state !== "active") {
@@ -233,6 +268,22 @@ export async function reconcileSynaraMcpProject(input: {
 }
 
 /**
+ * Derive the live session generation for a wait-set member from the current
+ * authoritative read model (F3): the same token the planner mints at
+ * acceptance, re-derived from the live `thread.session.updatedAt`. A missing
+ * live session yields `undefined`, which the provider enable boundary treats
+ * as a fail-closed mismatch.
+ */
+function synaraMcpLiveSessionGeneration(
+  readModel: OrchestrationReadModel,
+  sessionId: ThreadId,
+): string | undefined {
+  const thread = readModel.threads.find((candidate) => candidate.id === sessionId);
+  const session = thread?.session ?? null;
+  return session === null ? undefined : synaraMcpSessionGeneration(sessionId, session.updatedAt);
+}
+
+/**
  * Journal the durable failed-disabled rollback, clean every captured member
  * (successful siblings included) through the bounded provider disable, then
  * journal exactly one failed terminal activity. Cleanup is best-effort: the
@@ -252,12 +303,15 @@ async function journalRollback(input: {
     await seams.dispatch(failure.projectCommand);
   }
   for (const member of plan.operation.waitSet) {
-    const remainingMs = Date.parse(plan.operation.absoluteDeadline) - seams.now().getTime();
-    if (remainingMs <= 0) {
-      continue;
-    }
     try {
-      await seams.disableMember({ threadId: member.sessionId, remainingMs });
+      // Every captured member receives one bounded disable attempt under the
+      // cleanup grace budget — independent of the elapsed activation
+      // deadline (F1: an expired operation must still clean every enabled
+      // sibling, Decisions 16/18).
+      await seams.disableMember({
+        threadId: member.sessionId,
+        remainingMs: SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS,
+      });
     } catch {
       // Best-effort cleanup: an unproven disable cannot change the durable
       // failed-disabled terminal.

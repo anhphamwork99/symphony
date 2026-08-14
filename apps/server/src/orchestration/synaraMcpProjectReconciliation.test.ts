@@ -31,8 +31,10 @@ import {
   planSynaraMcpFailure,
   type SynaraMcpCommandPlan,
 } from "./synaraMcpCommand.ts";
+import { PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL } from "../provider/piSynaraMcpEnable.ts";
 import {
   reconcileSynaraMcpProject,
+  SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS,
   SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL,
   SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
   SYNARA_MCP_PROJECT_SESSION_DISAPPEARED_DETAIL,
@@ -193,6 +195,7 @@ interface ReconcileHarnessOptions {
   readonly enable?: (input: {
     readonly threadId: ThreadId;
     readonly expectedSessionGeneration: string;
+    readonly liveSessionGeneration: string | undefined;
     readonly remainingMs: number;
   }) => SynaraMcpEnableResolution;
   readonly disable?: (input: {
@@ -207,6 +210,7 @@ interface ReconcileHarness {
   readonly enableCalls: Array<{
     readonly threadId: ThreadId;
     readonly expectedSessionGeneration: string;
+    readonly liveSessionGeneration: string | undefined;
     readonly remainingMs: number;
   }>;
   readonly disableCalls: Array<{ readonly threadId: ThreadId; readonly remainingMs: number }>;
@@ -308,6 +312,72 @@ function operationCommands(dispatched: OrchestrationCommand[]) {
 }
 
 describe("Synara MCP project reconciliation (impl-08 AC1/AC2)", () => {
+  it("AC1 (F3): a session recreated on the same thread after capture carries a mismatched live generation and the member refusal rolls back with one terminal", async () => {
+    const { plan, readModel } = await pendingFixture("/Enable Synara MCP");
+    // The second member's session was stopped and recreated after the
+    // wait-set capture: the live read model shows a NEWER session.updatedAt
+    // on the SAME thread. The reconciliation must derive the live session
+    // generation from the current authoritative read model so the provider
+    // boundary can refuse the stale captured token before staging (F3,
+    // Decision 18).
+    const recreatedReadModel: OrchestrationReadModel = {
+      ...readModel,
+      threads: readModel.threads.map((thread) =>
+        thread.id === secondThreadId
+          ? {
+              ...thread,
+              session:
+                thread.session === null
+                  ? null
+                  : { ...thread.session, updatedAt: "2026-08-12T12:10:00.000Z" as IsoDateTime },
+            }
+          : thread,
+      ),
+    };
+    const harness = makeHarness({
+      plan,
+      readModel: recreatedReadModel,
+      // The provider boundary refuses when the full expected token no longer
+      // matches the live session generation (same behavior as the real
+      // enable helper).
+      enable: (input) =>
+        input.expectedSessionGeneration !== input.liveSessionGeneration
+          ? {
+              state: "unavailable",
+              detail: PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,
+            }
+          : { state: "active" },
+    });
+
+    const result = await reconcileSynaraMcpProject({ plan, seams: harness.seams });
+
+    expect(result).toEqual({ terminal: "failed" });
+    // The recreated member's enable call carries the derived live generation
+    // (newer session.updatedAt on the same thread), which no longer matches
+    // the captured wait-set token.
+    const recreatedCall = harness.enableCalls.find((call) => call.threadId === secondThreadId)!;
+    expect(recreatedCall.liveSessionGeneration).toBe(
+      `orchestration:${secondThreadId}:2026-08-12T12:10:00.000Z`,
+    );
+    expect(recreatedCall.expectedSessionGeneration).not.toBe(recreatedCall.liveSessionGeneration);
+    // The recreated member reached the provider boundary with the mismatched
+    // tokens and was refused there; the sibling that matched was enabled
+    // first, and the third member was never attempted (rollback is global
+    // and immediate once the boundary refuses).
+    expect(harness.enableCalls.map((call) => call.threadId)).toEqual([
+      issuingThreadId,
+      secondThreadId,
+    ]);
+    // Journal-first failed-disabled durable state and exactly one terminal.
+    const failureCommand = operationCommands(harness.dispatched).at(-1)!;
+    expect(failureCommand.operation.aggregateStatus).toBe("failed");
+    expect(failureCommand.operation.desiredState).toBe("disabled");
+    expect(failureCommand.operation.outcomes[0]?.detail).toBe(
+      PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,
+    );
+    expect(terminalActivities(harness.dispatched)).toHaveLength(1);
+  });
+
   it("AC1: reconciles every captured member independently and commits enabled only after all sessions succeed", async () => {
     const { plan, readModel } = await pendingFixture("/Enable Synara MCP");
     const harness = makeHarness({ plan, readModel });
@@ -324,6 +394,9 @@ describe("Synara MCP project reconciliation (impl-08 AC1/AC2)", () => {
     ]);
     for (const call of harness.enableCalls) {
       expect(call.expectedSessionGeneration).toBe(`orchestration:${call.threadId}:${now}`);
+      // The live session generation derived from the current read model
+      // matches the captured token while the session is unchanged (F3).
+      expect(call.liveSessionGeneration).toBe(call.expectedSessionGeneration);
       expect(call.remainingMs).toBeGreaterThan(0);
       expect(call.remainingMs).toBeLessThanOrEqual(120_000);
     }
@@ -486,6 +559,42 @@ describe("Synara MCP project reconciliation (impl-08 AC1/AC2)", () => {
     expect(harness.enableCalls).toEqual([]);
     const failureCommand = operationCommands(harness.dispatched).at(-1)!;
     expect(failureCommand.operation.aggregateStatus).toBe("failed");
+    expect(failureCommand.operation.outcomes[0]?.detail).toBe(
+      SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
+    );
+    expect(terminalActivities(harness.dispatched)).toHaveLength(1);
+  });
+
+  it("AC2 (F1): an expired activation deadline still fans out disable cleanup to every captured member under a bounded grace budget", async () => {
+    const { plan, readModel } = await pendingFixture("/Enable Synara MCP");
+    const harness = makeHarness({ plan, readModel });
+    // The fake clock jumps past the absolute deadline before any member work:
+    // rollback cleanup must still reach every captured member (Decisions
+    // 16/18, AC2 checklist item 4) — the grace budget is independent of the
+    // elapsed activation deadline, so an enabled sibling is never left
+    // active just because the deadline expired.
+    harness.advance(new Date("2026-08-12T12:03:00.000Z"));
+
+    const result = await reconcileSynaraMcpProject({ plan, seams: harness.seams });
+
+    expect(result).toEqual({ terminal: "failed" });
+    expect(harness.enableCalls).toEqual([]);
+    // Every captured member receives a bounded disable attempt.
+    expect(harness.disableCalls.map((call) => call.threadId)).toEqual([
+      issuingThreadId,
+      secondThreadId,
+      thirdThreadId,
+    ]);
+    // Each attempt is bounded by the cleanup grace budget — never unbounded
+    // and never zeroed out by the elapsed activation deadline.
+    for (const call of harness.disableCalls) {
+      expect(call.remainingMs).toBeGreaterThan(0);
+      expect(call.remainingMs).toBeLessThanOrEqual(SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS);
+    }
+    // Journal-first failed-disabled durable state and exactly one terminal.
+    const failureCommand = operationCommands(harness.dispatched).at(-1)!;
+    expect(failureCommand.operation.aggregateStatus).toBe("failed");
+    expect(failureCommand.operation.desiredState).toBe("disabled");
     expect(failureCommand.operation.outcomes[0]?.detail).toBe(
       SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
     );

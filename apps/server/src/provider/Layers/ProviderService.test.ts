@@ -70,6 +70,8 @@ import {
 } from "./ProviderService.ts";
 import { makePiSessionSynaraMcpCoordinator } from "./PiAdapter.ts";
 import { makePiSynaraMcpDormantExtension } from "../piSynaraMcpExtension.ts";
+import type { PiSynaraMcpDormantAdapter } from "../piSynaraMcpExtension.ts";
+import type { PiSynaraMcpLifecycleCoordinator } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
 import {
   enablePiSynaraMcpSession,
@@ -300,6 +302,7 @@ function makeFakeCodexAdapter(
     (_input: {
       readonly threadId: ThreadId;
       readonly expectedSessionGeneration: string;
+      readonly liveSessionGeneration: string | undefined;
     }): Effect.Effect<ProviderEnableSynaraMcpResult, ProviderAdapterError> =>
       Effect.succeed({ state: "active", alreadyActive: true }),
   );
@@ -3776,6 +3779,7 @@ piEnableRouting.layer(
           const result = yield* provider.enableSynaraMcp!({
             threadId,
             expectedSessionGeneration: `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
+            liveSessionGeneration: `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
           });
 
           assert.deepEqual(result, { state: "active", alreadyActive: true });
@@ -3783,6 +3787,7 @@ piEnableRouting.layer(
           assert.deepEqual(enable.mock.calls[0]?.[0], {
             threadId,
             expectedSessionGeneration: `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
+            liveSessionGeneration: `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
           });
         }),
     );
@@ -3893,6 +3898,67 @@ piEnableRouting.layer(
     );
 
     it.effect(
+      "refuses a same-thread session recreated after capture through the public operation when the live session generation no longer matches the captured token (F3)",
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* ProviderService;
+          const threadId = asThreadId("thread-pi-enable-recreated");
+          yield* provider.startSession(threadId, {
+            provider: "pi",
+            threadId,
+            cwd: "/tmp/project",
+            runtimeMode: "full-access",
+          });
+
+          // Mount the real enable orchestration exactly as the production
+          // PiAdapter wires it. The coordinator/adapter stubs throw if they
+          // are ever reached: a stale generation must be refused before any
+          // staging, so the refusal path never touches the lifecycle.
+          const coordinator = {
+            activate: () => {
+              throw new Error("activation must not run for a stale generation");
+            },
+          } as unknown as PiSynaraMcpLifecycleCoordinator;
+          piEnableRouting.pi.enableSynaraMcp.mockImplementation((input) =>
+            Effect.tryPromise({
+              try: () =>
+                enablePiSynaraMcpSession({
+                  threadId: input.threadId,
+                  coordinator,
+                  adapter: {} as PiSynaraMcpDormantAdapter,
+                  expectedSessionGeneration: input.expectedSessionGeneration,
+                  liveSessionGeneration: input.liveSessionGeneration,
+                }),
+              catch: (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: "pi",
+                  method: "synara-mcp/enable",
+                  detail: "enable exploded",
+                  cause,
+                }),
+            }),
+          );
+
+          // The wait-set token was captured for the ORIGINAL session; the
+          // live session generation is newer on the SAME thread (the session
+          // was recreated after capture). The thread-prefix check alone
+          // would pass, so the full captured token must be matched against
+          // the live session generation and the stale enable refused
+          // (Decision 18).
+          const result = yield* provider.enableSynaraMcp!({
+            threadId,
+            expectedSessionGeneration: `orchestration:${threadId}:2026-08-12T12:00:00.000Z`,
+            liveSessionGeneration: `orchestration:${threadId}:2026-08-12T12:30:00.000Z`,
+          });
+
+          assert.deepEqual(result, {
+            state: "unavailable",
+            detail: PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,
+          });
+        }),
+    );
+
+    it.effect(
       "runs the real enable orchestration at the Pi adapter boundary through the public operation (AC1 behavioral)",
       () =>
         Effect.gen(function* () {
@@ -3979,6 +4045,7 @@ piEnableRouting.layer(
                   coordinator,
                   adapter: dormantAdapter,
                   expectedSessionGeneration: input.expectedSessionGeneration,
+                  liveSessionGeneration: input.liveSessionGeneration,
                 }),
               catch: (cause) =>
                 new ProviderAdapterRequestError({
@@ -3994,6 +4061,7 @@ piEnableRouting.layer(
           const result = yield* provider.enableSynaraMcp!({
             threadId,
             expectedSessionGeneration,
+            liveSessionGeneration: expectedSessionGeneration,
           });
 
           // The public operation drove the real boundary: the coordinator
@@ -4011,6 +4079,7 @@ piEnableRouting.layer(
           const duplicate = yield* provider.enableSynaraMcp!({
             threadId,
             expectedSessionGeneration,
+            liveSessionGeneration: expectedSessionGeneration,
           });
           assert.deepEqual(duplicate, { state: "active", alreadyActive: true });
           assert.equal(minted.length, 1);

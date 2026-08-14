@@ -145,14 +145,23 @@ export interface ProviderServiceShape {
   /**
    * Enable the per-session Synara MCP integration (impl-08). The command
    * boundary drives one call per immutable wait-set member with the member's
-   * durable session generation; the routed adapter validates the generation
-   * against the live session and runs the lifecycle coordinator activation.
-   * Idempotent. The live service always provides this member; it is declared
-   * optional so minimal test doubles and non-Synara deployments can omit it.
+   * durable session generation and the live session generation derived from
+   * the current read model; the routed adapter refuses unless the full
+   * captured token matches the live generation and then runs the lifecycle
+   * coordinator activation. Idempotent. The live service always provides
+   * this member; it is declared optional so minimal test doubles and
+   * non-Synara deployments can omit it.
    */
   readonly enableSynaraMcp?: (input: {
     readonly threadId: ThreadId;
     readonly expectedSessionGeneration: string;
+    /**
+     * Live session generation from the authoritative read model (F3).
+     * Optional at this boundary: an omitted value decodes to `undefined` and
+     * the enable helper fails closed on the stable stale-generation detail
+     * (the command boundary always supplies it).
+     */
+    readonly liveSessionGeneration?: string | undefined;
   }) => Effect.Effect<ProviderEnableSynaraMcpResult, ProviderServiceError>;
 
   /**

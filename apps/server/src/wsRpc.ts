@@ -782,7 +782,12 @@ const makeWsRpcHandlersLayer = () =>
                       ),
                     ),
                   ),
-                enableMember: async ({ threadId, expectedSessionGeneration, remainingMs }) => {
+                enableMember: async ({
+                  threadId,
+                  expectedSessionGeneration,
+                  liveSessionGeneration,
+                  remainingMs,
+                }) => {
                   const enable = providerService.enableSynaraMcp;
                   const outcome = await Effect.runPromise(
                     runProviderSynaraMcpEnable({
@@ -793,7 +798,7 @@ const makeWsRpcHandlersLayer = () =>
                               detail:
                                 "The provider service does not expose the Synara MCP enable operation.",
                             })
-                          : enable({ threadId, expectedSessionGeneration }),
+                          : enable({ threadId, expectedSessionGeneration, liveSessionGeneration }),
                       remainingMs,
                     }),
                   );

@@ -2342,6 +2342,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const ProviderEnableSynaraMcpInput = Schema.Struct({
       threadId: ThreadId,
       expectedSessionGeneration: Schema.NonEmptyString,
+      // Optional at the boundary: an absent live binding must fail closed at
+      // the enable helper with the stable stale-generation detail (F3), not
+      // with a schema validation error.
+      liveSessionGeneration: Schema.optional(Schema.NonEmptyString),
     });
 
     const enableSynaraMcp: ProviderServiceShape["enableSynaraMcp"] = (rawInput) =>
@@ -2371,6 +2375,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return yield* adapter.enableSynaraMcp({
           threadId: input.threadId,
           expectedSessionGeneration: input.expectedSessionGeneration,
+          liveSessionGeneration: input.liveSessionGeneration,
         });
       });
 

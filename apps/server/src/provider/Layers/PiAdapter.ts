@@ -2947,6 +2947,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               coordinator: context.synaraMcpCoordinator,
               adapter: context.synaraMcp,
               expectedSessionGeneration: input.expectedSessionGeneration,
+              liveSessionGeneration: input.liveSessionGeneration,
               // A running turn keeps its tool surface until agent_end; an
               // idle session has no active turn, so the safe boundary is
               // immediate (pumped locally by the enable helper).

@@ -208,14 +208,21 @@ export interface ProviderAdapterShape<TError> {
    * Enable the per-session Synara MCP integration (impl-08): drive the
    * session's lifecycle coordinator activation through the existing
    * `coordinator.activate` machinery, applying the safe boundary immediately
-   * for idle sessions. The durable wait-set member's session generation is
-   * validated before any staging (stale/misrouted generations are refused),
-   * and the result is bounded (active/unavailable); adapters without a
-   * Synara MCP runtime omit the operation.
+   * for idle sessions. The durable wait-set member's FULL session generation
+   * is validated against the live session generation before any staging
+   * (stale/misrouted/recreated-session tokens are refused), and the result is
+   * bounded (active/unavailable); adapters without a Synara MCP runtime omit
+   * the operation.
    */
   readonly enableSynaraMcp?: (input: {
     readonly threadId: ThreadId;
     readonly expectedSessionGeneration: string;
+    /**
+     * Live session generation derived from the authoritative read model at
+     * reconciliation time (F3). The enable fails closed unless the expected
+     * (captured) token matches it exactly.
+     */
+    readonly liveSessionGeneration: string | undefined;
   }) => Effect.Effect<ProviderEnableSynaraMcpResult, TError>;
 
   /**

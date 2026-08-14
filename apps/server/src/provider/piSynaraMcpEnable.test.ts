@@ -138,6 +138,8 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
 
   const SESSION_GENERATION = "orchestration:thread-pi-enable-1:2026-08-12T12:00:00.000Z";
   const OTHER_SESSION_GENERATION = "orchestration:thread-pi-enable-2:2026-08-12T12:00:00.000Z";
+  /** A newer live session generation on the SAME thread (session recreated after capture). */
+  const RECREATED_SESSION_GENERATION = "orchestration:thread-pi-enable-1:2026-08-12T12:30:00.000Z";
 
   it("activates an idle dormant session through the coordinator with an immediate safe boundary", async () => {
     const harness = makeEnableHarness({ mcpAuthority: AUTHORITY_BINDING });
@@ -148,6 +150,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
 
     expect(result).toEqual({ state: "active", alreadyActive: false });
@@ -171,6 +174,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
       activeTurnId: "turn-active-1" as never,
     });
     // Staging runs while the activation waits for the turn boundary; the
@@ -195,6 +199,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
       isStillIdle: () => stillIdle,
     });
     await new Promise((resolve) => setTimeout(resolve, 60));
@@ -220,6 +225,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
     const mintedCount = harness.minted.length;
 
@@ -228,6 +234,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
 
     expect(duplicate).toEqual({ state: "active", alreadyActive: true });
@@ -246,6 +253,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       // A wait-set member captured for a different session/thread: the live
       // session must never be activated under a stale foreign generation.
       expectedSessionGeneration: OTHER_SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
     expect(misrouted).toEqual({
       state: "unavailable",
@@ -260,12 +268,44 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: "not-a-session-generation",
+      liveSessionGeneration: SESSION_GENERATION,
     });
     expect(malformed).toEqual({
       state: "unavailable",
       detail: PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,
     });
     expect(harness.coordinator.state).toBe("dormant");
+  });
+
+  it("refuses a session recreated on the same thread when the live session generation no longer matches the captured token (F3)", async () => {
+    const harness = makeEnableHarness({ mcpAuthority: AUTHORITY_BINDING });
+
+    // The wait-set token was captured for the ORIGINAL session on this
+    // thread; the live session generation is newer (the session was stopped
+    // and recreated on the same thread). The prefix check alone would pass
+    // (same thread), so the full captured token must be matched against the
+    // live session generation and the stale enable refused before any
+    // staging (Decision 18: a recreated session must never activate from a
+    // stale wait-set token).
+    const result = await enablePiSynaraMcpSession({
+      threadId: "thread-pi-enable-1" as ThreadId,
+      coordinator: harness.coordinator,
+      adapter: harness.adapter,
+      expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: RECREATED_SESSION_GENERATION,
+    });
+
+    expect(result).toEqual({
+      state: "unavailable",
+      detail: PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,
+    });
+    // Fail closed before staging: no activation ran, nothing was minted, no
+    // candidate resources were staged, and the coordinator never left the
+    // dormant state.
+    expect(harness.coordinator.state).toBe("dormant");
+    expect(harness.minted).toEqual([]);
+    expect(harness.stagedTools).toEqual([]);
+    expect(harness.revoked).toEqual([]);
   });
 
   it("refuses activation while a disable is deactivating (fail-closed)", async () => {
@@ -275,6 +315,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
     await harness.coordinator.beginDeactivation();
 
@@ -283,6 +324,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
 
     expect(result).toEqual({
@@ -301,6 +343,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
 
     expect(result).toEqual({
@@ -322,6 +365,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
 
     expect(result).toEqual({
@@ -343,6 +387,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
     expect(first).toEqual({ state: "active", alreadyActive: false });
 
@@ -356,6 +401,7 @@ describe("enablePiSynaraMcpSession at the Pi provider/session boundary (impl-08)
       coordinator: harness.coordinator,
       adapter: harness.adapter,
       expectedSessionGeneration: SESSION_GENERATION,
+      liveSessionGeneration: SESSION_GENERATION,
     });
     expect(reenable).toEqual({ state: "active", alreadyActive: false });
     expect(harness.coordinator.state).toBe("active");
