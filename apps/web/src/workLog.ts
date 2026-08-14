@@ -45,6 +45,26 @@ export type WorkLogRequestKind = ApprovalRequestKind;
 // import.
 const CHECKPOINT_REVERT_FAILED_ACTIVITY_KIND = "checkpoint.revert.failed";
 
+// Mirror the Synara MCP command acknowledgement kinds in
+// apps/server/src/orchestration/synaraMcpCommand.ts, which the web app cannot
+// import. They are Synara control-plane facts (Decision 12) and carry no
+// provider turn id.
+const SYNARA_MCP_COMMAND_PENDING_ACTIVITY_KIND = "synara.mcp.command.pending";
+const SYNARA_MCP_COMMAND_SUCCEEDED_ACTIVITY_KIND = "synara.mcp.command.succeeded";
+const SYNARA_MCP_COMMAND_FAILED_ACTIVITY_KIND = "synara.mcp.command.failed";
+
+const SYNARA_MCP_COMMAND_ACTIVITY_KINDS = new Set([
+  SYNARA_MCP_COMMAND_PENDING_ACTIVITY_KIND,
+  SYNARA_MCP_COMMAND_SUCCEEDED_ACTIVITY_KIND,
+  SYNARA_MCP_COMMAND_FAILED_ACTIVITY_KIND,
+]);
+
+// Bound rendered diagnostics at the web work-log boundary (Decision 12):
+// failed detail is sanitized server-side to at most 1 KiB UTF-8; anything
+// larger or malformed must never create unbounded output here, so it is
+// omitted instead of rendered.
+const MAX_WORK_LOG_DETAIL_UTF8_BYTES = 1_024;
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -326,6 +346,13 @@ function shouldKeepActivityForWorkLog(
     return true;
   }
 
+  // Synara MCP command acknowledgements are durable control-plane facts with
+  // `turnId: null` (Decision 12); keep them visible in the work log regardless
+  // of which provider turns are on screen.
+  if (SYNARA_MCP_COMMAND_ACTIVITY_KINDS.has(activity.kind)) {
+    return true;
+  }
+
   // An empty set means the transcript has no turn-stamped assistant messages
   // (e.g. providers that never supply turn ids); fall back to the legacy
   // latest-turn filter instead of hiding the whole work log.
@@ -436,6 +463,25 @@ function extractWorkLogSynaraThreadCreation(
   return { operationId, requestedCount, createdCount, threads };
 }
 
+// Accepts only non-empty strings within MAX_WORK_LOG_DETAIL_UTF8_BYTES of
+// UTF-8; oversized or malformed (non-string) diagnostics are dropped so a
+// misbehaving journal can never produce unbounded work-log output. This is a
+// web-boundary bound only: server redaction stays server-owned and journal
+// state is never mutated here. Used only for the Synara MCP command
+// acknowledgement kinds; unrelated kinds keep their legacy detail pass-through.
+function boundedWorkLogDetail(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return new TextEncoder().encode(trimmed).byteLength <= MAX_WORK_LOG_DETAIL_UTF8_BYTES
+    ? trimmed
+    : null;
+}
+
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
@@ -451,7 +497,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    ...(activity.turnId !== null ? { turnId: activity.turnId } : {}),
+    // Decision 12: the three Synara MCP command acknowledgement kinds are
+    // Synara control-plane facts with a literal `turnId: null`; other
+    // null-turn activities stay turn-less (no turnId field).
+    ...(activity.turnId !== null || SYNARA_MCP_COMMAND_ACTIVITY_KINDS.has(activity.kind)
+      ? { turnId: activity.turnId }
+      : {}),
     label: activity.summary,
     tone: activity.tone === "approval" ? "info" : activity.tone,
     activityKind: activity.kind,
@@ -461,8 +512,17 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-    const detail = stripTrailingExitCode(payload.detail).output;
+  // Decision 12 bounds only the Synara MCP command acknowledgement kinds:
+  // their failed terminal detail is sanitized server-side to at most 1 KiB
+  // UTF-8, so anything larger or malformed is omitted here. Unrelated kinds
+  // keep the legacy pass-through (non-empty string detail renders as-is).
+  const rawDetail = SYNARA_MCP_COMMAND_ACTIVITY_KINDS.has(activity.kind)
+    ? boundedWorkLogDetail(payload?.detail)
+    : payload && typeof payload.detail === "string" && payload.detail.length > 0
+      ? payload.detail
+      : null;
+  if (rawDetail) {
+    const detail = stripTrailingExitCode(rawDetail).output;
     if (detail) {
       entry.detail = detail;
     }

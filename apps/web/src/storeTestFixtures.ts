@@ -104,6 +104,53 @@ export function makeActivity(overrides: {
   };
 }
 
+// Shared Decision-12 journal builder for Synara MCP command acknowledgements
+// (mirrors apps/server/src/orchestration/synaraMcpCommand.ts): deterministic id
+// `${requestId}:${phase}`, `turnId: null`, tone "error" only for failed, and the
+// sanitized bounded diagnostic in `payload.detail` (failed terminal only).
+// `detail` is intentionally `unknown` so web tests can exercise the
+// malformed-detail boundary.
+export function makeSynaraMcpCommandActivity(overrides: {
+  createdAt?: string;
+  requestId: string;
+  command: "enable" | "disable";
+  phase: "pending" | "terminal";
+  status: "pending" | "succeeded" | "failed";
+  requestedState: "enabled" | "disabled";
+  finalState?: "enabled" | "disabled";
+  detail?: unknown;
+}): OrchestrationThreadActivity {
+  const { createdAt, requestId, command, phase, status, requestedState, finalState, detail } =
+    overrides;
+  return makeActivity({
+    id: `${requestId}:${phase}`,
+    createdAt,
+    kind: `synara.mcp.command.${status}`,
+    summary:
+      status === "pending"
+        ? command === "enable"
+          ? "Synara MCP will be enabled after the current turn completes"
+          : "Synara MCP will be disabled after the current turn completes"
+        : status === "succeeded"
+          ? command === "enable"
+            ? "Synara MCP is enabled for this project"
+            : "Synara MCP is disabled"
+          : command === "enable"
+            ? "Synara MCP activation failed; the project remains disabled"
+            : "Synara MCP could not be disabled",
+    tone: status === "failed" ? "error" : "info",
+    payload: {
+      requestId,
+      command,
+      phase,
+      status,
+      requestedState,
+      ...(finalState !== undefined ? { finalState } : {}),
+      ...(detail !== undefined ? { detail } : {}),
+    },
+  });
+}
+
 export function makeState(thread: Thread): AppState {
   const {
     session,

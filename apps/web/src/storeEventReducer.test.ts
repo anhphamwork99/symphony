@@ -7,7 +7,9 @@ import {
   CommandId,
   EventId,
   MessageId,
+  OrchestrationPendingInteraction,
   OrchestrationProposedPlanId,
+  OrchestrationThreadActivity,
   ProjectId,
   SpaceId,
   ThreadId,
@@ -17,6 +19,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { applyOrchestrationEvents, applyOrchestrationEventsHotPath } from "./storeEventReducer";
+import { deriveWorkLogEntries } from "./workLog";
 import {
   syncServerShellSnapshot,
   syncServerReadModel,
@@ -27,6 +30,7 @@ import {
   makeThread,
   makeDomainEvent,
   makeActivity,
+  makeSynaraMcpCommandActivity,
   makeState,
   makeProject,
   makeReadModelThread,
@@ -2181,5 +2185,194 @@ describe("store event reducer", () => {
     expect(next.messageIdsByThreadId?.[threadId]).toBe(
       initialState.messageIdsByThreadId?.[threadId],
     );
+  });
+});
+
+
+describe("store event reducer Synara MCP command acknowledgements", () => {
+  const threadId = ThreadId.makeUnsafe("thread-1");
+
+  // Decision-12 journal fixtures (shared builder in storeTestFixtures.ts):
+  // deterministic ids `${requestId}:${phase}`, turnId null, tone "error" only
+  // for failed, and the sanitized bounded diagnostic in payload.detail.
+  const pending = makeSynaraMcpCommandActivity({
+    createdAt: "2026-08-12T12:00:00.000Z",
+    requestId: "synara-mcp:req-1",
+    command: "enable",
+    phase: "pending",
+    status: "pending",
+    requestedState: "enabled",
+  });
+  const succeeded = makeSynaraMcpCommandActivity({
+    createdAt: "2026-08-12T12:00:01.000Z",
+    requestId: "synara-mcp:req-1",
+    command: "enable",
+    phase: "terminal",
+    status: "succeeded",
+    requestedState: "enabled",
+    finalState: "enabled",
+  });
+  const failed = makeSynaraMcpCommandActivity({
+    createdAt: "2026-08-12T12:00:02.000Z",
+    requestId: "synara-mcp:req-2",
+    command: "disable",
+    phase: "terminal",
+    status: "failed",
+    requestedState: "disabled",
+    finalState: "disabled",
+    detail: "The Synara MCP command could not be completed.",
+  });
+  const acknowledgementEvents = [
+    makeDomainEvent("thread.activity-appended", { threadId, activity: pending }, { sequence: 1 }),
+    makeDomainEvent("thread.activity-appended", { threadId, activity: succeeded }, { sequence: 2 }),
+    makeDomainEvent("thread.activity-appended", { threadId, activity: failed }, { sequence: 3 }),
+  ];
+
+  function durableFacts(activity: OrchestrationThreadActivity) {
+    return {
+      id: activity.id,
+      kind: activity.kind,
+      turnId: activity.turnId,
+      createdAt: activity.createdAt,
+      payload: activity.payload,
+    };
+  }
+
+  it("reduces live MCP acknowledgement events equivalently to replayed snapshots", () => {
+    const live = applyOrchestrationEvents(makeState(makeThread()), acknowledgementEvents);
+    // Reconnect replay: the server read-model snapshot carries the same
+    // durable activities; no turn id and no client-side acknowledgement.
+    const replayed = syncServerReadModel(
+      makeState(makeThread()),
+      makeReadModel(makeReadModelThread({ activities: [pending, succeeded, failed] })),
+    );
+
+    // Durable facts converge for pending, succeeded, and failed: same
+    // deterministic identity, kind, null turn id, timestamp, and payload.
+    expect(threadsOf(live)[0]?.activities.map(durableFacts)).toEqual(
+      threadsOf(replayed)[0]?.activities.map(durableFacts),
+    );
+    // All three kinds stay null-turn and keep their own durable rows on both paths.
+    expect(threadsOf(replayed)[0]?.activities.map((activity) => activity.turnId)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+
+    // Rendering equivalence: the work log derived from live-reduced state is
+    // identical to the work log derived from the replayed snapshot state.
+    const entryFacts = (state: AppState) =>
+      deriveWorkLogEntries(
+        threadsOf(state)[0]?.activities ?? [],
+        TurnId.makeUnsafe("turn-1"),
+        { visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]) },
+      ).map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        tone: entry.tone,
+        turnId: entry.turnId,
+        detail: entry.detail,
+      }));
+    expect(entryFacts(live)).toEqual(entryFacts(replayed));
+    expect(entryFacts(live)).toEqual([
+      {
+        id: "synara-mcp:req-1:pending",
+        label: "Synara MCP will be enabled after the current turn completes",
+        tone: "info",
+        turnId: null,
+        detail: undefined,
+      },
+      {
+        id: "synara-mcp:req-1:terminal",
+        label: "Synara MCP is enabled for this project",
+        tone: "info",
+        turnId: null,
+        detail: undefined,
+      },
+      {
+        id: "synara-mcp:req-2:terminal",
+        label: "Synara MCP could not be disabled",
+        tone: "error",
+        turnId: null,
+        detail: "The Synara MCP command could not be completed.",
+      },
+    ]);
+    // Pending and each terminal remain durable distinct rows, never collapsed.
+    expect(entryFacts(live).map((entry) => entry.id)).toEqual([
+      "synara-mcp:req-1:pending",
+      "synara-mcp:req-1:terminal",
+      "synara-mcp:req-2:terminal",
+    ]);
+  });
+
+  it("deduplicates MCP acknowledgement events re-delivered after reconnect", () => {
+    const live = applyOrchestrationEvents(makeState(makeThread()), acknowledgementEvents);
+    // A reconnect re-delivers the same journaled events; the reducer must not
+    // duplicate the durable rows and must keep the already-reduced state.
+    const afterReplay = applyOrchestrationEvents(live, acknowledgementEvents);
+
+    const durableRows = (state: AppState) =>
+      threadsOf(state)[0]?.activities.map((activity) => ({
+        id: activity.id,
+        kind: activity.kind,
+        turnId: activity.turnId,
+      }));
+    expect(durableRows(afterReplay)).toEqual(durableRows(live));
+    expect(durableRows(afterReplay)).toEqual([
+      { id: "synara-mcp:req-1:pending", kind: "synara.mcp.command.pending", turnId: null },
+      { id: "synara-mcp:req-1:terminal", kind: "synara.mcp.command.succeeded", turnId: null },
+      { id: "synara-mcp:req-2:terminal", kind: "synara.mcp.command.failed", turnId: null },
+    ]);
+  });
+
+  it("keeps messages, pending interactions, and sidebar summaries untouched by MCP acknowledgement events", () => {
+    // Acknowledgements are activities: they never become messages, never touch
+    // the real pending approval, and never alter its pending state.
+    const userMessage = {
+      id: MessageId.makeUnsafe("user-1"),
+      role: "user" as const,
+      text: "Enable Synara MCP",
+      turnId: null,
+      createdAt: "2026-08-12T12:00:00.000Z",
+      streaming: false,
+      source: "native" as const,
+    };
+    const pendingInteraction: OrchestrationPendingInteraction = {
+      interactionKind: "approval",
+      requestId: ApprovalRequestId.makeUnsafe("req-approval"),
+      threadId,
+      turnId: TurnId.makeUnsafe("turn-1"),
+      lifecycleGeneration: "generation-1",
+      status: "pending",
+      decision: null,
+      responseCommandId: null,
+      responseRequestedAt: null,
+      createdAt: "2026-08-12T12:00:00.000Z",
+      resolvedAt: null,
+    };
+    const initialState = makeState(
+      makeThread({
+        messages: [userMessage],
+        pendingInteractions: [pendingInteraction],
+      }),
+    );
+    const next = applyOrchestrationEvents(initialState, acknowledgementEvents);
+
+    expect(threadsOf(next)[0]?.messages).toEqual([userMessage]);
+    expect(threadsOf(next)[0]?.pendingInteractions).toEqual([pendingInteraction]);
+
+    // Sidebar summaries must also stay untouched: MCP acknowledgements are not
+    // summary-signal activities.
+    const summaryState = syncServerReadModel(
+      makeState(makeThread({ title: "MCP thread" })),
+      makeReadModel(
+        makeReadModelThread({ title: "MCP thread", updatedAt: "2026-08-12T12:00:00.000Z" }),
+      ),
+    );
+    const previousSummary = summaryState.sidebarThreadSummaryById["thread-1"];
+    const summaryAfter = applyOrchestrationEvents(summaryState, acknowledgementEvents);
+
+    expect(previousSummary).toBeDefined();
+    expect(summaryAfter.sidebarThreadSummaryById["thread-1"]).toEqual(previousSummary);
   });
 });

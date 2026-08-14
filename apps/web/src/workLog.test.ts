@@ -8,7 +8,7 @@ import {
   isProviderFileEditWorkLogEntry,
   omitRoutedSubagentWorkEntries,
 } from "./workLog";
-import { makeActivity } from "./storeTestFixtures";
+import { makeActivity, makeSynaraMcpCommandActivity } from "./storeTestFixtures";
 
 describe("deriveWorkLogEntries", () => {
   it("keeps started tool entries so pending Cursor calls appear immediately", () => {
@@ -3577,6 +3577,277 @@ describe("deriveWorkLogEntries Codex find regression", () => {
       preview: "for package.json in apps",
       itemType: "command_execution",
       toolCallId: "call_UmQKQmLCCrj9PF82rupLIFDO",
+    });
+  });
+});
+
+
+describe("Synara MCP command acknowledgements in the work log", () => {
+  it("keeps all three MCP acknowledgement kinds through normal visible-turn filtering", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "turn-1-tool",
+        createdAt: "2026-08-12T11:59:59.000Z",
+        turnId: "turn-1",
+        kind: "tool.started",
+        summary: "Tool call",
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:00.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "pending",
+        status: "pending",
+        requestedState: "enabled",
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:01.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "terminal",
+        status: "succeeded",
+        requestedState: "enabled",
+        finalState: "enabled",
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:02.000Z",
+        requestId: "synara-mcp:req-2",
+        command: "disable",
+        phase: "terminal",
+        status: "failed",
+        requestedState: "disabled",
+        finalState: "disabled",
+        detail: "The Synara MCP command could not be completed.",
+      }),
+      makeActivity({
+        id: "turn-2-tool",
+        createdAt: "2026-08-12T12:00:03.000Z",
+        turnId: "turn-2",
+        kind: "tool.started",
+        summary: "Hidden tool",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"), {
+      visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]),
+    });
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "turn-1-tool",
+      "synara-mcp:req-1:pending",
+      "synara-mcp:req-1:terminal",
+      "synara-mcp:req-2:terminal",
+    ]);
+    const pendingEntry = entries.find((entry) => entry.id === "synara-mcp:req-1:pending");
+    const succeededEntry = entries.find((entry) => entry.id === "synara-mcp:req-1:terminal");
+    const failedEntry = entries.find((entry) => entry.id === "synara-mcp:req-2:terminal");
+    expect(pendingEntry).toMatchObject({
+      label: "Synara MCP will be enabled after the current turn completes",
+      tone: "info",
+    });
+    expect(pendingEntry?.turnId).toBeNull();
+    expect(succeededEntry).toMatchObject({
+      label: "Synara MCP is enabled for this project",
+      tone: "info",
+    });
+    expect(succeededEntry?.turnId).toBeNull();
+    expect(failedEntry).toMatchObject({
+      label: "Synara MCP could not be disabled",
+      tone: "error",
+      detail: "The Synara MCP command could not be completed.",
+    });
+    expect(failedEntry?.turnId).toBeNull();
+    // Pending and terminal stay separate rows: the work log never collapses them.
+    expect(entries.filter((entry) => entry.id.startsWith("synara-mcp:req-1"))).toHaveLength(2);
+  });
+
+  it("renders MCP acknowledgements as work rows and never leaks into assistant content", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:00.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "pending",
+        status: "pending",
+        requestedState: "enabled",
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:01.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "terminal",
+        status: "failed",
+        requestedState: "enabled",
+        finalState: "disabled",
+        detail: "The Synara MCP command could not be completed.",
+      }),
+    ];
+
+    const timeline = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.makeUnsafe("message-1"),
+          role: "assistant",
+          text: "I will enable Synara MCP.",
+          createdAt: "2026-08-12T12:00:00.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      deriveWorkLogEntries(activities, undefined),
+    );
+
+    expect(timeline.map((row) => row.kind)).toEqual(["message", "work", "work"]);
+    expect(timeline[1]).toMatchObject({ kind: "work", entry: { id: "synara-mcp:req-1:pending" } });
+    expect(timeline[2]).toMatchObject({
+      kind: "work",
+      entry: {
+        id: "synara-mcp:req-1:terminal",
+        tone: "error",
+        detail: "The Synara MCP command could not be completed.",
+      },
+    });
+    // The assistant row keeps only its own text: no acknowledgement detail lands there.
+    expect(timeline[0]).toMatchObject({
+      kind: "message",
+      message: { text: "I will enable Synara MCP." },
+    });
+  });
+
+  it("does not specially retain unknown acknowledgement kinds", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:00.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "pending",
+        status: "pending",
+        requestedState: "enabled",
+      }),
+      makeActivity({
+        id: "synara-mcp:req-1:expired",
+        createdAt: "2026-08-12T12:00:01.000Z",
+        kind: "synara.mcp.command.expired",
+        summary: "Synara MCP command expired",
+        tone: "error",
+        payload: {
+          requestId: "synara-mcp:req-1",
+          command: "enable",
+          phase: "terminal",
+          status: "expired",
+          requestedState: "enabled",
+          finalState: "disabled",
+        },
+      }),
+      makeActivity({
+        id: "null-turn-generic",
+        createdAt: "2026-08-12T12:00:02.000Z",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "error",
+        payload: { message: "Something degraded" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"), {
+      visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]),
+    });
+
+    expect(entries.map((entry) => entry.id)).toEqual(["synara-mcp:req-1:pending"]);
+  });
+
+  it("bounds malformed or oversized failed diagnostics without corrupting unrelated rows", () => {
+    const inBoundDetail = "\u00ea".repeat(500); // 1000 UTF-8 bytes: renders at the accepted bound
+    const overBoundDetail = "\u00ea".repeat(600); // 1200 UTF-8 bytes: over the 1 KiB boundary
+    // 1200 UTF-8 bytes of unrelated tool detail: the 1 KiB bound is MCP-only,
+    // so legacy detail must still render untouched.
+    const unrelatedOverBoundDetail = `\u00ea${"x".repeat(1198)}`;
+    const activities: OrchestrationThreadActivity[] = [
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:00.000Z",
+        requestId: "synara-mcp:req-1",
+        command: "enable",
+        phase: "pending",
+        status: "pending",
+        requestedState: "enabled",
+      }),
+      makeActivity({
+        id: "synara-mcp:req-1:terminal",
+        createdAt: "2026-08-12T12:00:01.000Z",
+        kind: "synara.mcp.command.failed",
+        summary: "Synara MCP activation failed; the project remains disabled",
+        tone: "error",
+        payload: {
+          requestId: 12345,
+          command: "enable",
+          phase: "terminal",
+          status: "failed",
+          requestedState: "enabled",
+          finalState: "disabled",
+          detail: 12345,
+        },
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:02.000Z",
+        requestId: "synara-mcp:req-2",
+        command: "enable",
+        phase: "terminal",
+        status: "failed",
+        requestedState: "enabled",
+        finalState: "disabled",
+        detail: inBoundDetail,
+      }),
+      makeSynaraMcpCommandActivity({
+        createdAt: "2026-08-12T12:00:03.000Z",
+        requestId: "synara-mcp:req-3",
+        command: "enable",
+        phase: "terminal",
+        status: "failed",
+        requestedState: "enabled",
+        finalState: "disabled",
+        detail: overBoundDetail,
+      }),
+      makeActivity({
+        id: "turn-1-tool",
+        createdAt: "2026-08-12T12:00:04.000Z",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Read file",
+        tone: "tool",
+        payload: {
+          detail: unrelatedOverBoundDetail,
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"), {
+      visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]),
+    });
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "synara-mcp:req-1:pending",
+      "synara-mcp:req-1:terminal",
+      "synara-mcp:req-2:terminal",
+      "synara-mcp:req-3:terminal",
+      "turn-1-tool",
+    ]);
+    // Malformed diagnostics are dropped, not coerced or thrown.
+    const malformedEntry = entries.find((entry) => entry.id === "synara-mcp:req-1:terminal");
+    expect(malformedEntry).toMatchObject({
+      label: "Synara MCP activation failed; the project remains disabled",
+      tone: "error",
+    });
+    expect(malformedEntry?.detail).toBeUndefined();
+    // Valid non-empty diagnostics within 1 KiB UTF-8 render.
+    expect(entries.find((entry) => entry.id === "synara-mcp:req-2:terminal")?.detail).toBe(
+      inBoundDetail,
+    );
+    // Oversized diagnostics are omitted at the boundary, never emitted unbounded.
+    expect(entries.find((entry) => entry.id === "synara-mcp:req-3:terminal")?.detail).toBeUndefined();
+    // Unrelated rows keep their own detail even when oversized: the 1 KiB
+    // bound applies only to MCP acknowledgement kinds, never to legacy detail.
+    expect(entries.find((entry) => entry.id === "turn-1-tool")).toMatchObject({
+      detail: unrelatedOverBoundDetail,
     });
   });
 });
