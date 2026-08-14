@@ -13,6 +13,7 @@ import {
   type ProjectMcpActivationOperation,
   type ProjectMcpActivationOutcome,
   type ProjectMcpActivationUpdateCommand,
+  type ProjectMcpActivationWaitSetEntry,
   ProjectId,
   ThreadId,
 } from "@synara/contracts";
@@ -43,10 +44,7 @@ export interface SynaraMcpCommandPayload {
   readonly detail?: string;
 }
 
-export type SynaraMcpTurnCommand = Extract<
-  OrchestrationCommand,
-  { type: "thread.turn.start" }
->;
+export type SynaraMcpTurnCommand = Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
 export type SynaraMcpActivityAppendCommand = Extract<
   OrchestrationCommand,
   { type: "thread.activity.append" }
@@ -89,7 +87,7 @@ function phaseId(requestId: string, phase: "pending" | "terminal"): EventId {
 
 function phaseCommandId(
   requestId: string,
-  phase: "operation" | "terminal-operation" | "pending" | "terminal",
+  phase: "operation" | "terminal-operation" | "pending" | "terminal" | `member:${string}`,
 ): CommandId {
   return CommandId.makeUnsafe(`${requestId}:${phase}`);
 }
@@ -112,34 +110,28 @@ function projectForThread(
   return readModel.projects.find((project) => project.id === thread.projectId);
 }
 
-function activeWaitSet(readModel: OrchestrationReadModel, projectId: ProjectId) {
+function currentSessionWaitSet(readModel: OrchestrationReadModel, projectId: ProjectId) {
   return readModel.threads
-    .filter(
-      (thread) =>
-        thread.projectId === projectId &&
-        thread.session !== null &&
-        threadHasInFlightTurn(thread),
-    )
+    .filter((thread) => thread.projectId === projectId && thread.session !== null)
     .map((thread) => ({
       sessionId: thread.id,
-      // The session contract currently exposes no provider runtime generation.
-      // This durable session snapshot token is replaced by the provider
-      // lifecycle generation when that lifecycle is implemented.
+      // The session contract currently exposes no provider runtime
+      // generation. This durable session snapshot token is the acceptance-time
+      // generation the provider enable boundary validates against the live
+      // session (impl-08); it is replaced by the provider lifecycle
+      // generation when that lifecycle is fully exposed to orchestration.
       sessionGeneration: `orchestration:${thread.id}:${thread.session!.updatedAt}`,
     }))
     .toSorted((left, right) => left.sessionId.localeCompare(right.sessionId));
 }
 
 /**
- * Wait-set for a new Synara MCP operation. Enable waits only for in-flight
- * sessions (safe-boundary deferral). A disable with no in-flight session must
- * stay durably pending until the provider disable outcome is known (Decision
- * 14: a timeout/uncertain result is failed-disabled, never clean success), and
- * the contracts aggregate status derives from the wait-set outcomes, so the
- * issuing session joins the wait-set as the single member whose outcome
- * carries the provider result. A session-less issuing thread has no session to
- * track; its provider disable outcome is dormant by construction (there is no
- * live runtime to fence, drain, or revoke).
+ * Wait-set for a new Synara MCP operation (impl-08): both enable and disable
+ * fan out to every current session of the project, captured immutably at
+ * acceptance. Future sessions never join an accepted operation. An empty
+ * wait-set succeeds immediately (enable) or stays schema-valid terminal
+ * (disable with a session-less issuing thread: its provider outcome is
+ * dormant by construction, Decisions 14/18).
  */
 function waitSetForCommand(input: {
   readonly readModel: OrchestrationReadModel;
@@ -147,17 +139,7 @@ function waitSetForCommand(input: {
   readonly project: OrchestrationProject;
   readonly kind: SynaraMcpCommand;
 }): ProjectMcpActivationOperation["waitSet"] {
-  const active = activeWaitSet(input.readModel, input.project.id);
-  if (active.length > 0 || input.kind === "enable") return active;
-  return input.thread.session === null
-    ? active
-    : [
-        {
-          sessionId: input.thread.id,
-          // Same durable session snapshot token convention as activeWaitSet.
-          sessionGeneration: `orchestration:${input.thread.id}:${input.thread.session.updatedAt}`,
-        },
-      ];
+  return currentSessionWaitSet(input.readModel, input.project.id);
 }
 
 function activityCommand(input: {
@@ -276,7 +258,9 @@ function makeSucceededOperationCommand(input: {
   });
 }
 
-export function isSynaraMcpTurnCommand(command: OrchestrationCommand): command is SynaraMcpTurnCommand {
+export function isSynaraMcpTurnCommand(
+  command: OrchestrationCommand,
+): command is SynaraMcpTurnCommand {
   return command.type === "thread.turn.start" && commandKind(command.message.text) !== null;
 }
 
@@ -316,8 +300,8 @@ export function planSynaraMcpCommand(input: {
   const activityCreatedAt = isRetry ? operation.updatedAt : createdAt;
   const existingFailure =
     isRetry && operation.aggregateStatus === "failed"
-      ? operation.outcomes.find((outcome) => outcome.status === "failed")?.detail ??
-        "The previous Synara MCP activation attempt failed."
+      ? (operation.outcomes.find((outcome) => outcome.status === "failed")?.detail ??
+        "The previous Synara MCP activation attempt failed.")
       : null;
   return {
     command: input.command,
@@ -446,6 +430,7 @@ export function planSynaraMcpCompletion(input: {
   return {
     projectCommand:
       currentOperation?.requestId === input.plan.requestId &&
+      currentOperation.operationGeneration === input.plan.operation.operationGeneration &&
       currentOperation.aggregateStatus === "pending"
         ? makeSucceededOperationCommand({
             project: input.project,
@@ -565,9 +550,15 @@ export function sanitizeSynaraMcpDiagnostic(input: unknown): string {
   const sanitized = raw
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/\b(bearer|token|secret|password|credential|api[-_ ]?key)\s*[:=]?\s*[^,; ]+/gi, "$1 [redacted]")
+    .replace(
+      /\b(bearer|token|secret|password|credential|api[-_ ]?key)\s*[:=]?\s*[^,; ]+/gi,
+      "$1 [redacted]",
+    )
     .replace(/https?:\/\/[^\s,;]+/gi, "[redacted-url]")
-    .replace(/(?:^|\s)(?:[A-Za-z]:[\\/]|\/Users\/|\/private\/|\/tmp\/)[^\s,;]*/g, " [redacted-path]")
+    .replace(
+      /(?:^|\s)(?:[A-Za-z]:[\\/]|\/Users\/|\/private\/|\/tmp\/)[^\s,;]*/g,
+      " [redacted-path]",
+    )
     .trim();
   return truncateUtf8(
     sanitized || SYNARA_MCP_SAFE_DIAGNOSTIC_FALLBACK,
@@ -587,6 +578,7 @@ function makeFailedOperationCommand(input: {
     currentOperation === null ||
     currentOperation === undefined ||
     currentOperation.requestId !== input.requestId ||
+    currentOperation.operationGeneration !== input.operation.operationGeneration ||
     currentOperation.aggregateStatus !== "pending"
   ) {
     return null;
@@ -623,6 +615,82 @@ export function synaraMcpWaitStatus(
     if (threadHasInFlightTurn(thread)) return "waiting";
   }
   return "ready";
+}
+
+export type SynaraMcpMemberStatus = "ready" | "failed";
+
+/**
+ * Per-member liveness for the project reconciliation (impl-08): a captured
+ * wait-set member whose thread or session is gone can no longer be
+ * reconciled and is an unsafe disappearance for the operation.
+ */
+export function synaraMcpMemberStatus(
+  readModel: OrchestrationReadModel,
+  operation: ProjectMcpActivationOperation,
+  member: ProjectMcpActivationWaitSetEntry,
+): SynaraMcpMemberStatus {
+  const thread = readModel.threads.find((candidate) => candidate.id === member.sessionId);
+  if (thread === undefined || thread.session === null) return "failed";
+  return "ready";
+}
+
+/**
+ * Journal one wait-set member's succeeded outcome independently (impl-08).
+ * The resolution must match the current operation's request id, operation
+ * generation, wait-set membership, and the captured session generation;
+ * stale or settled resolutions are ignored (Decision 18: stale work is
+ * discarded). The aggregate succeeds only when every member has succeeded;
+ * a failed member is not journaled here — it immediately triggers the
+ * full failed-disabled rollback through {@link planSynaraMcpFailure}.
+ */
+export function planSynaraMcpMemberOutcome(input: {
+  readonly plan: SynaraMcpCommandPlan;
+  readonly project: OrchestrationProject;
+  readonly member: ProjectMcpActivationWaitSetEntry;
+  readonly now?: () => Date;
+}): ProjectMcpActivationUpdateCommand | null {
+  const currentOperation = input.project.synaraMcpActivationOperation;
+  if (
+    currentOperation === null ||
+    currentOperation === undefined ||
+    currentOperation.requestId !== input.plan.requestId ||
+    currentOperation.operationGeneration !== input.plan.operation.operationGeneration ||
+    currentOperation.aggregateStatus !== "pending"
+  ) {
+    return null;
+  }
+  const captured = currentOperation.waitSet.find(
+    (entry) => entry.sessionId === input.member.sessionId,
+  );
+  if (captured === undefined || captured.sessionGeneration !== input.member.sessionGeneration) {
+    return null;
+  }
+  const existing = currentOperation.outcomes.find(
+    (outcome) => outcome.sessionId === input.member.sessionId,
+  );
+  if (existing !== undefined && existing.status === "succeeded") {
+    return null;
+  }
+  const completedAt = isoNow(input.now);
+  const outcomes = currentOperation.outcomes.map((outcome) =>
+    outcome.sessionId === input.member.sessionId
+      ? { ...outcome, status: "succeeded" as const, detail: null, updatedAt: completedAt }
+      : outcome,
+  );
+  const operation: ProjectMcpActivationOperation = {
+    ...currentOperation,
+    outcomes,
+    aggregateStatus: outcomes.some((outcome) => outcome.status === "pending")
+      ? "pending"
+      : "succeeded",
+    version: currentOperation.version + 1,
+    updatedAt: completedAt,
+  };
+  return makeProjectCommand({
+    project: input.project,
+    operation,
+    commandId: phaseCommandId(input.plan.requestId, `member:${input.member.sessionId}`),
+  });
 }
 
 export function planSynaraMcpFailure(input: {
