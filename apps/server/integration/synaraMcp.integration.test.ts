@@ -28,8 +28,13 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
+  CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
+  MessageId,
+  ProjectId,
+  ProviderKind,
   ThreadId,
   type OrchestrationProject,
   type OrchestrationThread,
@@ -71,13 +76,53 @@ import {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
+const asCommandId = (value: string): CommandId => CommandId.makeUnsafe(value);
+const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
+const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
+const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
+
+/**
+ * Fixture thread id for turn events queued for the NEXT session. The test
+ * adapter overwrites `threadId` (and `eventId`/`provider`/`createdAt`) on
+ * every fixture event at send time, so this is only a typed placeholder.
+ */
+const FIXTURE_THREAD_ID = ThreadId.makeUnsafe("fixture-thread");
+
+/**
+ * Base metadata every fixture turn event carries, mirroring the canonical
+ * `runtimeBase` fixture pattern used by the orchestration engine
+ * integration tests. The adapter re-mints `eventId`/`provider`/`createdAt`/
+ * `threadId` per real session at send time.
+ */
+const runtimeBase = (eventId: string, createdAt: string, provider: ProviderKind = "codex") => ({
+  eventId: asEventId(eventId),
+  provider,
+  createdAt,
+});
 
 /** Minimal fixture turn that starts, emits one assistant delta, and completes. */
 const EMPTY_TURN_RESPONSE: TestTurnResponse = {
   events: [
-    { type: "turn.started", turnId: "fixture-turn-1" },
-    { type: "message.delta", turnId: "fixture-turn-1", delta: "ok.\n" },
-    { type: "turn.completed", turnId: "fixture-turn-1", status: "completed" },
+    {
+      type: "turn.started",
+      ...runtimeBase("evt-fixture-turn-started", "2026-08-15T00:00:00.000Z"),
+      threadId: FIXTURE_THREAD_ID,
+      turnId: "fixture-turn-1",
+    },
+    {
+      type: "message.delta",
+      ...runtimeBase("evt-fixture-message-delta", "2026-08-15T00:00:00.100Z"),
+      threadId: FIXTURE_THREAD_ID,
+      turnId: "fixture-turn-1",
+      delta: "ok.\n",
+    },
+    {
+      type: "turn.completed",
+      ...runtimeBase("evt-fixture-turn-completed", "2026-08-15T00:00:00.200Z"),
+      threadId: FIXTURE_THREAD_ID,
+      turnId: "fixture-turn-1",
+      status: "completed",
+    },
   ],
 };
 
@@ -115,8 +160,8 @@ const createProject = async (
 ): Promise<void> => {
   await harness.client.dispatchCommand({
     type: "project.create",
-    commandId: `cmd-${projectId}-create-${randomUUID()}`,
-    projectId,
+    commandId: asCommandId(`cmd-${projectId}-create-${randomUUID()}`),
+    projectId: asProjectId(projectId),
     title: `Project ${projectId}`,
     workspaceRoot,
     createdAt: new Date().toISOString(),
@@ -131,9 +176,9 @@ const createThread = async (
 ): Promise<void> => {
   await client.dispatchCommand({
     type: "thread.create",
-    commandId: `cmd-${threadId}-create-${randomUUID()}`,
-    threadId,
-    projectId,
+    commandId: asCommandId(`cmd-${threadId}-create-${randomUUID()}`),
+    threadId: asThreadId(threadId),
+    projectId: asProjectId(projectId),
     title: `Thread ${threadId}`,
     modelSelection: { provider: "codex", model: DEFAULT_MODEL_BY_PROVIDER.codex },
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -210,10 +255,10 @@ const startSessionTurn = async (
   await Effect.runPromise(harness.adapterHarness.queueTurnResponseForNextSession(EMPTY_TURN_RESPONSE));
   await client.dispatchCommand({
     type: "thread.turn.start",
-    commandId: `cmd-${threadId}-turn-${randomUUID()}`,
+    commandId: asCommandId(`cmd-${threadId}-turn-${randomUUID()}`),
     threadId,
     message: {
-      messageId: `msg-${threadId}-${randomUUID()}`,
+      messageId: asMessageId(`msg-${threadId}-${randomUUID()}`),
       role: "user",
       text,
       attachments: [],
@@ -247,18 +292,35 @@ const startDeferredTurn = async (
     harness.adapterHarness.queueTurnResponse(threadId, {
       deferCompletion: true,
       events: [
-        { type: "turn.started", turnId: "fixture-turn-deferred" },
-        { type: "message.delta", turnId: "fixture-turn-deferred", delta },
-        { type: "turn.completed", turnId: "fixture-turn-deferred", status: "completed" },
+        {
+          type: "turn.started",
+          ...runtimeBase("evt-deferred-turn-started", "2026-08-15T00:00:00.000Z"),
+          threadId,
+          turnId: "fixture-turn-deferred",
+        },
+        {
+          type: "message.delta",
+          ...runtimeBase("evt-deferred-message-delta", "2026-08-15T00:00:00.100Z"),
+          threadId,
+          turnId: "fixture-turn-deferred",
+          delta,
+        },
+        {
+          type: "turn.completed",
+          ...runtimeBase("evt-deferred-turn-completed", "2026-08-15T00:00:00.200Z"),
+          threadId,
+          turnId: "fixture-turn-deferred",
+          status: "completed",
+        },
       ],
     }),
   );
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
-    commandId: `cmd-${threadId}-deferred-${randomUUID()}`,
+    commandId: asCommandId(`cmd-${threadId}-deferred-${randomUUID()}`),
     threadId,
     message: {
-      messageId: `msg-${threadId}-deferred-${randomUUID()}`,
+      messageId: asMessageId(`msg-${threadId}-deferred-${randomUUID()}`),
       role: "user",
       text,
       attachments: [],
@@ -289,18 +351,35 @@ const startReusedSessionTurn = async (
   await Effect.runPromise(
     harness.adapterHarness.queueTurnResponse(threadId, {
       events: [
-        { type: "turn.started", turnId: "fixture-turn-1" },
-        { type: "message.delta", turnId: "fixture-turn-1", delta },
-        { type: "turn.completed", turnId: "fixture-turn-1", status: "completed" },
+        {
+          type: "turn.started",
+          ...runtimeBase("evt-reused-turn-started", "2026-08-15T00:00:00.000Z"),
+          threadId,
+          turnId: "fixture-turn-1",
+        },
+        {
+          type: "message.delta",
+          ...runtimeBase("evt-reused-message-delta", "2026-08-15T00:00:00.100Z"),
+          threadId,
+          turnId: "fixture-turn-1",
+          delta,
+        },
+        {
+          type: "turn.completed",
+          ...runtimeBase("evt-reused-turn-completed", "2026-08-15T00:00:00.200Z"),
+          threadId,
+          turnId: "fixture-turn-1",
+          status: "completed",
+        },
       ],
     }),
   );
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
-    commandId: `cmd-${threadId}-turn-${randomUUID()}`,
+    commandId: asCommandId(`cmd-${threadId}-turn-${randomUUID()}`),
     threadId,
     message: {
-      messageId: `msg-${threadId}-${randomUUID()}`,
+      messageId: asMessageId(`msg-${threadId}-${randomUUID()}`),
       role: "user",
       text,
       attachments: [],
@@ -326,10 +405,10 @@ const dispatchMcpCommand = async (
 ): Promise<number> => {
   const result = await harness.client.dispatchCommand({
     type: "thread.turn.start",
-    commandId,
+    commandId: asCommandId(commandId),
     threadId,
     message: {
-      messageId: `msg-${commandId}`,
+      messageId: asMessageId(`msg-${commandId}`),
       role: "user",
       text,
       attachments: [],
@@ -1020,10 +1099,10 @@ it(
       // wait-set token and the provider enable boundary must fail closed. ---
       await harness.client.dispatchCommand({
         type: "thread.turn.start",
-        commandId: `cmd-${threadB}-fail-${randomUUID()}`,
+        commandId: asCommandId(`cmd-${threadB}-fail-${randomUUID()}`),
         threadId: threadB,
         message: {
-          messageId: `msg-${threadB}-fail-${randomUUID()}`,
+          messageId: asMessageId(`msg-${threadB}-fail-${randomUUID()}`),
           role: "user",
           text: "induce a session error",
           attachments: [],

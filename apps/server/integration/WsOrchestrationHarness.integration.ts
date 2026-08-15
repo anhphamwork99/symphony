@@ -30,7 +30,7 @@ import {
   type OrchestrationThreadDetailSnapshot,
 } from "@synara/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
 
 import {
   McpSessionAuthority,
@@ -302,19 +302,20 @@ export async function makeWsOrchestrationHarness(
   );
   const runtime = ManagedRuntime.make(runtimeLayer);
 
-  const loadService = <A>(service: Effect.Effect<A, never, never>): Promise<A> =>
-    runtime.runPromise(service);
-
   let engine: OrchestrationEngineShape;
   let reactor: OrchestrationReactor["Service"];
   let snapshotQuery: ProjectionSnapshotQuery["Service"];
   let runtimeStartup: ServerRuntimeStartup["Service"];
   try {
-    engine = await loadService(Effect.service(OrchestrationEngineService));
-    reactor = await loadService(Effect.service(OrchestrationReactor));
-    snapshotQuery = await loadService(Effect.service(ProjectionSnapshotQuery));
-    runtimeStartup = await loadService(Effect.service(ServerRuntimeStartup));
-    authority = await loadService(Effect.service(McpSessionAuthority));
+    // Direct `runPromise(Effect.service(...))` calls (the canonical service
+    // load pattern in this repo's harnesses): the runtime holds the full
+    // layer context, so each effect requirement is satisfied without a
+    // generic indirection that would collapse the environment to `never`.
+    engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    reactor = await runtime.runPromise(Effect.service(OrchestrationReactor));
+    snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
+    runtimeStartup = await runtime.runPromise(Effect.service(ServerRuntimeStartup));
+    authority = await runtime.runPromise(Effect.service(McpSessionAuthority));
   } catch (cause) {
     await runtime.dispose().catch(() => undefined);
     if (ownsRootDir) fs.rmSync(rootDir, { recursive: true, force: true });
@@ -366,18 +367,22 @@ export async function makeWsOrchestrationHarness(
 
   // Mount the production WS route layer over a bounded loopback HTTP server.
   const serverScope = await runtime.runPromise(Scope.make("sequential"));
-  let nodeServer: http.Server | null = null;
+  // The bound address is captured through a box: production
+  // `makeBoundedNodeHttpServer` owns the raw node server and exposes the
+  // bound address on the `HttpServer` it returns. The box also keeps the
+  // capture type-safe — direct `let` narrowing collapses closure-only
+  // assignments to `never`, and reading the production `HttpServer.address`
+  // keeps the raw node server out of the harness entirely.
+  const boundAddress: { current: HttpServer.Address | null } = { current: null };
   try {
     await runtime.runPromise(
       Scope.provide(
         Effect.gen(function* () {
           const httpServer = yield* makeBoundedNodeHttpServer(
-            () => {
-              nodeServer = http.createServer();
-              return nodeServer;
-            },
+            () => http.createServer(),
             { port: 0, host: "127.0.0.1" },
           );
+          boundAddress.current = httpServer.address;
           const httpApp = yield* HttpRouter.toHttpEffect(websocketRpcRouteLayer);
           yield* httpServer.serve(httpApp);
         }),
@@ -398,8 +403,12 @@ export async function makeWsOrchestrationHarness(
       "httpServerMount",
     );
   }
-  const address = nodeServer?.address();
-  if (!address || typeof address !== "object" || !Number.isInteger(address.port)) {
+  const address = boundAddress.current;
+  if (
+    address === null ||
+    address._tag !== "TcpAddress" ||
+    !Number.isInteger(address.port)
+  ) {
     await runtime.runPromise(Scope.close(serverScope, Exit.void)).catch(() => undefined);
     await runtime.runPromise(Scope.close(reactorScope, Exit.void)).catch(() => undefined);
     await runtime.dispose().catch(() => undefined);

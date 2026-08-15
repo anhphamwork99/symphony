@@ -12,8 +12,11 @@
 import fs from "node:fs";
 
 import {
+  CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  ProjectId,
+  ThreadId,
 } from "@synara/contracts";
 import { expect, it } from "vitest";
 
@@ -25,12 +28,12 @@ it(
     const harness = await makeWsOrchestrationHarness({ provider: "codex" });
     try {
       const createdAt = new Date().toISOString();
-      const projectId = "ws-project-1";
-      const threadId = "ws-thread-1";
+      const projectId = ProjectId.makeUnsafe("ws-project-1");
+      const threadId = ThreadId.makeUnsafe("ws-thread-1");
 
       const projectDispatch = await harness.client.dispatchCommand({
         type: "project.create",
-        commandId: "cmd-ws-project-create",
+        commandId: CommandId.makeUnsafe("cmd-ws-project-create"),
         projectId,
         title: "WS Bootstrap Project",
         workspaceRoot: harness.workspaceDir,
@@ -40,7 +43,7 @@ it(
 
       const threadDispatch = await harness.client.dispatchCommand({
         type: "thread.create",
-        commandId: "cmd-ws-thread-create",
+        commandId: CommandId.makeUnsafe("cmd-ws-thread-create"),
         threadId,
         projectId,
         title: "WS Bootstrap Thread",
