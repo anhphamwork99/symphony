@@ -18,12 +18,23 @@ const SERVER_READY_TIMEOUT_MS = 90_000;
 const SERVER_TERMINATE_GRACE_MS = 8_000;
 const SERVER_KILL_GRACE_MS = 4_000;
 
+export interface IsolatedServerCatalogObserverConfig {
+  /** The measurement mode the observer must capture (Decision 35). */
+  readonly mode: "synara-default" | "synara-activated";
+}
+
 export interface IsolatedServer {
   readonly homeDir: string;
   readonly port: number;
   readonly stdoutPath: string;
   readonly stderrPath: string;
   readonly providerEventLogPath: string;
+  /**
+   * Decision 35 catalog observer artifact path (inside the isolated home),
+   * or null when the observer is not configured for this server. Normal
+   * isolated runs (and the user's own Synara instance) never configure it.
+   */
+  readonly catalogArtifactPath: string | null;
   readonly process: ChildProcess;
   readonly stop: () => Promise<void>;
 }
@@ -127,6 +138,13 @@ function readTail(filePath: string, lines: number): string {
 export async function startIsolatedServer(input: {
   readonly agentDir?: string;
   readonly port?: number;
+  /**
+   * Decision 35 measurement-only observer configuration. The harness sets it
+   * only for the applicable repetition's isolated child server; the explicit
+   * enable flag, the isolated-home root, the artifact destination (inside the
+   * home), and the mode are passed to the child through its environment.
+   */
+  readonly catalogObserver?: IsolatedServerCatalogObserverConfig;
 }): Promise<IsolatedServer> {
   const port = input.port ?? (await findFreePort());
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "synara-token-overhead-"));
@@ -135,6 +153,8 @@ export async function startIsolatedServer(input: {
   const stderrPath = path.join(homeDir, "server.stderr.log");
   const stdout = fs.openSync(stdoutPath, "w");
   const stderr = fs.openSync(stderrPath, "w");
+  const catalogArtifactPath =
+    input.catalogObserver === undefined ? null : path.join(homeDir, "catalog-artifact.json");
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -144,6 +164,17 @@ export async function startIsolatedServer(input: {
     SYNARA_NO_BROWSER: "1",
     SYNARA_LOG_PROVIDER_EVENTS: "1",
     ...(input.agentDir === undefined ? {} : { PI_CODING_AGENT_DIR: input.agentDir }),
+    // Decision 35: the measurement-only observer is enabled only in the
+    // isolated child server, with its artifact confined to this home. The
+    // child never inherits observer configuration from its own environment.
+    ...(input.catalogObserver === undefined
+      ? {}
+      : {
+          SYNARA_MEASUREMENT_CATALOG_OBSERVER: "1",
+          SYNARA_MEASUREMENT_CATALOG_HOME: homeDir,
+          SYNARA_MEASUREMENT_CATALOG_ARTIFACT_PATH: catalogArtifactPath!,
+          SYNARA_MEASUREMENT_CATALOG_MODE: input.catalogObserver.mode,
+        }),
   };
 
   const child = spawn(
@@ -224,6 +255,7 @@ export async function startIsolatedServer(input: {
     stdoutPath,
     stderrPath,
     providerEventLogPath,
+    catalogArtifactPath,
     process: child,
     stop,
   };

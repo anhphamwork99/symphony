@@ -99,6 +99,7 @@ import {
   type PiSynaraMcpStagedActivation,
 } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
+import { makePiCatalogObserver } from "../piCatalogObserver.ts";
 import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
@@ -430,6 +431,13 @@ export interface PiAdapterLiveOptions {
   readonly agentGatewayFetch?: AgentGatewayMcpFetch;
   /** Called once a fresh dormant adapter is installed for a Pi session. */
   readonly onSynaraMcpSession?: (lifecycle: PiSynaraMcpSessionLifecycle) => void;
+  /**
+   * Decision 35 measurement-only observer environment; defaults to the
+   * process environment. Only the isolated measurement harness sets the
+   * observer variables; absent configuration produces no observer at all,
+   * so normal runs never enumerate, serialize, or write catalogs.
+   */
+  readonly catalogObserverEnv?: NodeJS.ProcessEnv;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -588,6 +596,16 @@ export interface PiSessionSynaraMcpCoordinatorInput {
   readonly drainTimeoutMs?: number;
   /** Optional bounded diagnostics; a per-session default is created when omitted. */
   readonly diagnostics?: PiSynaraMcpDiagnostics;
+  /**
+   * Optional measurement-only observer notification (Decision 35): invoked
+   * synchronously when the activation commit is proven at the safe boundary
+   * (staged catalog applied and the Pi runtime reload completed), after the
+   * execution admission generation reset. The caller binds its own session
+   * context; the notification is a pure signal. Must not throw; the observer
+   * itself never throws, and a throwing notification is absorbed by the
+   * coordinator's commit path.
+   */
+  readonly onActivationCommitted?: () => void;
 }
 
 /**
@@ -771,8 +789,14 @@ export function makePiSessionSynaraMcpCoordinator(
     // forever with its own pending map (stale executions/callbacks can never
     // enter or mutate the fresh generation), and a fresh generation created
     // while a disable was queued starts fenced.
-    onActivationCommitted: (_staged, options) =>
-      input.executions.resetForFreshActivation(options.fenceFreshAdmission),
+    onActivationCommitted: (_staged, options) => {
+      input.executions.resetForFreshActivation(options.fenceFreshAdmission);
+      // Measurement-only observer notification (Decision 35): the activation
+      // is proven and the reload completed at this point. The observer is
+      // contractually non-throwing; a bug here is absorbed by the
+      // coordinator's commit path and can never roll back the activation.
+      input.onActivationCommitted?.();
+    },
   };
   return makePiSynaraMcpLifecycleCoordinator({
     adapter,
@@ -1644,6 +1668,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
+    // Decision 35 measurement-only observer. Absent in normal runs: only the
+    // isolated harness child server sets the observer environment, and the
+    // observer is a non-throwing no-op when it cannot be built.
+    const catalogObserver = makePiCatalogObserver(options?.catalogObserverEnv ?? process.env);
+    const safeObserve = (run: () => void): void => {
+      try {
+        run();
+      } catch {
+        // The observer must never alter any lifecycle outcome; a throwing
+        // observer (contract violation) is dropped entirely.
+      }
+    };
     // Optional so adapter tests can run without the gateway layer; when
     // present, activation mints per-attempt Synara MCP credentials through it.
     const agentGatewayCredentials = Option.getOrUndefined(
@@ -2515,7 +2551,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ...(agentGatewayCredentials === undefined
             ? {}
             : { credentials: agentGatewayCredentials }),
-          ...(options?.agentGatewayFetch === undefined ? {} : { fetch: options.agentGatewayFetch }),
+          ...(options?.agentGatewayFetch === undefined
+            ? {}
+            : { fetch: options.agentGatewayFetch }),
+          // Decision 35: the measurement-only observer learns the proven
+          // activation commit (reload completed) through this seam. The
+          // session generation it records is the one the capture must still
+          // match; a changed generation declines the capture.
+          ...(catalogObserver === null
+            ? {}
+            : {
+                onActivationCommitted: () =>
+                  safeObserve(() =>
+                    catalogObserver.onActivationCommitted({
+                      threadId: String(input.threadId),
+                      lifecycleGeneration: input.lifecycleGeneration,
+                    }),
+                  ),
+              }),
         });
         const now = new Date().toISOString();
         const model = runtime.session.model
@@ -2637,6 +2690,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             payload: { usage: initialUsage },
           } satisfies ProviderRuntimeEvent);
         }
+        // Decision 35 default-mode capture: the session reached its normal
+        // ready state; the observer records the complete live manifest before
+        // the first measured turn. The observer is non-throwing and absent in
+        // normal runs.
+        safeObserve(() =>
+          catalogObserver?.onSessionReady({
+            threadId: String(input.threadId),
+            session: runtime.session,
+            lifecycleGeneration: input.lifecycleGeneration,
+          }),
+        );
         return session;
       });
 
@@ -2797,6 +2861,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           scopedGatewayConnectionAvailable: context.gatewayControlAvailable,
         });
         const providerText = [harnessPolicy, payload.text].filter(Boolean).join("\n\n");
+        // Decision 35 activated-mode capture: the first prompt in the
+        // resulting catalog state (the enable command never reaches sendTurn;
+        // it is owned by the command boundary). The observer records the
+        // complete live manifest only after the proven activation commit,
+        // while the recorded generation is still current, and never throws.
+        safeObserve(() =>
+          catalogObserver?.onTurnPrompt({
+            threadId: String(input.threadId),
+            session: context.runtime.session,
+            lifecycleGeneration: context.lifecycleGeneration,
+          }),
+        );
         void context.runtime.session
           .prompt(providerText, payload.images.length > 0 ? { images: payload.images } : undefined)
           .catch((cause) => {

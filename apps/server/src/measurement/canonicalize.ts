@@ -19,6 +19,30 @@ export const MANIFEST_CANONICALIZATION_METHOD =
 
 const encoder = new TextEncoder();
 
+/**
+ * Map real tool/schema API entries into canonical manifest entries without
+ * filtering, truncating, or redacting anything (Decision 34 §3). Shared by
+ * the measurement enumeration and the Decision 35 observer so every mode
+ * canonicalizes exactly the same live surface.
+ */
+export function toCanonicalEntries(
+  tools: readonly {
+    readonly name: string;
+    readonly description: string;
+    readonly parameters: unknown;
+    readonly promptGuidelines?: readonly string[];
+  }[],
+): CanonicalToolEntry[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    ...(tool.promptGuidelines !== undefined && tool.promptGuidelines.length > 0
+      ? { promptGuidelines: tool.promptGuidelines }
+      : {}),
+  }));
+}
+
 /** Deterministic per-entry object with a fixed key order. */
 function canonicalEntryObject(entry: CanonicalToolEntry): Record<string, unknown> {
   const object: Record<string, unknown> = {

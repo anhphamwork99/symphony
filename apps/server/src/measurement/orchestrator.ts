@@ -186,12 +186,11 @@ function buildConclusion(
         "repetition startup field, so activated-mode turn-1 totals include the bootstrap session cost.",
     );
     limitations.push(
-      "The complete Synara MCP gateway catalog is served with in-memory per-session bearer " +
-        "credentials; no WS/RPC/event surface of the isolated server enumerates the effective Pi " +
-        "tool catalog, so the synara_* schema bytes cannot be measured at the harness boundary. " +
-        "Activated-mode manifest byte accounting is therefore marked catalog-incomplete and the " +
-        "catalog-size comparison is insufficient evidence (Decision 34 §3 fail-closed). Coding-tool " +
-        "manifests are complete and real for all modes.",
+      "Activated-mode complete manifests are captured by the Decision 35 measurement-only observer " +
+        "from the live session's authoritative getAllTools() surface and retained only inside the " +
+        "harness-created isolated home; catalog completeness for every mode therefore depends on the " +
+        "Pi SDK AgentSession.getAllTools() surface being the exact model-visible catalog " +
+        "(Decision 35 residual uncertainty).",
     );
   }
   measuredFacts.push(

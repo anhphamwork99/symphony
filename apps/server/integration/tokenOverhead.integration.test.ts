@@ -14,7 +14,7 @@ import { extractTurnCompletedUsage } from "../src/measurement/reconciliation.ts"
 import { canonicalizeManifest, summarizeManifest, sha256 } from "../src/measurement/canonicalize.ts";
 import { evaluateEvidence, buildRunSetSummary, computePairedDeltas, makeTurnMeasurement } from "../src/measurement/records.ts";
 import { parseCanonicalTurnCompletedEvents, parseCanonicalToolCallEvents } from "../src/measurement/synaraDriver.ts";
-import { startIsolatedServer } from "../src/measurement/serverProcess.ts";
+import { startIsolatedServer, removeIsolatedHomeDir } from "../src/measurement/serverProcess.ts";
 import { connectSynaraClient } from "../src/measurement/synaraClient.ts";
 import { STIMULUS_TEXT, STIMULUS_HASH } from "../src/measurement/stimulus.ts";
 import type { RawSessionStats, RepetitionRecord } from "../src/measurement/types.ts";
@@ -316,6 +316,62 @@ describe("token overhead isolated server lifecycle (non-gated)", () => {
   }, 120_000);
 });
 
+describe("token overhead Decision 35 catalog observer server wiring (non-gated)", () => {
+  it("normal isolated servers configure no observer and create no catalog artifact", async () => {
+    const server = await startIsolatedServer({});
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    try {
+      expect(server.catalogArtifactPath).toBeNull();
+      const client = await connectSynaraClient(server.port);
+      try {
+        const snapshot = await client.getSnapshot();
+        expect(snapshot.projects).toBeDefined();
+      } finally {
+        await client.close();
+      }
+      // No observer artifact anywhere in the isolated home.
+      const walk = (dir: string): string[] => {
+        const found: string[] = [];
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) found.push(...walk(full));
+          else if (entry.name.includes("catalog-artifact")) found.push(full);
+        }
+        return found;
+      };
+      expect(walk(server.homeDir)).toEqual([]);
+    } finally {
+      await server.stop();
+      removeIsolatedHomeDir(server.homeDir);
+    }
+  }, 120_000);
+
+  it("observer-configured servers confine the artifact path to the isolated home and clean up", async () => {
+    const server = await startIsolatedServer({ catalogObserver: { mode: "synara-default" } });
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    try {
+      expect(server.catalogArtifactPath).not.toBeNull();
+      expect(path.resolve(server.catalogArtifactPath!)).toContain(path.resolve(server.homeDir));
+      const client = await connectSynaraClient(server.port);
+      try {
+        const snapshot = await client.getSnapshot();
+        expect(snapshot.projects).toBeDefined();
+      } finally {
+        await client.close();
+      }
+      // No session started: no artifact yet (dormant until a session reaches
+      // its ready state).
+      expect(fs.existsSync(server.catalogArtifactPath!)).toBe(false);
+    } finally {
+      await server.stop();
+      removeIsolatedHomeDir(server.homeDir);
+      expect(fs.existsSync(server.homeDir)).toBe(false);
+    }
+  }, 120_000);
+});
+
 describe("token overhead real paired runs (credential-gated)", () => {
   const agentDir = process.env.PI_CODING_AGENT_DIR;
   const runAll = (): boolean =>
@@ -360,7 +416,27 @@ describe("token overhead real paired runs (credential-gated)", () => {
         for (const mode of ["standalone", "synara-default", "synara-activated"] as const) {
           const runSet = report.runSets[mode]!;
           expect(runSet.repetitions).toHaveLength(1);
+          // Decision 35: every mode must produce a complete effective manifest
+          // (standalone and default from the real tool API, activated through
+          // the measurement-only observer); a fail-closed catalog no longer
+          // carries the not-externally-capturable limitation.
+          for (const repetition of runSet.repetitions) {
+            expect(repetition.manifest.catalogComplete).toBe(true);
+            expect(repetition.manifest.catalogIncompleteReason).toBeUndefined();
+            expect(repetition.manifest.toolCount).toBeGreaterThan(0);
+            expect(repetition.manifest.hash).toMatch(/^[0-9a-f]{64}$/);
+          }
         }
+        // Activated mode must expose the live Synara MCP tools in the complete
+        // effective manifest captured after the real activation + reload.
+        const activated = report.runSets["synara-activated"]!;
+        const activatedNames = activated.repetitions.flatMap((r) => r.manifest.toolNames);
+        expect(activatedNames.some((name) => name.startsWith("synara_"))).toBe(true);
+        // Default mode must stay dormant: no Synara tools in the manifest.
+        const defaultNames = report.runSets["synara-default"]!.repetitions.flatMap((r) =>
+          r.manifest.toolNames,
+        );
+        expect(defaultNames.some((name) => name.startsWith("synara_"))).toBe(false);
         fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
       } finally {
         fs.rmSync(workspaceCwd, { recursive: true, force: true });

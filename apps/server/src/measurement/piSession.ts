@@ -13,10 +13,9 @@ import type {
   AgentSessionEvent,
   AgentSessionRuntime,
   CreateAgentSessionServicesOptions,
-  ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 
-import { canonicalizeManifest, summarizeManifest } from "./canonicalize.ts";
+import { canonicalizeManifest, summarizeManifest, toCanonicalEntries } from "./canonicalize.ts";
 import { makeTurnMeasurement } from "./records.ts";
 import { STIMULUS_TEXT } from "./stimulus.ts";
 import type {
@@ -252,15 +251,7 @@ export function resolvedModelDescription(handle: PiSessionHandle): string {
 
 /** Enumerate the complete effective tool manifest through the real tool API. */
 export function enumerateToolManifest(session: AgentSession): CanonicalToolEntry[] {
-  const tools: ToolInfo[] = session.getAllTools();
-  return tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-    ...(tool.promptGuidelines !== undefined && tool.promptGuidelines.length > 0
-      ? { promptGuidelines: tool.promptGuidelines }
-      : {}),
-  }));
+  return toCanonicalEntries(session.getAllTools());
 }
 
 export function summarizeSessionManifest(

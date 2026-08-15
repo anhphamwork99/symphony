@@ -28,10 +28,13 @@ import {
 } from "../orchestration/synaraMcpCommand.ts";
 
 import {
-  createMeasurementPiSession,
-  enumerateToolManifest,
   manifestSummaryFromEntries,
 } from "./piSession.ts";
+import {
+  parseCatalogArtifact,
+  validateCatalogArtifact,
+  type CatalogArtifactOk,
+} from "./catalogArtifact.ts";
 import { writeLocalManifest } from "./standaloneDriver.ts";
 import { sanitizePathForReport, sanitizeFailureForReport } from "./sanitize.ts";
 import { extractTurnCompletedUsage, reconcileSessionStats } from "./reconciliation.ts";
@@ -51,6 +54,8 @@ import type {
 export const SYNARA_MCP_ACTIVATION_TIMEOUT_MS = 150_000;
 export const TURN_COMPLETION_TIMEOUT_MS = 180_000;
 export const CANONICAL_LOG_POLL_MS = 250;
+export const CATALOG_ARTIFACT_WAIT_TIMEOUT_MS = 45_000;
+export const CATALOG_ARTIFACT_POLL_MS = 200;
 
 export interface SynaraDriverOptions {
   readonly mode: "synara-default" | "synara-activated";
@@ -122,6 +127,10 @@ export async function runSynaraMode(
   try {
     server = await startIsolatedServer({
       ...(options.serverPort === undefined ? {} : { port: options.serverPort }),
+      // Decision 35: the isolated child server enables the measurement-only
+      // catalog observer for the mode being measured; its artifact is
+      // confined to this server's fresh home and removed with it.
+      catalogObserver: { mode: options.mode },
     });
     client = await connectSynaraClient(server.port);
 
@@ -262,10 +271,14 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
     }
   }
 
-  // 3. The two (or more) measured turns.
+  // 3. The two (or more) measured turns. The catalog artifact appears when
+  // the first measured turn starts the session (default mode: at session
+  // ready) or when its prompt is dispatched in the resulting catalog state
+  // (activated mode); the harness waits for, validates, and consumes it right
+  // after the first measured turn completes.
   const turns: TurnMeasurement[] = [];
   let previousRaw: RawSessionStats = bootstrapRaw ?? zeroStats();
-  const manifest = await captureSynaraManifest(context);
+  let manifest: CanonicalManifestSummary | undefined;
   for (let turnIndex = 1; turnIndex <= options.turnsPerRepetition; turnIndex += 1) {
     const expectedCompleted = completedTurnCount + 1;
     const turnRun = await guard(`measured turn ${turnIndex}`, () =>
@@ -296,6 +309,17 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
     });
     turns.push(measurement);
     previousRaw = turnRun.after;
+    if (turnIndex === 1) {
+      // Wait for + validate + consume the Decision 35 observer artifact. A
+      // missing, stale, malformed, or unwritable artifact is a measurement
+      // failure (never a partial manifest promoted to valid).
+      manifest = await captureSynaraManifest(context, threadId);
+    }
+  }
+  if (manifest === undefined) {
+    // The repetition has no measured turns (defensive; the CLI enforces at
+    // least one): the catalog evidence cannot be produced.
+    manifest = incompleteCatalogManifest("catalog artifact not produced");
   }
   // 4. Exposure evidence finalization.
   const snapshot = await client
@@ -684,89 +708,96 @@ function findSynaraMcpTerminalActivity(
 }
 
 /**
- * Capture the complete effective coding-tool manifest for a Synara mode
- * through the real Pi tool/schema API with the same configuration the
- * isolated server resolves (same agent dir, cwd, model, thinking level; no
- * Synara extension — the dormant extension registers no tools before
- * activation, and the spec guarantees default sessions contain exactly the
- * configured coding-agent tool set). The full manifest is retained locally
- * when a local manifest dir is configured; committed output contains only
- * names/count/bytes/hash/method.
+ * Consume the Decision 35 catalog observer artifact: wait for it (it is
+ * written by the isolated child server at the valid capture point of the
+ * current repetition), then validate identity, freshness, and canonical
+ * consistency and build the committed manifest summary. The artifact's
+ * entries ARE the live `getAllTools()` result of the measured session; no
+ * partial, inferred, or substituted catalog is ever promoted (Decision 35).
  */
 async function captureSynaraManifest(
   context: RepetitionContext,
+  threadId: ThreadId,
 ): Promise<CanonicalManifestSummary> {
-  const { options, repetitionIndex } = context;
-  let localCaptureProduced = false;
-  let catalogComplete = true;
-  let catalogIncompleteReason: string | undefined;
-  let summary: CanonicalManifestSummary | undefined;
-
-  try {
-    const session = await createMeasurementPiSession({
-      cwd: options.workspaceCwd,
-      agentDir: options.agentDir,
-      ...(options.modelId === undefined ? {} : { modelId: options.modelId }),
-      thinkingLevel: options.thinkingLevel as never,
-      extensionFactories: [],
-    });
-    const entries = enumerateToolManifest(session.session);
-    session.session.dispose();
-    if (options.mode === "synara-activated") {
-      // The Synara MCP gateway catalog is served by the isolated server's
-      // gateway with in-memory per-session bearer credentials that no
-      // external process can obtain; the coding-tool portion is complete and
-      // real, and the synara_* portion is recorded as not externally
-      // capturable (Decision 34 fail-closed: no partial catalog is presented
-      // as complete). This makes the activated-mode catalog-size claim
-      // insufficient evidence while every accounting component stays real.
-      catalogComplete = false;
-      catalogIncompleteReason =
-        "synara-mcp-catalog-not-externally-capturable: the isolated server's gateway " +
-        "credentials are in-memory per-session tokens; no WS/RPC/event surface " +
-        "enumerates the effective Pi tool catalog, so the synara_* schema bytes " +
-        "cannot be measured at the harness boundary (Decision 34 §3 fail-closed).";
-    }
-    summary = manifestSummaryFromEntries(entries, {
-      localCaptureProduced: false,
-      catalogComplete,
-      ...(catalogIncompleteReason === undefined
-        ? {}
-        : { catalogIncompleteReason }),
-    });
-    localCaptureProduced = writeLocalManifest(
-      options.localManifestDir,
-      options.mode,
-      repetitionIndex,
-      entries,
-    );
-    if (localCaptureProduced) {
-      summary = manifestSummaryFromEntries(entries, {
-        localCaptureProduced: true,
-        catalogComplete,
-        ...(catalogIncompleteReason === undefined
-          ? {}
-          : { catalogIncompleteReason }),
-      });
-    }
-    return summary;
-  } catch (cause) {
-    context.onDiagnostic(
-      `manifest capture failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-    return {
-      toolNames: [],
-      toolCount: 0,
-      canonicalBytes: 0,
-      hash: "",
-      hashAlgorithm: "sha256",
-      method: "in-process-pi-tool-api",
-      localCaptureProduced,
-      catalogComplete: false,
-      catalogIncompleteReason:
-        "manifest capture failed: " +
-        (cause instanceof Error ? cause.message : String(cause)).slice(0, 300),
-    };
+  const { server, options, repetitionIndex } = context;
+  const artifactPath = server.catalogArtifactPath;
+  if (artifactPath === null) {
+    return incompleteCatalogManifest("catalog observer not configured in the isolated server");
   }
+  const expectedPhase = options.mode === "synara-activated" ? "activated-terminal" : "ready";
+  const deadline = Date.now() + CATALOG_ARTIFACT_WAIT_TIMEOUT_MS;
+  let lastReason = "artifact not produced";
+  while (Date.now() < deadline) {
+    const artifact = readCatalogArtifact(artifactPath);
+    if (artifact !== null) {
+      if (artifact.status === "malformed") {
+        return incompleteCatalogManifest("catalog artifact malformed");
+      }
+      if (artifact.status === "failed") {
+        // The observer recorded a bounded failure; the code is sanitized and
+        // never contains paths, schemas, or credentials.
+        return incompleteCatalogManifest(`catalog observer failure: ${artifact.code}`);
+      }
+      const validation = validateCatalogArtifact(artifact, {
+        mode: options.mode,
+        threadId: String(threadId),
+        phase: expectedPhase,
+      });
+      if (validation.ok) {
+        const localCaptureProduced = writeLocalManifest(
+          options.localManifestDir,
+          options.mode,
+          repetitionIndex,
+          validation.entries,
+        );
+        return manifestSummaryFromEntries(validation.entries, {
+          localCaptureProduced,
+          catalogComplete: true,
+        });
+      }
+      // Stale or misrouted (wrong thread/mode/phase) or internally
+      // inconsistent: never accepted; a fresh write is not coming after the
+      // measured turn completed, so fail fast with the bounded reason.
+      return incompleteCatalogManifest(`catalog artifact rejected: ${validation.reason}`);
+    }
+    lastReason = "artifact not produced";
+    await sleep(CATALOG_ARTIFACT_POLL_MS);
+  }
+  context.onDiagnostic(
+    `catalog artifact wait timed out for repetition ${repetitionIndex} (${lastReason})`,
+  );
+  return incompleteCatalogManifest(`catalog artifact wait timed out: ${lastReason}`);
+}
+
+/** Read and parse the artifact; null while it does not exist yet (keep polling). */
+function readCatalogArtifact(
+  artifactPath: string,
+): CatalogArtifactOk | { status: "malformed" } | { status: "failed"; code: string; message: string } | null {
+  try {
+    const content = fs.readFileSync(artifactPath, "utf8");
+    const parsed = parseCatalogArtifact(content);
+    if (parsed.status === "malformed") return { status: "malformed" };
+    if (parsed.status === "failed") {
+      return { status: "failed", code: parsed.code, message: parsed.message };
+    }
+    return parsed;
+  } catch {
+    // Missing or unreadable: keep polling until the deadline.
+    return null;
+  }
+}
+
+function incompleteCatalogManifest(reason: string): CanonicalManifestSummary {
+  return {
+    toolNames: [],
+    toolCount: 0,
+    canonicalBytes: 0,
+    hash: "",
+    hashAlgorithm: "sha256",
+    method: "unavailable",
+    localCaptureProduced: false,
+    catalogComplete: false,
+    catalogIncompleteReason: reason,
+  };
 }
 
