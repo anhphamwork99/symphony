@@ -7,7 +7,7 @@ no assertion change.
 
 **Blocked by:** nothing — independent of impl-10 (per Decision 33 binding).
 
-**Status:** implemented-awaiting-repository-verification
+**Status:** done
 
 - [x] Reproduce the focused red baseline (27 failed / 356 passed / 3 skipped).
 - [x] Provide the `McpSessionAuthority` service through the shared orchestration
@@ -16,7 +16,7 @@ no assertion change.
       `AgentGatewayCredentials` session lease in the five red fixtures.
 - [x] Verify the five focused files green with exact counts and no new
       skips/timeouts.
-- [ ] Repository completion gate: `bun fmt`, `bun lint`, `bun typecheck`, and
+- [x] Repository completion gate: `bun fmt`, `bun lint`, `bun typecheck`, and
       the root suite must pass together with authorized owner verification.
 
 ## Why this ticket exists and what it is not
@@ -167,8 +167,13 @@ The 3 skips are the same tests skipped in the red baseline (unchanged).
 
 ## Out of scope / residual
 
-- Root `bun run test`, `bun fmt`, `bun lint`, `bun typecheck`, and UI
-  screenshots remain for the owner-authorized repository completion gate
-  (Decision 33 reopening conditions).
+- Final clean-worktree verification at `96f590a8` passed root test 8/8 tasks,
+  `bun fmt`, lint with 0 errors, and typecheck 7/7 tasks.
 - The real-Codex integration tests (`itLiveUnlessCi`) run only outside CI and
   were green in the focused run; they exercise the same fixed harness layer.
+
+## Final acceptance
+
+[Decision 37](../decisions/37-maint-34-final-acceptance.md) accepts maint-34 at
+`23df500b`. The fixture repair remains outside impl-10 production ownership,
+as recorded by Decision 36.
