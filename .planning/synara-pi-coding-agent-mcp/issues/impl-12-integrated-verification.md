@@ -4,7 +4,7 @@
 
 **Blocked by:** impl-01 through impl-11.
 
-**Status:** implemented-awaiting-final-acceptance
+**Status:** done
 
 - [x] Verify default dormant startup has no Synara catalog or MCP activity.
 - [x] Verify enable pending/terminal behavior, all-session success, and subject-bound MCP use.
