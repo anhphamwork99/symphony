@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { createRepetitionWorkspace, removeRepetitionWorkspace } from "./workspace.ts";
 import {
   createMeasurementPiSession,
   enumerateToolManifest,
@@ -27,7 +28,6 @@ export interface StandaloneDriverOptions {
   readonly agentDir: string;
   readonly modelId: string;
   readonly thinkingLevel: string;
-  readonly workspaceCwd: string;
   readonly repetitions: number;
   readonly turnsPerRepetition: number;
   readonly localManifestDir: string | null;
@@ -80,11 +80,15 @@ export async function runStandaloneMode(
   const diagnostics: string[] = [];
   const repetitions: RepetitionRecord[] = [];
   for (let repetitionIndex = 0; repetitionIndex < options.repetitions; repetitionIndex += 1) {
+    // Each repetition gets its own distinct temp workspace with identical
+    // deterministic fixture bytes/git state (workspace.ts), preserving
+    // Decision 34 §4 project/worktree equivalence per repetition.
+    const workspace = createRepetitionWorkspace(repetitionIndex);
     let handle: PiSessionHandle | undefined;
     const lifecycleFailures: string[] = [];
     try {
       handle = await createMeasurementPiSession({
-        cwd: options.workspaceCwd,
+        cwd: workspace.root,
         agentDir: options.agentDir,
         modelId: options.modelId,
         thinkingLevel: options.thinkingLevel as never,
@@ -142,7 +146,7 @@ export async function runStandaloneMode(
           thinkingLevel: options.thinkingLevel,
           promptHash: options.promptHash,
           promptBytes: options.promptBytes,
-          workspaceCwd: sanitizePathForReport(options.workspaceCwd),
+          workspaceCwd: sanitizePathForReport(workspace.root),
           agentDir: sanitizePathForReport(options.agentDir),
           harnessVersion: options.harnessVersion,
         },
@@ -182,7 +186,7 @@ export async function runStandaloneMode(
           thinkingLevel: options.thinkingLevel,
           promptHash: options.promptHash,
           promptBytes: options.promptBytes,
-          workspaceCwd: sanitizePathForReport(options.workspaceCwd),
+          workspaceCwd: sanitizePathForReport(workspace.root),
           agentDir: sanitizePathForReport(options.agentDir),
           harnessVersion: options.harnessVersion,
         },
@@ -194,6 +198,7 @@ export async function runStandaloneMode(
         // Disposal is best-effort; the in-process session has no external
         // resources beyond its transcript in memory.
       }
+      removeRepetitionWorkspace(workspace);
     }
   }
   return { repetitions, diagnostics };

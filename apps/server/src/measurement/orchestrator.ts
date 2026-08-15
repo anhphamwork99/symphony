@@ -33,12 +33,17 @@ export interface OrchestratorOptions {
   readonly agentDir: string;
   readonly modelId: string;
   readonly thinkingLevel: string;
-  readonly workspaceCwd: string;
   readonly repetitions: number;
   readonly turnsPerRepetition: number;
   readonly localManifestDir: string | null;
   readonly modes: readonly MeasurementMode[];
   readonly serverPort?: number;
+  /** Shared fixture digest proving byte-equivalent project/worktree input. */
+  readonly fixtureDigest: string;
+  /** Deterministic fixture repo HEAD (null when git is unavailable). */
+  readonly fixtureGitCommit: string | null;
+  /** Repo root used for the committed git metadata; defaults to process.cwd(). */
+  readonly repoRoot?: string;
   readonly onDiagnostic?: (message: string) => void;
 }
 
@@ -55,10 +60,10 @@ interface GitMetadata {
   readonly diffHash?: string;
 }
 
-function runGit(args: ReadonlyArray<string>): string | undefined {
+function runGit(repoRoot: string, args: ReadonlyArray<string>): string | undefined {
   try {
     return execFileSync("git", args, {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     })
@@ -69,16 +74,16 @@ function runGit(args: ReadonlyArray<string>): string | undefined {
   }
 }
 
-export function collectGitMetadata(): GitMetadata {
-  const commit = runGit(["rev-parse", "HEAD"]);
-  const branch = runGit(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const diffStat = runGit(["diff", "HEAD", "--stat"]);
+export function collectGitMetadata(repoRoot = process.cwd()): GitMetadata {
+  const commit = runGit(repoRoot, ["rev-parse", "HEAD"]);
+  const branch = runGit(repoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const diffStat = runGit(repoRoot, ["diff", "HEAD", "--stat"]);
   const dirty = diffStat !== undefined && diffStat.length > 0;
   let diffHash: string | undefined;
   if (dirty) {
     // Reproducibility identifier for the measured source state without
     // committing raw sensitive content (Decision 34 §5).
-    const diff = runGit(["diff", "HEAD"]);
+    const diff = runGit(repoRoot, ["diff", "HEAD"]);
     if (diff !== undefined) {
       diffHash = createHash("sha256").update(diff).digest("hex");
     }
@@ -219,7 +224,6 @@ export async function runMeasurement(
       agentDir: options.agentDir,
       modelId: options.modelId,
       thinkingLevel: options.thinkingLevel,
-      workspaceCwd: options.workspaceCwd,
       repetitions: options.repetitions,
       turnsPerRepetition: options.turnsPerRepetition,
       localManifestDir: options.localManifestDir,
@@ -237,7 +241,6 @@ export async function runMeasurement(
       agentDir: options.agentDir,
       modelId: options.modelId,
       thinkingLevel: options.thinkingLevel,
-      workspaceCwd: options.workspaceCwd,
       repetitions: options.repetitions,
       turnsPerRepetition: options.turnsPerRepetition,
       localManifestDir: options.localManifestDir,
@@ -285,7 +288,7 @@ export async function runMeasurement(
   }
 
   const conclusion = buildConclusion(options, runSets, evidenceByMode);
-  const git = collectGitMetadata();
+  const git = collectGitMetadata(options.repoRoot);
   const report: MeasurementReport = {
     reportVersion: 1,
     harnessVersion: HARNESS_VERSION,
@@ -310,6 +313,8 @@ export async function runMeasurement(
       agentDir: sanitizePathForReport(options.agentDir),
       localManifestDir:
         options.localManifestDir === null ? null : sanitizePathForReport(options.localManifestDir),
+      fixtureDigest: options.fixtureDigest,
+      fixtureGitCommit: options.fixtureGitCommit,
     },
     runSets: runSetReports,
     conclusions: conclusion,

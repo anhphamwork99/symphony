@@ -16,6 +16,11 @@ import { evaluateEvidence, buildRunSetSummary, computePairedDeltas, makeTurnMeas
 import { parseCanonicalTurnCompletedEvents, parseCanonicalToolCallEvents } from "../src/measurement/synaraDriver.ts";
 import { startIsolatedServer, removeIsolatedHomeDir } from "../src/measurement/serverProcess.ts";
 import { connectSynaraClient } from "../src/measurement/synaraClient.ts";
+import {
+  computeFixtureDigest,
+  createRepetitionWorkspace,
+  removeRepetitionWorkspace,
+} from "../src/measurement/workspace.ts";
 import { STIMULUS_TEXT, STIMULUS_HASH } from "../src/measurement/stimulus.ts";
 import type { RawSessionStats, RepetitionRecord } from "../src/measurement/types.ts";
 
@@ -256,6 +261,34 @@ describe("token overhead isolated server lifecycle (non-gated)", () => {
     }
   }, 120_000);
 
+  it("runs the child server from the isolated home dir so no repo-local state is possible", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const server = await startIsolatedServer({});
+    try {
+      // Regression: the child must never run with the repo as its cwd — Pi
+      // extensions write project-local `.pi` state next to process.cwd(), so
+      // the cwd must be inside the temp home (removed at teardown).
+      expect(path.resolve(server.cwd)).toBe(path.resolve(server.homeDir));
+      expect(server.cwd.startsWith(path.join(os.tmpdir(), "synara-token-overhead-"))).toBe(true);
+      const client = await connectSynaraClient(server.port);
+      try {
+        const snapshot = await client.getSnapshot();
+        expect(snapshot.projects).toBeDefined();
+      } finally {
+        await client.close();
+      }
+      // No `.pi` runtime state was created in the child's cwd by the
+      // lifecycle exercised here.
+      expect(fs.existsSync(path.join(server.cwd, ".pi"))).toBe(false);
+    } finally {
+      await server.stop();
+      removeIsolatedHomeDir(server.homeDir);
+      expect(fs.existsSync(server.homeDir)).toBe(false);
+    }
+  }, 120_000);
+
   it("creates a fresh project and thread through the real RPC API on the isolated server", async () => {
     const server = await startIsolatedServer({});
     const fs = await import("node:fs");
@@ -312,6 +345,93 @@ describe("token overhead isolated server lifecycle (non-gated)", () => {
       const { removeIsolatedHomeDir } = await import("../src/measurement/serverProcess.ts");
       removeIsolatedHomeDir(server.homeDir);
       fs.rmSync(workspaceCwd, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
+describe("token overhead per-repetition workspaces (non-gated)", () => {
+  it("creates multiple projects with distinct repetition workspaces on one server without root collision", async () => {
+    // Regression: the first real matrix reused one workspace root for all
+    // repetitions, so project.create rejected repetitions 1/2 (workspace
+    // roots must be unique). Each repetition now gets its own distinct temp
+    // workspace with identical fixture bytes/git state.
+    const fs = await import("node:fs");
+    const { randomUUID } = await import("node:crypto");
+    const { CommandId, ProjectId, ThreadId } = await import("@synara/contracts");
+    const workspaces = [
+      createRepetitionWorkspace(0),
+      createRepetitionWorkspace(1),
+      createRepetitionWorkspace(2),
+    ];
+    const server = await startIsolatedServer({});
+    try {
+      // Distinct roots with identical deterministic fixture content/digest.
+      const roots = workspaces.map((workspace) => workspace.root);
+      expect(new Set(roots).size).toBe(3);
+      for (const workspace of workspaces) {
+        expect(workspace.fixtureDigest).toBe(computeFixtureDigest());
+        expect(fs.readFileSync(`${workspace.root}/README.md`, "utf8")).toBe("Token overhead measurement fixture v1\n");
+        expect(fs.readFileSync(`${workspace.root}/fixture.txt`, "utf8")).toBe("deterministic fixture content\n");
+      }
+      // Identical git state when git is available.
+      if (workspaces[0]!.fixtureGitCommit !== null) {
+        expect(workspaces[1]!.fixtureGitCommit).toBe(workspaces[0]!.fixtureGitCommit);
+        expect(workspaces[2]!.fixtureGitCommit).toBe(workspaces[0]!.fixtureGitCommit);
+      }
+      const client = await connectSynaraClient(server.port);
+      try {
+        const created: { readonly projectId: string; readonly threadId: string }[] = [];
+        for (let index = 0; index < 3; index += 1) {
+          const projectId = ProjectId.makeUnsafe(randomUUID());
+          const threadId = ThreadId.makeUnsafe(randomUUID());
+          const now = new Date().toISOString();
+          const projectReceipt = await client.dispatchCommand({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe(randomUUID()),
+            projectId,
+            kind: "project",
+            title: `toh-rep-${index}`,
+            workspaceRoot: roots[index]!,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: { provider: "pi", model: "pi/default" },
+            createdAt: now,
+          });
+          expect(projectReceipt.sequence).toBeGreaterThanOrEqual(0);
+          const threadReceipt = await client.dispatchCommand({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe(randomUUID()),
+            threadId,
+            projectId,
+            title: `toh-rep-thread-${index}`,
+            modelSelection: { provider: "pi", model: "pi/default" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            envMode: "local",
+            branch: null,
+            worktreePath: null,
+            workingDirectory: null,
+            createdAt: now,
+          });
+          expect(threadReceipt.sequence).toBeGreaterThanOrEqual(0);
+          created.push({ projectId: String(projectId), threadId: String(threadId) });
+        }
+        // Fresh identities for every repetition (fresh project/thread).
+        const snapshot = await client.getSnapshot();
+        expect(new Set(created.map((entry) => entry.projectId)).size).toBe(3);
+        expect(new Set(created.map((entry) => entry.threadId)).size).toBe(3);
+        for (const entry of created) {
+          expect(snapshot.projects.some((project) => project.id === entry.projectId)).toBe(true);
+          expect(snapshot.threads.some((thread) => thread.id === entry.threadId)).toBe(true);
+        }
+      } finally {
+        await client.close();
+      }
+    } finally {
+      await server.stop();
+      removeIsolatedHomeDir(server.homeDir);
+      for (const workspace of workspaces) {
+        removeRepetitionWorkspace(workspace);
+      }
     }
   }, 120_000);
 });
@@ -385,30 +505,37 @@ describe("token overhead real paired runs (credential-gated)", () => {
     async () => {
       const { runMeasurement, HARNESS_VERSION } = await import("../src/measurement/orchestrator.ts");
       const { resolveConfiguredModelId } = await import("../src/measurement/piSession.ts");
+      const { computeFixtureDigest, probeFixtureGitCommit } = await import("../src/measurement/workspace.ts");
       const fs = await import("node:fs");
       const os = await import("node:os");
       const path = await import("node:path");
 
       const resolvedModelId = await resolveConfiguredModelId(agentDir!);
       expect(resolvedModelId).toBeDefined();
-      const workspaceCwd = fs.mkdtempSync(path.join(os.tmpdir(), "synara-toh-ws-"));
-      fs.writeFileSync(path.join(workspaceCwd, "README.md"), "fixture\n");
+      expect(resolvedModelId).not.toMatch(/^amazon-bedrock\//);
+      const fixtureDigest = computeFixtureDigest();
+      const fixtureGitCommit = probeFixtureGitCommit();
       const outputPath = path.join(os.tmpdir(), `synara-token-overhead-${Date.now()}.json`);
       try {
         const result = await runMeasurement({
           agentDir: agentDir!,
           modelId: resolvedModelId!,
           thinkingLevel: "medium",
-          workspaceCwd,
           repetitions: 1,
           turnsPerRepetition: 2,
           localManifestDir: null,
           modes: ["standalone", "synara-default", "synara-activated"],
+          fixtureDigest,
+          fixtureGitCommit,
           onDiagnostic: (message) => process.stderr.write(`${message}\n`),
         });
         const report = result.report;
         expect(report.harnessVersion).toBe(HARNESS_VERSION);
         expect(report.prompt.hash).toBe(STIMULUS_HASH);
+        // Shared fixture equivalence evidence: identical digest/commit across
+        // the whole matrix (Decision 34 §4 project/worktree input).
+        expect(report.config.fixtureDigest).toBe(fixtureDigest);
+        expect(report.config.fixtureGitCommit).toBe(fixtureGitCommit);
         // Every mode either ran with recorded repetitions or was skipped by config.
         expect(report.runSets.standalone).not.toBeNull();
         expect(report.runSets["synara-default"]).not.toBeNull();
@@ -439,7 +566,7 @@ describe("token overhead real paired runs (credential-gated)", () => {
         expect(defaultNames.some((name) => name.startsWith("synara_"))).toBe(false);
         fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
       } finally {
-        fs.rmSync(workspaceCwd, { recursive: true, force: true });
+        fs.rmSync(outputPath, { recursive: true, force: true });
       }
     },
     20 * 60 * 1_000,

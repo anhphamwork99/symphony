@@ -31,6 +31,9 @@ export interface PiSdkModule {
     create: (input: { readonly authPath: string; readonly modelsPath: string }) => unknown;
   };
   readonly ModelRegistry: new (modelRuntime: unknown) => PiModelRegistry;
+  readonly SettingsManager: {
+    create: (cwd: string, agentDir?: string) => PiSettingsManager;
+  };
   readonly SessionManager: {
     create: (cwd: string) => unknown;
   };
@@ -60,6 +63,18 @@ interface PiModelRegistry {
     readonly api?: unknown;
     readonly baseUrl?: unknown;
   }>;
+}
+
+/** Settings accessors the harness uses to resolve Pi's configured default model. */
+export interface PiSettingsManager {
+  readonly getDefaultProvider: () => string | undefined;
+  readonly getDefaultModel: () => string | undefined;
+}
+
+/** Raw settings.json surface relevant to default model resolution. */
+export interface PiDefaultSettings {
+  readonly defaultProvider?: string | undefined;
+  readonly defaultModel?: string | undefined;
 }
 
 export interface PiSessionHandle {
@@ -138,24 +153,67 @@ export async function loadPiSdk(): Promise<PiSdkModule> {
 }
 
 /**
- * Resolve the Pi model id used for the whole measurement matrix. When the
- * CLI does not pass an explicit `--model`, the first model available in the
- * real model registry of the agent dir is used so every mode measures the
- * same model. Returns undefined when the registry is empty (the run must
- * fail with a clear diagnostic).
+ * Resolve Pi's configured default provider/model (settings.json) against the
+ * real model registry. This is the corrected impl-11 behavior: the configured
+ * default is authoritative and must exist in the registry — the harness never
+ * silently substitutes an arbitrary first registry model (which broke
+ * configuration equivalence and produced no-credential failures). Every
+ * failure mode throws a clear diagnostic naming the exact problem.
  */
-export async function resolveConfiguredModelId(agentDir: string): Promise<string | undefined> {
-  const piSdk = await loadPiSdk();
-  const modelRuntime = await piSdk.ModelRuntime.create({
+export function resolveConfiguredDefaultModel(
+  settings: PiDefaultSettings,
+  registry: Pick<PiModelRegistry, "find">,
+): { readonly provider: string; readonly id: string } {
+  const provider = settings.defaultProvider?.trim();
+  const id = settings.defaultModel?.trim();
+  if (!provider && !id) {
+    throw new Error(
+      `Pi settings.json has no configured default provider/model (defaultProvider/defaultModel unset). ` +
+        `Configure Pi's default model, or pass --model=<provider>/<model> explicitly.`,
+    );
+  }
+  if (!provider || !id) {
+    throw new Error(
+      `Pi settings.json has an incomplete default model configuration ` +
+        `(defaultProvider=${provider ?? "(unset)"}, defaultModel=${id ?? "(unset)"}); ` +
+        `set both in settings.json or pass --model=<provider>/<model> explicitly.`,
+    );
+  }
+  if (registry.find(provider, id) === undefined) {
+    throw new Error(
+      `Configured Pi default model '${provider}/${id}' from settings.json is not present in the ` +
+        `model registry of the agent directory. Fix defaultProvider/defaultModel in settings.json ` +
+        `or pass --model=<provider>/<model> explicitly.`,
+    );
+  }
+  return { provider, id };
+}
+
+/**
+ * Resolve the Pi model id used for the whole measurement matrix. The Pi SDK
+ * settings manager (same semantics Pi's own model selection uses) is read
+ * from the agent dir; the configured default provider/model must exist in
+ * the real model registry or the run fails with a clear diagnostic.
+ */
+export async function resolveConfiguredModelId(
+  agentDir: string,
+  piSdk?: PiSdkModule,
+): Promise<string> {
+  const sdk = piSdk ?? (await loadPiSdk());
+  const modelRuntime = await sdk.ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsPath: path.join(agentDir, "models.json"),
   });
-  const registry = new piSdk.ModelRegistry(modelRuntime) as PiModelRegistry;
-  const models = registry.getAll();
-  if (models.length === 0) return undefined;
-  const first = models[0];
-  if (!first) return undefined;
-  return `${first.provider}/${first.id}`;
+  const registry = new sdk.ModelRegistry(modelRuntime) as PiModelRegistry;
+  const settings = sdk.SettingsManager.create(process.cwd(), agentDir) as PiSettingsManager;
+  const configured = resolveConfiguredDefaultModel(
+    {
+      defaultProvider: settings.getDefaultProvider(),
+      defaultModel: settings.getDefaultModel(),
+    },
+    registry,
+  );
+  return `${configured.provider}/${configured.id}`;
 }
 
 function toRawSessionStats(stats: {

@@ -4,7 +4,6 @@
 // defaults to the Decision 34 matrix (3 modes × 3 repetitions × 2 turns),
 // exits nonzero on incomplete or unreconciled run sets, and never writes
 // secrets or raw sensitive paths into the committed report surface.
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +12,11 @@ import { PI_THINKING_LEVEL_OPTIONS } from "@synara/contracts";
 
 import { HARNESS_VERSION, printReportSummary, runMeasurement } from "./orchestrator.ts";
 import { resolveConfiguredModelId } from "./piSession.ts";
+import {
+  computeFixtureDigest,
+  isolateHarnessCwd,
+  probeFixtureGitCommit,
+} from "./workspace.ts";
 import { MEASUREMENT_MODES, type MeasurementMode } from "./types.ts";
 
 const DEFAULT_REPETITIONS = 3;
@@ -127,28 +131,21 @@ async function importPiSdkConfig(): Promise<{
   return cachedPiSdkConfig;
 }
 
-function ensureWorkspaceCwd(): string {
-  // The measurement workspace must exist and be constant across modes. Use a
-  // fresh temp fixture initialized as a git repo with fixed content so the
-  // project/worktree input is identical for every repetition and mode.
-  const workspaceCwd = fs.mkdtempSync(path.join(os.tmpdir(), "synara-token-overhead-ws-"));
-  fs.writeFileSync(path.join(workspaceCwd, "README.md"), "Token overhead measurement fixture v1\n");
-  fs.writeFileSync(path.join(workspaceCwd, "fixture.txt"), "deterministic fixture content\n");
-  try {
-    execGit(workspaceCwd, ["init", "--initial-branch=main"]);
-    execGit(workspaceCwd, ["config", "user.email", "measurement@example.com"]);
-    execGit(workspaceCwd, ["config", "user.name", "Token Overhead Harness"]);
-    execGit(workspaceCwd, ["add", "."]);
-    execGit(workspaceCwd, ["commit", "-m", "fixture"]);
-  } catch {
-    // A non-git fixture is acceptable when git is unavailable; the report
-    // records the workspace path and the harness never writes into it.
+/**
+ * Decide the model id for the whole matrix: an explicit `--model` always
+ * wins; otherwise resolve Pi's configured default provider/model through the
+ * SDK settings manager and verify it exists in the model registry (failing
+ * clearly instead of picking an arbitrary first registry model).
+ */
+export async function resolveRunModelId(input: {
+  readonly explicitModel: string | undefined;
+  readonly agentDir: string;
+}): Promise<string> {
+  const explicit = input.explicitModel?.trim();
+  if (explicit) {
+    return explicit;
   }
-  return workspaceCwd;
-}
-
-function execGit(cwd: string, args: ReadonlyArray<string>): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" });
+  return resolveConfiguredModelId(input.agentDir);
 }
 
 export async function main(): Promise<number> {
@@ -161,31 +158,47 @@ export async function main(): Promise<number> {
     );
     return 2;
   }
+
+  // The harness runs real Pi sessions in-process; Pi extensions (e.g.
+  // pi-alfie) write project-local `.pi` state next to process.cwd(), so the
+  // harness cwd is isolated in a temp directory and invocation-relative
+  // outputs are resolved against the invocation cwd first. The harness must
+  // never leave repo-local runtime state behind.
+  const invocationCwd = process.cwd();
+  const outputPath = path.resolve(options.output);
+  const localManifestDir =
+    options.localManifestDir === null ? null : path.resolve(options.localManifestDir);
+  const cwdIsolation = isolateHarnessCwd();
+
   const agentDir = options.agentDir ?? (await defaultAgentDir());
   if (!fs.existsSync(path.join(agentDir, "models.json"))) {
+    cwdIsolation.restore();
     process.stderr.write(
       `Pi agent directory '${agentDir}' has no models.json; configure Pi (or pass --agent-dir) before running the measurement.\n`,
     );
     return 2;
   }
-  const modelId = options.model ?? (await resolveConfiguredModelId(agentDir));
-  if (modelId === undefined) {
+  let modelId: string;
+  try {
+    modelId = await resolveRunModelId({ explicitModel: options.model, agentDir });
+  } catch (cause) {
+    cwdIsolation.restore();
     process.stderr.write(
-      `No Pi model found in agent directory '${agentDir}' and no --model was provided.\n`,
+      `Token-overhead measurement configuration error: ${cause instanceof Error ? cause.message : String(cause)}\n`,
     );
     return 2;
   }
-  const workspaceCwd = ensureWorkspaceCwd();
-  const localManifestDir = options.localManifestDir;
+  const fixtureDigest = computeFixtureDigest();
+  const fixtureGitCommit = probeFixtureGitCommit();
   if (localManifestDir !== null) {
-    fs.mkdirSync(path.resolve(localManifestDir), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(localManifestDir, { recursive: true, mode: 0o700 });
   }
 
   process.stderr.write(
     `Synara token-overhead measurement harness v${HARNESS_VERSION} (Pi SDK ${(await importPiSdkConfig()).VERSION})\n` +
       `  modes=${options.modes.join(",")} repetitions=${options.repetitions} turns=${options.turns}\n` +
       `  model=${modelId} thinking=${options.thinking} agentDir=${agentDir}\n` +
-      `  workspace=${workspaceCwd}\n`,
+      `  fixtureDigest=${fixtureDigest} fixtureGitCommit=${fixtureGitCommit ?? "(git unavailable)"}\n`,
   );
 
   try {
@@ -193,32 +206,34 @@ export async function main(): Promise<number> {
       agentDir,
       modelId,
       thinkingLevel: options.thinking,
-      workspaceCwd,
       repetitions: options.repetitions,
       turnsPerRepetition: options.turns,
       localManifestDir,
       modes: options.modes,
+      fixtureDigest,
+      fixtureGitCommit,
+      repoRoot: invocationCwd,
       ...(options.port === undefined ? {} : { serverPort: options.port }),
       onDiagnostic: (message) => process.stderr.write(`${message}\n`),
     });
 
     const reportJson = `${JSON.stringify(result.report, null, 2)}\n`;
-    fs.writeFileSync(options.output, reportJson, { mode: 0o600 });
+    fs.writeFileSync(outputPath, reportJson, { mode: 0o600 });
     printReportSummary(result.report);
-    fs.rmSync(workspaceCwd, { recursive: true, force: true });
 
     if (result.exitCode !== 0) {
       process.stderr.write(
         `Measurement completed with insufficient evidence for: ${result.insufficientModes.join(", ")}; ` +
-          `report written to ${options.output} (exit 1).\n`,
+          `report written to ${outputPath} (exit 1).\n`,
       );
     }
     return result.exitCode;
   } catch (cause) {
-    fs.rmSync(workspaceCwd, { recursive: true, force: true });
     process.stderr.write(
       `Token-overhead measurement failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
     );
     return 2;
+  } finally {
+    cwdIsolation.restore();
   }
 }

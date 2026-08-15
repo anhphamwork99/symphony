@@ -258,6 +258,10 @@ export interface MeasurementReport {
     readonly thinkingLevel: string;
     readonly agentDir: string;
     readonly localManifestDir: string | null;
+    /** Shared fixture digest proving byte-equivalent project/worktree input across repetitions (Decision 34 §4). */
+    readonly fixtureDigest: string;
+    /** Deterministic fixture repo HEAD shared by every repetition (null when git is unavailable). */
+    readonly fixtureGitCommit: string | null;
   };
   readonly runSets: Record<MeasurementMode, ReportRunSet | null>;
   readonly conclusions: Conclusion;

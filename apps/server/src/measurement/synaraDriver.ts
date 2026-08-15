@@ -30,6 +30,7 @@ import {
 import {
   manifestSummaryFromEntries,
 } from "./piSession.ts";
+import { createRepetitionWorkspace, removeRepetitionWorkspace } from "./workspace.ts";
 import {
   parseCatalogArtifact,
   validateCatalogArtifact,
@@ -63,7 +64,6 @@ export interface SynaraDriverOptions {
   /** Resolved Pi model id (provider/id) — required so every mode measures the same model. */
   readonly modelId: string;
   readonly thinkingLevel: string;
-  readonly workspaceCwd: string;
   readonly repetitions: number;
   readonly turnsPerRepetition: number;
   readonly localManifestDir: string | null;
@@ -164,6 +164,24 @@ interface RepetitionContext {
 }
 
 async function runSynaraRepetition(context: RepetitionContext): Promise<RepetitionRecord> {
+  // Each repetition gets its own distinct temp workspace with identical
+  // deterministic fixture bytes/git state (workspace.ts). Distinct roots are
+  // required: Synara project workspace roots must be unique, so reusing one
+  // root across repetitions rejects `project.create` after the first one.
+  const workspace = createRepetitionWorkspace(context.repetitionIndex);
+  try {
+    return await runSynaraRepetitionWithWorkspace(context, workspace.root);
+  } finally {
+    // Harness-owned cleanup: the workspace is temp-only and removed as soon
+    // as the repetition's measurement and exposure evidence are recorded.
+    removeRepetitionWorkspace(workspace);
+  }
+}
+
+async function runSynaraRepetitionWithWorkspace(
+  context: RepetitionContext,
+  workspaceRoot: string,
+): Promise<RepetitionRecord> {
   const { client, server, options, repetitionIndex } = context;
   const projectId = ProjectId.makeUnsafe(randomUUID());
   const threadId = ThreadId.makeUnsafe(randomUUID());
@@ -197,14 +215,14 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
       projectId,
       kind: "project",
       title: `token-overhead-${repetitionIndex}`,
-      workspaceRoot: options.workspaceCwd,
+      workspaceRoot,
       createWorkspaceRootIfMissing: false,
       defaultModelSelection: piModelSelection(options.modelId, options.thinkingLevel),
       createdAt: isoNow(),
     } satisfies ClientOrchestrationCommand),
   );
   if (projectCreated === undefined) {
-    return invalidRepetition(context, exposure, undefined, "project.create failed");
+    return invalidRepetition(context, exposure, undefined, "project.create failed", workspaceRoot);
   }
 
   const threadCreated = await guard("thread.create", () =>
@@ -225,7 +243,7 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
     } satisfies ClientOrchestrationCommand),
   );
   if (threadCreated === undefined) {
-    return invalidRepetition(context, exposure, undefined, "thread.create failed");
+    return invalidRepetition(context, exposure, undefined, "thread.create failed", workspaceRoot);
   }
 
   // 2. Activated mode: a real session must exist before the enable wait-set
@@ -244,6 +262,7 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
         exposure,
         undefined,
         "bootstrap turn failed: activation requires a started session",
+        workspaceRoot,
       );
     }
     bootstrapRaw = bootstrap.after;
@@ -267,6 +286,7 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
         exposure,
         undefined,
         "Synara MCP activation did not reach its real successful terminal state",
+        workspaceRoot,
       );
     }
   }
@@ -365,7 +385,7 @@ async function runSynaraRepetition(context: RepetitionContext): Promise<Repetiti
       thinkingLevel: options.thinkingLevel,
       promptHash: options.promptHash,
       promptBytes: options.promptBytes,
-      workspaceCwd: sanitizePathForReport(options.workspaceCwd),
+      workspaceCwd: sanitizePathForReport(workspaceRoot),
       agentDir: sanitizePathForReport(options.agentDir),
       harnessVersion: options.harnessVersion,
     },
@@ -377,6 +397,7 @@ function invalidRepetition(
   exposure: ExposureEvidence,
   manifest: CanonicalManifestSummary | undefined,
   reason: string,
+  workspaceRoot: string,
 ): RepetitionRecord {
   const { options, repetitionIndex } = context;
   return {
@@ -403,7 +424,7 @@ function invalidRepetition(
       thinkingLevel: context.options.thinkingLevel,
       promptHash: context.options.promptHash,
       promptBytes: context.options.promptBytes,
-      workspaceCwd: sanitizePathForReport(context.options.workspaceCwd),
+      workspaceCwd: sanitizePathForReport(workspaceRoot),
       agentDir: sanitizePathForReport(context.options.agentDir),
       harnessVersion: context.options.harnessVersion,
     },

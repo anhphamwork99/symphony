@@ -30,6 +30,13 @@ export interface IsolatedServer {
   readonly stderrPath: string;
   readonly providerEventLogPath: string;
   /**
+   * Working directory of the isolated child process. It is the isolated home
+   * dir (never the repo), so any cwd-relative runtime state Pi writes (e.g.
+   * extension `.pi` notifications) stays inside the temp home and is removed
+   * with it.
+   */
+  readonly cwd: string;
+  /**
    * Decision 35 catalog observer artifact path (inside the isolated home),
    * or null when the observer is not configured for this server. Normal
    * isolated runs (and the user's own Synara instance) never configure it.
@@ -181,7 +188,9 @@ export async function startIsolatedServer(input: {
     resolveBunExecutable(),
     [
       "run",
-      entry,
+      // Absolute entry so module resolution stays file-relative while the
+      // child cwd is the isolated home dir.
+      path.join(cwd, entry),
       "--",
       "--home-dir",
       homeDir,
@@ -195,7 +204,12 @@ export async function startIsolatedServer(input: {
       "--log-provider-events",
     ],
     {
-      cwd,
+      // The child must never run with the repo as its cwd: Pi sessions in the
+      // server load user extensions that write project-local `.pi` state next
+      // to process.cwd(), which would leak repo-local runtime state. With the
+      // cwd inside the isolated home, all cwd-relative writes are confined to
+      // the temp home and removed at teardown.
+      cwd: homeDir,
       env,
       stdio: ["ignore", stdout, stderr],
       detached: false,
@@ -255,6 +269,7 @@ export async function startIsolatedServer(input: {
     stdoutPath,
     stderrPath,
     providerEventLogPath,
+    cwd: homeDir,
     catalogArtifactPath,
     process: child,
     stop,
