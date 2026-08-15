@@ -108,8 +108,9 @@ export function makeActivity(overrides: {
 // (mirrors apps/server/src/orchestration/synaraMcpCommand.ts): deterministic id
 // `${requestId}:${phase}`, `turnId: null`, tone "error" only for failed, and the
 // sanitized bounded diagnostic in `payload.detail` (failed terminal only).
-// `detail` is intentionally `unknown` so web tests can exercise the
-// malformed-detail boundary.
+// `detail` is intentionally a JSON payload value rather than `string`, so web
+// tests can exercise the malformed-detail boundary with JSON-valid but
+// non-string detail (e.g. objects or null) while the payload stays Json-safe.
 export function makeSynaraMcpCommandActivity(overrides: {
   createdAt?: string;
   requestId: string;
@@ -118,13 +119,13 @@ export function makeSynaraMcpCommandActivity(overrides: {
   status: "pending" | "succeeded" | "failed";
   requestedState: "enabled" | "disabled";
   finalState?: "enabled" | "disabled";
-  detail?: unknown;
+  detail?: OrchestrationThreadActivity["payload"];
 }): OrchestrationThreadActivity {
   const { createdAt, requestId, command, phase, status, requestedState, finalState, detail } =
     overrides;
   return makeActivity({
     id: `${requestId}:${phase}`,
-    createdAt,
+    ...(createdAt !== undefined ? { createdAt } : {}),
     kind: `synara.mcp.command.${status}`,
     summary:
       status === "pending"
