@@ -58,11 +58,15 @@ import {
 } from "../src/provider/piSynaraMcpToolExecution.ts";
 
 import type { TestTurnResponse } from "./TestProviderAdapter.integration.ts";
+import { isSynaraMcpAuthorityDeniedError } from "./TestProviderAdapter.integration.ts";
 import {
   makeWsOrchestrationHarness,
   type WsOrchestrationHarness,
 } from "./WsOrchestrationHarness.integration.ts";
-import { connectSynaraWsClient } from "./synaraWsClient.integration.ts";
+import {
+  connectSynaraWsClient,
+  type SynaraWsClient,
+} from "./synaraWsClient.integration.ts";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -123,8 +127,9 @@ const createThread = async (
   harness: WsOrchestrationHarness,
   projectId: string,
   threadId: string,
+  client: SynaraWsClient = harness.client,
 ): Promise<void> => {
-  await harness.client.dispatchCommand({
+  await client.dispatchCommand({
     type: "thread.create",
     commandId: `cmd-${threadId}-create-${randomUUID()}`,
     threadId,
@@ -140,19 +145,70 @@ const createThread = async (
 };
 
 /**
+ * Polls `client.getSnapshot()` until the thread exists (and `predicate`
+ * holds). Used instead of the harness wait helpers when the harness's own
+ * client has been closed for a reconnect leg.
+ */
+const waitForThreadViaClient = async (
+  client: SynaraWsClient,
+  threadId: string,
+  predicate?: (thread: OrchestrationThread) => boolean,
+  timeoutMs = 30_000,
+): Promise<OrchestrationThread> => {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const snapshot = await client.getSnapshot();
+    const thread = snapshot.threads.find((entry) => entry.id === threadId) ?? null;
+    if (thread !== null && (predicate === undefined || predicate(thread))) {
+      return thread;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for thread ${threadId}.`);
+    }
+    await sleep(10);
+  }
+};
+
+/**
+ * Aggregate harness teardown: every harness dispose runs even when an
+ * earlier one fails, and the collected failures are rethrown together so a
+ * single cleanup failure can never skip another scope, harness, or the
+ * test-owned root cleanup.
+ */
+const disposeHarnesses = async (
+  harnesses: ReadonlyArray<WsOrchestrationHarness | null | undefined>,
+): Promise<void> => {
+  const failures: unknown[] = [];
+  for (const harness of harnesses) {
+    if (harness === null || harness === undefined) continue;
+    try {
+      await harness.dispose();
+    } catch (cause) {
+      failures.push(cause);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      failures.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join("; "),
+    );
+  }
+};
+
+/**
  * Start one normal turn on a fresh session: queues the fixture turn response
  * for the NEXT session that starts (deterministic because turns are
- * dispatched and settled one at a time), dispatches the turn through the real
- * WS boundary, and waits until the projected session is ready with a
- * non-streaming assistant message.
+ * dispatched and settled one at a time), dispatches the turn through the
+ * real WS boundary (optionally on a reconnected client), and waits until the
+ * projected session is ready with a non-streaming assistant message.
  */
 const startSessionTurn = async (
   harness: WsOrchestrationHarness,
   threadId: ThreadId,
   text: string,
+  client: SynaraWsClient = harness.client,
 ): Promise<OrchestrationThread> => {
   await Effect.runPromise(harness.adapterHarness.queueTurnResponseForNextSession(EMPTY_TURN_RESPONSE));
-  await harness.client.dispatchCommand({
+  await client.dispatchCommand({
     type: "thread.turn.start",
     commandId: `cmd-${threadId}-turn-${randomUUID()}`,
     threadId,
@@ -166,11 +222,57 @@ const startSessionTurn = async (
     runtimeMode: "approval-required",
     createdAt: new Date().toISOString(),
   });
-  return harness.waitForThread(
-    threadId,
+  return waitForThreadViaClient(
+    client,
+    String(threadId),
     (thread) =>
       thread.session?.status === "ready" &&
       thread.messages.some((message) => message.role === "assistant" && message.streaming === false),
+  );
+};
+
+/**
+ * Start a turn on an ALREADY-EXISTING session whose completion is DEFERRED:
+ * the turn is ACTIVE (its `turn.completed` is held by the adapter) until the
+ * test releases it via `completeDeferredTurn`. The wait returns as soon as
+ * the turn's message is projected, so the caller observes the active turn.
+ */
+const startDeferredTurn = async (
+  harness: WsOrchestrationHarness,
+  threadId: ThreadId,
+  text: string,
+  delta = "ok.\n",
+): Promise<OrchestrationThread> => {
+  await Effect.runPromise(
+    harness.adapterHarness.queueTurnResponse(threadId, {
+      deferCompletion: true,
+      events: [
+        { type: "turn.started", turnId: "fixture-turn-deferred" },
+        { type: "message.delta", turnId: "fixture-turn-deferred", delta },
+        { type: "turn.completed", turnId: "fixture-turn-deferred", status: "completed" },
+      ],
+    }),
+  );
+  await harness.client.dispatchCommand({
+    type: "thread.turn.start",
+    commandId: `cmd-${threadId}-deferred-${randomUUID()}`,
+    threadId,
+    message: {
+      messageId: `msg-${threadId}-deferred-${randomUUID()}`,
+      role: "user",
+      text,
+      attachments: [],
+    },
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    runtimeMode: "approval-required",
+    createdAt: new Date().toISOString(),
+  });
+  // The turn is ACTIVE: assistant deltas are buffered until the deferred
+  // completion lands, so the observable active-turn signal is the projected
+  // session's running status with an active turn id.
+  return harness.waitForThread(
+    threadId,
+    (thread) => thread.session?.status === "running" && thread.session?.activeTurnId !== null,
   );
 };
 
@@ -261,8 +363,9 @@ const countJournalActivities = async (
 const journalHasSlashMessage = async (
   harness: WsOrchestrationHarness,
   text: string,
+  client: SynaraWsClient = harness.client,
 ): Promise<boolean> => {
-  const events = await harness.client.replayEvents({ fromSequenceExclusive: 0 });
+  const events = await client.replayEvents({ fromSequenceExclusive: 0 });
   return events.some(
     (event) =>
       event.type === "thread.message-sent" &&
@@ -277,7 +380,7 @@ const readThreadSnapshot = async (harness: WsOrchestrationHarness, threadId: Thr
 // Journey 2 (WP4 slice)
 // ---------------------------------------------------------------------------
 it(
-  "WP4 journey: disable during an in-flight MCP call with fence/settle ordering, structured exactly-once settlement, turn continuity, no replay, duplicate idempotency",
+  "WP4 journey: disable DURING an active turn with an in-flight MCP call, fence/settle ordering, structured exactly-once settlement, turn continuity (no interrupt, no replay), duplicate idempotency",
   async () => {
     const harness = await makeWsOrchestrationHarness({ provider: "codex" });
     try {
@@ -322,40 +425,24 @@ it(
       const observedInflight = observePromise(inflightCall);
       expect(harness.adapterHarness.getSynaraMcpInFlightCount(threadC)).toBe(1);
 
-      // --- Pi turn continuity: a normal turn runs to completion while the
-      // MCP call is still in flight; disable never interrupts the turn. ---
-      await Effect.runPromise(
-        harness.adapterHarness.queueTurnResponse(threadC, {
-          events: [
-            { type: "turn.started", turnId: "fixture-turn-2" },
-            { type: "message.delta", turnId: "fixture-turn-2", delta: "turn while call in flight.\n" },
-            { type: "turn.completed", turnId: "fixture-turn-2", status: "completed" },
-          ],
-        }),
+      // --- Pi turn continuity: a DEFERRED turn is ACTIVE while the MCP call
+      // is still in flight; the disable command is dispatched DURING that
+      // same turn and never interrupts it. ---
+      const deferredTurn = await startDeferredTurn(
+        harness,
+        threadC,
+        "continue while the MCP call is in flight",
+        "turn while call in flight.\n",
       );
-      await harness.client.dispatchCommand({
-        type: "thread.turn.start",
-        commandId: `cmd-${threadC}-continuity-${randomUUID()}`,
-        threadId: threadC,
-        message: {
-          messageId: `msg-${threadC}-continuity-${randomUUID()}`,
-          role: "user",
-          text: "continue while the MCP call is in flight",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: new Date().toISOString(),
-      });
-      const continued = await harness.waitForThread(threadC, (thread) =>
-        thread.messages.some((message) => message.text === "turn while call in flight.\n"),
-      );
-      expect(continued.session?.status).toBe("ready");
-      expect(harness.adapterHarness.getInterruptCalls(threadC)).toEqual([]);
-      // The MCP call is still in flight after the turn completed.
+      // The deferred turn is ACTIVE when disable arrives (assistant deltas
+      // are buffered until the turn completes, so the active-turn signal is
+      // the running session with an active turn id).
+      expect(deferredTurn.session?.status).toBe("running");
+      expect(deferredTurn.session?.activeTurnId).not.toBeNull();
+      // The MCP call is still in flight when disable arrives.
       expect(harness.adapterHarness.getSynaraMcpInFlightCount(threadC)).toBe(1);
 
-      // --- Disable during the in-flight MCP call. ---
+      // --- Disable during the in-flight MCP call and the active turn. ---
       const disableCommandId = "cmd-wp4-disable-1";
       const disableRequestId = synaraMcpRequestId(disableCommandId);
       await dispatchMcpCommand(harness, threadC, disableCommandId, SYNARA_MCP_DISABLE_COMMAND);
@@ -479,6 +566,22 @@ it(
       expect(harness.adapterHarness.getSynaraMcpDisabledSettledCount(threadC)).toBe(1);
       expect(await countJournalActivities(harness, duplicateRequestId, "terminal")).toBe(1);
 
+      // --- The SAME active turn completes normally after the disable
+      // settled: release the deferred completion, then the thread reaches
+      // ready with the turn's message projected (Pi turn continuity, no
+      // interrupt, no replay). ---
+      await Effect.runPromise(harness.adapterHarness.completeDeferredTurn(threadC));
+      const completedTurn = await harness.waitForThread(
+        threadC,
+        (thread) =>
+          thread.session?.status === "ready" &&
+          thread.messages.some((message) => message.text === "turn while call in flight.\n"),
+      );
+      expect(completedTurn.session?.status).toBe("ready");
+      expect(harness.adapterHarness.getInterruptCalls(threadC)).toEqual([]);
+      expect(handlerCalls).toBe(1);
+      expect(harness.adapterHarness.getSynaraMcpDisabledSettledCount(threadC)).toBe(1);
+
       // --- No turn interrupt anywhere in the journey; the session surface
       // stays usable after disable (Pi turn continuity). ---
       expect(harness.adapterHarness.getInterruptCalls(threadC)).toEqual([]);
@@ -487,31 +590,11 @@ it(
         String(threadC),
         String(threadD),
       ]);
-      await Effect.runPromise(
-        harness.adapterHarness.queueTurnResponse(threadC, {
-          events: [
-            { type: "turn.started", turnId: "fixture-turn-3" },
-            { type: "message.delta", turnId: "fixture-turn-3", delta: "after disable.\n" },
-            { type: "turn.completed", turnId: "fixture-turn-3", status: "completed" },
-          ],
-        }),
-      );
-      await harness.client.dispatchCommand({
-        type: "thread.turn.start",
-        commandId: `cmd-${threadC}-after-disable-${randomUUID()}`,
-        threadId: threadC,
-        message: {
-          messageId: `msg-${threadC}-after-disable-${randomUUID()}`,
-          role: "user",
-          text: "work after disable",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: new Date().toISOString(),
-      });
-      const afterDisable = await harness.waitForThread(threadC, (thread) =>
-        thread.messages.some((message) => message.text === "after disable.\n"),
+      const afterDisable = await startReusedSessionTurn(
+        harness,
+        threadC,
+        "work after disable",
+        "after disable.\n",
       );
       expect(afterDisable.session?.status).toBe("ready");
 
@@ -520,8 +603,7 @@ it(
       const providerTurnSnapshot = await readThreadSnapshot(harness, threadC);
       expect(providerTurnSnapshot.turns).toHaveLength(3);
     } finally {
-      await harness.dispose();
-      await harness.dispose();
+      await disposeHarnesses([harness, harness]);
     }
   },
   180_000,
@@ -807,8 +889,7 @@ it(
       );
       expect(restartedThread.session?.status).toBe("ready");
     } finally {
-      await harness2?.dispose();
-      await harness1.dispose();
+      await disposeHarnesses([harness2, harness1]);
       fs.rmSync(rootDir, { recursive: true, force: true });
     }
   },
@@ -1094,8 +1175,271 @@ it(
         await reconnected.close();
       }
     } finally {
-      await harness.dispose();
-      await harness.dispose();
+      await disposeHarnesses([harness, harness]);
+    }
+  },
+  180_000,
+);
+
+// ---------------------------------------------------------------------------
+// Journey 4 (WP3b slice): successful enable with exactly-once terminal,
+// subject-bound MCP admission at the provider boundary (success + fail-closed
+// mismatch/missing/stale), and FRESH subject-bound authority after an enabled
+// reconnect/session recreation (prior authority is never reused).
+// ---------------------------------------------------------------------------
+it(
+  "WP3b journey: successful enable terminal exactly once, dormant and authority fail-closed MCP admission, and fresh subject-bound authority after enabled reconnect",
+  async () => {
+    const harness = await makeWsOrchestrationHarness({ provider: "codex" });
+    let reconnected: SynaraWsClient | null = null;
+    try {
+      const threadA = asThreadId("thread-mcp-a");
+      const threadB = asThreadId("thread-mcp-b");
+      const projectId = "project-wp3b";
+
+      // --- Two current sessions on one project; both capture the
+      // server-minted subject-bound MCP authority at session start. ---
+      await createProject(harness, projectId);
+      await createThread(harness, projectId, String(threadA));
+      await createThread(harness, projectId, String(threadB));
+      await startSessionTurn(harness, threadA, "hello A");
+      await startSessionTurn(harness, threadB, "hello B");
+      const authorityA = harness.adapterHarness.getMcpAuthority(threadA)!;
+      const authorityB = harness.adapterHarness.getMcpAuthority(threadB)!;
+      expect(authorityA.kind).toBe("local-owner");
+      expect(authorityB.kind).toBe("local-owner");
+      const recordA = harness.authority.get(authorityA.authorityId);
+      expect(recordA).toBeDefined();
+      expect(recordA?.status).toBe("active");
+      expect(recordA?.subject).toBe(authorityA.subject);
+      // Fail-closed admission check against trusted registry state: the
+      // sessions' subject-bound credentials are currently admittable.
+      expect(harness.authority.assertAdmittable(authorityA)).toBeNull();
+      expect(harness.authority.assertAdmittable(authorityB)).toBeNull();
+
+      // --- Dormant startup fails closed: before enable, every Pi-facing
+      // Synara MCP call is refused with the structured disabled error before
+      // its handler starts. ---
+      let dormantHandlerCalls = 0;
+      const dormantCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(threadA, () => {
+          dormantHandlerCalls += 1;
+          return Promise.resolve("never");
+        }),
+      );
+      const observedDormant = await Effect.runPromise(Effect.promise(() => dormantCall));
+      expect(observedDormant.ok).toBe(false);
+      if (!observedDormant.ok) {
+        expect(isPiSynaraMcpDisabledError(observedDormant.cause)).toBe(true);
+      }
+      expect(dormantHandlerCalls).toBe(0);
+      expect(harness.adapterHarness.getSynaraMcpDisabledSettledCount(threadA)).toBe(0);
+
+      // --- Successful enable with exactly-once succeeded terminal. ---
+      const enableCommandId = "cmd-wp3b-enable-1";
+      const requestId = synaraMcpRequestId(enableCommandId);
+      await dispatchMcpCommand(harness, threadA, enableCommandId, SYNARA_MCP_ENABLE_COMMAND);
+      const enabledProject = await harness.waitForProject(
+        projectId,
+        (project) =>
+          operationOf(project)?.aggregateStatus === "succeeded" &&
+          operationOf(project)?.desiredState === "enabled",
+      );
+      expect(operationOf(enabledProject)?.desiredState).toBe("enabled");
+      expect(harness.adapterHarness.getEnableCalls(threadA)).toHaveLength(1);
+      expect(harness.adapterHarness.getEnableCalls(threadB)).toHaveLength(1);
+
+      // Exactly-once succeeded terminal (projection + journal): one
+      // deterministic terminal activity, turnId null, finalState enabled,
+      // one pending activity, and exactly one journaled terminal.
+      const succeededTerminalThread = await harness.waitForThread(threadA, (thread) =>
+        thread.activities.some(
+          (activity) =>
+            activity.id === `${requestId}:terminal` &&
+            activity.kind === SYNARA_MCP_SUCCEEDED_ACTIVITY_KIND,
+        ),
+      );
+      const succeededTerminals = succeededTerminalThread.activities.filter(
+        (activity) => activity.id === `${requestId}:terminal`,
+      );
+      expect(succeededTerminals).toHaveLength(1);
+      expect(succeededTerminals[0]!.turnId).toBeNull();
+      expect(succeededTerminals[0]!.payload).toMatchObject({
+        requestId,
+        command: "enable",
+        phase: "terminal",
+        status: "succeeded",
+        requestedState: "enabled",
+        finalState: "enabled",
+      });
+      expect(
+        succeededTerminalThread.activities.filter(
+          (activity) => activity.id === `${requestId}:pending`,
+        ),
+      ).toHaveLength(1);
+      expect(await countJournalActivities(harness, requestId, "terminal")).toBe(1);
+      expect(await countJournalActivities(harness, requestId, "pending")).toBe(1);
+
+      // --- Authorized MCP use is admitted under the captured subject-bound
+      // binding (success through the integrated provider boundary). ---
+      const usedCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(threadA, () => Promise.resolve("mcp-ok")),
+      );
+      const used = await Effect.runPromise(Effect.promise(() => usedCall));
+      expect(used.ok).toBe(true);
+      if (used.ok) {
+        expect(used.value).toBe("mcp-ok");
+      }
+
+      // --- Mismatched subject fails closed before the handler starts: a
+      // hostile credential carrying the captured authorityId but a different
+      // subject is denied by the REAL registry's admission check. ---
+      let mismatchHandlerCalls = 0;
+      const mismatchedCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(
+          threadA,
+          () => {
+            mismatchHandlerCalls += 1;
+            return Promise.resolve("never");
+          },
+          { bindingOverride: { ...authorityA, subject: "user-evil" } },
+        ),
+      );
+      const observedMismatch = await Effect.runPromise(Effect.promise(() => mismatchedCall));
+      expect(observedMismatch.ok).toBe(false);
+      if (!observedMismatch.ok) {
+        expect(isSynaraMcpAuthorityDeniedError(observedMismatch.cause)).toBe(true);
+        expect((observedMismatch.cause as { reason?: string }).reason).toBe("subject-mismatch");
+      }
+      expect(mismatchHandlerCalls).toBe(0);
+
+      // --- Missing binding fails closed: a session started through the
+      // provider boundary WITHOUT a server-minted binding (the production
+      // fail-closed path when no trusted binding exists at session start)
+      // cannot admit a call even after a proven activation. ---
+      const unboundThread = asThreadId("thread-mcp-unbound");
+      await Effect.runPromise(
+        harness.adapterHarness.adapter.startSession({
+          threadId: unboundThread,
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: harness.workspaceDir,
+        }),
+      );
+      expect(harness.adapterHarness.getMcpAuthority(unboundThread)).toBeUndefined();
+      // Dormant fail-closed applies to the unbound session too.
+      const unboundDormantCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(unboundThread, () => Promise.resolve("never")),
+      );
+      const observedUnboundDormant = await Effect.runPromise(
+        Effect.promise(() => unboundDormantCall),
+      );
+      expect(observedUnboundDormant.ok).toBe(false);
+      if (!observedUnboundDormant.ok) {
+        expect(isPiSynaraMcpDisabledError(observedUnboundDormant.cause)).toBe(true);
+      }
+      const enableUnbound = harness.adapterHarness.adapter.enableSynaraMcp;
+      expect(enableUnbound).toBeDefined();
+      await Effect.runPromise(
+        enableUnbound!({
+          threadId: unboundThread,
+          expectedSessionGeneration: "gen-unbound",
+          liveSessionGeneration: "gen-unbound",
+        }),
+      );
+      const unboundCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(unboundThread, () => Promise.resolve("never")),
+      );
+      const observedUnbound = await Effect.runPromise(Effect.promise(() => unboundCall));
+      expect(observedUnbound.ok).toBe(false);
+      if (!observedUnbound.ok) {
+        expect(isSynaraMcpAuthorityDeniedError(observedUnbound.cause)).toBe(true);
+        expect((observedUnbound.cause as { reason?: string }).reason).toBe("missing-binding");
+      }
+
+      // --- Stale authority fails closed: revoking the owning record in the
+      // REAL registry denies the still-captured binding on the active
+      // session. ---
+      expect(harness.authority.revoke(authorityA.authorityId, "rotation")).toBe(true);
+      expect(harness.authority.assertAdmittable(authorityA)).toBe("revoked");
+      const staleCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(threadA, () => Promise.resolve("never")),
+      );
+      const observedStale = await Effect.runPromise(Effect.promise(() => staleCall));
+      expect(observedStale.ok).toBe(false);
+      if (!observedStale.ok) {
+        expect(isSynaraMcpAuthorityDeniedError(observedStale.cause)).toBe(true);
+        expect((observedStale.cause as { reason?: string }).reason).toBe("revoked");
+      }
+
+      // --- Enabled reconnect/session recreation: a fresh WS connection
+      // mints a FRESH authority record, and the recreated session binds a
+      // fresh subject-bound credential/session generation — the prior
+      // authority is never reused. ---
+      await harness.client.close();
+      reconnected = await connectSynaraWsClient(harness.port);
+      const threadC = asThreadId("thread-mcp-c");
+      await createThread(harness, projectId, String(threadC), reconnected);
+      await startSessionTurn(harness, threadC, "hello C after reconnect", reconnected);
+      // Terminal-enabled convergence activates the fresh session under its
+      // own fresh exact generation.
+      await waitFor("fresh session C converged to active", () =>
+        harness.adapterHarness.getEnableCalls(threadC).length === 1,
+      );
+      const authorityC = harness.adapterHarness.getMcpAuthority(threadC)!;
+      expect(authorityC).toBeDefined();
+      expect(authorityC.authorityId).not.toBe(authorityA.authorityId);
+      expect(authorityC.sessionGeneration).not.toBe(authorityA.sessionGeneration);
+      expect(authorityC.credentialExpiresAt).not.toBe(authorityA.credentialExpiresAt);
+      // The subject binding is re-established under the SAME server-minted
+      // local-owner principal (Decision 21: never accepted from payloads).
+      expect(authorityC.subject).toBe(authorityA.subject);
+      expect(authorityC.kind).toBe("local-owner");
+      const recordC = harness.authority.get(authorityC.authorityId);
+      expect(recordC).toBeDefined();
+      expect(recordC?.status).toBe("active");
+      expect(recordC?.subject).toBe(authorityC.subject);
+      expect(recordC?.sessionGeneration).toBe(authorityC.sessionGeneration);
+      expect(harness.authority.assertAdmittable(authorityC)).toBeNull();
+      // Prior authority is not reused: the old record was not rotated or
+      // re-issued for the recreated session (same session generation as
+      // captured) and stays revoked.
+      expect(harness.authority.get(authorityA.authorityId)?.sessionGeneration).toBe(
+        authorityA.sessionGeneration,
+      );
+      expect(harness.authority.assertAdmittable(authorityA)).toBe("revoked");
+      // The fresh binding admits MCP use; the old binding is still denied.
+      const freshCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(threadC, () => Promise.resolve("fresh-ok")),
+      );
+      const observedFresh = await Effect.runPromise(Effect.promise(() => freshCall));
+      expect(observedFresh.ok).toBe(true);
+      if (observedFresh.ok) {
+        expect(observedFresh.value).toBe("fresh-ok");
+      }
+      const oldCall = observePromise(
+        harness.adapterHarness.startSynaraMcpCall(threadA, () => Promise.resolve("never")),
+      );
+      const observedOld = await Effect.runPromise(Effect.promise(() => oldCall));
+      expect(observedOld.ok).toBe(false);
+      if (!observedOld.ok) {
+        expect(isSynaraMcpAuthorityDeniedError(observedOld.cause)).toBe(true);
+      }
+
+      // --- No slash-command message or provider-turn contamination. ---
+      expect(await journalHasSlashMessage(harness, SYNARA_MCP_ENABLE_COMMAND, reconnected)).toBe(
+        false,
+      );
+      const snapshotThreadA = (await reconnected.getSnapshot()).threads.find(
+        (thread) => thread.id === String(threadA),
+      )!;
+      expect(
+        snapshotThreadA.messages.some((message) => message.text === SYNARA_MCP_ENABLE_COMMAND),
+      ).toBe(false);
+      expect(harness.adapterHarness.getStartCount()).toBe(4);
+    } finally {
+      await reconnected?.close().catch(() => undefined);
+      await disposeHarnesses([harness]);
     }
   },
   180_000,

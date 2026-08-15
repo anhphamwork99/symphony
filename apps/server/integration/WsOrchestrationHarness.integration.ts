@@ -261,7 +261,13 @@ export async function makeWsOrchestrationHarness(
   // provide/provideMerge chains — `Layer.mergeAll` members do not see each
   // other's services — so ProviderDiscoveryService gets its own
   // ServerSettings/ServerSecretStore wiring exactly like `makeServerProviderLayer`.
-  const adapterHarness = await Effect.runPromise(makeTestProviderAdapterHarness({ provider }));
+  // The live MCP session authority service is loaded from the runtime below;
+  // the adapter harness resolves it lazily so provider-boundary MCP admission
+  // (Decision 21) validates against the SAME registry the server writes.
+  let authority: McpSessionAuthorityShape;
+  const adapterHarness = await Effect.runPromise(
+    makeTestProviderAdapterHarness({ provider, mcpSessionAuthority: () => authority }),
+  );
   const fakeRegistry = Layer.succeed(ProviderAdapterRegistry, {
     getByProvider: (resolvedProvider) =>
       resolvedProvider === adapterHarness.provider
@@ -303,7 +309,6 @@ export async function makeWsOrchestrationHarness(
   let reactor: OrchestrationReactor["Service"];
   let snapshotQuery: ProjectionSnapshotQuery["Service"];
   let runtimeStartup: ServerRuntimeStartup["Service"];
-  let authority: McpSessionAuthorityShape;
   try {
     engine = await loadService(Effect.service(OrchestrationEngineService));
     reactor = await loadService(Effect.service(OrchestrationReactor));
@@ -485,7 +490,6 @@ export async function makeWsOrchestrationHarness(
   let disposed = false;
   const dispose: WsOrchestrationHarness["dispose"] = async () => {
     if (disposed) return;
-    disposed = true;
     const failures: unknown[] = [];
     await client.close().catch((cause) => failures.push(cause));
     await runtime
@@ -508,6 +512,10 @@ export async function makeWsOrchestrationHarness(
         "dispose",
       );
     }
+    // Retry-safe: only a fully successful teardown marks the harness
+    // disposed, so a later dispose retries the failed steps instead of
+    // skipping the remaining scopes or the root cleanup.
+    disposed = true;
   };
 
   return {

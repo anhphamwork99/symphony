@@ -6,7 +6,11 @@
 // and observed in the real `getSnapshot` RPC projection; `replayEvents` proves
 // the journal committed both bootstrap events; the thread detail read model is
 // observed through `getThreadDetailSnapshot`. No provider/model call happens:
-// the adapter harness start count stays zero.
+// the adapter harness start count stays zero. Teardown regression: dispose is
+// idempotent AND retry-safe (only a fully successful teardown marks the
+// harness disposed), and the harness-owned temp root is always removed.
+import fs from "node:fs";
+
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -83,6 +87,11 @@ it(
       await harness.dispose();
       // dispose must be idempotent and clean.
       await harness.dispose();
+      // Cleanup regression: the harness-owned temp root (home, workspace,
+      // and SQLite state) is removed by a successful dispose.
+      expect(fs.existsSync(harness.rootDir)).toBe(false);
+      expect(fs.existsSync(harness.homeDir)).toBe(false);
+      expect(fs.existsSync(harness.workspaceDir)).toBe(false);
     }
   },
   120_000,

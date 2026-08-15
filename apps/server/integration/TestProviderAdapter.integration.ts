@@ -14,6 +14,11 @@ import {
   TurnId,
   ProviderKind,
 } from "@synara/contracts";
+import type {
+  McpAuthorityAdmissionFailure,
+  McpAuthorityBinding,
+} from "../src/agentGateway/mcpSessionAuthority.ts";
+import type { McpSessionAuthorityShape } from "../src/agentGateway/Services/McpSessionAuthority.ts";
 import { Effect, PubSub, Stream } from "effect";
 
 import {
@@ -101,6 +106,40 @@ export interface TestSynaraMcpEnableCall {
 /** One recorded disable invocation with its ordered stage sequence. */
 export interface TestSynaraMcpDisableCall {
   readonly stages: ReadonlyArray<TestSynaraMcpDisableStage>;
+}
+
+/**
+ * Structured fail-closed denial for a Pi-facing Synara MCP call whose
+ * subject-bound credential binding is missing, mismatched, stale, revoked,
+ * or expired at the provider admission boundary (Decision 21). The denial
+ * reason is the production `McpAuthorityAdmissionFailure` union (plus the
+ * transport-level "missing-binding" outcome for an unbound session), never
+ * an invented diagnostic.
+ */
+export const SYNARA_MCP_AUTHORITY_DENIED_ERROR_CODE = "synara_mcp_authority_denied" as const;
+
+export interface SynaraMcpAuthorityDeniedError extends Error {
+  readonly code: typeof SYNARA_MCP_AUTHORITY_DENIED_ERROR_CODE;
+  readonly reason: McpAuthorityAdmissionFailure | "missing-binding";
+}
+
+export function makeSynaraMcpAuthorityDeniedError(
+  reason: McpAuthorityAdmissionFailure | "missing-binding",
+): SynaraMcpAuthorityDeniedError {
+  return Object.assign(new Error(`Synara MCP authority denied: ${reason}`), {
+    name: "SynaraMcpAuthorityDeniedError",
+    code: SYNARA_MCP_AUTHORITY_DENIED_ERROR_CODE,
+    reason,
+  }) as SynaraMcpAuthorityDeniedError;
+}
+
+export function isSynaraMcpAuthorityDeniedError(
+  cause: unknown,
+): cause is SynaraMcpAuthorityDeniedError {
+  return (
+    cause instanceof Error &&
+    (cause as SynaraMcpAuthorityDeniedError).code === SYNARA_MCP_AUTHORITY_DENIED_ERROR_CODE
+  );
 }
 
 /** Pi-facing Synara MCP call handler used by the fixture's call simulation. */
@@ -362,10 +401,16 @@ export interface TestProviderAdapterHarness {
   /** Recorded disable invocations with ordered stages (empty for unknown sessions). */
   readonly getDisableCalls: (threadId: ThreadId) => ReadonlyArray<TestSynaraMcpDisableCall>;
   /**
-   * Simulate one Pi-facing Synara MCP call. When the session is fenced the
-   * returned promise rejects immediately with the structured disabled error
-   * before the handler starts. When disable settles the session, every
-   * in-flight call rejects exactly once with that structured error and its
+   * Simulate one Pi-facing Synara MCP call. Fail closed while the session is
+   * not proven active (dormant startup or unavailable) or fenced (a
+   * registration racing disable): the returned promise rejects immediately
+   * with the structured disabled error before the handler starts. When the
+   * session is active the call is admitted only when its subject-bound MCP
+   * authority binding is present and admittable against the REAL MCP session
+   * authority registry; a missing, mismatched, stale, revoked, or expired
+   * binding rejects with the structured authority-denied error before the
+   * handler starts. When disable settles the session, every in-flight call
+   * rejects exactly once with the structured disabled error and its
    * controller aborts. Without a handler the call stays in flight until
    * disable settles it. Unknown sessions reject with the session-not-found
    * error shape.
@@ -373,7 +418,15 @@ export interface TestProviderAdapterHarness {
   readonly startSynaraMcpCall: (
     threadId: ThreadId,
     handler?: TestSynaraMcpCallHandler,
+    options?: { readonly bindingOverride?: McpAuthorityBinding },
   ) => Promise<unknown>;
+  /**
+   * Emit the deferred turn-completion events of an active deferred turn
+   * (completes the turn normally through the runtime event path). No-op for
+   * sessions without deferred completions; unknown sessions fail with the
+   * session-not-found error shape.
+   */
+  readonly completeDeferredTurn: (threadId: ThreadId) => Effect.Effect<void, ProviderAdapterError>;
   /** Whether the session's Synara MCP admission fence is installed. */
   readonly isSynaraMcpFenced: (threadId: ThreadId) => boolean;
   /** In-flight simulated Synara MCP call count (bounded diagnostics). */
@@ -384,6 +437,13 @@ export interface TestProviderAdapterHarness {
 
 interface MakeTestProviderAdapterHarnessOptions {
   readonly provider?: ProviderKind;
+  /**
+   * Lazily resolve the REAL MCP session authority registry (Decision 21) the
+   * provider-boundary admission validates captured bindings against. Wired by
+   * `WsOrchestrationHarness` from the live server service; standalone harness
+   * usages that never admit MCP calls may omit it.
+   */
+  readonly mcpSessionAuthority?: () => McpSessionAuthorityShape;
 }
 
 function nowIso(): string {
@@ -410,6 +470,7 @@ function missingSessionEffect(
 export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapterHarnessOptions) =>
   Effect.gen(function* () {
     const provider = options?.provider ?? "codex";
+    const mcpSessionAuthority = options?.mcpSessionAuthority;
     const runtimeEvents = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     let sessionCount = 0;
     const sessions = new Map<ThreadId, SessionState>();
@@ -755,16 +816,42 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
     const startSynaraMcpCall = (
       threadId: ThreadId,
       handler?: TestSynaraMcpCallHandler,
+      options?: { readonly bindingOverride?: McpAuthorityBinding },
     ): Promise<unknown> => {
       const state = sessions.get(threadId);
       if (!state) {
         return Promise.reject(sessionNotFound(provider, threadId));
       }
       const mcp = state.synaraMcp;
-      // Fail closed: a post-fence admission is rejected before its handler
-      // starts, exactly like the production registry's synchronous fence.
-      if (mcp.fenced) {
+      // Fail closed while the session is not proven active (dormant startup
+      // or unavailable after an unproven enable/disable) and while the
+      // admission fence is installed (a registration racing disable is
+      // rejected before its handler starts), exactly like the production
+      // registry's synchronous fence.
+      if (mcp.state !== "active" || mcp.fenced) {
         return Promise.reject(makePiSynaraMcpDisabledError());
+      }
+      // Decision 21 subject-bound admission at the provider boundary: the
+      // credential binding — the server-minted captured binding, or the
+      // hostile override a test presents — must resolve against the REAL MCP
+      // session authority registry. A missing binding fails closed, and any
+      // mismatch/stale/revoked/expired admission failure denies the call
+      // before its handler starts.
+      const authorityService = mcpSessionAuthority?.();
+      if (authorityService === undefined) {
+        return Promise.reject(
+          new ProviderAdapterValidationError({
+            provider,
+            operation: "startSynaraMcpCall",
+            issue: "No MCP session authority service is wired into the test harness.",
+          }),
+        );
+      }
+      const binding = options?.bindingOverride ?? state.mcpAuthority;
+      const admissionFailure: McpAuthorityAdmissionFailure | "missing-binding" | null =
+        binding === undefined ? "missing-binding" : authorityService.assertAdmittable(binding);
+      if (admissionFailure !== null) {
+        return Promise.reject(makeSynaraMcpAuthorityDeniedError(admissionFailure));
       }
       const controller = new AbortController();
       let rejectOnce!: (cause: unknown) => void;
@@ -801,6 +888,20 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       mcp.inflightCalls.set(result, entry);
       return result;
     };
+
+    const completeDeferredTurn = (
+      threadId: ThreadId,
+    ): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.sync(() => sessions.get(threadId)).pipe(
+        Effect.flatMap((state): Effect.Effect<void, ProviderAdapterError> => {
+          if (!state) {
+            return Effect.fail(sessionNotFound(provider, threadId));
+          }
+          const events = state.deferredCompletionEvents;
+          state.deferredCompletionEvents = [];
+          return Effect.forEach(events, emit, { discard: true });
+        }),
+      );
 
     const stopSession: ProviderAdapterShape<ProviderAdapterError>["stopSession"] = (threadId) =>
       Effect.sync(() => {
@@ -1069,6 +1170,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       getEnableCalls,
       getDisableCalls,
       startSynaraMcpCall,
+      completeDeferredTurn,
       isSynaraMcpFenced,
       getSynaraMcpInFlightCount,
       getSynaraMcpDisabledSettledCount,
