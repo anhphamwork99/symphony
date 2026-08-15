@@ -4,12 +4,33 @@
 
 **Blocked by:** impl-03 — Remove default Synara tools and add dormant MCP extension.
 
-**Status:** ready-for-agent
+**Status:** implemented-awaiting-final-acceptance
 
-- [ ] Measure policy, tool schema, startup/context, cached input, and processed tokens consistently.
-- [ ] Compare equivalent prompts and model/session configurations.
-- [ ] Report real overhead without changing accounting or hiding catalog content.
-- [ ] Record whether measurement justifies future compaction or artifact-backed output work.
+- [x] Measure policy, tool schema, startup/context, cached input, and processed tokens consistently.
+- [x] Compare equivalent prompts and model/session configurations.
+- [x] Report real overhead without changing accounting or hiding catalog content.
+- [x] Record whether measurement justifies future compaction or artifact-backed output work.
+
+## Delivery evidence
+
+- Harness: `apps/server/scripts/token-overhead/measure.ts`
+- Reconciliation and reporting: `apps/server/src/measurement/`
+- Measurement-only effective-catalog observer:
+  `apps/server/src/provider/piCatalogObserver.ts`
+- Paired real-run artifact:
+  `benchmarks/synara-pi-token-overhead/report.json`
+- Human-readable result and reproduction command:
+  `benchmarks/synara-pi-token-overhead/README.md`
+
+The accepted run used `cockpit/gpt-5.6-sol`, thinking level `medium`, three
+fresh repetitions per mode, and two identical measured turns per repetition.
+All three modes completed 3/3 valid repetitions and every measured turn
+reconciled against
+`total == input + cacheRead + cacheWrite + output`.
+
+The measurement records a non-binding recommendation to investigate
+compaction or artifact-backed output separately. It does not establish a
+numeric budget or authorize that work.
 
 ## Testing Seams
 
