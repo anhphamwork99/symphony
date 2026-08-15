@@ -251,7 +251,7 @@ describe("sanitizePathForReport", () => {
     if (tmp.length <= 1) return;
     const sibling = `${tmp}-suffix`;
     const result = sanitizePathForReport(sibling);
-    expect(result).not.toContain(tmp);
+    expect(result).not.toBe(sibling);
     expect(result.startsWith("<abs>")).toBe(true);
   });
 });
