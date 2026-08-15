@@ -62,7 +62,13 @@ describe("readCodexSessionSummary", () => {
       limits: [{ window: "5h", usedPercent: 25, windowDurationMins: 300 }],
     });
     expect(readFile).not.toHaveBeenCalled();
-    expect(read.mock.calls.every((call) => (call[2] ?? 0) <= 64 * 1024)).toBe(true);
+    // FileHandle.read is overloaded; the spied type exposes only the options-object
+    // signature, while the runtime implementation calls read(buffer, offset, length,
+    // position). Narrow the mock calls to that positional signature (fixes TS2493).
+    const positionalReadCalls = read.mock.calls as unknown as Array<
+      [Buffer, number | null, number | null, number | null]
+    >;
+    expect(positionalReadCalls.every((call) => (call[2] ?? 0) <= 64 * 1024)).toBe(true);
   });
 
   it("parses a CRLF token record split across read chunks", async () => {
