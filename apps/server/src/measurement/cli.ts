@@ -12,6 +12,7 @@ import { PI_THINKING_LEVEL_OPTIONS } from "@synara/contracts";
 
 import { HARNESS_VERSION, printReportSummary, runMeasurement } from "./orchestrator.ts";
 import { resolveConfiguredModelId } from "./piSession.ts";
+import { prepareLocalManifestDir } from "./standaloneDriver.ts";
 import {
   computeFixtureDigest,
   isolateHarnessCwd,
@@ -191,7 +192,19 @@ export async function main(): Promise<number> {
   const fixtureDigest = computeFixtureDigest();
   const fixtureGitCommit = probeFixtureGitCommit();
   if (localManifestDir !== null) {
-    fs.mkdirSync(localManifestDir, { recursive: true, mode: 0o700 });
+    // Decision 34 §3: local full-manifest retention is allowed only in an
+    // owner-only location that is either outside the repo or proven ignored
+    // by git; reject the configuration up front instead of silently skipping
+    // retention per repetition.
+    const prepared = prepareLocalManifestDir(localManifestDir);
+    if (!prepared.ok) {
+      cwdIsolation.restore();
+      process.stderr.write(
+        `Token-overhead measurement configuration error: local manifest directory rejected (${prepared.reason}). ` +
+          `Use a directory outside the repository or an ignored (gitignored) path inside it.\n`,
+      );
+      return 2;
+    }
   }
 
   process.stderr.write(

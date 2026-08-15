@@ -125,25 +125,31 @@ export async function runSynaraMode(
   let client: SynaraClient | null = null;
   const repetitions: RepetitionRecord[] = [];
   try {
-    server = await startIsolatedServer({
-      ...(options.serverPort === undefined ? {} : { port: options.serverPort }),
-      // Decision 35: the isolated child server enables the measurement-only
-      // catalog observer for the mode being measured; its artifact is
-      // confined to this server's fresh home and removed with it.
-      catalogObserver: { mode: options.mode },
-    });
+    server = await startIsolatedServer(isolatedServerLaunchOptions(options));
     client = await connectSynaraClient(server.port);
+    // Narrowed handles for the repetition closure (the mutable outer
+    // variables are only assigned above, inside the guarded try).
+    const serverHandle = server;
+    const clientHandle = client;
 
-    for (let repetitionIndex = 0; repetitionIndex < options.repetitions; repetitionIndex += 1) {
-      const record = await runSynaraRepetition({
-        client,
-        server,
-        options,
-        repetitionIndex,
-        onDiagnostic,
-      });
-      repetitions.push(record);
-    }
+    // Decision 34 §4/§5: every requested repetition yields a visible record.
+    // A repetition that throws without producing an explicit invalid record
+    // is contained per repetition and recorded as an invalid repetition with
+    // a sanitized lifecycle failure while the mode continues; the run set
+    // then fails closed at the evidence layer.
+    const records = await runSynaraRepetitionLoop({
+      options,
+      onDiagnostic,
+      runRepetition: ({ repetitionIndex, onDiagnostic: repetitionDiagnostic }) =>
+        runSynaraRepetition({
+          client: clientHandle,
+          server: serverHandle,
+          options,
+          repetitionIndex,
+          onDiagnostic: repetitionDiagnostic,
+        }),
+    });
+    repetitions.push(...records);
   } finally {
     await client?.close().catch(() => undefined);
     await server?.stop().catch(() => undefined);
@@ -153,6 +159,61 @@ export async function runSynaraMode(
     }
   }
   return { repetitions, diagnostics: diagnosticsLog };
+}
+
+/**
+ * Build the isolated-server launch options for the mode. The resolved
+ * `agentDir` is passed through so the child's Pi runtime resolves the same
+ * Pi configuration as standalone and custom `--agent-dir` (Decision 34 §4
+ * configuration equivalence); the Decision 35 measurement-only observer is
+ * enabled only in the isolated child server, for the mode being measured.
+ */
+export function isolatedServerLaunchOptions(
+  options: SynaraDriverOptions,
+): Parameters<typeof startIsolatedServer>[0] {
+  return {
+    ...(options.serverPort === undefined ? {} : { port: options.serverPort }),
+    agentDir: options.agentDir,
+    catalogObserver: { mode: options.mode },
+  };
+}
+
+export interface SynaraRepetitionLoopContext {
+  readonly repetitionIndex: number;
+  readonly onDiagnostic: (message: string) => void;
+}
+
+export interface SynaraRepetitionLoopInput {
+  readonly options: SynaraDriverOptions;
+  readonly onDiagnostic?: (message: string) => void;
+  readonly runRepetition: (context: SynaraRepetitionLoopContext) => Promise<RepetitionRecord>;
+}
+
+/**
+ * Run the requested repetitions with deterministic per-repetition failure
+ * containment: an uncaught repetition failure yields a visible invalid
+ * `RepetitionRecord` carrying a sanitized lifecycle failure (never an
+ * unrecorded abort of the mode), while the mode continues; the run set then
+ * fails closed at the evidence layer (Decision 34 §4/§5).
+ */
+export async function runSynaraRepetitionLoop(
+  input: SynaraRepetitionLoopInput,
+): Promise<readonly RepetitionRecord[]> {
+  const records: RepetitionRecord[] = [];
+  for (let repetitionIndex = 0; repetitionIndex < input.options.repetitions; repetitionIndex += 1) {
+    const record = await input
+      .runRepetition({
+        repetitionIndex,
+        onDiagnostic: input.onDiagnostic ?? (() => undefined),
+      })
+      .catch((cause) => {
+        const message = sanitizeFailure(cause);
+        input.onDiagnostic?.(`repetition ${repetitionIndex} aborted: ${message}`);
+        return failedRepetition(input.options, repetitionIndex, message);
+      });
+    records.push(record);
+  }
+  return records;
 }
 
 interface RepetitionContext {
@@ -186,6 +247,13 @@ async function runSynaraRepetitionWithWorkspace(
   const projectId = ProjectId.makeUnsafe(randomUUID());
   const threadId = ThreadId.makeUnsafe(randomUUID());
   const lifecycleFailures: string[] = [];
+  // Decision 34 §2 stimulus departures (any real tool call in a stimulus
+  // turn) invalidate the repetition; accounting/diagnostic evidence stays.
+  const stimulusViolations: string[] = [];
+  // Freshness bound for the Decision 35 artifact: any artifact captured
+  // before this repetition started is stale (e.g. a leftover from an earlier
+  // repetition on the same isolated server) and is never accepted.
+  const repetitionStartedAt = new Date().toISOString();
   // Mutable builder for the exposure evidence; the final record is immutable.
   type MutableExposure = { -readonly [K in keyof ExposureEvidence]: ExposureEvidence[K] };
   const exposure: MutableExposure = {
@@ -271,7 +339,13 @@ async function runSynaraRepetitionWithWorkspace(
     context.onDiagnostic(
       `bootstrap turn (dormant catalog, unmeasured): input=${bootstrapRaw.input} output=${bootstrapRaw.output} cacheRead=${bootstrapRaw.cacheRead} cacheWrite=${bootstrapRaw.cacheWrite} total=${bootstrapRaw.total}`,
     );
-    if (bootstrap.toolCalls.length > 0) {
+    const bootstrapViolation = stimulusToolCallViolation("bootstrap turn", bootstrap.toolCalls);
+    if (bootstrapViolation !== null) {
+      // Decision 34 §2: the bootstrap turn is a real stimulus run; any tool
+      // call there invalidates the repetition too. The raw accounting stays
+      // in the repetition's startup field and the diagnostic remains, so the
+      // evidence is retained while the record is invalid.
+      stimulusViolations.push(bootstrapViolation);
       context.onDiagnostic(
         `bootstrap turn observed tool calls (recorded, not measured): ${bootstrap.toolCalls.join(", ")}`,
       );
@@ -333,7 +407,7 @@ async function runSynaraRepetitionWithWorkspace(
       // Wait for + validate + consume the Decision 35 observer artifact. A
       // missing, stale, malformed, or unwritable artifact is a measurement
       // failure (never a partial manifest promoted to valid).
-      manifest = await captureSynaraManifest(context, threadId);
+      manifest = await captureSynaraManifest(context, threadId, repetitionStartedAt);
     }
   }
   if (manifest === undefined) {
@@ -361,6 +435,7 @@ async function runSynaraRepetitionWithWorkspace(
   }
 
   const invalidReasons: string[] = [
+    ...stimulusViolations,
     ...(turns.some((turn) => turn.invalid) ? ["invalid turn(s)"] : []),
     ...(lifecycleFailures.length > 0 ? ["lifecycle failure(s)"] : []),
   ];
@@ -392,12 +467,25 @@ async function runSynaraRepetitionWithWorkspace(
   };
 }
 
+/**
+ * Decision 34 §2: a real tool call during a stimulus turn departs from the
+ * defined no-tool stimulus and invalidates the repetition. Returns the
+ * sanitized violation entry, or null when the turn stayed on-stimulus.
+ */
+export function stimulusToolCallViolation(
+  turnLabel: string,
+  toolCalls: readonly string[],
+): string | null {
+  if (toolCalls.length === 0) return null;
+  return `${turnLabel} observed tool call(s): ${toolCalls.join(", ")}`;
+}
+
 function invalidRepetition(
   context: RepetitionContext,
   exposure: ExposureEvidence,
   manifest: CanonicalManifestSummary | undefined,
   reason: string,
-  workspaceRoot: string,
+  workspaceRoot: string | null,
 ): RepetitionRecord {
   const { options, repetitionIndex } = context;
   return {
@@ -424,9 +512,59 @@ function invalidRepetition(
       thinkingLevel: context.options.thinkingLevel,
       promptHash: context.options.promptHash,
       promptBytes: context.options.promptBytes,
-      workspaceCwd: sanitizePathForReport(workspaceRoot),
+      workspaceCwd:
+        workspaceRoot === null
+          ? "<workspace-unavailable>"
+          : sanitizePathForReport(workspaceRoot),
       agentDir: sanitizePathForReport(context.options.agentDir),
       harnessVersion: context.options.harnessVersion,
+    },
+  };
+}
+
+/**
+ * Visible invalid record for a repetition that threw without producing an
+ * explicit invalid record: the sanitized lifecycle failure is recorded and
+ * the mode continues (the run set fails closed at the evidence layer).
+ */
+function failedRepetition(
+  options: SynaraDriverOptions,
+  repetitionIndex: number,
+  message: string,
+): RepetitionRecord {
+  return {
+    mode: options.mode,
+    repetitionIndex,
+    manifest: {
+      toolNames: [],
+      toolCount: 0,
+      canonicalBytes: 0,
+      hash: "",
+      hashAlgorithm: "sha256",
+      method: "unavailable",
+      localCaptureProduced: false,
+      catalogComplete: false,
+      catalogIncompleteReason: "repetition aborted before manifest capture",
+    },
+    startup: zeroStats(),
+    turns: [],
+    invalid: true,
+    invalidReason: message.slice(0, 500),
+    exposureEvidence: {
+      mode: options.mode,
+      projectSynaraMcpDesiredState: null,
+      activationSucceeded: false,
+      dormantObserved: false,
+      lifecycleFailures: [message],
+    },
+    config: {
+      model: options.modelId,
+      thinkingLevel: options.thinkingLevel,
+      promptHash: options.promptHash,
+      promptBytes: options.promptBytes,
+      workspaceCwd: "<workspace-unavailable>",
+      agentDir: sanitizePathForReport(options.agentDir),
+      harnessVersion: options.harnessVersion,
     },
   };
 }
@@ -731,14 +869,16 @@ function findSynaraMcpTerminalActivity(
 /**
  * Consume the Decision 35 catalog observer artifact: wait for it (it is
  * written by the isolated child server at the valid capture point of the
- * current repetition), then validate identity, freshness, and canonical
- * consistency and build the committed manifest summary. The artifact's
- * entries ARE the live `getAllTools()` result of the measured session; no
- * partial, inferred, or substituted catalog is ever promoted (Decision 35).
+ * current repetition), then validate identity, freshness, lifecycle
+ * generation binding, and canonical consistency and build the committed
+ * manifest summary. The artifact's entries ARE the live `getAllTools()`
+ * result of the measured session; no partial, inferred, or substituted
+ * catalog is ever promoted (Decision 35).
  */
 async function captureSynaraManifest(
   context: RepetitionContext,
   threadId: ThreadId,
+  repetitionStartedAt: string,
 ): Promise<CanonicalManifestSummary> {
   const { server, options, repetitionIndex } = context;
   const artifactPath = server.catalogArtifactPath;
@@ -763,6 +903,10 @@ async function captureSynaraManifest(
         mode: options.mode,
         threadId: String(threadId),
         phase: expectedPhase,
+        // Decision 35 freshness: the artifact must have been captured during
+        // this repetition; an older artifact (previous repetition, leftover
+        // file) is stale and never accepted.
+        capturedNotBefore: repetitionStartedAt,
       });
       if (validation.ok) {
         const localCaptureProduced = writeLocalManifest(
@@ -770,15 +914,20 @@ async function captureSynaraManifest(
           options.mode,
           repetitionIndex,
           validation.entries,
+          (reason) =>
+            context.onDiagnostic(
+              `repetition ${repetitionIndex}: local manifest retention rejected (${reason}); committed hash remains the identity proof`,
+            ),
         );
         return manifestSummaryFromEntries(validation.entries, {
           localCaptureProduced,
           catalogComplete: true,
         });
       }
-      // Stale or misrouted (wrong thread/mode/phase) or internally
-      // inconsistent: never accepted; a fresh write is not coming after the
-      // measured turn completed, so fail fast with the bounded reason.
+      // Stale or misrouted (wrong thread/mode/phase/generation) or
+      // internally inconsistent: never accepted; a fresh write is not coming
+      // after the measured turn completed, so fail fast with the bounded
+      // reason.
       return incompleteCatalogManifest(`catalog artifact rejected: ${validation.reason}`);
     }
     lastReason = "artifact not produced";

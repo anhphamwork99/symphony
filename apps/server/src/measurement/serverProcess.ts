@@ -42,6 +42,13 @@ export interface IsolatedServer {
    * isolated runs (and the user's own Synara instance) never configure it.
    */
   readonly catalogArtifactPath: string | null;
+  /**
+   * The Pi agent directory passed to the child through `PI_CODING_AGENT_DIR`
+   * (undefined when the caller did not configure one): the isolated Synara
+   * Pi runtime resolves the same Pi configuration as standalone and custom
+   * `--agent-dir` (Decision 34 §4 configuration equivalence).
+   */
+  readonly piCodingAgentDir: string | undefined;
   readonly process: ChildProcess;
   readonly stop: () => Promise<void>;
 }
@@ -271,6 +278,7 @@ export async function startIsolatedServer(input: {
     providerEventLogPath,
     cwd: homeDir,
     catalogArtifactPath,
+    piCodingAgentDir: input.agentDir,
     process: child,
     stop,
   };

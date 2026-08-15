@@ -209,6 +209,8 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     readonly requests: Array<{ readonly token: string | null; readonly method: string }>;
     readonly reload: ReturnType<typeof vi.fn>;
     readonly abort: ReturnType<typeof vi.fn>;
+    /** Decision 35: committed activation generations observed by the observer seam. */
+    readonly committedGenerations: string[];
   }
 
   function makeCoordinatorHarness(options: {
@@ -308,6 +310,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     // (excess properties are legal for variables) and keeps `abort`
     // observable for the no-whole-session-abort assertions.
     const session = { reload, abort };
+    const committedGenerations: string[] = [];
     const coordinator = makePiSessionSynaraMcpCoordinator({
       threadId: "thread-pi-1" as ThreadId,
       adapter,
@@ -318,6 +321,11 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       ...(options.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: options.drainTimeoutMs }),
       ...(options.withCredentials === false ? {} : { credentials }),
       fetch,
+      // Decision 35: the measurement-only observer seam observes the exact
+      // committed activation lifecycle generation at the safe-boundary commit.
+      onActivationCommitted: (lifecycleGeneration) => {
+        committedGenerations.push(lifecycleGeneration);
+      },
     });
       return {
         adapter,
@@ -331,6 +339,7 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
         requests,
         reload,
         abort,
+        committedGenerations,
       };
   }
 
@@ -389,6 +398,36 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
       "synara_invoke",
     ]);
     expect(harness.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies the observer with the exact committed activation lifecycle generation", async () => {
+    const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
+
+    const activation = harness.coordinator.activate({});
+    await flush();
+    await harness.adapter.notifySafeBoundary();
+    const result = await activation;
+
+    expect(result).toMatchObject({ ok: true, state: "active" });
+    // The committed activation lifecycle generation is minted fresh per
+    // activation at the safe-boundary commit — it is the generation the
+    // credential was bound to, NOT the outer session/authority generation.
+    expect(harness.committedGenerations).toHaveLength(1);
+    const committed = harness.committedGenerations[0]!;
+    expect(committed).toMatch(/^[0-9a-f-]{36}$/);
+    expect(committed).toBe(harness.mintedAuthorities[0]?.lifecycleGeneration);
+    if (!result.ok) {
+      throw new Error("activation must succeed");
+    }
+    expect(committed).toBe(result.lifecycleGeneration);
+    expect(committed).not.toBe(AUTHORITY_BINDING.lifecycleGeneration);
+    // A duplicate activation while already active is idempotent: no new
+    // commit runs, so the observer is not re-notified with a stale or
+    // duplicate generation.
+    const duplicate = harness.coordinator.activate({});
+    const duplicateResult = await duplicate;
+    expect(duplicateResult).toMatchObject({ ok: true, state: "active", alreadyActive: true });
+    expect(harness.committedGenerations).toHaveLength(1);
   });
 
   it("fails closed at the authority stage when no server-minted binding exists", async () => {

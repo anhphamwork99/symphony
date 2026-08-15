@@ -18,6 +18,7 @@ import {
   CATALOG_OBSERVER_ENV_ENABLE,
   CATALOG_OBSERVER_ENV_HOME,
   CATALOG_OBSERVER_ENV_MODE,
+  captureCatalogObserverEnv,
   makePiCatalogObserver,
   type PiCatalogObserver,
 } from "./piCatalogObserver.ts";
@@ -540,6 +541,160 @@ describe("pi catalog observer failure surfaces (Decision 35)", () => {
       if (parsed.status === "failed") {
         expect(parsed.message).toMatch(/^catalog observer capture failed: [a-z-]+$/);
       }
+    } finally {
+      removeIsolatedHomeDir(harness.homeDir);
+    }
+  });
+});
+
+describe("pi catalog observer environment capture and scrub (Decision 35 confinement)", () => {
+  it("captures the observer configuration once and scrubs it from the process environment", () => {
+    const source: NodeJS.ProcessEnv = {
+      [CATALOG_OBSERVER_ENV_ENABLE]: "1",
+      [CATALOG_OBSERVER_ENV_HOME]: "/tmp/isolated-home",
+      [CATALOG_OBSERVER_ENV_ARTIFACT]: "/tmp/isolated-home/catalog-artifact.json",
+      [CATALOG_OBSERVER_ENV_MODE]: "synara-activated",
+      UNRELATED_VAR: "keep-me",
+    };
+    const processEnv: NodeJS.ProcessEnv = { ...source };
+    const captured = captureCatalogObserverEnv(source, processEnv);
+    // Captured once for the adapter; unrelated variables are untouched.
+    expect(captured[CATALOG_OBSERVER_ENV_ENABLE]).toBe("1");
+    expect(captured[CATALOG_OBSERVER_ENV_MODE]).toBe("synara-activated");
+    expect(captured.UNRELATED_VAR).toBeUndefined();
+    // Scrubbed before any unrelated child/tool process can inherit them.
+    for (const key of [
+      CATALOG_OBSERVER_ENV_ENABLE,
+      CATALOG_OBSERVER_ENV_HOME,
+      CATALOG_OBSERVER_ENV_ARTIFACT,
+      CATALOG_OBSERVER_ENV_MODE,
+    ]) {
+      expect(processEnv[key]).toBeUndefined();
+    }
+    expect(processEnv.UNRELATED_VAR).toBe("keep-me");
+  });
+
+  it("absent mode explicitly removes inherited observer variables from the process environment", () => {
+    const processEnv: NodeJS.ProcessEnv = {
+      [CATALOG_OBSERVER_ENV_ENABLE]: "0",
+      [CATALOG_OBSERVER_ENV_HOME]: "/tmp/leaked-home",
+      [CATALOG_OBSERVER_ENV_ARTIFACT]: "/tmp/leaked-home/catalog-artifact.json",
+      [CATALOG_OBSERVER_ENV_MODE]: "synara-default",
+    };
+    const captured = captureCatalogObserverEnv(processEnv, processEnv);
+    // Disabled enablement: the observer stays absent…
+    expect(makePiCatalogObserver(captured)).toBeNull();
+    // …but the inherited observer variables are removed anyway so they never
+    // leak into unrelated child/tool processes.
+    for (const key of [
+      CATALOG_OBSERVER_ENV_ENABLE,
+      CATALOG_OBSERVER_ENV_HOME,
+      CATALOG_OBSERVER_ENV_ARTIFACT,
+      CATALOG_OBSERVER_ENV_MODE,
+    ]) {
+      expect(processEnv[key]).toBeUndefined();
+    }
+  });
+
+  it("an observer built from the captured snapshot still captures while the environment stays scrubbed", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-catalog-observer-capture-"));
+    try {
+      const artifactPath = path.join(homeDir, "catalog-artifact.json");
+      const processEnv: NodeJS.ProcessEnv = {
+        [CATALOG_OBSERVER_ENV_ENABLE]: "1",
+        [CATALOG_OBSERVER_ENV_HOME]: homeDir,
+        [CATALOG_OBSERVER_ENV_ARTIFACT]: artifactPath,
+        [CATALOG_OBSERVER_ENV_MODE]: "synara-default",
+      };
+      const captured = captureCatalogObserverEnv(processEnv, processEnv);
+      const observer = makePiCatalogObserver(captured);
+      expect(observer).not.toBeNull();
+      observer!.onSessionReady({
+        threadId: "thread-1",
+        session: stubSession(TOOLS),
+        lifecycleGeneration: "gen-1",
+      });
+      // The capture itself still works from the captured snapshot, and the
+      // process environment remains scrubbed (nothing re-inherits it).
+      expect(fs.existsSync(artifactPath)).toBe(true);
+      for (const key of [
+        CATALOG_OBSERVER_ENV_ENABLE,
+        CATALOG_OBSERVER_ENV_HOME,
+        CATALOG_OBSERVER_ENV_ARTIFACT,
+        CATALOG_OBSERVER_ENV_MODE,
+      ]) {
+        expect(processEnv[key]).toBeUndefined();
+      }
+    } finally {
+      removeIsolatedHomeDir(homeDir);
+    }
+  });
+});
+
+describe("pi catalog observer generation binding (Decision 35)", () => {
+  it("records the exact committed activation lifecycle generation in the artifact", () => {
+    const harness = makeHarness("synara-activated");
+    try {
+      const session = stubSession(TOOLS);
+      // The session started with the outer session-start generation; the
+      // activation commits a FRESH generation (the coordinator mints one per
+      // activation at the safe boundary). Only the committed generation may
+      // bind the capture.
+      harness.observer.onSessionReady({
+        threadId: "thread-1",
+        session,
+        lifecycleGeneration: "outer-session-gen",
+      });
+      harness.observer.onActivationCommitted({
+        threadId: "thread-1",
+        lifecycleGeneration: "committed-activation-gen",
+      });
+      harness.observer.onTurnPrompt({
+        threadId: "thread-1",
+        session,
+        lifecycleGeneration: "committed-activation-gen",
+      });
+      const artifact = readOkArtifact(harness.artifactPath);
+      expect(artifact.lifecycleGeneration).toBe("committed-activation-gen");
+      // The consumer accepts it when the expected committed generation is
+      // known and rejects the outer session-start generation as stale.
+      expect(
+        validateCatalogArtifact(artifact, {
+          mode: "synara-activated",
+          threadId: "thread-1",
+          phase: "activated-terminal",
+          lifecycleGeneration: "committed-activation-gen",
+        }).ok,
+      ).toBe(true);
+      expect(
+        validateCatalogArtifact(artifact, {
+          mode: "synara-activated",
+          threadId: "thread-1",
+          phase: "activated-terminal",
+          lifecycleGeneration: "outer-session-gen",
+        }),
+      ).toEqual({ ok: false, reason: "generation-mismatch" });
+    } finally {
+      removeIsolatedHomeDir(harness.homeDir);
+    }
+  });
+
+  it("declines the activated capture when the prompt generation is not the committed generation", () => {
+    const harness = makeHarness("synara-activated");
+    try {
+      const session = stubSession(TOOLS);
+      harness.observer.onActivationCommitted({
+        threadId: "thread-1",
+        lifecycleGeneration: "committed-activation-gen",
+      });
+      // The prompt still runs under the outer session generation: the
+      // committed generation is no longer current, so the capture is declined.
+      harness.observer.onTurnPrompt({
+        threadId: "thread-1",
+        session,
+        lifecycleGeneration: "outer-session-gen",
+      });
+      expectNoArtifact(harness.homeDir, harness.artifactPath);
     } finally {
       removeIsolatedHomeDir(harness.homeDir);
     }

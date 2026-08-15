@@ -4,6 +4,7 @@
 // configuration the Synara modes use), captures startup SessionStats, the
 // complete effective tool manifest through the real tool/schema API, the
 // fixed two-turn stimulus, and tool-call invalidation.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -52,16 +53,154 @@ function toRaw(stats: { readonly tokens: { input: number; output: number; cacheR
   };
 }
 
+/**
+ * Prepare a local full-manifest retention directory under Decision 34 §3:
+ * the destination must be outside any git repository or, when inside one,
+ * must pass `git check-ignore` (the equivalent tracked/ignored proof) so a
+ * repo-contained manifest path can never be committed. Symlinks (a planted
+ * redirect anywhere between the deepest existing ancestor and the target,
+ * or at the target itself) and non-directory targets are rejected, and the
+ * directory is created when missing and made owner-only (0700) either way.
+ * Returns the prepared directory or a bounded rejection reason (nothing is
+ * written on rejection).
+ */
+export function prepareLocalManifestDir(
+  localManifestDir: string,
+): { readonly ok: true; readonly dir: string } | { readonly ok: false; readonly reason: string } {
+  const resolved = path.resolve(localManifestDir);
+  const ancestor = deepestExistingAncestor(resolved);
+  if (ancestor === null) {
+    return { ok: false, reason: "path-resolve-failed" };
+  }
+  // A pre-existing target that is a symlink or a non-directory is rejected
+  // before anything is created or chmodded.
+  if (ancestor.missing.length === 0) {
+    let stat;
+    try {
+      stat = fs.lstatSync(resolved);
+    } catch {
+      return { ok: false, reason: "path-resolve-failed" };
+    }
+    if (stat.isSymbolicLink()) {
+      return { ok: false, reason: "symlink-rejected" };
+    }
+    if (!stat.isDirectory()) {
+      return { ok: false, reason: "not-a-directory" };
+    }
+  }
+  // Repo containment + ignore proof runs before creation (check-ignore works
+  // on not-yet-existing paths, and rejection then creates nothing). The
+  // canonical spelling is used so a symlinked path is judged by where the
+  // write actually lands.
+  const canonicalTarget = path.join(ancestor.dir, ...ancestor.missing);
+  const repoRoot = findGitRepoRoot(canonicalTarget);
+  if (repoRoot !== null && !gitCheckIgnore(repoRoot, canonicalTarget)) {
+    return { ok: false, reason: "inside-repo-not-ignored" };
+  }
+  try {
+    fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  } catch {
+    return { ok: false, reason: "directory-create-failed" };
+  }
+  // The created directory must be a real directory at the canonical spelling
+  // of the user's path: a symlink planted between the ancestor and the
+  // target (or at the target) would redirect the write and is rejected.
+  let realCreated: string;
+  try {
+    realCreated = fs.realpathSync(resolved);
+  } catch {
+    return { ok: false, reason: "directory-create-failed" };
+  }
+  if (realCreated !== canonicalTarget) {
+    return { ok: false, reason: "symlink-redirect-rejected" };
+  }
+  let createdStat;
+  try {
+    createdStat = fs.lstatSync(resolved);
+  } catch {
+    return { ok: false, reason: "directory-create-failed" };
+  }
+  if (createdStat.isSymbolicLink() || !createdStat.isDirectory()) {
+    return { ok: false, reason: "not-a-directory" };
+  }
+  try {
+    fs.chmodSync(resolved, 0o700);
+  } catch {
+    return { ok: false, reason: "permission-failed" };
+  }
+  // The prepared directory is the canonical spelling of the user's path —
+  // where the write actually lands (a consistent symlink keeps it equal to
+  // the lexical path on most systems).
+  return { ok: true, dir: canonicalTarget };
+}
+
+/** Deepest existing ancestor of a target plus the not-yet-existing tail. */
+function deepestExistingAncestor(
+  target: string,
+): { readonly dir: string; readonly missing: readonly string[] } | null {
+  const missing: string[] = [];
+  let existing = target;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return null;
+    missing.unshift(path.basename(existing));
+    existing = parent;
+  }
+  let realExisting: string;
+  try {
+    realExisting = fs.realpathSync(existing);
+  } catch {
+    return null;
+  }
+  return { dir: realExisting, missing };
+}
+
+/** Nearest enclosing git work tree (`.git` dir or file), or null outside any repo. */
+function findGitRepoRoot(target: string): string | null {
+  let cursor = target;
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (fs.existsSync(path.join(cursor, ".git"))) return cursor;
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return null;
+    cursor = parent;
+  }
+  return null;
+}
+
+/**
+ * `git check-ignore` proof for a repo-contained destination. Exit 0 is the
+ * tracked/ignored proof; anything else (not ignored, no git, not a repo)
+ * fails closed so an unproven repo-contained path is never written.
+ */
+function gitCheckIgnore(repoRoot: string, target: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", target], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function writeLocalManifest(
   localManifestDir: string | null,
   mode: string,
   repetitionIndex: number,
   entries: readonly ReturnType<typeof enumerateToolManifest>[number][],
+  onRejected?: (reason: string) => void,
 ): boolean {
+  // Default (null) remains allowed and simply records that no local full
+  // manifest was produced (Decision 34 §3: local retention is optional).
   if (localManifestDir === null) return false;
-  const manifestDir = path.resolve(localManifestDir);
-  fs.mkdirSync(manifestDir, { recursive: true, mode: 0o700 });
-  const target = path.join(manifestDir, `${mode}-${repetitionIndex}.manifest.json`);
+  const prepared = prepareLocalManifestDir(localManifestDir);
+  if (!prepared.ok) {
+    onRejected?.(prepared.reason);
+    return false;
+  }
+  const target = path.join(prepared.dir, `${mode}-${repetitionIndex}.manifest.json`);
   fs.writeFileSync(target, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600 });
   return true;
 }
@@ -101,6 +240,10 @@ export async function runStandaloneMode(
         "standalone",
         repetitionIndex,
         entries,
+        (reason) =>
+          diagnostics.push(
+            `standalone/${repetitionIndex}: local manifest retention rejected (${reason}); committed hash remains the identity proof`,
+          ),
       );
       const manifest = summarizeSessionManifest(handle.session, {
         localCaptureProduced,

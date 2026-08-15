@@ -261,6 +261,31 @@ describe("token overhead isolated server lifecycle (non-gated)", () => {
     }
   }, 120_000);
 
+  it("passes the resolved agentDir to the isolated child server so the Pi runtime matches standalone", async () => {
+    // Decision 34 §4 configuration equivalence: the isolated Synara Pi
+    // runtime must resolve the SAME Pi configuration as standalone and
+    // custom `--agent-dir`. The launch input is threaded from the driver's
+    // options into PI_CODING_AGENT_DIR in the child environment; the handle
+    // records what was passed.
+    const customDir = "/custom/pi-agent";
+    const server = await startIsolatedServer({ agentDir: customDir });
+    try {
+      expect(server.piCodingAgentDir).toBe(customDir);
+    } finally {
+      await server.stop();
+      removeIsolatedHomeDir(server.homeDir);
+    }
+    // Default (no agentDir): the child resolves Pi's own configuration and
+    // the handle records no override.
+    const defaultServer = await startIsolatedServer({});
+    try {
+      expect(defaultServer.piCodingAgentDir).toBeUndefined();
+    } finally {
+      await defaultServer.stop();
+      removeIsolatedHomeDir(defaultServer.homeDir);
+    }
+  }, 120_000);
+
   it("runs the child server from the isolated home dir so no repo-local state is possible", async () => {
     const fs = await import("node:fs");
     const os = await import("node:os");

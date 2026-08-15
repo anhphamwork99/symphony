@@ -139,6 +139,21 @@ export interface CatalogArtifactExpectation {
   readonly mode: CatalogArtifactMode;
   readonly threadId: string;
   readonly phase: CatalogArtifactPhase;
+  /**
+   * Expected lifecycle-generation binding; enforced exactly when provided.
+   * The observer records the coordinator's committed activation generation
+   * for activated captures (never the outer session-start generation), so a
+   * caller that knows the committed generation can reject any artifact bound
+   * to a different (stale/wrong) generation (Decision 35).
+   */
+  readonly lifecycleGeneration?: string | null;
+  /**
+   * Freshness bound: the artifact must have been captured at/after this ISO
+   * instant. Rejects a pre-existing artifact from an earlier repetition that
+   * could not have been written by the current one (Decision 35 never
+   * accepts a stale artifact).
+   */
+  readonly capturedNotBefore?: string;
 }
 
 export type CatalogArtifactValidation =
@@ -169,6 +184,22 @@ export function validateCatalogArtifact(
   if (artifact.phase !== expected.phase) {
     return { ok: false, reason: "phase-mismatch" };
   }
+  // Generation binding: an activated capture MUST be bound to a committed
+  // activation lifecycle generation (null means the capture lost its binding
+  // and is stale), while default-mode captures may legitimately record null
+  // (no activation ever committed for the session). When the caller knows
+  // the expected committed generation, any other value is stale/wrong.
+  if (expected.mode === "synara-activated") {
+    if (artifact.lifecycleGeneration === null || artifact.lifecycleGeneration.length === 0) {
+      return { ok: false, reason: "generation-unbound" };
+    }
+  }
+  if (
+    expected.lifecycleGeneration !== undefined &&
+    artifact.lifecycleGeneration !== expected.lifecycleGeneration
+  ) {
+    return { ok: false, reason: "generation-mismatch" };
+  }
   if (artifact.entries.length === 0) {
     return { ok: false, reason: "empty-catalog" };
   }
@@ -183,6 +214,11 @@ export function validateCatalogArtifact(
   }
   if (Number.isNaN(Date.parse(artifact.capturedAt))) {
     return { ok: false, reason: "malformed-captured-at" };
+  }
+  if (expected.capturedNotBefore !== undefined) {
+    if (Date.parse(artifact.capturedAt) < Date.parse(expected.capturedNotBefore)) {
+      return { ok: false, reason: "stale-artifact" };
+    }
   }
   let canonicalBytes: Uint8Array;
   try {

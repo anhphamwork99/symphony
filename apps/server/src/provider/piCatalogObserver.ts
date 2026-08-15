@@ -37,6 +37,40 @@ export const CATALOG_OBSERVER_ENV_ARTIFACT = "SYNARA_MEASUREMENT_CATALOG_ARTIFAC
 /** The measurement mode selecting the capture schedule. */
 export const CATALOG_OBSERVER_ENV_MODE = "SYNARA_MEASUREMENT_CATALOG_MODE" as const;
 
+/** All observer configuration variables; the complete set is captured/scrubbed together. */
+export const CATALOG_OBSERVER_ENV_KEYS = [
+  CATALOG_OBSERVER_ENV_ENABLE,
+  CATALOG_OBSERVER_ENV_HOME,
+  CATALOG_OBSERVER_ENV_ARTIFACT,
+  CATALOG_OBSERVER_ENV_MODE,
+] as const;
+
+/**
+ * Capture the Decision 35 observer configuration exactly once from the given
+ * source environment and scrub every observer variable from the process
+ * environment (default) before any unrelated child/tool process can inherit
+ * it. The scrub runs regardless of whether the observer is enabled: absent
+ * or disabled mode still explicitly removes inherited observer variables so
+ * they never leak into unrelated children (Decision 35 confinement). Returns
+ * the captured snapshot the observer is built from.
+ */
+export function captureCatalogObserverEnv(
+  source: NodeJS.ProcessEnv,
+  processEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const captured: NodeJS.ProcessEnv = {};
+  for (const key of CATALOG_OBSERVER_ENV_KEYS) {
+    const value = source[key];
+    if (value !== undefined) {
+      captured[key] = value;
+    }
+  }
+  for (const key of CATALOG_OBSERVER_ENV_KEYS) {
+    delete processEnv[key];
+  }
+  return captured;
+}
+
 export type PiCatalogObserverMode = "synara-default" | "synara-activated";
 export type PiCatalogObserverPhase = "ready" | "activated-terminal";
 

@@ -204,4 +204,97 @@ describe("catalog artifact validation (Decision 35)", () => {
       }),
     ).toEqual({ ok: false, reason: "canonicalization-method-mismatch" });
   });
+
+  it("binds activated captures to the committed lifecycle generation and rejects unbound artifacts", () => {
+    // An activated capture MUST carry the coordinator's committed activation
+    // generation (Decision 35); a null/empty binding means the capture lost
+    // its generation and is stale.
+    expect(
+      validateCatalogArtifact(
+        okArtifact({ mode: "synara-activated", phase: "activated-terminal", lifecycleGeneration: null }),
+        {
+          mode: "synara-activated",
+          threadId: "thread-1",
+          phase: "activated-terminal",
+        },
+      ),
+    ).toEqual({ ok: false, reason: "generation-unbound" });
+    expect(
+      validateCatalogArtifact(
+        okArtifact({ mode: "synara-activated", phase: "activated-terminal", lifecycleGeneration: "" }),
+        {
+          mode: "synara-activated",
+          threadId: "thread-1",
+          phase: "activated-terminal",
+        },
+      ),
+    ).toEqual({ ok: false, reason: "generation-unbound" });
+    // Default-mode captures may legitimately carry null (no activation ever
+    // committed for the session): default generation semantics stay explicit.
+    const defaultNull = okArtifact({ lifecycleGeneration: null });
+    expect(
+      validateCatalogArtifact(defaultNull, {
+        mode: "synara-default",
+        threadId: "thread-1",
+        phase: "ready",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects an artifact bound to a wrong/stale generation when the expected generation is known", () => {
+    const committed = okArtifact({
+      mode: "synara-activated",
+      phase: "activated-terminal",
+      lifecycleGeneration: "committed-gen",
+    });
+    expect(
+      validateCatalogArtifact(committed, {
+        mode: "synara-activated",
+        threadId: "thread-1",
+        phase: "activated-terminal",
+        lifecycleGeneration: "committed-gen",
+      }).ok,
+    ).toBe(true);
+    // Wrong generation: stale artifact from another activation is rejected.
+    expect(
+      validateCatalogArtifact(committed, {
+        mode: "synara-activated",
+        threadId: "thread-1",
+        phase: "activated-terminal",
+        lifecycleGeneration: "outer-session-gen",
+      }),
+    ).toEqual({ ok: false, reason: "generation-mismatch" });
+    // Expected null rejects a generation-bound artifact and vice versa.
+    expect(
+      validateCatalogArtifact(committed, {
+        mode: "synara-activated",
+        threadId: "thread-1",
+        phase: "activated-terminal",
+        lifecycleGeneration: null,
+      }),
+    ).toEqual({ ok: false, reason: "generation-mismatch" });
+  });
+
+  it("rejects a stale artifact captured before the repetition started", () => {
+    const now = new Date().toISOString();
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    // A leftover artifact from a previous repetition (captured before this
+    // repetition began) is never accepted (Decision 35 freshness).
+    expect(
+      validateCatalogArtifact(okArtifact({ capturedAt: earlier }), {
+        mode: "synara-default",
+        threadId: "thread-1",
+        phase: "ready",
+        capturedNotBefore: now,
+      }),
+    ).toEqual({ ok: false, reason: "stale-artifact" });
+    expect(
+      validateCatalogArtifact(okArtifact({ capturedAt: now }), {
+        mode: "synara-default",
+        threadId: "thread-1",
+        phase: "ready",
+        capturedNotBefore: now,
+      }).ok,
+    ).toBe(true);
+  });
 });

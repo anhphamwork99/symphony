@@ -99,7 +99,7 @@ import {
   type PiSynaraMcpStagedActivation,
 } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
-import { makePiCatalogObserver } from "../piCatalogObserver.ts";
+import { captureCatalogObserverEnv, makePiCatalogObserver } from "../piCatalogObserver.ts";
 import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
@@ -355,6 +355,13 @@ interface PiSessionContext {
   readonly synaraMcpCoordinator: PiSynaraMcpLifecycleCoordinator;
   /** impl-07: Pi-local execution registry for Synara MCP tool calls. */
   readonly synaraMcpExecutions: PiSynaraMcpToolExecutionRegistry;
+  /**
+   * Decision 35: per-session current lifecycle generation for the
+   * measurement-only observer's activated capture (the coordinator's
+   * committed activation generation after reload). Only the observer reads
+   * it; runtime events keep the outer session generation.
+   */
+  readonly observerCurrentLifecycleGeneration?: { current: string | undefined };
   readonly lifecycleGeneration?: string;
   runtime: PiAgentRuntime;
   readonly processSupervisor: PiBashProcessSupervisor;
@@ -600,12 +607,15 @@ export interface PiSessionSynaraMcpCoordinatorInput {
    * Optional measurement-only observer notification (Decision 35): invoked
    * synchronously when the activation commit is proven at the safe boundary
    * (staged catalog applied and the Pi runtime reload completed), after the
-   * execution admission generation reset. The caller binds its own session
-   * context; the notification is a pure signal. Must not throw; the observer
-   * itself never throws, and a throwing notification is absorbed by the
-   * coordinator's commit path.
+   * execution admission generation reset. The caller receives the exact
+   * committed activation lifecycle generation
+   * (`staged.lifecycleGeneration` — minted fresh per activation at commit),
+   * never the outer session-start generation. The caller binds its own
+   * session context; the notification is a pure signal. Must not throw; the
+   * observer itself never throws, and a throwing notification is absorbed by
+   * the coordinator's commit path.
    */
-  readonly onActivationCommitted?: () => void;
+  readonly onActivationCommitted?: (lifecycleGeneration: string) => void;
 }
 
 /**
@@ -789,13 +799,16 @@ export function makePiSessionSynaraMcpCoordinator(
     // forever with its own pending map (stale executions/callbacks can never
     // enter or mutate the fresh generation), and a fresh generation created
     // while a disable was queued starts fenced.
-    onActivationCommitted: (_staged, options) => {
+    onActivationCommitted: (staged, options) => {
       input.executions.resetForFreshActivation(options.fenceFreshAdmission);
       // Measurement-only observer notification (Decision 35): the activation
-      // is proven and the reload completed at this point. The observer is
+      // is proven and the reload completed at this point. The exact committed
+      // activation lifecycle generation (staged.lifecycleGeneration) is
+      // passed so the observer binds the capture to the committed generation
+      // — never the outer session-start generation. The observer is
       // contractually non-throwing; a bug here is absorbed by the
       // coordinator's commit path and can never roll back the activation.
-      input.onActivationCommitted?.();
+      input.onActivationCommitted?.(staged.lifecycleGeneration);
     },
   };
   return makePiSynaraMcpLifecycleCoordinator({
@@ -1670,8 +1683,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const fileSystem = yield* FileSystem.FileSystem;
     // Decision 35 measurement-only observer. Absent in normal runs: only the
     // isolated harness child server sets the observer environment, and the
-    // observer is a non-throwing no-op when it cannot be built.
-    const catalogObserver = makePiCatalogObserver(options?.catalogObserverEnv ?? process.env);
+    // observer is a non-throwing no-op when it cannot be built. The observer
+    // configuration is captured exactly once here and then scrubbed from the
+    // process environment, so no unrelated child/tool process spawned later
+    // (Pi bash tools, gateway helpers, …) can inherit the measurement
+    // configuration (Decision 35 confinement); the scrub runs even when the
+    // observer is absent or disabled so inherited observer variables never
+    // leak into unrelated children.
+    const catalogObserver = makePiCatalogObserver(
+      captureCatalogObserverEnv(options?.catalogObserverEnv ?? process.env),
+    );
     const safeObserve = (run: () => void): void => {
       try {
         run();
@@ -2541,6 +2562,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // execution registry fences and settles Synara MCP tool calls on
         // disable (impl-07).
         const synaraMcpExecutions = makePiSynaraMcpToolExecutionRegistry();
+        // Decision 35: the generation the observer's capture must still match
+        // is the coordinator's committed activation lifecycle generation (a
+        // fresh generation minted per activation at the safe-boundary commit),
+        // never the outer session-start generation. This per-session cell
+        // tracks the committed generation after reload for the observer's
+        // activated capture only; runtime events keep the outer session
+        // generation, so the cell never changes event/accounting semantics.
+        const observerCurrentLifecycleGeneration =
+          catalogObserver === null
+            ? undefined
+            : { current: input.lifecycleGeneration };
         const synaraMcpCoordinator = makePiSessionSynaraMcpCoordinator({
           threadId: input.threadId,
           adapter: synaraMcp.adapter,
@@ -2555,19 +2587,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             ? {}
             : { fetch: options.agentGatewayFetch }),
           // Decision 35: the measurement-only observer learns the proven
-          // activation commit (reload completed) through this seam. The
-          // session generation it records is the one the capture must still
-          // match; a changed generation declines the capture.
+          // activation commit (reload completed) through this seam together
+          // with the exact committed activation lifecycle generation. The
+          // generation it records is the one the capture must still match; a
+          // changed generation declines the capture.
           ...(catalogObserver === null
             ? {}
             : {
-                onActivationCommitted: () =>
+                onActivationCommitted: (lifecycleGeneration) => {
+                  observerCurrentLifecycleGeneration!.current = lifecycleGeneration;
                   safeObserve(() =>
                     catalogObserver.onActivationCommitted({
                       threadId: String(input.threadId),
-                      lifecycleGeneration: input.lifecycleGeneration,
+                      lifecycleGeneration,
                     }),
-                  ),
+                  );
+                },
               }),
         });
         const now = new Date().toISOString();
@@ -2590,6 +2625,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ...(input.lifecycleGeneration !== undefined
             ? { lifecycleGeneration: input.lifecycleGeneration }
             : {}),
+          ...(observerCurrentLifecycleGeneration === undefined
+            ? {}
+            : { observerCurrentLifecycleGeneration }),
           runtime,
           gatewayControlAvailable: false,
           synaraMcp: synaraMcp.adapter,
@@ -2865,12 +2903,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // resulting catalog state (the enable command never reaches sendTurn;
         // it is owned by the command boundary). The observer records the
         // complete live manifest only after the proven activation commit,
-        // while the recorded generation is still current, and never throws.
+        // while the committed activation lifecycle generation is still
+        // current, and never throws.
         safeObserve(() =>
           catalogObserver?.onTurnPrompt({
             threadId: String(input.threadId),
             session: context.runtime.session,
-            lifecycleGeneration: context.lifecycleGeneration,
+            lifecycleGeneration: context.observerCurrentLifecycleGeneration?.current,
           }),
         );
         void context.runtime.session
