@@ -28,16 +28,16 @@ filesystem paths.
 
 | Mode | Effective tools | Canonical schema bytes | Cold turn total tokens | Turn-2 incremental total |
 | --- | ---: | ---: | --- | ---: |
-| Pi standalone | 44 | 54,303 | 22,206 / 22,206 / 22,206 | 79 / 79 / 79 |
-| Synara default | 48 | 63,752 | 24,020 / 24,023 / 24,021 | 79 / 79 / 79 |
-| Synara MCP activated | 105 | 170,798 | 65,113 / 65,109 / 65,111 | 79 / 79 / 79 |
+| Pi standalone | 44 | 54,303 | 22,206 / 22,205 / 22,205 | 79 / 79 / 79 |
+| Synara default | 48 | 63,752 | 24,021 / 24,022 / 24,020 | 79 / 79 / 79 |
+| Synara MCP activated | 105 | 170,798 | 65,111 / 65,111 / 65,109 | 79 / 79 / 79 |
 
 Against the paired standalone runs:
 
 - Synara default added 4 tools and 9,449 canonical schema bytes. Cold-turn
-  processed tokens increased by 1,814–1,817 tokens (about 8.2%).
+  processed tokens increased by 1,815–1,817 tokens (about 8.2%).
 - Activated Synara MCP added 61 tools and 116,495 canonical schema bytes.
-  Cold-turn processed tokens increased by 42,903–42,907 tokens (about 193%).
+  Cold-turn processed tokens increased by 42,904–42,906 tokens (about 193%).
 - Subsequent-turn incremental totals were identical across all nine runs
   (`79`), so the measured overhead is concentrated in the effective
   policy/catalog context rather than the bounded response itself.
