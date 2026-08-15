@@ -52,6 +52,7 @@ import {
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
+import { recoverSynaraMcpPendingOperations } from "../src/orchestration/synaraMcpStartupRecovery.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
@@ -324,6 +325,27 @@ export async function makeWsOrchestrationHarness(
   try {
     await runtime.runPromise(reactor.start.pipe(Scope.provide(reactorScope)));
     await runtime.runPromise(Effect.sleep(10));
+    // impl-09 startup recovery of pending Synara MCP activation operations,
+    // mirroring `createEffectServer`: runs after the projection bootstrap and
+    // before `markCommandReady`, settles every durable pending operation with
+    // ZERO provider/MCP replay, and blocks the harness when a legacy pending
+    // operation without a recovery identity is found.
+    await runtime.runPromise(
+      Effect.tryPromise(() =>
+        recoverSynaraMcpPendingOperations({
+          seams: {
+            now: () => new Date(),
+            getReadModel: () => Effect.runPromise(engine.getReadModel()),
+            dispatch: (command) => Effect.runPromise(engine.dispatch(command)),
+          },
+        }).then((result) => {
+          if (result.kind === "blocked") {
+            throw new Error(result.detail);
+          }
+          return result.operations;
+        }),
+      ),
+    );
     await runtime.runPromise(runtimeStartup.markCommandReady);
   } catch (cause) {
     await runtime
