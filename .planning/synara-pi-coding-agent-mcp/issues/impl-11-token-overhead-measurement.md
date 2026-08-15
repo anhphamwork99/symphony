@@ -4,7 +4,7 @@
 
 **Blocked by:** impl-03 — Remove default Synara tools and add dormant MCP extension.
 
-**Status:** implemented-awaiting-final-acceptance
+**Status:** done
 
 - [x] Measure policy, tool schema, startup/context, cached input, and processed tokens consistently.
 - [x] Compare equivalent prompts and model/session configurations.
