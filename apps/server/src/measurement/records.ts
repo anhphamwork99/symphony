@@ -3,8 +3,12 @@
 // per-repetition records, paired deltas, spread/variance summaries, and the
 // insufficient-evidence logic. Every repetition stays visible — invalid runs
 // are never dropped, and no numeric variance threshold is invented: variance
-// is reported, and only the Decision 34 direction-consistency rule feeds the
-// non-binding recommendation.
+// is reported, and run-set sufficiency covers required repetitions,
+// accounting/reconciliation, catalog completeness, and config equivalence
+// only. The Decision 34 direction-consistency rule (a claimed direction must
+// hold across valid paired repetitions) feeds the non-binding recommendation,
+// not the run-set sufficiency gate; per-repetition component sign agreement in
+// paired deltas stays descriptive data.
 import { PI_RECONCILIATION_RULE, reconcileRawVsNormalized, reconcileSessionStats } from "./reconciliation.ts";
 import type {
   ComponentSummary,
@@ -110,6 +114,11 @@ export function computePairedDeltas(repetitions: readonly RepetitionRecord[]): P
     const nonZeroDirections = Object.values(components)
       .map(directionOf)
       .filter((direction) => direction !== "zero");
+    // Descriptive only: sign agreement across accounting components within one
+    // pair. A cache component may fall while the total rises without
+    // invalidating accounting or repeatability, so this never gates run-set
+    // sufficiency — the claimed comparative direction is checked across valid
+    // pairs at the recommendation level (Decision 34 §1).
     const consistentDirection =
       nonZeroDirections.length === 0 ||
       nonZeroDirections.every((direction) => direction === nonZeroDirections[0]);
@@ -208,9 +217,16 @@ function configEquivalent(records: readonly RepetitionRecord[]): readonly string
  * Decision 34 §1 insufficient-evidence logic. A run set is insufficient when
  * any required accounting component is missing, component reconciliation
  * fails, required equivalent repetitions cannot be completed, configuration
- * equivalence cannot be established, the catalog capture is incomplete, or
- * the paired results do not repeat sufficiently to support the claimed
- * direction. This never invents a numeric threshold.
+ * equivalence cannot be established, or the catalog capture is incomplete.
+ * Directional consistency is deliberately not a run-set gate: the Decision 34
+ * rule applies to the claimed comparative ordering across modes/repetitions,
+ * not to the signs of different accounting components within one turn-to-turn
+ * delta (a cache component may fall while the total rises without
+ * invalidating accounting, repeatability, or evidence). Comparative direction
+ * is evaluated across valid paired repetitions at the recommendation level
+ * (orchestrator comparisonDirection → makeRecommendation), which reports
+ * inconclusive when the direction changes between valid pairs. This never
+ * invents a numeric threshold.
  */
 export function evaluateEvidence(
   config: RunSetConfig,
@@ -243,13 +259,10 @@ export function evaluateEvidence(
   if (equivalenceFailures.length > 0) {
     reasons.push("config-inequivalence");
   }
+  // Pair count for reporting only; component deltas and variance stay
+  // descriptive data (buildRunSetSummary). Direction consistency is not a
+  // sufficiency condition here (see doc comment above).
   const pairedDeltas = computePairedDeltas(validRepetitions);
-  if (
-    pairedDeltas.length >= 2 &&
-    !pairedDeltas.every((delta) => delta.consistentDirection)
-  ) {
-    reasons.push("inconsistent-direction");
-  }
   const uniqueReasons = [...new Set(reasons)];
   return {
     insufficientEvidence: uniqueReasons.length > 0,

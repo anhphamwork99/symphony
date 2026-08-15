@@ -440,6 +440,212 @@ describe("evaluateEvidence", () => {
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("incomplete-catalog");
   });
+
+  it("keeps a reconciled run set sufficient when component deltas have mixed signs (impl-11 real-matrix regression)", () => {
+    // Observed real shape: turn-1 totals 24021/24020/24020 (synara-default),
+    // every paired turn delta total +79. A cache component falls while the
+    // total rises, so each repetition's component signs disagree — but the
+    // turns reconcile, the catalog is complete, and the config is equivalent,
+    // so the run set must remain sufficient. Directional consistency is
+    // evaluated at the recommendation level across modes, not per component.
+    const t1ByIndex = [
+      { input: 20000, output: 1000, cacheRead: 3000, cacheWrite: 21, total: 24021 },
+      { input: 19999, output: 1000, cacheRead: 3000, cacheWrite: 21, total: 24020 },
+      { input: 20000, output: 1000, cacheRead: 3000, cacheWrite: 20, total: 24020 },
+    ];
+    // Turn-2 usage: same stimulus under the same session; cache contributes
+    // less (hits from turn 1) while input/output/total rise: +79 total with a
+    // negative cacheRead component.
+    const u2ByIndex = [
+      { input: 20040, output: 1020, cacheRead: 2965, cacheWrite: 75, total: 24100 },
+      { input: 20039, output: 1020, cacheRead: 2965, cacheWrite: 75, total: 24099 },
+      { input: 20040, output: 1020, cacheRead: 2965, cacheWrite: 74, total: 24099 },
+    ];
+    const record = (index: number): RepetitionRecord => {
+      const t1 = t1ByIndex[index]!;
+      const u2 = u2ByIndex[index]!;
+      const t2 = {
+        input: t1.input + u2.input,
+        output: t1.output + u2.output,
+        cacheRead: t1.cacheRead + u2.cacheRead,
+        cacheWrite: t1.cacheWrite + u2.cacheWrite,
+        total: t1.total + u2.total,
+      };
+      return {
+        mode: "synara-default",
+        repetitionIndex: index,
+        manifest,
+        startup: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
+        turns: [
+          makeTurnMeasurement({
+            turnIndex: 1,
+            before: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
+            after: raw(t1),
+            normalized: {
+              usedTokens: t1.total,
+              totalProcessedTokens: t1.total,
+              inputTokens: t1.input,
+              cachedInputTokens: t1.cacheRead,
+              outputTokens: t1.output,
+            },
+          }),
+          makeTurnMeasurement({
+            turnIndex: 2,
+            before: raw(t1),
+            after: raw(t2),
+            normalized: {
+              usedTokens: t2.total,
+              totalProcessedTokens: t2.total,
+              inputTokens: t2.input,
+              cachedInputTokens: t2.cacheRead,
+              outputTokens: t2.output,
+            },
+          }),
+        ],
+        invalid: false,
+        exposureEvidence: { ...exposure, mode: "synara-default" },
+        config,
+      };
+    };
+    const records = [record(0), record(1), record(2)];
+    // The paired deltas reconcile to total +79 with cacheRead -35: mixed
+    // component signs, preserved as descriptive per-pair data.
+    for (const delta of computePairedDeltas(records)) {
+      expect(delta.total).toBe(79);
+      expect(delta.input).toBe(40);
+      expect(delta.output).toBe(20);
+      expect(delta.cacheRead).toBe(-35);
+      expect(delta.cacheWrite).toBe(54);
+      expect(delta.consistentDirection).toBe(false);
+    }
+    const verdict = evaluateEvidence({
+      mode: "synara-default",
+      repetitions: 3,
+      turnsPerRepetition: 2,
+      model: "m",
+      thinkingLevel: "medium",
+      promptHash: "h",
+      promptBytes: 10,
+      harnessVersion: "test",
+    }, records);
+    expect(verdict.insufficientEvidence).toBe(false);
+    expect(verdict.reasons).toEqual([]);
+    expect(verdict.validPairCount).toBe(3);
+  });
+
+  it("declares insufficient evidence on a reconciliation failure", () => {
+    const record: RepetitionRecord = {
+      mode: "standalone",
+      repetitionIndex: 0,
+      manifest,
+      startup: raw(),
+      turns: [
+        // total 999 does not equal input + cacheRead + cacheWrite + output (380).
+        makeTurnMeasurement({
+          turnIndex: 1,
+          before: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
+          after: raw({ total: 999 }),
+          skipCrossCheck: true,
+        }),
+        makeTurnMeasurement({
+          turnIndex: 2,
+          before: raw(),
+          after: raw({ input: 140, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 }),
+          skipCrossCheck: true,
+        }),
+      ],
+      invalid: false,
+      exposureEvidence: exposure,
+      config,
+    };
+    const verdict = evaluateEvidence({
+      mode: "standalone",
+      repetitions: 1,
+      turnsPerRepetition: 2,
+      model: "m",
+      thinkingLevel: "medium",
+      promptHash: "h",
+      promptBytes: 10,
+      harnessVersion: "test",
+    }, [record]);
+    expect(verdict.insufficientEvidence).toBe(true);
+    expect(verdict.reasons).toContain("reconciliation-failure");
+  });
+
+  it("declares insufficient evidence on a missing accounting component", () => {
+    const record: RepetitionRecord = {
+      mode: "standalone",
+      repetitionIndex: 0,
+      manifest,
+      startup: raw(),
+      turns: [
+        makeTurnMeasurement({
+          turnIndex: 1,
+          before: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
+          // cacheWrite is absent from the accounting surface.
+          after: raw({ cacheWrite: undefined as unknown as number }),
+          skipCrossCheck: true,
+        }),
+        makeTurnMeasurement({
+          turnIndex: 2,
+          before: raw(),
+          after: raw({ input: 140, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 }),
+          skipCrossCheck: true,
+        }),
+      ],
+      invalid: false,
+      exposureEvidence: exposure,
+      config,
+    };
+    const verdict = evaluateEvidence({
+      mode: "standalone",
+      repetitions: 1,
+      turnsPerRepetition: 2,
+      model: "m",
+      thinkingLevel: "medium",
+      promptHash: "h",
+      promptBytes: 10,
+      harnessVersion: "test",
+    }, [record]);
+    expect(verdict.insufficientEvidence).toBe(true);
+    expect(verdict.reasons).toContain("missing-accounting-component");
+  });
+
+  it("declares insufficient evidence on configuration inequivalence", () => {
+    const record = (index: number): RepetitionRecord => ({
+      mode: "standalone",
+      repetitionIndex: index,
+      manifest,
+      startup: raw(),
+      turns: [
+        makeTurnMeasurement({
+          turnIndex: 1,
+          before: raw(),
+          after: raw(),
+        }),
+        makeTurnMeasurement({
+          turnIndex: 2,
+          before: raw(),
+          after: raw({ input: 140, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 }),
+        }),
+      ],
+      invalid: false,
+      exposureEvidence: exposure,
+      config: index === 0 ? config : { ...config, thinkingLevel: "high" },
+    });
+    const verdict = evaluateEvidence({
+      mode: "standalone",
+      repetitions: 2,
+      turnsPerRepetition: 2,
+      model: "m",
+      thinkingLevel: "medium",
+      promptHash: "h",
+      promptBytes: 10,
+      harnessVersion: "test",
+    }, [record(0), record(1)]);
+    expect(verdict.insufficientEvidence).toBe(true);
+    expect(verdict.reasons).toContain("config-inequivalence");
+  });
 });
 
 describe("makeRecommendation", () => {
@@ -461,6 +667,20 @@ describe("makeRecommendation", () => {
       direction: "mixed",
     });
     expect(recommendation.kind).toBe("inconclusive");
+  });
+
+  it("stays inconclusive when the comparative direction disagrees across cross-mode pairs", () => {
+    // Cross-mode ordering compares each repetition's turn-1 total across
+    // modes; one flipped pair makes the recommendation inconclusive even
+    // though every run set individually has sufficient evidence.
+    const recommendation = makeRecommendation({
+      consistentDirection: false,
+      component: "total (turn 1 cumulative, cold start)",
+      pairedCount: 6,
+      direction: "mixed",
+    });
+    expect(recommendation.kind).toBe("inconclusive");
+    expect(recommendation.consistentDirection).toBe(false);
   });
 
   it("never recommends against when there are no valid pairs", () => {
