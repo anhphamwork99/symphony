@@ -4,7 +4,7 @@
 
 **Blocked by:** impl-05 — Implement Synara MCP commands and durable acknowledgements.
 
-**Status:** implementation-verified-final-acceptance-blocked
+**Status:** done
 
 - [x] Retain all MCP acknowledgement kinds even with `turnId: null`.
 - [x] Make live events and replayed snapshots render equivalently.
@@ -22,13 +22,16 @@ Server journal durability is owned by `impl-05`; browser-wide replay smoke is co
 
 ## Implementation evidence
 
-- [Decision 33](../decisions/33-impl-10-final-acceptance.md) rejects final
-  acceptance at candidate commit `6b132f83`; the rejection is an acceptance-
-  gate rejection, not a source/behavior defect finding.
-- Candidate commit `6b132f83` (one commit above fixed point `f021e84b`,
-  clean working tree, four web files) passes focused worker + reviewer runs
-  150/150 and the web suite 3796/3796.
-- Final acceptance is blocked by the root suite's `apps/server` failures
-  (external/pre-existing, reproduced at the fixed point) and by missing
-  authorized `bun fmt`/`bun lint`/`bun typecheck` passing evidence; screenshots
-  are required before PR handoff.
+- Production implementation: `6b132f83`.
+- Accepted clean-worktree verification point: `96f590a8`; root test 8/8 tasks,
+  focused impl-10 tests 150/150, `bun fmt` exit 0, lint 0 errors, and typecheck
+  7/7 tasks.
+- External test-fixture repair: `23df500b` under maint-34, outside impl-10
+  production ownership.
+- Chromium before/after evidence: `782ee225`; the acknowledgement renders as a
+  system/work row and DOM evidence reports zero matching assistant messages.
+- [Decision 33](../decisions/33-impl-10-final-acceptance.md) records the
+  historical repository-gate rejection.
+- [Decision 36](../decisions/36-impl-10-final-acceptance-reassessment.md) is the
+  binding Reassessment that resolves Decision 33's reject gate and finally
+  accepts impl-10.
