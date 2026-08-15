@@ -15,6 +15,7 @@ import {
   AgentGatewayCredentials,
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials";
+import { makeTestMcpSessionAuthorityFixture } from "../../agentGateway/mcpSessionAuthority.testUtils";
 import { AntigravityAdapter } from "../Services/AntigravityAdapter";
 import {
   antigravityPromptCommandLineIssue,
@@ -285,12 +286,17 @@ describe("Antigravity CLI integration helpers", () => {
         Effect.gen(function* () {
           const adapter = yield* AntigravityAdapter;
           const threadId = ThreadId.makeUnsafe("thread-antigravity-turn-lease");
+          const authorityFixture = makeTestMcpSessionAuthorityFixture();
           yield* adapter.startSession({
             provider: "antigravity",
             threadId,
             runtimeMode: "full-access",
             cwd: root,
             providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+            mcpAuthority: authorityFixture.bindingForThread({
+              threadId: "thread-antigravity-turn-lease",
+              provider: "antigravity",
+            }),
           });
           const waitUntilReady = Effect.gen(function* () {
             for (let attempt = 0; attempt < 100; attempt += 1) {

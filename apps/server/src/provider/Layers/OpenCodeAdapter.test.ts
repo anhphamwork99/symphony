@@ -20,6 +20,7 @@ import {
   AgentGatewayCredentials,
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
+import { makeTestMcpSessionAuthorityFixture } from "../../agentGateway/mcpSessionAuthority.testUtils.ts";
 import {
   type OpenCodeCliModelDescriptor,
   OpenCodeRuntimeError,
@@ -1110,6 +1111,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
   it("isolates same-cwd managed sessions, injects distinct gateway tokens, and revokes them", async () => {
     const runtime = createMockOpenCodeRuntime();
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const firstThread = asThreadId("thread-gateway-a");
     const secondThread = asThreadId("thread-gateway-b");
 
@@ -1122,6 +1124,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
             threadId,
             runtimeMode: "full-access",
             cwd: "/same/repo",
+            mcpAuthority: authorityFixture.bindingForThread({
+              threadId: String(threadId),
+              provider: "opencode",
+            }),
           });
           yield* adapter.sendTurn({
             threadId,
@@ -1364,6 +1370,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
       mcpAdd: async () => ({ data: { synara: { status: "failed", error: "offline" } } }),
     });
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -1373,6 +1380,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
           provider: "opencode",
           threadId,
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-gateway-setup-failed",
+            provider: "opencode",
+          }),
         });
         yield* adapter.sendTurn({
           threadId,
@@ -1401,6 +1412,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
   it("applies the same isolated gateway lifecycle to managed Kilo sessions", async () => {
     const runtime = createMockOpenCodeRuntime();
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const threadId = asThreadId("thread-kilo-gateway");
 
     await Effect.runPromise(
@@ -1411,6 +1423,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
           threadId,
           runtimeMode: "full-access",
           cwd: "/repo",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-kilo-gateway",
+            provider: "kilo",
+          }),
         });
         yield* adapter.stopSession(threadId);
       }).pipe(
@@ -1566,6 +1582,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
     const serverExit = Deferred.makeUnsafe<number>();
     const runtime = createMockOpenCodeRuntime({ serverExit: Deferred.await(serverExit) });
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const threadId = asThreadId("thread-gateway-unexpected-exit");
 
     await Effect.runPromise(
@@ -1575,6 +1592,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
           provider: "opencode",
           threadId,
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-gateway-unexpected-exit",
+            provider: "opencode",
+          }),
         });
         expect(gateway.ownerByToken.get("gateway-token-1")).toBe(threadId);
 
@@ -1605,6 +1626,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
       scopeCloseDefect: true,
     });
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
 
     const exit = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1614,6 +1636,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
             provider: "opencode",
             threadId: asThreadId("thread-gateway-failed-start"),
             runtimeMode: "full-access",
+            mcpAuthority: authorityFixture.bindingForThread({
+              threadId: "thread-gateway-failed-start",
+              provider: "opencode",
+            }),
           }),
         );
       }).pipe(
@@ -1644,6 +1670,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
       },
     });
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -1653,6 +1680,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
             provider: "opencode",
             threadId: asThreadId("thread-gateway-interrupted-start"),
             runtimeMode: "full-access",
+            mcpAuthority: authorityFixture.bindingForThread({
+              threadId: "thread-gateway-interrupted-start",
+              provider: "opencode",
+            }),
           })
           .pipe(Effect.forkChild);
         yield* Effect.promise(() => vi.waitFor(() => expect(runtime.connectCalls).toHaveLength(1)));
@@ -1686,6 +1717,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
       },
     });
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const threadId = asThreadId("thread-gateway-interrupted-before-install");
 
     await Effect.runPromise(
@@ -1696,6 +1728,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
             provider: "opencode",
             threadId,
             runtimeMode: "full-access",
+            mcpAuthority: authorityFixture.bindingForThread({
+              threadId: "thread-gateway-interrupted-before-install",
+              provider: "opencode",
+            }),
           })
           .pipe(Effect.forkChild);
 
@@ -2139,6 +2175,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
     const gateway = makeGatewayCredentials({
       cancelSessionTurnRequests: () => gatewayBarrier,
     });
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const threadId = asThreadId("thread-gateway-interrupt");
 
     await Effect.runPromise(
@@ -2148,6 +2185,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
           provider: "opencode",
           threadId,
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-gateway-interrupt",
+            provider: "opencode",
+          }),
         });
         const turn = yield* adapter.sendTurn({
           threadId,
@@ -5008,6 +5049,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
     const eventQueue = createSubscribedEventQueue();
     const runtime = createMockOpenCodeRuntime();
     const gateway = makeGatewayCredentials();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const client = runtime.runtime.createOpenCodeSdkClient({
       baseUrl: "http://127.0.0.1:4099",
       directory: process.cwd(),
@@ -5029,6 +5071,10 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
           provider: "opencode",
           threadId: asThreadId("thread-session-idle"),
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-session-idle",
+            provider: "opencode",
+          }),
         });
 
         const turn = yield* adapter.sendTurn({

@@ -52,6 +52,7 @@ import {
   AGENT_GATEWAY_TURN_AUTHORITY_RETIRED,
   acquireAgentGatewaySessionLease,
 } from "./agentGateway/sessionLease.ts";
+import { makeTestMcpSessionAuthorityFixture } from "./agentGateway/mcpSessionAuthority.testUtils.ts";
 import { MINIMUM_CODEX_AUTO_REVIEW_CLI_VERSION } from "./provider/codexCliVersion.ts";
 
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
@@ -682,6 +683,13 @@ describe("Codex app-server teardown", () => {
       },
       threadId,
       "codex",
+      // Decision 21: the lease seam fails closed without a server-minted
+      // subject-bound snapshot, so the fixture supplies one owned by this
+      // exact thread, as production does at trusted dispatch.
+      makeTestMcpSessionAuthorityFixture().bindingForThread({
+        threadId: "thread-codex-exit-proof",
+        provider: "codex",
+      }),
     );
     const context = {
       gatewaySessionLease,
@@ -752,6 +760,12 @@ describe("Codex app-server teardown", () => {
       },
       threadId,
       "codex",
+      // Decision 21: fail-closed lease seam needs the fixture's server-minted
+      // subject-bound snapshot owned by this exact thread.
+      makeTestMcpSessionAuthorityFixture().bindingForThread({
+        threadId: "thread-codex-spontaneous-exit",
+        provider: "codex",
+      }),
     );
     const context = {
       gatewaySessionLease,

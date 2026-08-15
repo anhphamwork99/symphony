@@ -29,6 +29,7 @@ import {
   AgentGatewayCredentials,
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
+import { makeTestMcpSessionAuthorityFixture } from "../../agentGateway/mcpSessionAuthority.testUtils.ts";
 import { ServerConfig } from "../../config.ts";
 import { MINIMUM_CLAUDE_AUTO_MODE_CLI_VERSION } from "../claudeCliVersion.ts";
 import { ProviderAdapterRequestError, ProviderAdapterValidationError } from "../Errors.ts";
@@ -470,6 +471,7 @@ describe("ClaudeAdapterLive", () => {
 
   it.effect("injects the canonical Synara browser MCP into an Opus 4.8 session", () => {
     const gateway = makeGatewayCredentialsHarness();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const harness = makeMultiQueryHarness({ gatewayCredentials: gateway.credentials });
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -477,6 +479,10 @@ describe("ClaudeAdapterLive", () => {
         threadId: THREAD_ID,
         provider: "claudeAgent",
         runtimeMode: "full-access",
+        mcpAuthority: authorityFixture.bindingForThread({
+          threadId: "thread-claude-1",
+          provider: "claudeAgent",
+        }),
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-opus-4-8",
@@ -2994,6 +3000,7 @@ describe("ClaudeAdapterLive", () => {
       const gateway = makeGatewayCredentialsHarness({
         cancelSessionTurnRequests: () => gatewayBarrier,
       });
+      const authorityFixture = makeTestMcpSessionAuthorityFixture();
       const harness = makeMultiQueryHarness({ gatewayCredentials: gateway.credentials });
 
       return Effect.gen(function* () {
@@ -3002,6 +3009,10 @@ describe("ClaudeAdapterLive", () => {
           threadId: THREAD_ID,
           provider: "claudeAgent",
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-claude-1",
+            provider: "claudeAgent",
+          }),
         });
         const turn = yield* adapter.sendTurn({
           threadId: session.threadId,
@@ -3054,6 +3065,7 @@ describe("ClaudeAdapterLive", () => {
 
   it.effect("revokes the shared gateway when a background child outlives its parent turn", () => {
     const gateway = makeGatewayCredentialsHarness();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const harness = makeMultiQueryHarness({ gatewayCredentials: gateway.credentials });
 
     return Effect.gen(function* () {
@@ -3067,6 +3079,10 @@ describe("ClaudeAdapterLive", () => {
         threadId: THREAD_ID,
         provider: "claudeAgent",
         runtimeMode: "full-access",
+        mcpAuthority: authorityFixture.bindingForThread({
+          threadId: "thread-claude-1",
+          provider: "claudeAgent",
+        }),
       });
       const turn = yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -8226,6 +8242,7 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
 
   it.effect("releases old and failed-replacement gateway leases exactly once", () => {
     const gateway = makeGatewayCredentialsHarness();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const harness = makeMultiQueryHarness({
       failCreateAt: 1,
       gatewayCredentials: gateway.credentials,
@@ -8236,6 +8253,10 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
         threadId: THREAD_ID,
         provider: "claudeAgent",
         runtimeMode: "full-access",
+        mcpAuthority: authorityFixture.bindingForThread({
+          threadId: "thread-claude-1",
+          provider: "claudeAgent",
+        }),
       });
 
       const replacement = yield* Effect.exit(
@@ -8243,6 +8264,10 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
           threadId: THREAD_ID,
           provider: "claudeAgent",
           runtimeMode: "full-access",
+          mcpAuthority: authorityFixture.bindingForThread({
+            threadId: "thread-claude-1",
+            provider: "claudeAgent",
+          }),
           modelSelection: {
             provider: "claudeAgent",
             model: "claude-opus-4-8",
@@ -8262,6 +8287,7 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
 
   it.effect("releases the gateway lease when the Claude stream aborts spontaneously", () => {
     const gateway = makeGatewayCredentialsHarness();
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
     const harness = makeMultiQueryHarness({ gatewayCredentials: gateway.credentials });
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -8269,6 +8295,10 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
         threadId: THREAD_ID,
         provider: "claudeAgent",
         runtimeMode: "full-access",
+        mcpAuthority: authorityFixture.bindingForThread({
+          threadId: "thread-claude-1",
+          provider: "claudeAgent",
+        }),
       });
       yield* adapter.sendTurn({
         threadId: THREAD_ID,

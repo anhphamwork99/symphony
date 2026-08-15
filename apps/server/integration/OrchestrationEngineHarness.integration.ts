@@ -72,6 +72,8 @@ import {
   type TestProviderAdapterHarness,
 } from "./TestProviderAdapter.integration.ts";
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
+import { McpSessionAuthority } from "../src/agentGateway/Services/McpSessionAuthority.ts";
+import { makeTestMcpSessionAuthorityFixture } from "../src/agentGateway/mcpSessionAuthority.testUtils.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
@@ -316,6 +318,12 @@ export const makeOrchestrationIntegrationHarness = (
     const studioOutputReactorLayer = StudioOutputReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
     );
+    // Decision 21: the reactor resolves trusted MCP session authority through
+    // this service on every session start. The deterministic in-memory fixture
+    // registry stays empty by default so existing integration tests keep their
+    // unbound behavior (no authority record, no gateway credential minted) and
+    // no identity is ever invented for a fixture thread.
+    const mcpSessionAuthorityFixture = makeTestMcpSessionAuthorityFixture();
     const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(studioOutputReactorLayer),
@@ -323,6 +331,9 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(textGenerationLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(AgentGatewayOperationRepositoryLive),
+      Layer.provideMerge(
+        Layer.succeed(McpSessionAuthority, mcpSessionAuthorityFixture.shape),
+      ),
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
