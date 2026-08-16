@@ -20,7 +20,9 @@ import {
   type PiSubagentAdmissionRecordResult,
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
+  type PiSubagentLifecycleRecordResult,
   type RecordPiSubagentAdmissionInput,
+  type RecordPiSubagentLifecycleEventInput,
 } from "../Services/PiSubagentExecutionRepository.ts";
 
 interface ExecutionRow {
@@ -136,123 +138,337 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     `;
 
   const recordAdmission: PiSubagentExecutionRepositoryShape["recordAdmission"] = (input) =>
-    Effect.gen(function* () {
-      const existingRows = yield* getByCommandIdInternal(input.commandId).pipe(
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const existingRows = yield* getByCommandIdInternal(input.commandId);
+
+          if (existingRows.length > 0) {
+            const existing = rowToExecutionRecord(existingRows[0]!);
+            return {
+              kind: "already_applied" as const,
+              execution: existing,
+            };
+          }
+
+          const eventId = crypto.randomUUID();
+          const mode = input.mode ?? "foreground";
+          const cancellationScope = input.cancellationScope ?? "parent_turn";
+          const desiredState = input.state === "rejected" ? "rejected" : "running";
+          const parentTurnId = input.parentTurnId ?? null;
+          const parentToolCallId = input.parentToolCallId ?? null;
+          const diagnosticCode = input.diagnosticCode ?? null;
+          const rejectionReason = input.rejectionReason ?? null;
+
+          // Atomic insert into lifecycle journal and executions
+          yield* sql`
+            INSERT INTO pi_subagent_lifecycle_journal (
+              event_id,
+              execution_id,
+              attempt_id,
+              generation,
+              sequence,
+              state,
+              occurred_at,
+              diagnostic_code,
+              diagnostic_message,
+              metadata_json
+            ) VALUES (
+              ${eventId},
+              ${input.executionId},
+              ${input.attemptId},
+              ${input.generation},
+              ${1},
+              ${input.state},
+              ${input.now},
+              ${diagnosticCode},
+              ${rejectionReason},
+              ${null}
+            )
+          `;
+
+          yield* sql`
+            INSERT INTO pi_subagent_executions (
+              execution_id,
+              attempt_id,
+              generation,
+              command_id,
+              project_id,
+              parent_thread_id,
+              parent_turn_id,
+              parent_tool_call_id,
+              agent_type,
+              prompt,
+              mode,
+              cancellation_scope,
+              desired_state,
+              observed_state,
+              diagnostic_code,
+              rejection_reason,
+              created_at,
+              updated_at
+            ) VALUES (
+              ${input.executionId},
+              ${input.attemptId},
+              ${input.generation},
+              ${input.commandId},
+              ${input.projectId},
+              ${input.parentThreadId},
+              ${parentTurnId},
+              ${parentToolCallId},
+              ${input.agentType},
+              ${input.prompt},
+              ${mode},
+              ${cancellationScope},
+              ${desiredState},
+              ${input.state},
+              ${diagnosticCode},
+              ${rejectionReason},
+              ${input.now},
+              ${input.now}
+            )
+          `;
+
+          const createdRecord: PiSubagentExecutionRecord = {
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            commandId: input.commandId,
+            projectId: input.projectId as ProjectId,
+            parentThreadId: input.parentThreadId as ThreadId,
+            parentTurnId: (parentTurnId as TurnId) ?? null,
+            parentToolCallId,
+            agentType: input.agentType,
+            prompt: input.prompt,
+            mode,
+            cancellationScope,
+            desiredState,
+            observedState: input.state,
+            diagnosticCode: input.diagnosticCode ?? undefined,
+            rejectionReason: input.rejectionReason ?? undefined,
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+
+          return {
+            kind: "admitted" as const,
+            execution: createdRecord,
+          };
+        }),
+      )
+      .pipe(
+        Effect.catch((err) =>
+          Effect.gen(function* () {
+            // Concurrent race on command_id unique constraint recovery
+            const existingRows = yield* getByCommandIdInternal(input.commandId).pipe(
+              Effect.mapError(toPersistenceSqlError),
+            );
+            if (existingRows.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                execution: rowToExecutionRecord(existingRows[0]!),
+              };
+            }
+            return yield* Effect.fail(toPersistenceSqlError(err));
+          }),
+        ),
         Effect.mapError(toPersistenceSqlError),
       );
 
-      if (existingRows.length > 0) {
-        const existing = rowToExecutionRecord(existingRows[0]!);
-        return {
-          kind: "already_applied" as const,
-          execution: existing,
-        };
-      }
+  const recordLifecycleEvent: PiSubagentExecutionRepositoryShape["recordLifecycleEvent"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const existingEventRows = yield* sql<JournalRow>`
+            SELECT
+              event_id AS "eventId",
+              execution_id AS "executionId",
+              attempt_id AS "attemptId",
+              generation,
+              sequence,
+              state,
+              occurred_at AS "occurredAt",
+              diagnostic_code AS "diagnosticCode",
+              diagnostic_message AS "diagnosticMessage",
+              metadata_json AS "metadataJson"
+            FROM pi_subagent_lifecycle_journal
+            WHERE event_id = ${input.eventId}
+               OR (execution_id = ${input.executionId} AND attempt_id = ${input.attemptId} AND sequence = ${input.sequence})
+               OR (execution_id = ${input.executionId} AND sequence = ${input.sequence})
+            LIMIT 1
+          `;
 
-      const eventId = crypto.randomUUID();
-      const mode = input.mode ?? "foreground";
-      const cancellationScope = input.cancellationScope ?? "parent_turn";
-      const desiredState = input.state === "rejected" ? "rejected" : "running";
-      const parentTurnId = input.parentTurnId ?? null;
-      const parentToolCallId = input.parentToolCallId ?? null;
-      const diagnosticCode = input.diagnosticCode ?? null;
-      const rejectionReason = input.rejectionReason ?? null;
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
 
-      // Journal-first: write to lifecycle journal before or in transaction with execution record
-      yield* sql`
-        INSERT INTO pi_subagent_lifecycle_journal (
-          event_id,
-          execution_id,
-          attempt_id,
-          generation,
-          sequence,
-          state,
-          occurred_at,
-          diagnostic_code,
-          diagnostic_message,
-          metadata_json
-        ) VALUES (
-          ${eventId},
-          ${input.executionId},
-          ${input.attemptId},
-          ${input.generation},
-          ${1},
-          ${input.state},
-          ${input.now},
-          ${diagnosticCode},
-          ${rejectionReason},
-          ${null}
-        )
-      `.pipe(Effect.mapError(toPersistenceSqlError));
+          const currentExecution = executionRows[0]!;
 
-      yield* sql`
-        INSERT INTO pi_subagent_executions (
-          execution_id,
-          attempt_id,
-          generation,
-          command_id,
-          project_id,
-          parent_thread_id,
-          parent_turn_id,
-          parent_tool_call_id,
-          agent_type,
-          prompt,
-          mode,
-          cancellation_scope,
-          desired_state,
-          observed_state,
-          diagnostic_code,
-          rejection_reason,
-          created_at,
-          updated_at
-        ) VALUES (
-          ${input.executionId},
-          ${input.attemptId},
-          ${input.generation},
-          ${input.commandId},
-          ${input.projectId},
-          ${input.parentThreadId},
-          ${parentTurnId},
-          ${parentToolCallId},
-          ${input.agentType},
-          ${input.prompt},
-          ${mode},
-          ${cancellationScope},
-          ${desiredState},
-          ${input.state},
-          ${diagnosticCode},
-          ${rejectionReason},
-          ${input.now},
-          ${input.now}
-        )
-      `.pipe(Effect.mapError(toPersistenceSqlError));
+          if (existingEventRows.length > 0) {
+            const row = existingEventRows[0]!;
+            const event: PiSubagentLifecycleEvent = {
+              eventId: row.eventId,
+              executionId: row.executionId,
+              attemptId: row.attemptId,
+              generation: row.generation,
+              sequence: row.sequence,
+              state: row.state,
+              occurredAt: row.occurredAt,
+              parentThreadId: currentExecution.parentThreadId as ThreadId,
+              parentTurnId: (currentExecution.parentTurnId as TurnId) ?? null,
+              parentToolCallId: currentExecution.parentToolCallId ?? null,
+              projectId: currentExecution.projectId as ProjectId,
+              diagnosticCode: row.diagnosticCode ?? undefined,
+              diagnosticMessage: row.diagnosticMessage ?? undefined,
+              metadata: row.metadataJson ? JSON.parse(row.metadataJson) : undefined,
+            };
+            return {
+              kind: "already_applied" as const,
+              event,
+              execution: rowToExecutionRecord(currentExecution),
+            };
+          }
 
-      const createdRecord: PiSubagentExecutionRecord = {
-        executionId: input.executionId,
-        attemptId: input.attemptId,
-        generation: input.generation,
-        commandId: input.commandId,
-        projectId: input.projectId as ProjectId,
-        parentThreadId: input.parentThreadId as ThreadId,
-        parentTurnId: (parentTurnId as TurnId) ?? null,
-        parentToolCallId,
-        agentType: input.agentType,
-        prompt: input.prompt,
-        mode,
-        cancellationScope,
-        desiredState,
-        observedState: input.state,
-        diagnosticCode: input.diagnosticCode ?? undefined,
-        rejectionReason: input.rejectionReason ?? undefined,
-        createdAt: input.now,
-        updatedAt: input.now,
-      };
+          const diagnosticCode = input.diagnosticCode ?? null;
+          const diagnosticMessage = input.diagnosticMessage ?? null;
+          const metadataJson = input.metadataJson ?? null;
 
-      return {
-        kind: "admitted" as const,
-        execution: createdRecord,
-      };
-    });
+          yield* sql`
+            INSERT INTO pi_subagent_lifecycle_journal (
+              event_id,
+              execution_id,
+              attempt_id,
+              generation,
+              sequence,
+              state,
+              occurred_at,
+              diagnostic_code,
+              diagnostic_message,
+              metadata_json
+            ) VALUES (
+              ${input.eventId},
+              ${input.executionId},
+              ${input.attemptId},
+              ${input.generation},
+              ${input.sequence},
+              ${input.state},
+              ${input.occurredAt},
+              ${diagnosticCode},
+              ${diagnosticMessage},
+              ${metadataJson}
+            )
+          `;
+
+          if (input.generation >= currentExecution.generation) {
+            const nextDesired =
+              input.state === "cancelled" || input.state === "cancelling"
+                ? "cancelled"
+                : input.state === "failed" || input.state === "succeeded" || input.state === "rejected"
+                  ? input.state
+                  : currentExecution.desiredState;
+
+            yield* sql`
+              UPDATE pi_subagent_executions
+              SET
+                attempt_id = ${input.attemptId},
+                generation = ${input.generation},
+                observed_state = ${input.state},
+                desired_state = ${nextDesired},
+                diagnostic_code = ${diagnosticCode},
+                rejection_reason = ${diagnosticMessage},
+                updated_at = ${input.occurredAt}
+              WHERE execution_id = ${input.executionId}
+            `;
+          }
+
+          const updatedExecutionRows = yield* getByIdInternal(input.executionId);
+          const updatedExecution = rowToExecutionRecord(updatedExecutionRows[0] ?? currentExecution);
+
+          const event: PiSubagentLifecycleEvent = {
+            eventId: input.eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+            state: input.state,
+            occurredAt: input.occurredAt,
+            parentThreadId: updatedExecution.parentThreadId,
+            parentTurnId: updatedExecution.parentTurnId,
+            parentToolCallId: updatedExecution.parentToolCallId,
+            projectId: updatedExecution.projectId,
+            diagnosticCode: input.diagnosticCode,
+            diagnosticMessage: input.diagnosticMessage,
+            metadata: metadataJson ? JSON.parse(metadataJson) : undefined,
+          };
+
+          return {
+            kind: "recorded" as const,
+            event,
+            execution: updatedExecution,
+          };
+        }),
+      )
+      .pipe(
+        Effect.catch((err) =>
+          Effect.gen(function* () {
+            const existingEventRows = yield* sql<JournalRow>`
+              SELECT
+                event_id AS "eventId",
+                execution_id AS "executionId",
+                attempt_id AS "attemptId",
+                generation,
+                sequence,
+                state,
+                occurred_at AS "occurredAt",
+                diagnostic_code AS "diagnosticCode",
+                diagnostic_message AS "diagnosticMessage",
+                metadata_json AS "metadataJson"
+              FROM pi_subagent_lifecycle_journal
+              WHERE event_id = ${input.eventId}
+                 OR (execution_id = ${input.executionId} AND attempt_id = ${input.attemptId} AND sequence = ${input.sequence})
+                 OR (execution_id = ${input.executionId} AND sequence = ${input.sequence})
+              LIMIT 1
+            `.pipe(Effect.mapError(toPersistenceSqlError));
+
+            const executionRows = yield* getByIdInternal(input.executionId).pipe(
+              Effect.mapError(toPersistenceSqlError),
+            );
+
+            if (existingEventRows.length > 0 && executionRows.length > 0) {
+              const row = existingEventRows[0]!;
+              const currentExecution = executionRows[0]!;
+              const event: PiSubagentLifecycleEvent = {
+                eventId: row.eventId,
+                executionId: row.executionId,
+                attemptId: row.attemptId,
+                generation: row.generation,
+                sequence: row.sequence,
+                state: row.state,
+                occurredAt: row.occurredAt,
+                parentThreadId: currentExecution.parentThreadId as ThreadId,
+                parentTurnId: (currentExecution.parentTurnId as TurnId) ?? null,
+                parentToolCallId: currentExecution.parentToolCallId ?? null,
+                projectId: currentExecution.projectId as ProjectId,
+                diagnosticCode: row.diagnosticCode ?? undefined,
+                diagnosticMessage: row.diagnosticMessage ?? undefined,
+                metadata: row.metadataJson ? JSON.parse(row.metadataJson) : undefined,
+              };
+              return {
+                kind: "already_applied" as const,
+                event,
+                execution: rowToExecutionRecord(currentExecution),
+              };
+            }
+            return yield* Effect.fail(toPersistenceSqlError(err));
+          }),
+        ),
+        Effect.mapError(toPersistenceSqlError),
+      );
 
   const getById: PiSubagentExecutionRepositoryShape["getById"] = (executionId) =>
     Effect.gen(function* () {
@@ -344,6 +560,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
 
   return {
     recordAdmission,
+    recordLifecycleEvent,
     getById,
     getByCommandId,
     listByThreadId,

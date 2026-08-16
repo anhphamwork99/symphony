@@ -280,6 +280,192 @@ describe("Pi subagent admission coordinator (T02-AC1, T02-AC3, T02-AC4, T02-AC5)
   });
 });
 
+describe("Pi subagent trusted authority verification (T20-AC5)", () => {
+  it("rejects when trusted provider is not pi (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          trustedProvider: "codex",
+        },
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_provider_mismatch");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("rejects when subject authority credentials have expired (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          mcpAuthority: {
+            subject: "user_456",
+            expiresAt: "2020-01-01T00:00:00.000Z",
+          },
+        },
+        now: "2026-08-16T12:00:00.000Z",
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_unauthorized");
+      expect(result.rejectionReason).toContain("Subject authority credentials have expired");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("rejects when extension command parentThreadId attempts to hijack a different thread (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: { ...validCommand, parentThreadId: "thread_hijacked" as ThreadId },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          trustedThreadId: "thread_main",
+        },
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_unauthorized");
+      expect(result.rejectionReason).toContain("Thread authorization mismatch");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("rejects when extension command projectId mismatches server-minted trusted project context (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: { ...validCommand, projectId: "proj_attacker" as ProjectId },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          trustedProjectId: "proj_default",
+        },
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_project_mismatch");
+      expect(result.rejectionReason).toContain("Project authorization mismatch");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("rejects when extension command parentTurnId mismatches server-minted trusted active turn context (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: { ...validCommand, parentTurnId: "turn_forged" as TurnId },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          trustedActiveTurnId: "turn_001",
+        },
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_active_turn_required");
+      expect(result.rejectionReason).toContain("Active turn mismatch");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("rejects when approval is required but not granted (T20-AC5)", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const result = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        trustedContext: {
+          approvalRequired: true,
+          approvalGranted: false,
+        },
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_unauthorized");
+      expect(result.rejectionReason).toContain("requires approval");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+});
+
 describe("Pi subagent admission fails closed (Ticket 03: T03-AC1, T03-AC2, T03-AC3, T03-AC4, T03-AC5, T03-AC6)", () => {
   it("T03-AC1, T03-AC2: failure to persist lifecycle fails closed with stable lifecycle persistence diagnostic and projects no accepted/running execution", async () => {
     const snapshotQuery = createMockSnapshotQuery([validThread]);

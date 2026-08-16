@@ -108,8 +108,21 @@ import {
   makePiSynaraMcpToolExecutionRegistry,
   type PiSynaraMcpToolExecutionRegistry,
 } from "../piSynaraMcpToolExecution.ts";
-import type { PiSubagentNegotiatedCapability } from "@synara/contracts";
+import type {
+  PiSubagentNegotiatedCapability,
+  PiSubagentSpawnCommand,
+  PiSubagentSpawnResult,
+} from "@synara/contracts";
 import { probePiSubagentBridge } from "../piSubagentBridge.ts";
+import {
+  PiSubagentExecutionRepository,
+  type PiSubagentExecutionRepositoryShape,
+} from "../../persistence/Services/PiSubagentExecutionRepository.ts";
+import {
+  admitSubagentSpawn,
+  type AdmissionSnapshotQuery,
+} from "../piSubagentAdmissionCoordinator.ts";
+import type { PiSubagentControlHealthShape } from "../piSubagentControlHealth.ts";
 
 import {
   teardownChildProcessTree,
@@ -450,6 +463,14 @@ export interface PiAdapterLiveOptions {
     readonly capability: PiSubagentNegotiatedCapability;
     readonly session: PiAgentSession;
     readonly context: unknown;
+  }) => void;
+  readonly snapshotQuery?: AdmissionSnapshotQuery;
+  readonly controlHealth?: PiSubagentControlHealthShape;
+  readonly piSubagentRepository?: PiSubagentExecutionRepositoryShape;
+  readonly onSubagentAdmission?: (event: {
+    readonly threadId: ThreadId;
+    readonly command: PiSubagentSpawnCommand;
+    readonly result: PiSubagentSpawnResult;
   }) => void;
   /**
    * Decision 35 measurement-only observer environment; defaults to the
@@ -1719,6 +1740,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const agentGatewayCredentials = Option.getOrUndefined(
       yield* Effect.serviceOption(AgentGatewayCredentials),
     );
+    const injectedPiSubagentRepository = options?.piSubagentRepository;
+    const piSubagentRepository =
+      injectedPiSubagentRepository ??
+      Option.getOrUndefined(yield* Effect.serviceOption(PiSubagentExecutionRepository));
     const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
@@ -2743,6 +2768,158 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           } satisfies ProviderRuntimeEvent);
         }
         const loadedExtensions = runtime.session.resourceLoader.getExtensions().extensions;
+
+        if (subagentCapability.isManaged && piSubagentRepository) {
+          const wrapAgentTool = (target: any) => {
+            if (!target || target.__synaraAdmissionWrapped) {
+              return;
+            }
+            const exec = typeof target.execute === "function" ? target.execute : target.definition?.execute;
+            if (typeof exec !== "function") {
+              return;
+            }
+            const targetObj = typeof target.execute === "function" ? target : target.definition;
+            const originalExecute = exec.bind(targetObj);
+            target.__synaraAdmissionWrapped = true;
+            targetObj.__synaraAdmissionWrapped = true;
+            targetObj.execute = async (
+              toolCallId: string,
+              params: any,
+              signal?: any,
+              onUpdate?: any,
+              ctx?: any,
+            ) => {
+              const cmdId =
+                typeof params?.commandId === "string" && params.commandId.trim().length > 0
+                  ? params.commandId.trim()
+                  : toolCallId;
+              const agentType =
+                typeof params?.subagent_type === "string" && params.subagent_type.trim().length > 0
+                  ? params.subagent_type.trim()
+                  : typeof params?.agentType === "string" && params.agentType.trim().length > 0
+                    ? params.agentType.trim()
+                    : "general-purpose";
+              const prompt =
+                typeof params?.task === "string" && params.task.trim().length > 0
+                  ? params.task.trim()
+                  : typeof params?.prompt === "string" && params.prompt.trim().length > 0
+                    ? params.prompt.trim()
+                    : "";
+              const mode = params?.run_in_background
+                ? ("background" as const)
+                : params?.mode === "background"
+                  ? ("background" as const)
+                  : ("foreground" as const);
+
+              const command: PiSubagentSpawnCommand = {
+                commandId: cmdId,
+                projectId: (params?.projectId ?? params?.project_id ?? input.projectId ?? "proj_default") as ProjectId,
+                parentThreadId: (params?.parentThreadId ?? params?.parent_thread_id ?? input.threadId) as ThreadId,
+                parentTurnId: (params?.parentTurnId ?? params?.parent_turn_id ?? context.activeTurnId ?? null) as TurnId | null,
+                parentToolCallId: toolCallId,
+                agentType,
+                prompt,
+                mode,
+                cancellationScope: "parent_turn",
+              };
+
+              const defaultSnapshotQuery: AdmissionSnapshotQuery = {
+                getSnapshot: () =>
+                  Effect.succeed({
+                    projects: [],
+                    threads: [
+                      {
+                        id: input.threadId,
+                        projectId: (input.projectId ?? "proj_default") as ProjectId,
+                        archivedAt: null,
+                        session: {
+                          activeTurnId: context.activeTurnId,
+                        },
+                      },
+                    ] as any,
+                  } as any),
+              };
+
+              const admissionResult = await Effect.runPromise(
+                admitSubagentSpawn({
+                  command,
+                  sessionCapability: subagentCapability,
+                  snapshotQuery: options?.snapshotQuery ?? defaultSnapshotQuery,
+                  repository: piSubagentRepository,
+                  controlHealth: options?.controlHealth,
+                  trustedContext: {
+                    trustedThreadId: input.threadId,
+                    trustedProjectId: input.projectId ?? "proj_default",
+                    trustedActiveTurnId: context.activeTurnId ?? null,
+                    trustedProvider: PROVIDER,
+                    mcpAuthority: input.mcpAuthority
+                      ? {
+                          subject: input.mcpAuthority.subject,
+                          expiresAt: input.mcpAuthority.expiresAt,
+                        }
+                      : null,
+                  },
+                }),
+              );
+
+              options?.onSubagentAdmission?.({
+                threadId: input.threadId,
+                command,
+                result: admissionResult,
+              });
+
+              if (admissionResult.status === "rejected") {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected [${admissionResult.diagnosticCode}]: ${admissionResult.rejectionReason ?? admissionResult.diagnosticCode}`,
+                    },
+                  ],
+                  isError: true,
+                  status: "rejected",
+                  diagnosticCode: admissionResult.diagnosticCode,
+                  rejectionReason: admissionResult.rejectionReason,
+                };
+              }
+
+              const childParams = {
+                ...params,
+                executionId: admissionResult.executionId,
+                attemptId: admissionResult.attemptId,
+                generation: admissionResult.generation,
+              };
+
+              const effectiveCtx = ctx ?? {
+                ui: makePiExtensionUIContext(context),
+                cwd: context.session.cwd,
+              };
+
+              const res = await originalExecute(toolCallId, childParams, signal, onUpdate, effectiveCtx);
+              if (res && typeof res === "object" && !res.isError) {
+                return {
+                  ...res,
+                  executionId: admissionResult.executionId,
+                  attemptId: admissionResult.attemptId,
+                  generation: admissionResult.generation,
+                };
+              }
+              return res;
+            };
+          };
+
+          for (const ext of loadedExtensions) {
+            if (ext && ext.tools instanceof Map && ext.tools.has("Agent")) {
+              const agentEntry = ext.tools.get("Agent");
+              wrapAgentTool(agentEntry.definition ?? agentEntry);
+            }
+          }
+          const allTools = runtime.session.getAllTools();
+          const sessionAgentTool = allTools.find((t: any) => t.name === "Agent");
+          if (sessionAgentTool) {
+            wrapAgentTool(sessionAgentTool);
+          }
+        }
 
         if (loadedExtensions.length > 0) {
           const extensionNames = loadedExtensions.map(extensionDisplayName);

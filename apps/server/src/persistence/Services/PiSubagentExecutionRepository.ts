@@ -41,10 +41,38 @@ export type PiSubagentAdmissionRecordResult =
       readonly execution: PiSubagentExecutionRecord;
     };
 
+export interface RecordPiSubagentLifecycleEventInput {
+  readonly eventId: string;
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly sequence: number;
+  readonly state: PiSubagentLifecycleState;
+  readonly occurredAt: string;
+  readonly diagnosticCode?: PiSubagentDiagnosticCode;
+  readonly diagnosticMessage?: string;
+  readonly metadataJson?: string | null;
+}
+
+export type PiSubagentLifecycleRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly event: PiSubagentLifecycleEvent;
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly event: PiSubagentLifecycleEvent;
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
   ) => Effect.Effect<PiSubagentAdmissionRecordResult, PiSubagentExecutionRepositoryError>;
+  readonly recordLifecycleEvent: (
+    input: RecordPiSubagentLifecycleEventInput,
+  ) => Effect.Effect<PiSubagentLifecycleRecordResult, PiSubagentExecutionRepositoryError>;
   readonly getById: (
     executionId: string,
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;

@@ -9,7 +9,7 @@ import {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +21,9 @@ import {
 } from "@synara/contracts";
 
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import {
   makeCompatiblePiSubagentExtension,
   negotiatePiSubagentCapability,
@@ -819,5 +822,158 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     await Effect.runPromise(
       adapter.stopSession("th_prod_test_1" as ThreadId).pipe(Effect.provide(piAdapterLayer)),
     );
+  });
+
+  it("T20-AC1, T20-AC5, T20-AC6: production PiAdapter session routes Agent tool call through server admission before child start", async () => {
+    const versionedDir = resolveVersionedExtensionDir();
+    const tempAgentDir = `/tmp/synara-piadapter-admission-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    createdDirs.push(tempAgentDir);
+
+    const extensionsDir = join(tempAgentDir, "extensions");
+    mkdirSync(extensionsDir, { recursive: true });
+    symlinkSync(versionedDir, join(extensionsDir, "pi-subagents"), "dir");
+    const sharedDir = join(versionedDir, "..", "shared");
+    if (existsSync(sharedDir)) {
+      symlinkSync(sharedDir, join(extensionsDir, "shared"), "dir");
+    }
+
+    const serverConfig: ServerConfigShape = {
+      mode: "web",
+      port: 3774,
+      host: "127.0.0.1",
+      cwd: tempAgentDir,
+      homeDir: tempAgentDir,
+      chatWorkspaceRoot: tempAgentDir,
+      studioWorkspaceRoot: tempAgentDir,
+      baseDir: tempAgentDir,
+      stateDir: tempAgentDir,
+      secretsDir: tempAgentDir,
+      dbPath: join(tempAgentDir, "state.sqlite"),
+      settingsPath: join(tempAgentDir, "settings.json"),
+      keybindingsConfigPath: join(tempAgentDir, "keybindings.json"),
+      worktreesDir: tempAgentDir,
+      attachmentsDir: tempAgentDir,
+      logsDir: tempAgentDir,
+      serverLogPath: join(tempAgentDir, "server.log"),
+      serverRuntimeStatePath: join(tempAgentDir, "runtime.json"),
+      providerLogsDir: tempAgentDir,
+      providerEventLogPath: join(tempAgentDir, "provider.ndjson"),
+      terminalLogsDir: tempAgentDir,
+      environmentIdPath: join(tempAgentDir, "env-id"),
+      staticDir: undefined,
+      devUrl: undefined,
+      publicUrl: undefined,
+      allowInsecureRemote: false,
+      noBrowser: true,
+      authToken: undefined,
+      autoBootstrapProjectFromCwd: false,
+      logProviderEvents: false,
+      logWebSocketEvents: false,
+    };
+
+    let observedSession: any;
+    let admittedEvent: any;
+
+    const piAdapterLayer = makePiAdapterLive({
+      onSubagentCapability: (event) => {
+        observedSession = event.session;
+      },
+      onSubagentAdmission: (event) => {
+        admittedEvent = event;
+      },
+    }).pipe(
+      Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
+      Layer.provide(NodeFileSystem.layer),
+      Layer.provide(PiSubagentExecutionRepositoryLive),
+      Layer.provide(SqlitePersistenceMemory),
+    );
+
+    const testLayer = Layer.mergeAll(
+      piAdapterLayer,
+      PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    );
+
+    const testProgram = Effect.gen(function* () {
+      const adapter = yield* PiAdapter;
+      const repo = yield* PiSubagentExecutionRepository;
+
+      yield* adapter.startSession({
+        threadId: "th_prod_admission_1" as ThreadId,
+        projectId: "proj_default",
+        cwd: tempAgentDir,
+        providerOptions: {
+          pi: {
+            agentDir: tempAgentDir,
+          },
+        },
+      });
+
+      expect(observedSession).toBeDefined();
+
+      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
+        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
+      ) as any;
+      expect(loadedExt).toBeDefined();
+
+      const agentEntry = loadedExt.tools.get("Agent");
+      const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
+      expect(executeFn).toBeDefined();
+
+      // 1. Authorized Agent tool execution
+      const toolResult = yield* Effect.promise(() =>
+        executeFn("call_agent_prod_1", {
+          commandId: "cmd_prod_agent_1",
+          task: "Perform database index research",
+          subagent_type: "researcher",
+          run_in_background: false,
+        }),
+      );
+
+      // T20-AC1, T20-AC6: Verified admitted before child start and ran with server-minted identities
+      expect(admittedEvent).toBeDefined();
+      expect(admittedEvent.result.status).toBe("accepted");
+      expect(admittedEvent.result.executionId).toMatch(/^exec_/);
+      expect(admittedEvent.result.attemptId).toMatch(/^att_/);
+      expect(admittedEvent.result.generation).toBe(1);
+
+      // Verify repository has durable record and sequence 1 journal event
+      const stored = yield* repo.getByCommandId("cmd_prod_agent_1");
+      expect(Option.isSome(stored)).toBe(true);
+      if (Option.isSome(stored)) {
+        expect(stored.value.executionId).toBe(admittedEvent.result.executionId);
+        expect(stored.value.observedState).toBe("accepted");
+        expect(stored.value.agentType).toBe("researcher");
+      }
+
+      const journal = yield* repo.listJournalEvents(admittedEvent.result.executionId);
+      expect(journal.length).toBe(1);
+      expect(journal[0]!.sequence).toBe(1);
+      expect(journal[0]!.state).toBe("accepted");
+
+      // 2. Denied Agent execution (project mismatch / unauthorized)
+      const deniedResult = yield* Effect.promise(() =>
+        executeFn("call_agent_denied_1", {
+          commandId: "cmd_prod_denied_1",
+          projectId: "proj_other_unauthorized",
+          task: "Unauthorized task",
+          subagent_type: "researcher",
+        }),
+      );
+
+      expect(deniedResult.isError).toBe(true);
+      expect(deniedResult.content[0].text).toContain("pi_subagent_admission_project_mismatch");
+
+      // Verify no accepted execution in repository for the denied command
+      const deniedRecord = yield* repo.getByCommandId("cmd_prod_denied_1");
+      // If recorded, its state is rejected
+      if (Option.isSome(deniedRecord)) {
+        expect(deniedRecord.value.observedState).toBe("rejected");
+      }
+
+      // Stop session cleanly
+      yield* adapter.stopSession("th_prod_admission_1" as ThreadId);
+    });
+
+    await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
   });
 });

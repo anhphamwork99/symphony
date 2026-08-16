@@ -279,6 +279,87 @@ describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC
   });
 });
 
+describe("Pi subagent admission and legacy bypass (Issue 20: T20-AC6, T20-AC7)", () => {
+  it("T20-AC6: managed tool execution returns server-minted executionId, attemptId, generation on success and stable error on denial", async () => {
+    let spawnCalled = false;
+    const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn", "abort-propagation"],
+      onSpawn: async (cmd) => {
+        spawnCalled = true;
+        if (cmd.agentType === "denied_type") {
+          return {
+            status: "rejected",
+            executionId: "exec_denied_test",
+            attemptId: "att_denied_test",
+            generation: 1,
+            state: "rejected",
+            diagnosticCode: "pi_subagent_admission_unauthorized",
+            rejectionReason: "Spawn unauthorized for agent type",
+          };
+        }
+        return {
+          status: "accepted",
+          executionId: "exec_accepted_test",
+          attemptId: "att_accepted_test",
+          generation: 1,
+          state: "accepted",
+          diagnosticCode: "pi_subagent_managed_enabled",
+        };
+      },
+    });
 
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(true);
 
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
 
+    // Success call
+    const okResult = await agentTool.definition.execute("call_ok", {
+      commandId: "cmd_ok_1",
+      agentType: "researcher",
+      prompt: "Research task",
+    });
+
+    expect((okResult as any).executionId).toBe("exec_accepted_test");
+    expect((okResult as any).attemptId).toBe("att_accepted_test");
+    expect((okResult as any).generation).toBe(1);
+    expect(emittedEvents.length).toBe(1);
+
+    // Denied call
+    const deniedResult = await agentTool.definition.execute("call_denied", {
+      commandId: "cmd_denied_2",
+      agentType: "denied_type",
+      prompt: "Forbidden task",
+    });
+
+    expect(deniedResult.isError).toBe(true);
+    expect((deniedResult as any).content[0].text).toContain("pi_subagent_admission_unauthorized");
+    // No additional child emitted
+    expect(emittedEvents.length).toBe(1);
+
+    session.dispose();
+  });
+
+  it("T20-AC7: unmanaged/legacy session bypasses managed admission path entirely", async () => {
+    const { extension } = makeLegacyPiSubagentExtension();
+
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(false);
+
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
+
+    const result = await agentTool.definition.execute("call_legacy_bypass", {
+      prompt: "Legacy work without managed admission",
+    });
+
+    expect((result as any).content[0].text).toBe("legacy response");
+    expect((result as any).executionId).toBeUndefined();
+
+    session.dispose();
+  });
+});

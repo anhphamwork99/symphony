@@ -14,12 +14,26 @@ export interface AdmissionSnapshotQuery {
   readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, unknown>;
 }
 
+export interface TrustedAdmissionContext {
+  readonly trustedThreadId?: string;
+  readonly trustedProjectId?: string;
+  readonly trustedActiveTurnId?: string | null;
+  readonly trustedProvider?: string;
+  readonly mcpAuthority?: {
+    readonly subject?: string;
+    readonly expiresAt?: string;
+  } | null;
+  readonly approvalRequired?: boolean;
+  readonly approvalGranted?: boolean;
+}
+
 export interface AdmitSubagentSpawnInput {
   readonly command: PiSubagentSpawnCommand;
   readonly sessionCapability?: PiSubagentNegotiatedCapability;
   readonly snapshotQuery: AdmissionSnapshotQuery;
   readonly repository: PiSubagentExecutionRepositoryShape;
   readonly controlHealth?: PiSubagentControlHealthShape;
+  readonly trustedContext?: TrustedAdmissionContext;
   readonly now?: string;
 }
 
@@ -65,7 +79,112 @@ export const admitSubagentSpawn = (
       }
     }
 
-    // 3. Check snapshot for thread / project / active turn authorization
+    // 3. Check server-minted trusted authority context (T20-AC5)
+    if (input.trustedContext) {
+      const {
+        trustedThreadId,
+        trustedProjectId,
+        trustedActiveTurnId,
+        trustedProvider,
+        mcpAuthority,
+        approvalRequired,
+        approvalGranted,
+      } = input.trustedContext;
+
+      if (trustedProvider !== undefined && trustedProvider !== "pi") {
+        const executionId = `exec_rejected_${randomUUID()}`;
+        const attemptId = `att_rejected_${randomUUID()}`;
+        return {
+          status: "rejected",
+          executionId,
+          attemptId,
+          generation: 1,
+          state: "rejected",
+          diagnosticCode: "pi_subagent_admission_provider_mismatch",
+          rejectionReason: `Provider mismatch: expected 'pi', received '${trustedProvider}'`,
+        };
+      }
+
+      if (mcpAuthority?.expiresAt) {
+        const expiryTime = new Date(mcpAuthority.expiresAt).getTime();
+        const currentTime = new Date(now).getTime();
+        if (Number.isFinite(expiryTime) && expiryTime <= currentTime) {
+          const executionId = `exec_rejected_${randomUUID()}`;
+          const attemptId = `att_rejected_${randomUUID()}`;
+          return {
+            status: "rejected",
+            executionId,
+            attemptId,
+            generation: 1,
+            state: "rejected",
+            diagnosticCode: "pi_subagent_admission_unauthorized",
+            rejectionReason: "Subject authority credentials have expired",
+          };
+        }
+      }
+
+      if (trustedThreadId !== undefined && input.command.parentThreadId !== trustedThreadId) {
+        const executionId = `exec_rejected_${randomUUID()}`;
+        const attemptId = `att_rejected_${randomUUID()}`;
+        return {
+          status: "rejected",
+          executionId,
+          attemptId,
+          generation: 1,
+          state: "rejected",
+          diagnosticCode: "pi_subagent_admission_unauthorized",
+          rejectionReason: `Thread authorization mismatch: command specified '${input.command.parentThreadId}', trusted context is '${trustedThreadId}'`,
+        };
+      }
+
+      if (trustedProjectId !== undefined && input.command.projectId !== trustedProjectId) {
+        const executionId = `exec_rejected_${randomUUID()}`;
+        const attemptId = `att_rejected_${randomUUID()}`;
+        return {
+          status: "rejected",
+          executionId,
+          attemptId,
+          generation: 1,
+          state: "rejected",
+          diagnosticCode: "pi_subagent_admission_project_mismatch",
+          rejectionReason: `Project authorization mismatch: command specified '${input.command.projectId}', trusted context is '${trustedProjectId}'`,
+        };
+      }
+
+      if (
+        trustedActiveTurnId !== undefined &&
+        input.command.parentTurnId &&
+        input.command.parentTurnId !== trustedActiveTurnId
+      ) {
+        const executionId = `exec_rejected_${randomUUID()}`;
+        const attemptId = `att_rejected_${randomUUID()}`;
+        return {
+          status: "rejected",
+          executionId,
+          attemptId,
+          generation: 1,
+          state: "rejected",
+          diagnosticCode: "pi_subagent_admission_active_turn_required",
+          rejectionReason: `Active turn mismatch: command specified '${input.command.parentTurnId}', trusted active turn is '${trustedActiveTurnId}'`,
+        };
+      }
+
+      if (approvalRequired && !approvalGranted) {
+        const executionId = `exec_rejected_${randomUUID()}`;
+        const attemptId = `att_rejected_${randomUUID()}`;
+        return {
+          status: "rejected",
+          executionId,
+          attemptId,
+          generation: 1,
+          state: "rejected",
+          diagnosticCode: "pi_subagent_admission_unauthorized",
+          rejectionReason: "Subagent spawn requires approval which was not granted",
+        };
+      }
+    }
+
+    // 4. Check snapshot for thread / project / active turn authorization
     const snapshot = yield* input.snapshotQuery.getSnapshot();
     const thread = snapshot.threads.find((t) => t.id === input.command.parentThreadId);
 
