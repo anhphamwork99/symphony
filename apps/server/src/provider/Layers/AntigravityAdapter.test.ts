@@ -914,3 +914,278 @@ describe("Antigravity turn settle on cancel (#465)", () => {
     }
   });
 });
+
+describe("Antigravity turn settle on non-zero CLI exit with output", () => {
+  it("settles a completed turn with a warning when the CLI fails late but output was produced", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-late-fail-"));
+    let child: ChildProcess | undefined;
+    const spawnProcess = ((_command: string, _args: readonly string[]) => {
+      const spawned = new EventEmitter() as ChildProcess;
+      Object.assign(spawned, {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        killed: false,
+        kill: () => true,
+      });
+      child = spawned;
+      return spawned;
+    }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          const settleFiber = yield* adapter.streamEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "runtime.error" ||
+                event.type === "runtime.warning" ||
+                event.type === "turn.completed",
+            ),
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          const threadId = ThreadId.makeUnsafe("thread-antigravity-late-fail");
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          });
+          yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+
+          child!.stdout.end("a visible reply\n");
+          child!.stderr.end("Error: timeout waiting for response\n");
+          yield* Effect.sleep("30 millis");
+          child!.emit("close", 1, null);
+
+          const events = Array.from(
+            yield* Fiber.join(settleFiber).pipe(Effect.timeout("2 seconds")),
+          );
+          expect(events.map((event) => event.type)).toEqual([
+            "runtime.warning",
+            "turn.completed",
+          ]);
+          const warning = events[0];
+          if (warning.type === "runtime.warning") {
+            expect(warning.payload.message).toContain("timeout waiting for response");
+          }
+          const completion = events[1];
+          if (completion.type === "turn.completed") {
+            expect(completion.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+          }
+          const session = (yield* adapter.listSessions()).find(
+            (candidate) => candidate.threadId === threadId,
+          );
+          expect(session?.status).toBe("ready");
+          yield* adapter.stopSession(threadId);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              spawnProcess,
+            }).pipe(
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-late-fail-" }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("still fails the turn when the CLI exits non-zero without any output", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-silent-fail-"));
+    let child: ChildProcess | undefined;
+    const spawnProcess = ((_command: string, _args: readonly string[]) => {
+      const spawned = new EventEmitter() as ChildProcess;
+      Object.assign(spawned, {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        killed: false,
+        kill: () => true,
+      });
+      child = spawned;
+      return spawned;
+    }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          const settleFiber = yield* adapter.streamEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "runtime.error" ||
+                event.type === "runtime.warning" ||
+                event.type === "turn.completed",
+            ),
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          const threadId = ThreadId.makeUnsafe("thread-antigravity-silent-fail");
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          });
+          yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+
+          child!.stderr.end("Error: timeout waiting for response\n");
+          yield* Effect.sleep("30 millis");
+          child!.emit("close", 7, null);
+
+          const events = Array.from(
+            yield* Fiber.join(settleFiber).pipe(Effect.timeout("2 seconds")),
+          );
+          expect(events.map((event) => event.type)).toEqual(["runtime.error", "turn.completed"]);
+          const failure = events[0];
+          if (failure.type === "runtime.error") {
+            expect(failure.payload).toEqual({
+              message: "Error: timeout waiting for response",
+              class: "provider_error",
+            });
+          }
+          const completion = events[1];
+          if (completion.type === "turn.completed") {
+            expect(completion.payload).toEqual({
+              state: "failed",
+              stopReason: "error",
+              errorMessage: "Error: timeout waiting for response",
+            });
+          }
+          const session = (yield* adapter.listSessions()).find(
+            (candidate) => candidate.threadId === threadId,
+          );
+          expect(session?.status).toBe("error");
+          expect(
+            (yield* adapter.listSessions()).find(
+              (candidate) => candidate.threadId === threadId,
+            )?.lastError,
+          ).toBe("Error: timeout waiting for response");
+          yield* adapter.stopSession(threadId);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              spawnProcess,
+            }).pipe(
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-silent-fail-" }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("counts hook tool activity as output for the late-failure recovery", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-tool-output-"));
+    let eventFile: string | undefined;
+    let child: ChildProcess | undefined;
+    const spawnProcess = ((
+      _command: string,
+      _args: readonly string[],
+      options: { readonly env?: NodeJS.ProcessEnv },
+    ) => {
+      eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS;
+      const spawned = new EventEmitter() as ChildProcess;
+      Object.assign(spawned, {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        killed: false,
+        kill: () => true,
+      });
+      child = spawned;
+      return spawned;
+    }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          const settleFiber = yield* adapter.streamEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "runtime.error" ||
+                event.type === "runtime.warning" ||
+                event.type === "turn.completed",
+            ),
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          const itemStartedFiber = yield* adapter.streamEvents.pipe(
+            Stream.filter((event) => event.type === "item.started"),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          const threadId = ThreadId.makeUnsafe("thread-antigravity-tool-output");
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          });
+          yield* adapter.sendTurn({ threadId, input: "exercise tools", attachments: [] });
+          expect(eventFile).toBeTruthy();
+          yield* Effect.promise(() =>
+            fs.appendFile(
+              eventFile!,
+              'pre-tool\t{"stepIdx":1,"toolCall":{"name":"run_command","args":{}}}\n',
+            ),
+          );
+          Array.from(
+            yield* Fiber.join(itemStartedFiber).pipe(Effect.timeout("2 seconds")),
+          );
+
+          child!.stderr.end("Error: timeout waiting for response\n");
+          yield* Effect.sleep("30 millis");
+          child!.emit("close", 1, null);
+
+          const events = Array.from(
+            yield* Fiber.join(settleFiber).pipe(Effect.timeout("2 seconds")),
+          );
+          expect(events.map((event) => event.type)).toEqual([
+            "runtime.warning",
+            "turn.completed",
+          ]);
+          const completion = events[1];
+          if (completion.type === "turn.completed") {
+            expect(completion.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+          }
+          yield* adapter.stopSession(threadId);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              spawnProcess,
+            }).pipe(
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-tool-output-" }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});

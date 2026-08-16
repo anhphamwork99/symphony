@@ -126,6 +126,8 @@ type AntigravitySessionContext = {
   pendingTools: PendingTool[];
   nextToolSequence: number;
   sawAssistant: boolean;
+  /** Set once the turn emits any user-visible output (assistant text or tool activity). */
+  turnOutputProduced: boolean;
   interrupted: boolean;
   stopped: boolean;
   /** Guards against double turn.completed (process close + interrupt/stop). */
@@ -786,6 +788,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         raw: raw(step.type ?? "transcript", step),
       } satisfies ProviderRuntimeEvent);
       if (itemType === "assistant_message") context.sawAssistant = true;
+      context.turnOutputProduced = true;
     };
 
     const processTranscriptStep = (context: AntigravitySessionContext, step: TranscriptStep) => {
@@ -923,6 +926,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
               name,
             } satisfies PendingTool;
             context.pendingTools.push(pending);
+            context.turnOutputProduced = true;
             offer({
               ...base(context, { itemId }),
               type: "item.started",
@@ -1049,6 +1053,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           pendingTools: [],
           nextToolSequence: 0,
           sawAssistant: false,
+          turnOutputProduced: false,
           interrupted: false,
           stopped: false,
           turnTerminalEmitted: false,
@@ -1171,6 +1176,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         context.pendingTools = [];
         context.nextToolSequence = 0;
         context.sawAssistant = false;
+        context.turnOutputProduced = false;
         context.interrupted = false;
         context.turnTerminalEmitted = false;
         context.turns.push({ id: turnId, items: [] });
@@ -1302,18 +1308,49 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             }
             const interrupted = context.interrupted || signal !== null;
             const failed = !interrupted && (code ?? 1) !== 0;
-            if (failed && stderr.trim()) {
+            // A non-zero exit after the turn already produced user-visible
+            // output (assistant text, tools, or stdout fallback) is treated as
+            // a completed turn with a warning instead of a hard failure: the
+            // Antigravity CLI can abort its finalization wait (e.g. "Error:
+            // timeout waiting for response") after streaming is fully delivered.
+            const outputRecovered = failed && context.turnOutputProduced;
+            const settledState = interrupted
+              ? "interrupted"
+              : outputRecovered
+                ? "completed"
+                : failed
+                  ? "failed"
+                  : "completed";
+            const settledStopReason = interrupted
+              ? "interrupted"
+              : outputRecovered
+                ? "model_stop"
+                : failed
+                  ? "error"
+                  : "model_stop";
+            if (failed && !outputRecovered && stderr.trim()) {
               offer({
                 ...base(context, { includeTurn: false }),
                 type: "runtime.error",
                 payload: { message: stderr.trim(), class: "provider_error" },
                 raw: raw("stderr", { code, stderr }),
               } satisfies ProviderRuntimeEvent);
+            } else if (outputRecovered) {
+              offer({
+                ...base(context, { includeTurn: false }),
+                type: "runtime.warning",
+                payload: {
+                  message:
+                    stderr.trim() ||
+                    `Antigravity CLI exited with code ${code ?? 1} after producing output.`,
+                },
+                raw: raw("stderr", { code, stderr }),
+              } satisfies ProviderRuntimeEvent);
             }
             settleActiveTurn(context, {
-              state: interrupted ? "interrupted" : failed ? "failed" : "completed",
-              stopReason: interrupted ? "interrupted" : failed ? "error" : "model_stop",
-              ...(failed
+              state: settledState,
+              stopReason: settledStopReason,
+              ...(failed && !outputRecovered
                 ? {
                     errorMessage: stderr.trim() || `Antigravity CLI exited with code ${code ?? 1}.`,
                   }
