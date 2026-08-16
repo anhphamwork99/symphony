@@ -10,7 +10,7 @@ compatible with future resume attempts.
 **Blocked by:** 18 — Reconcile released migration lineages; 19 — Complete
 real-Pi capability negotiation.
 
-**Status:** ready-for-review
+**Status:** completed
 
 - [x] **T20-AC1:** The production composition provides the durable execution
       repository and routes the actual managed Agent spawn through admission before
@@ -52,7 +52,11 @@ known seams on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** ready-for-review
+**Implementation state:** completed
+
+**Final acceptance:** Accepted with recorded nonblocking risks by Project
+Supervisor on 2026-08-17. See
+[`decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md`](../decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md).
 
 > Status note: the previous candidate completion claims in this report were
 > rejected on review (AC1/2/4/5/6 failed). This report replaces them. The
@@ -82,8 +86,11 @@ execution + first attempt + sequence-1 lifecycle journal, then child start.
   `pi`, server-minted ownership cross-checks (thread/project/active turn),
   server projection truth (thread existence, archive, project, active turn,
   thread runtime mode), the approval gate, and Decision-21 subject authority
-  (`assertAdmittable`). Every rejection path durably records a rejected
-  execution + sequence-1 journal event atomically.
+  (`assertAdmittable`). Coordinator-path authorization rejections durably
+  record a rejected execution + sequence-1 journal event atomically. Rejections
+  before coordinator entry, command-identity conflicts, and persistence
+  failures remain terminal and fail closed without claiming a newly persisted
+  rejection row.
 - **Repository** (`apps/server/src/persistence/Layers/PiSubagentExecutionRepository.ts`)
   commits the execution row and the sequence-1 journal event in one
   transaction (T20-AC2), dedups admission by `(command_id, command_fingerprint)`

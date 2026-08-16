@@ -16,6 +16,9 @@
   accepted migration-lineage baseline for downstream persistence work.
 - [decisions/0003-t19-real-pi-capability-final-acceptance.md](decisions/0003-t19-real-pi-capability-final-acceptance.md) —
   accepted real-Pi handshake and capability baseline.
+- [decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md](decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md) —
+  accepted atomic authorized production-admission baseline and recorded
+  nonblocking risks.
 - [issues/](issues/) — normative implementation tickets in dependency order;
   work the blocker-free frontier one ticket at a time.
 
@@ -26,8 +29,8 @@
   production wiring, migration compatibility, persistence correctness,
   authorization, and real-Pi/restart evidence did not.
 - **Remediation track:** tickets 18–24.
-- **Accepted remediation prerequisites:** tickets 18 and 19.
-- **Blocker-free frontier:** ticket 20 — Atomic authorized production admission.
+- **Accepted remediation tickets:** tickets 18, 19, and 20.
+- **Blocker-free frontier:** ticket 21 — Production fail-closed control health.
 - **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
 - Every remediation ticket owns an `Implementation Report`; an implementer must
   complete that report with exact evidence before requesting review.
