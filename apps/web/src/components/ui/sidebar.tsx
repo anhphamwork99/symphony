@@ -448,7 +448,7 @@ function SidebarRail({
   const isContentSeam = placement === "content-seam";
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
-  const resizeStateRef = React.useRef<{
+  type RailResizeState = {
     moved: boolean;
     pointerId: number;
     pendingWidth: number;
@@ -461,11 +461,40 @@ function SidebarRail({
     transitionTargets: HTMLElement[];
     width: number;
     wrapper: HTMLElement;
-  } | null>(null);
+  };
+  const resizeStateRef = React.useRef<RailResizeState | null>(null);
   const resolvedResizable = sidebarInstance?.resizable ?? null;
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+
+  // Probe and commit one width candidate: the host acceptance gate first, then
+  // the DOM write. Shared by the drag frame and the release flush below so the
+  // final position of a gesture is committed with identical semantics either
+  // way — a fast release can precede the scheduled frame without losing moves.
+  const commitResizeCandidate = React.useCallback(
+    (resizeState: RailResizeState, nextWidth: number): boolean => {
+      if (!resolvedResizable) {
+        return false;
+      }
+      const accepted =
+        resolvedResizable.shouldAcceptWidth?.({
+          currentWidth: resizeState.width,
+          nextWidth,
+          rail: resizeState.rail,
+          side: resizeState.side,
+          sidebarRoot: resizeState.sidebarRoot,
+          wrapper: resizeState.wrapper,
+        }) ?? true;
+      if (!accepted) {
+        return false;
+      }
+      resizeState.wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+      resizeState.width = nextWidth;
+      return true;
+    },
+    [resolvedResizable],
+  );
 
   const stopResize = React.useCallback(
     (pointerId: number) => {
@@ -475,6 +504,16 @@ function SidebarRail({
       }
       if (resizeState.rafId !== null) {
         window.cancelAnimationFrame(resizeState.rafId);
+        resizeState.rafId = null;
+      }
+      // Flush the gesture's final position before release: a fast drag can end
+      // before its scheduled frame runs, and dropping `pendingWidth` would lose
+      // the last stretch of the gesture (the next drag then starts from a stale
+      // width — the "blocked first, works second" symptom). The write happens
+      // while the drag transition suppression is still active, so the final hop
+      // snaps exactly like every other drag frame.
+      if (resizeState.pendingWidth !== resizeState.width) {
+        commitResizeCandidate(resizeState, resizeState.pendingWidth);
       }
       resizeState.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
@@ -490,7 +529,7 @@ function SidebarRail({
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     },
-    [resolvedResizable],
+    [commitResizeCandidate, resolvedResizable],
   );
 
   const handlePointerDown = React.useCallback(
@@ -578,24 +617,12 @@ function SidebarRail({
 
         activeResizeState.rafId = null;
         const nextWidth = activeResizeState.pendingWidth;
-        const accepted =
-          resolvedResizable.shouldAcceptWidth?.({
-            currentWidth: activeResizeState.width,
-            nextWidth,
-            rail: activeResizeState.rail,
-            side: activeResizeState.side,
-            sidebarRoot: activeResizeState.sidebarRoot,
-            wrapper: activeResizeState.wrapper,
-          }) ?? true;
-        if (!accepted) {
-          return;
+        if (nextWidth !== activeResizeState.width) {
+          commitResizeCandidate(activeResizeState, nextWidth);
         }
-
-        activeResizeState.wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
-        activeResizeState.width = nextWidth;
       });
     },
-    [onPointerMove, resolvedResizable],
+    [commitResizeCandidate, onPointerMove, resolvedResizable],
   );
 
   const endResizeInteraction = React.useCallback(

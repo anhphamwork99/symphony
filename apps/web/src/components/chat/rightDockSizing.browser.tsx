@@ -307,4 +307,27 @@ describe("RightDock desktop sizing contract", () => {
     await expectDockWidthPx(RIGHT_DOCK_MIN_WIDTH);
     railPointerUp();
   });
+
+  it("commits a fast drag's final position even when the release precedes the next frame", async () => {
+    mounted = await render(<DockHarness shellWidth={1200} open />);
+    await expectDockWidthPx(600);
+
+    // pointerdown + pointermove + pointerup dispatched in the same task: no
+    // animation frame can run in between, so only the release-flush path can
+    // commit the final candidate (a regression here reproduces the "first drag
+    // blocked, second drag works" symptom).
+    railPointerDown(-120);
+    railPointerUp();
+    await expectDockWidthPx(600 + 120);
+
+    // Same flush guarantee for the narrowing direction.
+    railPointerDown(160);
+    railPointerUp();
+    await expectDockWidthPx(600 + 120 - 160);
+
+    // The flushed candidate is clamped into the resize bounds.
+    railPointerDown(-1_000);
+    railPointerUp();
+    await expectDockWidthPx(1200 - MAIN_MIN_WIDTH);
+  });
 });
