@@ -42,7 +42,6 @@ import {
 import type { DockPaneRuntimeMode } from "../../lib/dockPaneActivation";
 import type { FileCommentSelection } from "../../lib/fileComments";
 import { gitBranchesQueryOptions } from "../../lib/gitReactQuery";
-import { canComposerHandlePanelWidth } from "../../lib/panelResize";
 import { RIGHT_DOCK_MAIN_MIN_WIDTH } from "../../lib/rightDockSizing";
 import { projectListDirectoriesQueryOptions } from "../../lib/projectReactQuery";
 import { waitForSidechatCreator } from "../../lib/sidechatCreatorRegistry";
@@ -138,33 +137,6 @@ const DIFF_INLINE_DEFAULT_WIDTH = "max(28rem, calc(50vw - 8rem))";
 const SINGLE_PANEL_MIN_WIDTH = 26 * 16;
 
 const allowAnySplitDirection = (_direction: SplitDirection) => true;
-
-function shouldAcceptDockWidth({
-  nextWidth,
-  wrapper,
-}: {
-  nextWidth: number;
-  wrapper: HTMLElement;
-}) {
-  const previousSidebarWidth = wrapper.style.getPropertyValue("--sidebar-width");
-  return canComposerHandlePanelWidth({
-    nextWidth,
-    // The dock coexists only with the single-pane chat, but dock sidechat
-    // panes mount their own composer forms — scope the probe so it always
-    // measures the main composer instead of "first form in the document".
-    paneScopeId: SINGLE_CHAT_PANE_SCOPE_ID,
-    applyWidth: (width) => {
-      wrapper.style.setProperty("--sidebar-width", `${width}px`);
-    },
-    resetWidth: () => {
-      if (previousSidebarWidth.length > 0) {
-        wrapper.style.setProperty("--sidebar-width", previousSidebarWidth);
-      } else {
-        wrapper.style.removeProperty("--sidebar-width");
-      }
-    },
-  });
-}
 
 function RightDockPanePlaceholder(props: { kind: RightDockPaneKind }) {
   const { label } = getRightDockPaneMeta(props.kind);
@@ -289,6 +261,7 @@ export function SingleChatSurface(props: {
   const [editorDiffOptionsControl, setEditorDiffOptionsControl] = useState<ReactNode | null>(null);
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
   const [searchPaletteMode, setSearchPaletteMode] = useState<WorkspaceSearchPaletteMode>("files");
+  const mainSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   const activePane = resolveActivePane(dockState);
   const {
@@ -1088,41 +1061,43 @@ export function SingleChatSurface(props: {
       <div
         className={cn(CHAT_MAIN_VIEWPORT_SHELL_CLASS_NAME, CHAT_MAIN_CONTENT_SURFACE_CLASS_NAME)}
       >
-        <ChatPaneDropOverlay
-          canDropInDirection={allowAnySplitDirection}
-          excludedThreadIds={excludedThreadIds}
-          onDrop={handleDropThread}
-          className="flex h-full min-h-0 min-w-0 flex-1"
-        >
-          <RouteInsetSurface surfaceClassName={CHAT_BACKGROUND_CLASS_NAME}>
-            <DeferredChatView
-              threadId={props.threadId}
-              paneScopeId={SINGLE_CHAT_PANE_SCOPE_ID}
-              deferMount={isBrandNewDraftThread}
-              surfaceMode="single"
-              isFocusedPane
-              panelState={chatPanelState}
-              onToggleDiff={handleToggleDiff}
-              onToggleRightDock={handleToggleRightDock}
-              onToggleBrowser={handleToggleBrowser}
-              {...(hasDeviceSupport ? { onToggleDevice: handleToggleDevice } : {})}
-              onOpenBrowserUrl={handleOpenBrowserUrl}
-              onOpenTurnDiff={handleOpenTurnDiff}
-              onSplitSurface={handleSplitSurface}
-              viewModeAction={{
-                label: "Editor view",
-                active: false,
-                onClick: handleOpenEditorView,
-              }}
-            />
-          </RouteInsetSurface>
-        </ChatPaneDropOverlay>
+        <div ref={mainSurfaceRef} className="flex h-full min-h-0 min-w-0 flex-1">
+          <ChatPaneDropOverlay
+            canDropInDirection={allowAnySplitDirection}
+            excludedThreadIds={excludedThreadIds}
+            onDrop={handleDropThread}
+            className="flex h-full min-h-0 min-w-0 flex-1"
+          >
+            <RouteInsetSurface surfaceClassName={CHAT_BACKGROUND_CLASS_NAME}>
+              <DeferredChatView
+                threadId={props.threadId}
+                paneScopeId={SINGLE_CHAT_PANE_SCOPE_ID}
+                deferMount={isBrandNewDraftThread}
+                surfaceMode="single"
+                isFocusedPane
+                panelState={chatPanelState}
+                onToggleDiff={handleToggleDiff}
+                onToggleRightDock={handleToggleRightDock}
+                onToggleBrowser={handleToggleBrowser}
+                {...(hasDeviceSupport ? { onToggleDevice: handleToggleDevice } : {})}
+                onOpenBrowserUrl={handleOpenBrowserUrl}
+                onOpenTurnDiff={handleOpenTurnDiff}
+                onSplitSurface={handleSplitSurface}
+                viewModeAction={{
+                  label: "Editor view",
+                  active: false,
+                  onClick: handleOpenEditorView,
+                }}
+              />
+            </RouteInsetSurface>
+          </ChatPaneDropOverlay>
+        </div>
         <RightDock
           state={dockState}
           minWidth={SINGLE_PANEL_MIN_WIDTH}
           defaultWidth={DIFF_INLINE_DEFAULT_WIDTH}
           mainMinWidth={RIGHT_DOCK_MAIN_MIN_WIDTH}
-          shouldAcceptWidth={shouldAcceptDockWidth}
+          mainTransitionTargetRef={mainSurfaceRef}
           addMenuKinds={availableDockPaneKinds}
           launcherItems={dockLauncherItems}
           motionKey={props.threadId}

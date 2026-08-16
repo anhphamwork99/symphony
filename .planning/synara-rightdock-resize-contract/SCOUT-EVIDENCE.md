@@ -8,6 +8,21 @@ NOTE: the scout's paths say `components/chat/ChatView.tsx`; the correct file is
 `apps/web/src/components/ChatView.tsx` (verified by orchestrator). All line
 numbers below were verified against the correct file.
 
+## Product implication (owner decision, 2026-08-16 — BINDING)
+
+This evidence explains WHY the dock must not run any composer feasibility check
+on the drag path: the probe creates a drifting, stateful acceptance boundary
+that pins the dock early and lurches mid-gesture. The owner's product intent
+(chat panel = Main conversation; Main has exactly one minimum width, 360px)
+makes the fix a REMOVAL: composer feasibility is removed from the right-dock
+drag path entirely — no live probe and NO replacement composer ceiling, snapshot
+or otherwise. The only max dock width is geometric (`shellWidth - 360`; Main
+floor 360px). `canComposerHandlePanelWidth` remains in the codebase only for
+split-view callers, unchanged. Earlier draft decisions that proposed replacing
+the live probe with a conservative composer-derived snapshot bound are
+superseded (see PROJECT.md); this file's evidence remains valid and is the
+justification for removal, not for any substitute bound.
+
 ## Key findings
 
 1. **No min-width floor in the Main column chain** (Q1). Shell = SingleChatSurface
@@ -34,9 +49,9 @@ numbers below were verified against the correct file.
      actions `shrink-0` (:11538-11542), leading cluster `overflow-hidden` vs
      `overflow-x-auto` (:11492-11494), picker widths change with compact state
      (w-32 vs w-36 sm:w-44 etc., :9554-9556).
-   Consequence: the accept/reject boundary is a step function of tier/compact
-   state that lags committed widths by one RO delivery, with hysteresis on the
-   way back. Acceptance is NOT a pure function of nextWidth.
+     Consequence: the accept/reject boundary is a step function of tier/compact
+     state that lags committed widths by one RO delivery, with hysteresis on the
+     way back. Acceptance is NOT a pure function of nextWidth.
 
 3. **No paint boundary inside the probe** (Q3). apply → measure → reset in
    panelResize.ts:37-63 is fully synchronous; RO callbacks deliver in the
@@ -68,11 +83,12 @@ numbers below were verified against the correct file.
    content-box changes. Does not fire on dock drags. REFUTED.
 
 7. **Exactly two resizable rails exist**: left thread sidebar — content-seam
-   rail, resizable `{minWidth: 13*16, shouldAcceptWidth: clientWidth - nextWidth
-   >= 640, storageKey: "chat_thread_sidebar_width"}` (routes/_chat.tsx:64-69,
-   574-597); right dock — sidebar-shell rail (RightDock.tsx:541), resizable
-   `{minWidth: bounds.minDock, maxWidth: bounds.maxDock, shouldAcceptWidth}`
-   (RightDock.tsx:429-440), no storageKey/onResize.
+   rail, resizable `{minWidth: 13\*16, shouldAcceptWidth: clientWidth - nextWidth
+
+   > = 640, storageKey: "chat_thread_sidebar_width"}`(routes/_chat.tsx:64-69,
+574-597); right dock — sidebar-shell rail (RightDock.tsx:541), resizable`{minWidth: bounds.minDock, maxWidth: bounds.maxDock, shouldAcceptWidth}`(RightDock.tsx:429-440), no storageKey/onResize. Under the approved contract
+the right dock's`shouldAcceptWidth` composer adapter is removed from its
+   > path; the left rail keeps its probe.
 
 8. **What the user sees** (Q7): the position:fixed sidebar-container
    (right-0, w-(--sidebar-width)) is "the panel"; the in-flow gap carries the
@@ -96,10 +112,17 @@ the same probe, still beyond the boundary → rejected → no write; suppression
 removed; nothing animates. Perceived as "jerks back to the limit": the panel is
 at a probe-derived limit, not under the cursor, and it lurched before settling.
 
+Product consequence: because the boundary is probe-derived and stateful, NO
+composer feasibility check can be part of the dock drag path. The approved
+contract removes the probe and bounds the dock geometrically
+(`shellWidth - 360`), so the drifting boundary — and with it the lurch, the
+early pin, and the second stop — is gone by construction.
+
 ## Minimal reproduction (to prove the live-boundary behavior)
 
 Harness (rightDockSizing.browser.tsx pattern) with the REAL composer (footer +
-data-chat-composer-* attrs) and the real shouldAcceptDockWidth probe:
+data-chat-composer-\* attrs) and the real shouldAcceptDockWidth probe:
+
 - Test A: fast overshoot widen drag (8 × 55px steps); assert var pins at an
   accepted width, log shows the boundary drifting between frames (tier/compact
   interleaved with probes), and readVar() unchanged 5 frames after pointerup.
@@ -109,6 +132,10 @@ data-chat-composer-* attrs) and the real shouldAcceptDockWidth probe:
 - Test C: slow 1px-step drag across the boundary; count accept/reject flips near
   the ±0.5 fudge margins (flutter) — runtime-only, plausible.
 
+These tests demonstrate the drift mechanism. The production acceptance suite
+(DESIGNER-CONTRACT AC-02) asserts the dock stops exactly once at the geometric
+ceiling with no second boundary — the observable signature of probe removal.
+
 ## Load-bearing facts for implementation
 
 - Release call order (sidebar.tsx:640-644 → 628-638 → 499-533): pointerup →
@@ -116,11 +143,14 @@ data-chat-composer-* attrs) and the real shouldAcceptDockWidth probe:
   commitResizeCandidate (probe-then-write, forward-only) → remove suppression →
   persist/onResize (none for dock) → null ref → releasePointerCapture → body
   cleanup. Suppression removal is AFTER the flush, so the flush paints at 0ms.
+  Under the approved contract the dock's release flush must not re-evaluate or
+  change geometry (binding #3); the left sidebar keeps its own probe.
 - CSS var ownership: the wrapper's inline var; provider React style only resets
   on REMOUNT (drag width reset to open default).
 - Probe returns true when no composer form exists (panelResize.ts:27-28) —
   during deferred mounts (ChatMountLoader) widening is bounded only by the
-  geometric ceiling.
+  geometric ceiling. Moot for the dock once the probe is removed from its path;
+  still true for split-view callers.
 - Blast radius: rail primitive shared with the left sidebar (storage + own
   probe); probe change is dock-only; split panes use panelResize separately.
 - Diagnostic scratch file must not become the production acceptance suite.

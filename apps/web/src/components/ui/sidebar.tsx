@@ -54,9 +54,19 @@ type SidebarContextProps = {
 };
 
 type SidebarResizableOptions = {
+  getMainTransitionTarget?: () => HTMLElement | null;
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
+  resolveSessionBounds?: (context: {
+    currentWidth: number;
+    maxWidth: number;
+    minWidth: number;
+    rail: HTMLButtonElement;
+    side: "left" | "right";
+    wrapper: HTMLElement;
+  }) => { min: number; max: number } | null;
+  sessionHandleRef?: { current: SidebarResizeSessionHandle | null };
   shouldAcceptWidth?: (context: {
     currentWidth: number;
     nextWidth: number;
@@ -69,9 +79,12 @@ type SidebarResizableOptions = {
 };
 
 type SidebarResolvedResizableOptions = {
+  getMainTransitionTarget?: () => HTMLElement | null;
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
+  resolveSessionBounds?: SidebarResizableOptions["resolveSessionBounds"];
+  sessionHandleRef?: { current: SidebarResizeSessionHandle | null };
   shouldAcceptWidth?: (context: {
     currentWidth: number;
     nextWidth: number;
@@ -82,6 +95,11 @@ type SidebarResolvedResizableOptions = {
   }) => boolean;
   storageKey: string | null;
 };
+
+export interface SidebarResizeSessionHandle {
+  /** Tightens an active gesture and synchronously clamps an unsafe rendered width. */
+  tightenBounds(bounds: { min: number; max: number }): void;
+}
 
 type SidebarInstanceContextProps = {
   resizable: SidebarResolvedResizableOptions | null;
@@ -202,6 +220,11 @@ function resolveSidebarResizable(
     minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
     storageKey: options.storageKey ?? null,
     ...(options.onResize ? { onResize: options.onResize } : {}),
+    ...(options.getMainTransitionTarget
+      ? { getMainTransitionTarget: options.getMainTransitionTarget }
+      : {}),
+    ...(options.resolveSessionBounds ? { resolveSessionBounds: options.resolveSessionBounds } : {}),
+    ...(options.sessionHandleRef ? { sessionHandleRef: options.sessionHandleRef } : {}),
     ...(options.shouldAcceptWidth ? { shouldAcceptWidth: options.shouldAcceptWidth } : {}),
   };
 }
@@ -432,6 +455,7 @@ function SidebarRail({
   placement: placementProp,
   className,
   onClick,
+  onLostPointerCapture,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
@@ -456,17 +480,68 @@ function SidebarRail({
     rafId: number | null;
     sidebarRoot: HTMLElement;
     side: "left" | "right";
+    sessionBounds: { min: number; max: number } | null;
     startWidth: number;
     startX: number;
-    transitionTargets: HTMLElement[];
+    transitionTargets: Array<{ element: HTMLElement; priorTransitionDuration: string }>;
     width: number;
     wrapper: HTMLElement;
   };
   const resizeStateRef = React.useRef<RailResizeState | null>(null);
+  const transitionRestoreRef = React.useRef<{
+    firstFrameId: number | null;
+    secondFrameId: number | null;
+    targets: RailResizeState["transitionTargets"];
+  } | null>(null);
   const resolvedResizable = sidebarInstance?.resizable ?? null;
+  const resolvedResizableRef = React.useRef(resolvedResizable);
+  resolvedResizableRef.current = resolvedResizable;
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+
+  const restoreTransitionTargets = React.useCallback(() => {
+    const pending = transitionRestoreRef.current;
+    transitionRestoreRef.current = null;
+    if (!pending) return;
+    if (pending.firstFrameId !== null) window.cancelAnimationFrame(pending.firstFrameId);
+    if (pending.secondFrameId !== null) window.cancelAnimationFrame(pending.secondFrameId);
+    for (const { element, priorTransitionDuration } of pending.targets) {
+      if (priorTransitionDuration === "") {
+        element.style.removeProperty("transition-duration");
+      } else {
+        element.style.setProperty("transition-duration", priorTransitionDuration);
+      }
+    }
+  }, []);
+
+  const scheduleTransitionRestore = React.useCallback(
+    (targets: RailResizeState["transitionTargets"]) => {
+      restoreTransitionTargets();
+      const pending: {
+        firstFrameId: number | null;
+        secondFrameId: number | null;
+        targets: RailResizeState["transitionTargets"];
+      } = { firstFrameId: null, secondFrameId: null, targets };
+      pending.firstFrameId = window.requestAnimationFrame(() => {
+        pending.firstFrameId = null;
+        pending.secondFrameId = window.requestAnimationFrame(() => {
+          pending.secondFrameId = null;
+          if (transitionRestoreRef.current !== pending) return;
+          transitionRestoreRef.current = null;
+          for (const { element, priorTransitionDuration } of targets) {
+            if (priorTransitionDuration === "") {
+              element.style.removeProperty("transition-duration");
+            } else {
+              element.style.setProperty("transition-duration", priorTransitionDuration);
+            }
+          }
+        });
+      });
+      transitionRestoreRef.current = pending;
+    },
+    [restoreTransitionTargets],
+  );
 
   // Probe and commit one width candidate: the host acceptance gate first, then
   // the DOM write. Shared by the drag frame and the release flush below so the
@@ -474,11 +549,12 @@ function SidebarRail({
   // way — a fast release can precede the scheduled frame without losing moves.
   const commitResizeCandidate = React.useCallback(
     (resizeState: RailResizeState, nextWidth: number): boolean => {
-      if (!resolvedResizable) {
+      const activeResolvedResizable = resolvedResizableRef.current;
+      if (!activeResolvedResizable) {
         return false;
       }
       const accepted =
-        resolvedResizable.shouldAcceptWidth?.({
+        activeResolvedResizable.shouldAcceptWidth?.({
           currentWidth: resizeState.width,
           nextWidth,
           rail: resizeState.rail,
@@ -493,13 +569,13 @@ function SidebarRail({
       resizeState.width = nextWidth;
       return true;
     },
-    [resolvedResizable],
+    [],
   );
 
   const stopResize = React.useCallback(
     (pointerId: number) => {
       const resizeState = resizeStateRef.current;
-      if (!resizeState) {
+      if (!resizeState || resizeState.pointerId !== pointerId) {
         return;
       }
       if (resizeState.rafId !== null) {
@@ -512,31 +588,54 @@ function SidebarRail({
       // width — the "blocked first, works second" symptom). The write happens
       // while the drag transition suppression is still active, so the final hop
       // snaps exactly like every other drag frame.
-      if (resizeState.pendingWidth !== resizeState.width) {
+      if (resizeState.sessionBounds === null && resizeState.pendingWidth !== resizeState.width) {
         commitResizeCandidate(resizeState, resizeState.pendingWidth);
+      } else if (
+        resizeState.sessionBounds !== null &&
+        resizeState.pendingWidth !== resizeState.width
+      ) {
+        resizeState.wrapper.style.setProperty("--sidebar-width", `${resizeState.pendingWidth}px`);
+        resizeState.width = resizeState.pendingWidth;
       }
-      resizeState.transitionTargets.forEach((element) => {
-        element.style.removeProperty("transition-duration");
-      });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+      if (resizeState.sessionBounds === null) {
+        for (const { element, priorTransitionDuration } of resizeState.transitionTargets) {
+          if (priorTransitionDuration === "") {
+            element.style.removeProperty("transition-duration");
+          } else {
+            element.style.setProperty("transition-duration", priorTransitionDuration);
+          }
+        }
+      } else {
+        scheduleTransitionRestore(resizeState.transitionTargets);
       }
-      resolvedResizable?.onResize?.(resizeState.width);
+      const activeResolvedResizable = resolvedResizableRef.current;
+      if (activeResolvedResizable?.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(activeResolvedResizable.storageKey, resizeState.width, Schema.Finite);
+      }
+      activeResolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
+      if (activeResolvedResizable?.sessionHandleRef) {
+        activeResolvedResizable.sessionHandleRef.current = null;
+      }
       if (resizeState.rail.hasPointerCapture(pointerId)) {
-        resizeState.rail.releasePointerCapture(pointerId);
+        try {
+          resizeState.rail.releasePointerCapture(pointerId);
+        } catch {
+          // Ignore if already released
+        }
       }
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     },
-    [commitResizeCandidate, resolvedResizable],
+    [commitResizeCandidate, scheduleTransitionRestore],
   );
 
   const handlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       onPointerDown?.(event);
       if (event.defaultPrevented) return;
-      if (!resolvedResizable || !open || event.button !== 0) return;
+      const activeResolvedResizable = resolvedResizableRef.current;
+      if (!activeResolvedResizable || !open || event.button !== 0) return;
 
       const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
       const sidebarRoot =
@@ -554,15 +653,52 @@ function SidebarRail({
         return;
       }
 
-      const startWidth = sidebarContainer.getBoundingClientRect().width;
-      const initialWidth = clampSidebarWidth(startWidth, resolvedResizable);
-      const transitionTargets = [
+      const renderedStartWidth = sidebarContainer.getBoundingClientRect().width;
+      const currentSide = sidebarInstance?.side ?? "left";
+      const resolvedSessionBounds = activeResolvedResizable.resolveSessionBounds?.({
+        currentWidth: renderedStartWidth,
+        maxWidth: activeResolvedResizable.maxWidth,
+        minWidth: activeResolvedResizable.minWidth,
+        rail: event.currentTarget,
+        side: currentSide,
+        wrapper,
+      });
+      const hasValidSessionBounds =
+        resolvedSessionBounds !== undefined &&
+        resolvedSessionBounds !== null &&
+        Number.isFinite(resolvedSessionBounds.min) &&
+        Number.isFinite(resolvedSessionBounds.max) &&
+        resolvedSessionBounds.min >= 0 &&
+        resolvedSessionBounds.max >= resolvedSessionBounds.min;
+      const sessionBounds = activeResolvedResizable.resolveSessionBounds
+        ? hasValidSessionBounds
+          ? resolvedSessionBounds
+          : {
+              min: activeResolvedResizable.minWidth,
+              max: Math.max(
+                activeResolvedResizable.minWidth,
+                Math.min(activeResolvedResizable.maxWidth, renderedStartWidth),
+              ),
+            }
+        : null;
+      const initialWidth = sessionBounds
+        ? Math.max(sessionBounds.min, Math.min(renderedStartWidth, sessionBounds.max))
+        : clampSidebarWidth(renderedStartWidth, activeResolvedResizable);
+      const rawTransitionTargets = [
         sidebarRoot.querySelector<HTMLElement>("[data-slot='sidebar-gap']"),
         sidebarRoot.querySelector<HTMLElement>("[data-slot='sidebar-container']"),
+        ...(sessionBounds
+          ? [event.currentTarget, activeResolvedResizable.getMainTransitionTarget?.() ?? null]
+          : []),
       ].filter((element): element is HTMLElement => element !== null);
-      transitionTargets.forEach((element) => {
+      restoreTransitionTargets();
+      const transitionTargets = [...new Set(rawTransitionTargets)].map((element) => ({
+        element,
+        priorTransitionDuration: element.style.getPropertyValue("transition-duration"),
+      }));
+      for (const { element } of transitionTargets) {
         element.style.setProperty("transition-duration", "0ms");
-      });
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -573,7 +709,8 @@ function SidebarRail({
         rail: event.currentTarget,
         rafId: null,
         sidebarRoot,
-        side: sidebarInstance?.side ?? "left",
+        sessionBounds,
+        side: currentSide,
         startWidth: initialWidth,
         startX: event.clientX,
         transitionTargets,
@@ -581,11 +718,36 @@ function SidebarRail({
         wrapper,
       };
       wrapper.style.setProperty("--sidebar-width", `${initialWidth}px`);
+      if (sessionBounds && activeResolvedResizable.sessionHandleRef) {
+        activeResolvedResizable.sessionHandleRef.current = {
+          tightenBounds: (nextBounds) => {
+            const active = resizeStateRef.current;
+            if (!active?.sessionBounds) return;
+            if (
+              !Number.isFinite(nextBounds.min) ||
+              !Number.isFinite(nextBounds.max) ||
+              nextBounds.min < 0 ||
+              nextBounds.max < 0
+            ) {
+              return;
+            }
+            const nextMax = Math.min(active.sessionBounds.max, nextBounds.max);
+            const nextMin = Math.min(active.sessionBounds.min, nextBounds.min, nextMax);
+            active.sessionBounds = { min: nextMin, max: nextMax };
+            const nextWidth = Math.max(nextMin, Math.min(active.width, nextMax));
+            active.pendingWidth = nextWidth;
+            if (nextWidth !== active.width) {
+              active.wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+              active.width = nextWidth;
+            }
+          },
+        };
+      }
       event.currentTarget.setPointerCapture(event.pointerId);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     },
-    [onPointerDown, open, resolvedResizable, sidebarInstance?.side],
+    [onPointerDown, open, restoreTransitionTargets, sidebarInstance?.side],
   );
 
   const handlePointerMove = React.useCallback(
@@ -593,7 +755,9 @@ function SidebarRail({
       onPointerMove?.(event);
       if (event.defaultPrevented) return;
       const resizeState = resizeStateRef.current;
-      if (!resizeState || resizeState.pointerId !== event.pointerId || !resolvedResizable) return;
+      const activeResolvedResizable = resolvedResizableRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId || !activeResolvedResizable)
+        return;
 
       event.preventDefault();
       const delta =
@@ -603,17 +767,26 @@ function SidebarRail({
       if (Math.abs(delta) > 2) {
         resizeState.moved = true;
       }
-      resizeState.pendingWidth = clampSidebarWidth(
-        resizeState.startWidth + delta,
-        resolvedResizable,
-      );
+      resizeState.pendingWidth = resizeState.sessionBounds
+        ? Math.max(
+            resizeState.sessionBounds.min,
+            Math.min(resizeState.startWidth + delta, resizeState.sessionBounds.max),
+          )
+        : clampSidebarWidth(resizeState.startWidth + delta, activeResolvedResizable);
+      if (resizeState.sessionBounds) {
+        if (resizeState.pendingWidth !== resizeState.width) {
+          resizeState.wrapper.style.setProperty("--sidebar-width", `${resizeState.pendingWidth}px`);
+          resizeState.width = resizeState.pendingWidth;
+        }
+        return;
+      }
       if (resizeState.rafId !== null) {
         return;
       }
 
       resizeState.rafId = window.requestAnimationFrame(() => {
         const activeResizeState = resizeStateRef.current;
-        if (!activeResizeState || !resolvedResizable) return;
+        if (!activeResizeState || !resolvedResizableRef.current) return;
 
         activeResizeState.rafId = null;
         const nextWidth = activeResizeState.pendingWidth;
@@ -622,7 +795,7 @@ function SidebarRail({
         }
       });
     },
-    [commitResizeCandidate, onPointerMove, resolvedResizable],
+    [commitResizeCandidate, onPointerMove],
   );
 
   const endResizeInteraction = React.useCallback(
@@ -649,6 +822,12 @@ function SidebarRail({
     endResizeInteraction(event);
   };
 
+  const handleLostPointerCapture = (event: React.PointerEvent<HTMLButtonElement>) => {
+    onLostPointerCapture?.(event);
+    if (event.defaultPrevented) return;
+    endResizeInteraction(event);
+  };
+
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     onClick?.(event);
     if (event.defaultPrevented) return;
@@ -657,7 +836,7 @@ function SidebarRail({
       event.preventDefault();
       return;
     }
-    if (resolvedResizable && open) {
+    if (resolvedResizableRef.current && open) {
       event.preventDefault();
       return;
     }
@@ -665,32 +844,51 @@ function SidebarRail({
   };
 
   React.useEffect(() => {
-    if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
+    const active = resolvedResizableRef.current;
+    if (!active?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
     if (!rail) return;
     const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
     if (!wrapper) return;
 
-    const storedWidth = getLocalStorageItem(resolvedResizable.storageKey, Schema.Finite);
+    const storedWidth = getLocalStorageItem(active.storageKey, Schema.Finite);
     if (storedWidth === null) return;
-    const clampedWidth = clampSidebarWidth(storedWidth, resolvedResizable);
+    const clampedWidth = clampSidebarWidth(storedWidth, active);
     wrapper.style.setProperty("--sidebar-width", `${clampedWidth}px`);
-    resolvedResizable.onResize?.(clampedWidth);
-  }, [resolvedResizable]);
+    active.onResize?.(clampedWidth);
+  }, [resolvedResizable?.storageKey]);
 
   React.useEffect(() => {
     return () => {
       const resizeState = resizeStateRef.current;
-      if (resizeState?.rafId != null) {
-        window.cancelAnimationFrame(resizeState.rafId);
+      if (resizeState) {
+        if (resizeState.rafId != null) {
+          window.cancelAnimationFrame(resizeState.rafId);
+        }
+        if (resizeState.rail.hasPointerCapture(resizeState.pointerId)) {
+          try {
+            resizeState.rail.releasePointerCapture(resizeState.pointerId);
+          } catch {
+            // Ignore if already released
+          }
+        }
+        for (const { element, priorTransitionDuration } of resizeState.transitionTargets) {
+          if (priorTransitionDuration === "") {
+            element.style.removeProperty("transition-duration");
+          } else {
+            element.style.setProperty("transition-duration", priorTransitionDuration);
+          }
+        }
+        resizeStateRef.current = null;
       }
-      resizeState?.transitionTargets.forEach((element) => {
-        element.style.removeProperty("transition-duration");
-      });
+      if (resolvedResizableRef.current?.sessionHandleRef) {
+        resolvedResizableRef.current.sessionHandleRef.current = null;
+      }
+      restoreTransitionTargets();
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     };
-  }, []);
+  }, [restoreTransitionTargets]);
 
   return (
     <button
@@ -724,6 +922,7 @@ function SidebarRail({
       data-placement={placement}
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onLostPointerCapture={handleLostPointerCapture}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

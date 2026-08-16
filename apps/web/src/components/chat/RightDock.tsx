@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -40,6 +41,8 @@ import {
   SIDEBAR_OFFCANVAS_MOTION_SUPPRESSED_CLASS,
   SidebarProvider,
   SidebarRail,
+  type SidebarResizableOptions,
+  type SidebarResizeSessionHandle,
 } from "../ui/sidebar";
 import { CHAT_BACKGROUND_CLASS_NAME } from "./composerPickerStyles";
 import { ComposerPickerMenuPopup } from "./ComposerPickerMenuPopup";
@@ -79,7 +82,8 @@ interface RightDockProps {
   // renders below this width (px) during open, drag, or shell/window shrink.
   // Hosts without the bound keep the legacy unbounded open/drag behavior.
   mainMinWidth?: number;
-  shouldAcceptWidth: (context: { nextWidth: number; wrapper: HTMLElement }) => boolean;
+  shouldAcceptWidth?: (context: { nextWidth: number; wrapper: HTMLElement }) => boolean;
+  mainTransitionTargetRef?: { current: HTMLElement | null };
   paneLabelOverrides?: Record<string, string | undefined>;
   // Per-pane tab glyph overrides (same shape as label overrides) — e.g. a pull request pane
   // swapping the generic kind icon for its live state glyph.
@@ -196,6 +200,26 @@ function resolveRightDockShell(content: HTMLDivElement | null): HTMLElement | nu
   return wrapper?.parentElement ?? null;
 }
 
+// The bounded resizable option set a mainMinWidth host passes to Sidebar:
+// geometric shell bounds only, no composer probe hook. Kept as a small pure
+// builder so the bounded path is produced by the same code the AC-12 negative
+// probe assertion checks directly.
+export function createBoundedDockResizableOptions(input: {
+  minWidth: number;
+  maxWidth: number;
+  getMainTransitionTarget: () => HTMLElement | null;
+  resolveSessionBounds: NonNullable<SidebarResizableOptions["resolveSessionBounds"]>;
+  sessionHandleRef: NonNullable<SidebarResizableOptions["sessionHandleRef"]>;
+}): SidebarResizableOptions {
+  return {
+    minWidth: input.minWidth,
+    maxWidth: input.maxWidth,
+    getMainTransitionTarget: input.getMainTransitionTarget,
+    resolveSessionBounds: input.resolveSessionBounds,
+    sessionHandleRef: input.sessionHandleRef,
+  };
+}
+
 export function RightDock(props: RightDockProps) {
   const activePane = resolveActivePane(props.state);
   const onSelectPane = props.onSelectPane;
@@ -207,12 +231,26 @@ export function RightDock(props: RightDockProps) {
 
   const keepMountedPaneIds = useKeepMountedPaneIds(props.state.panes, activePane);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const resizeSessionHandleRef = useRef<SidebarResizeSessionHandle | null>(null);
   const minWidth = props.minWidth;
   const mainMinWidth = props.mainMinWidth;
   const activePaneKind = activePane?.kind ?? null;
   const boundsActive = mainMinWidth !== undefined;
   const [shellWidth, setShellWidth] = useState(0);
   const bounds = boundsActive ? rightDockEffectiveBounds(shellWidth) : null;
+
+  const resolveDockSessionBounds = useCallback(
+    (context: { currentWidth: number; wrapper: HTMLElement }) => {
+      const liveShell = context.wrapper.parentElement;
+      if (!liveShell) {
+        return null;
+      }
+      const liveShellWidth = liveShell.getBoundingClientRect().width;
+      const geometricBounds = rightDockEffectiveBounds(liveShellWidth);
+      return { min: geometricBounds.minDock, max: geometricBounds.maxDock };
+    },
+    [],
+  );
 
   // The automatic shrink write must not animate: the dock's width transitions
   // are intentionally enabled for open/close and manual drags, so a passive
@@ -254,15 +292,14 @@ export function RightDock(props: RightDockProps) {
   // so the dock never auto-grows and repeated shell changes converge without
   // oscillation (writes never resize the shell, so the observer never re-fires
   // from them). The transition suppression is scoped to this automatic write.
-  //
-  // Accepted asymmetry (accepted design decision): this automatic write
-  // deliberately bypasses the composer feasibility probe (shouldAcceptWidth /
-  // canComposerHandlePanelWidth) that manual drags go through. The strict
-  // 360px Main-conversation floor contract outranks the soft composer buffer,
-  // so an automatic shrink pins Main to exactly 360 even if a manual drag to
-  // that same width would have been rejected by the probe.
   const writeShrinkClamp = useCallback(
     (wrapper: HTMLElement, shellWidthPx: number) => {
+      const activeSession = resizeSessionHandleRef.current;
+      if (activeSession) {
+        const nextBounds = rightDockEffectiveBounds(shellWidthPx);
+        activeSession.tightenBounds({ min: nextBounds.minDock, max: nextBounds.maxDock });
+        return;
+      }
       const currentWidth = wrapper.getBoundingClientRect().width;
       const nextWidth = clampRightDockShrinkWidth(currentWidth, shellWidthPx);
       if (nextWidth >= currentWidth) {
@@ -346,6 +383,7 @@ export function RightDock(props: RightDockProps) {
       restoreShrinkWriteTransitions();
     };
   }, [boundsActive, restoreShrinkWriteTransitions, writeShrinkClamp]);
+
   // The dock must open as an exact 50/50 split of the chat shell. The CSS
   // default can only approximate half (it cannot observe the resizable left
   // sidebar), so on every open we measure the shell row hosting chat + dock and
@@ -408,6 +446,28 @@ export function RightDock(props: RightDockProps) {
     ? SIDEBAR_OFFCANVAS_MOTION_SUPPRESSED_CLASS
     : SIDEBAR_OFFCANVAS_MOTION_CLASS;
 
+  const resizable = useMemo<SidebarResizableOptions | boolean>(() => {
+    if (bounds) {
+      return createBoundedDockResizableOptions({
+        minWidth: bounds.minDock,
+        maxWidth: bounds.maxDock,
+        getMainTransitionTarget: () => props.mainTransitionTargetRef?.current ?? null,
+        resolveSessionBounds: resolveDockSessionBounds,
+        sessionHandleRef: resizeSessionHandleRef,
+      });
+    }
+    return {
+      minWidth: props.minWidth,
+      ...(props.shouldAcceptWidth ? { shouldAcceptWidth: props.shouldAcceptWidth } : {}),
+    };
+  }, [
+    bounds,
+    props.mainTransitionTargetRef,
+    resolveDockSessionBounds,
+    props.minWidth,
+    props.shouldAcceptWidth,
+  ]);
+
   return (
     <SidebarProvider
       defaultOpen={false}
@@ -426,20 +486,7 @@ export function RightDock(props: RightDockProps) {
         innerClassName={CHAT_BACKGROUND_CLASS_NAME}
         gapClassName={chromeMotionClass}
         transparentSurface
-        resizable={
-          bounds
-            ? {
-                // Geometric invariant first: the rail clamps every drag candidate
-                // into these bounds before the composer feasibility probe runs.
-                minWidth: bounds.minDock,
-                maxWidth: bounds.maxDock,
-                shouldAcceptWidth: props.shouldAcceptWidth,
-              }
-            : {
-                minWidth: props.minWidth,
-                shouldAcceptWidth: props.shouldAcceptWidth,
-              }
-        }
+        resizable={resizable}
       >
         <div
           ref={contentRef}
