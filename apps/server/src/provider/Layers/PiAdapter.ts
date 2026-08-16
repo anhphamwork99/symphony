@@ -108,6 +108,9 @@ import {
   makePiSynaraMcpToolExecutionRegistry,
   type PiSynaraMcpToolExecutionRegistry,
 } from "../piSynaraMcpToolExecution.ts";
+import type { PiSubagentNegotiatedCapability } from "@synara/contracts";
+import { probePiSubagentBridge } from "../piSubagentBridge.ts";
+
 import {
   teardownChildProcessTree,
   teardownProviderProcessTree,
@@ -374,7 +377,9 @@ interface PiSessionContext {
   activeToolItems: Map<string, PiTrackedToolCall>;
   pendingUserInputs: Map<ApprovalRequestId, PiPendingUserInput>;
   stopped: boolean;
+  subagentCapability?: PiSubagentNegotiatedCapability;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
+
   unsubscribe: (() => void) | undefined;
 }
 
@@ -436,7 +441,10 @@ export interface PiAdapterLiveOptions {
   readonly spawnProcess?: PiBashProcessSupervisorOptions["spawnProcess"];
   readonly teardownProcessTree?: typeof teardownProviderProcessTree;
   readonly agentGatewayFetch?: AgentGatewayMcpFetch;
+  /** Extra extension factories installed into the session resource loader. */
+  readonly extensionFactories?: readonly unknown[];
   /** Called once a fresh dormant adapter is installed for a Pi session. */
+
   readonly onSynaraMcpSession?: (lifecycle: PiSynaraMcpSessionLifecycle) => void;
   /**
    * Decision 35 measurement-only observer environment; defaults to the
@@ -2452,7 +2460,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           agentDir,
           modelRuntime,
           resourceLoaderOptions: {
-            extensionFactories: [synaraMcp.extension],
+            extensionFactories: [
+              synaraMcp.extension,
+              ...(options?.extensionFactories ?? []),
+            ],
+
           },
         });
         const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
@@ -2685,7 +2697,45 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           adapter: synaraMcp.adapter,
           coordinator: synaraMcpCoordinator,
         });
+        const subagentCapability = yield* Effect.tryPromise({
+          try: () => probePiSubagentBridge(runtime.session),
+          catch: (cause) => ({
+            status: "bridge_error" as const,
+            diagnosticCode: "pi_subagent_bridge_error" as const,
+            isManaged: false,
+            diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
+          }),
+        });
+        context.subagentCapability = subagentCapability;
+        if (
+          subagentCapability.status === "unsupported_version" ||
+          subagentCapability.status === "bridge_error"
+        ) {
+          offerRuntimeEvent({
+            ...makeEventBase(context, { includeTurnId: false }),
+            type: "runtime.warning",
+            payload: {
+              message: `Pi subagent managed execution is disabled (${subagentCapability.status}): ${subagentCapability.diagnosticMessage ?? subagentCapability.diagnosticCode}`,
+              detail: {
+                status: subagentCapability.status,
+                diagnosticCode: subagentCapability.diagnosticCode,
+                ...(subagentCapability.offeredVersion !== undefined
+                  ? { offeredVersion: subagentCapability.offeredVersion }
+                  : {}),
+                ...(subagentCapability.supportedVersions !== undefined
+                  ? { supportedVersions: subagentCapability.supportedVersions }
+                  : {}),
+              },
+            },
+            raw: {
+              source: "pi.subagents.handshake",
+              method: "capability/probe",
+              payload: subagentCapability,
+            },
+          } satisfies ProviderRuntimeEvent);
+        }
         const loadedExtensions = runtime.session.resourceLoader.getExtensions().extensions;
+
         if (loadedExtensions.length > 0) {
           const extensionNames = loadedExtensions.map(extensionDisplayName);
           offerRuntimeEvent({
