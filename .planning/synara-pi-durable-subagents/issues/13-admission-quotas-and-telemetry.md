@@ -13,24 +13,24 @@ heartbeat leases.
 **Status:** ready-for-agent
 
 - [ ] **T13-AC1:** Per-provider concurrency retains an initial compatibility
-  default of four running agents, while server-wide and per-project queue caps
-  are configurable and enforced before spawn.
+      default of four running agents, while server-wide and per-project queue caps
+      are configurable and enforced before spawn.
 - [ ] **T13-AC2:** Queue or capacity exhaustion returns stable diagnostics and
-  never starts a child outside the admitted budget.
+      never starts a child outside the admitted budget.
 - [ ] **T13-AC3:** Each execution has a configurable wall-time budget, initially
-  two hours, whose expiry records a stable diagnostic and emits the durable
-  escalation trigger consumed by ticket 15 rather than silently settling
-  projection. This ticket does not implement the watchdog stages.
+      two hours, whose expiry records a stable diagnostic and emits the durable
+      escalation trigger consumed by ticket 15 rather than silently settling
+      projection. This ticket does not implement the watchdog stages.
 - [ ] **T13-AC4:** Operator telemetry exposes active, queued, cancelling,
-  orphaned, and terminal counts plus detach duration, progress coalescing and
-  drops, lease expiry, cancel latency, and completion retry metrics.
+      orphaned, and terminal counts plus detach duration, progress coalescing and
+      drops, lease expiry, cancel latency, and completion retry metrics.
 - [ ] **T13-AC5:** Metrics and default logs correlate execution, attempt,
-  normalized thread, generation, and diagnostic code without prompt, result,
-  transcript, or secret content.
+      normalized thread, generation, and diagnostic code without prompt, result,
+      transcript, or secret content.
 - [ ] **T13-AC6:** Sustained admission and progress load keeps queues and memory
-  bounded and preserves terminal delivery.
+      bounded and preserves terminal delivery.
 - [ ] **T13-AC7:** Invalid limits fall back to safe defaults and cannot create
-  unlimited concurrency, queueing, or wall time.
+      unlimited concurrency, queueing, or wall time.
 
 ## Testing Seams
 

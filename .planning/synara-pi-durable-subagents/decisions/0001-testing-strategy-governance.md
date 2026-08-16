@@ -129,4 +129,3 @@ Decision Record. A material change to this feature-wide strategy, including
 removing the real-Pi smoke path, weakening journal-first terminal evidence, or
 treating automatic replay as safe recovery, requires a new owner-approved
 project-scoped Decision Record.
-

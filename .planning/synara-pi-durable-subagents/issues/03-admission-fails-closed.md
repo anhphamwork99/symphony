@@ -8,25 +8,31 @@ health until durable writes recover.
 
 **Blocked by:** 02 — Durable execution admission and identity.
 
-**Status:** complete
+**Status:** needs-remediation — see ticket 21.
 
-- [x] **T03-AC1:** Failure to persist requested or accepted lifecycle prevents
-  child spawn and returns a stable lifecycle-persistence diagnostic.
-- [x] **T03-AC2:** No execution is projected as accepted or running when its
-  durable admission did not complete.
-- [x] **T03-AC3:** Managed control health becomes degraded and new managed
-  admissions fail closed while persistence remains unavailable.
-- [x] **T03-AC4:** Existing execution records and terminal truth are not deleted,
-  rewritten, or misreported by admission degradation.
-- [x] **T03-AC5:** Once durable writes recover, health can return to available
-  and a new command can be admitted without replaying prior rejected work.
-- [x] **T03-AC6:** Legacy Pi behavior remains available according to the
-  negotiated capability policy and is never mislabeled managed.
+**Review disposition (2026-08-16):** Failed. Degraded control health and
+fail-closed behavior were not connected to production admission, and the
+underlying admission writes were not atomic. The checkboxes below represent
+accepted review evidence.
+
+- [ ] **T03-AC1:** Failure to persist requested or accepted lifecycle prevents
+      child spawn and returns a stable lifecycle-persistence diagnostic.
+- [ ] **T03-AC2:** No execution is projected as accepted or running when its
+      durable admission did not complete.
+- [ ] **T03-AC3:** Managed control health becomes degraded and new managed
+      admissions fail closed while persistence remains unavailable.
+- [ ] **T03-AC4:** Existing execution records and terminal truth are not deleted,
+      rewritten, or misreported by admission degradation.
+- [ ] **T03-AC5:** Once durable writes recover, health can return to available
+      and a new command can be admitted without replaying prior rejected work.
+- [ ] **T03-AC6:** Legacy Pi behavior remains available according to the
+      negotiated capability policy and is never mislabeled managed.
 
 ## Testing Seams
 
-**Approval status:** Approved — owner approval in the ticket-breakdown review
-on 2026-08-16.
+**Approval status:** Superseded by ticket 21 — the seams below are retained as
+historical lower-level evidence, but independent review on 2026-08-16 found
+that they did not prove production fail-closed control behavior.
 
 - **T03-AC1, T03-AC2, T03-AC3:** Orchestration command boundary with durable
   store fault injection — the highest stable command surface observes rejection
@@ -38,4 +44,3 @@ on 2026-08-16.
   command identity, and observe one new child.
 - **T03-AC6:** Managed-capability boundary — verify degradation does not convert
   legacy work into managed work.
-

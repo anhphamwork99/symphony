@@ -11,20 +11,20 @@ execution or reverse its settled projection.
 **Status:** ready-for-agent
 
 - [ ] **T16-AC1:** Teardown targets only process groups proven owned by the
-  execution/provider session and cannot kill unrelated Synara or user
-  processes.
+      execution/provider session and cannot kill unrelated Synara or user
+      processes.
 - [ ] **T16-AC2:** The final escalation stage requests teardown once,
-  idempotently, and records request, result, and proof status.
+      idempotently, and records request, result, and proof status.
 - [ ] **T16-AC3:** Completion requires process-tree liveness verification, not
-  only a successful kill API return.
+      only a successful kill API return.
 - [ ] **T16-AC4:** Surviving processes produce a stable uncertain-cleanup
-  diagnostic and remain operationally visible.
+      diagnostic and remain operationally visible.
 - [ ] **T16-AC5:** Proven teardown fences the attempt and generation before
-  projection settles; late events are ignored and counted.
+      projection settles; late events are ignored and counted.
 - [ ] **T16-AC6:** Graceful cancellation and normal terminal paths never invoke
-  process-tree teardown.
+      process-tree teardown.
 - [ ] **T16-AC7:** Server restart performs bounded orphan-process discovery and
-  cleanup only where ownership can still be proven.
+      cleanup only where ownership can still be proven.
 
 ## Testing Seams
 
@@ -43,4 +43,3 @@ test; retain an isolated manual real-Pi verification.
 - **T16-AC1, T16-AC3:** Isolated real-Pi destructive boundary if CI hermeticity
   is proven; otherwise deterministic process fixture plus manual-gated real-Pi
   evidence under the approved substitution.
-

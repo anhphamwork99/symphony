@@ -11,19 +11,19 @@ only after Synara acknowledges ownership for that managed execution.
 **Status:** ready-for-agent
 
 - [ ] **T09-AC1:** Completions for one parent thread inside the configured
-  batching window produce one follow-up containing bounded summaries and
-  execution identities.
+      batching window produce one follow-up containing bounded summaries and
+      execution identities.
 - [ ] **T09-AC2:** A thread has at most one pending or unacknowledged managed
-  follow-up; later bursts wait or join a later batch.
+      follow-up; later bursts wait or join a later batch.
 - [ ] **T09-AC3:** Delivery occurs only when the parent has no active turn, or
-  after the active turn's terminal lifecycle is durable; user-read state is not
-  a delivery gate.
+      after the active turn's terminal lifecycle is durable; user-read state is not
+      a delivery gate.
 - [ ] **T09-AC4:** Delivery failure remains retryable and cannot duplicate
-  follow-up content or change execution outcomes.
+      follow-up content or change execution outcomes.
 - [ ] **T09-AC5:** Legacy extension notification remains active until Synara has
-  acknowledged completion-delivery ownership for that execution.
+      acknowledged completion-delivery ownership for that execution.
 - [ ] **T09-AC6:** Superseded delivery entries create no follow-up effects, and
-  their execution results remain retrievable by identity.
+      their execution results remain retrievable by identity.
 
 ## Testing Seams
 

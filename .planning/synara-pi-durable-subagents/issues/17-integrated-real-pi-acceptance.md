@@ -20,25 +20,25 @@ through provider-session stop; 16 — Owned process-tree teardown and fencing.
 **Status:** ready-for-agent
 
 - [ ] **T17-AC1:** A compatible real Pi session negotiates managed capability
-  and starts one identity-stamped long-running execution.
+      and starts one identity-stamped long-running execution.
 - [ ] **T17-AC2:** The foreground parent releases within the configured budget,
-  progress remains bounded, and browser reconnect restores the execution card.
+      progress remains bounded, and browser reconnect restores the execution card.
 - [ ] **T17-AC3:** Parent Stop reaches the real child and the card remains
-  cancelling until termination evidence.
+      cancelling until termination evidence.
 - [ ] **T17-AC4:** Multiple real child completions create one bounded follow-up
-  per thread and remain individually retrievable by execution identity.
+      per thread and remain individually retrievable by execution identity.
 - [ ] **T17-AC5:** Restart during a non-terminal execution reconciles to a
-  proven live owner, recovered terminal, or honest orphan, with no automatic
-  replay.
+      proven live owner, recovered terminal, or honest orphan, with no automatic
+      replay.
 - [ ] **T17-AC6:** A deliberately wedged execution progresses through watchdog
-  stages and leaves no owned child process after proven teardown.
+      stages and leaves no owned child process after proven teardown.
 - [ ] **T17-AC7:** A no-bridge or legacy-extension leg retains legacy semantics
-  and is never labeled managed or recoverable.
+      and is never labeled managed or recoverable.
 - [ ] **T17-AC8:** The harness uses an isolated home, non-default ports, isolated
-  process ownership, and does not read or mutate the user's active Synara/Pi
-  instance or agent configuration.
+      process ownership, and does not read or mutate the user's active Synara/Pi
+      instance or agent configuration.
 - [ ] **T17-AC9:** Any stage failure reports the stage and stable diagnostic and
-  fails loudly; a mock-only success is impossible.
+      fails loudly; a mock-only success is impossible.
 
 ## Testing Seams
 

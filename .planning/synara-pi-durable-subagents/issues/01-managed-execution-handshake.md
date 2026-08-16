@@ -7,31 +7,37 @@ failing, or unsupported bridge leaves the complete legacy `Agent` behavior
 unchanged and prevents Synara from describing those agents as durable or
 restart-recoverable.
 
-**Blocked by:** None — can start immediately.
+**Blocked by:** 19 — Complete real-Pi capability negotiation.
 
-**Status:** complete
+**Status:** needs-remediation — see ticket 19.
 
-- [x] **T01-AC1:** The handshake carries an explicit protocol version and
-  capability set; compatible versions succeed and unsupported versions fail
-  closed with offered-versus-supported diagnostic context.
-- [x] **T01-AC2:** Without a successful handshake, spawn, abort, completion, and
-  notification behavior remain legacy behavior, and no managed execution
-  record is created.
-- [x] **T01-AC3:** Bridge absent, bridge error, and unsupported version produce
-  distinct stable diagnostic codes without degrading unrelated Pi session or
-  provider controls.
+**Review disposition (2026-08-16):** Partial. Production probing exists, but
+required capabilities are not validated and no compatible production Pi
+extension path was demonstrated. The implementation claim remains preserved in
+Git history; the checkboxes below now represent accepted review evidence.
+
+- [ ] **T01-AC1:** The handshake carries an explicit protocol version and
+      capability set; compatible versions succeed and unsupported versions fail
+      closed with offered-versus-supported diagnostic context.
+- [ ] **T01-AC2:** Without a successful handshake, spawn, abort, completion, and
+      notification behavior remain legacy behavior, and no managed execution
+      record is created.
+- [ ] **T01-AC3:** Bridge absent, bridge error, and unsupported version produce
+      distinct stable diagnostic codes without degrading unrelated Pi session or
+      provider controls.
 - [x] **T01-AC4:** The negotiated result is stable for the provider-session
-  lifetime and can be correlated with executions admitted in that session.
+      lifetime and can be correlated with executions admitted in that session.
 - [x] **T01-AC5:** Repeated probes are idempotent and produce no execution,
-  transcript, notification, or model-context side effects.
-- [x] **T01-AC6:** Managed admission and completion ownership remain inert until
-  successful negotiation; mixed-version rollout cannot silently enable only
-  part of the managed lifecycle.
-
+      transcript, notification, or model-context side effects.
+- [ ] **T01-AC6:** Managed admission and completion ownership remain inert until
+      successful negotiation; mixed-version rollout cannot silently enable only
+      part of the managed lifecycle.
 
 ## Testing Seams
 
-**Approval status:** Approved by owner on 2026-08-16
+**Approval status:** Superseded by ticket 19 — independent review on
+2026-08-16 rejected synthetic extension fixtures as production/real-Pi
+acceptance evidence. Ticket 19 contains the owner-approved remediation seams.
 
 - **T01-AC1, T01-AC5 (Contract Schemas & Compatibility):**
   - Seam: `packages/contracts/src/piSubagents.test.ts` validating `packages/contracts/src/piSubagents.ts`.
@@ -50,5 +56,3 @@ restart-recoverable.
 - **T01-AC6 (Managed Admission Guard Boundary):**
   - Seam: `apps/server/src/provider/piSubagentAdmissionGuard.test.ts`.
   - Proves: Managed execution admission and completion coordinator remain inert when session capability handshake is absent or unnegotiated.
-
-

@@ -13,21 +13,21 @@ Journal-first terminal lifecycle.
 **Status:** ready-for-agent
 
 - [ ] **T10-AC1:** No live-owner or terminal evidence produces `orphaned` with a
-  stable owner-loss diagnostic; `running` is never asserted without evidence.
+      stable owner-loss diagnostic; `running` is never asserted without evidence.
 - [ ] **T10-AC2:** A transcript terminal marker carrying matching identity and
-  generation restores the applicable terminal outcome instead of orphaning.
+      generation restores the applicable terminal outcome instead of orphaning.
 - [ ] **T10-AC3:** A bridge `listActive` or describe result matching execution,
-  attempt, and generation refreshes observation without creating a new attempt.
+      attempt, and generation refreshes observation without creating a new attempt.
 - [ ] **T10-AC4:** Startup reconciliation performs no spawn, resume, or other
-  side-effecting delegation replay.
+      side-effecting delegation replay.
 - [ ] **T10-AC5:** Late events from stale attempts or generations after
-  reconciliation are ignored and counted.
+      reconciliation are ignored and counted.
 - [ ] **T10-AC6:** The orphan diagnostic explains that partial external or
-  workspace side effects may already exist and recommends inspection.
+      workspace side effects may already exist and recommends inspection.
 - [ ] **T10-AC7:** Lease expiry without renewed live-owner evidence enters the
-  same owner-loss reconciliation instead of remaining running indefinitely;
-  the initial orphan threshold is approximately 60 seconds and remains
-  configurable.
+      same owner-loss reconciliation instead of remaining running indefinitely;
+      the initial orphan threshold is approximately 60 seconds and remains
+      configurable.
 
 ## Testing Seams
 

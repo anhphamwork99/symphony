@@ -13,22 +13,22 @@ without replaying unrelated migrations or losing data.
 **Status:** completed
 
 - [x] **T18-AC1:** The checked-in migration sequence contains no unreviewed
-  reuse of an `(id, name)` pair already released by either supported lineage.
+      reuse of an `(id, name)` pair already released by either supported lineage.
 - [x] **T18-AC2:** The existing Symphony migration at the divergence point
-  remains compatible with databases that already applied it; no blind renumber
-  invalidates those databases.
+      remains compatible with databases that already applied it; no blind renumber
+      invalidates those databases.
 - [x] **T18-AC3:** Every upstream v0.7.2 migration in the conflicting range is
-  represented or deliberately reconciled with evidence; no upstream schema
-  behavior silently disappears.
+      represented or deliberately reconciled with evidence; no upstream schema
+      behavior silently disappears.
 - [x] **T18-AC4:** Pi-subagent execution and lease/progress schema changes use
-  non-conflicting lineage entries and remain idempotent.
+      non-conflicting lineage entries and remain idempotent.
 - [x] **T18-AC5:** Fresh, Symphony-lineage, and upstream-v0.7.2 fixtures migrate
-  successfully to equivalent intended schema while preserving representative
-  pre-existing data.
+      successfully to equivalent intended schema while preserving representative
+      pre-existing data.
 - [x] **T18-AC6:** The migration-lineage checker exits successfully without an
-  alias between migrations that differ in schema or semantics.
+      alias between migrations that differ in schema or semantics.
 - [x] **T18-AC7:** A second startup/migration pass is a no-op and produces no
-  duplicate tables, columns, indexes, or data transformation.
+      duplicate tables, columns, indexes, or data transformation.
 
 ## Testing Seams
 
@@ -85,15 +85,15 @@ known seams on 2026-08-16.
 
 ### Acceptance evidence matrix
 
-| Criterion | Source evidence | Verification evidence | Result |
-| --- | --- | --- | --- |
-| T18-AC1 | `apps/server/src/persistence/Migrations.ts` (lines 211–224) | `node scripts/check-migration-lineage.ts` (exit code 0 across 84 release tags) | passed |
-| T18-AC2 | `apps/server/src/persistence/Migrations.ts` (`MIGRATION_LINEAGE_ALIASES`), `apps/server/src/persistence/Migrations.test.ts` (`releasedSymphonyV072Layer`) | `vitest run src/persistence/Migrations.test.ts` (asserts pre-existing `synara_mcp_desired_state` and activation version survive) | passed |
-| T18-AC3 | `apps/server/src/persistence/Migrations/090..096` | `vitest run src/persistence/Migrations/091..094*.test.ts`, `vitest run src/persistence/Migrations/MigrationLineageReconciliation.test.ts` | passed |
-| T18-AC4 | `apps/server/src/persistence/Migrations/098..099`, `apps/server/src/persistence/Layers/PiSubagentExecutionRepository.test.ts` | `vitest run src/persistence/Layers/PiSubagentExecutionRepository.test.ts` (8 tests pass) | passed |
-| T18-AC5 | `apps/server/src/persistence/Migrations/MigrationLineageReconciliation.test.ts` | Fresh, Symphony, and Upstream fixtures migrate and compare `sqlite_master` objects byte-for-byte; pre-existing rows verified | passed |
-| T18-AC6 | `scripts/check-migration-lineage.ts`, `scripts/check-migration-lineage.test.ts` | `vitest run scripts/check-migration-lineage.test.ts` (11 tests pass), `node scripts/check-migration-lineage.ts` (code 0) | passed |
-| T18-AC7 | `apps/server/src/persistence/Migrations/MigrationLineageReconciliation.test.ts` | Second and third `runMigrations()` passes return `[]`, assert 0 schema mutations or data changes | passed |
+| Criterion | Source evidence                                                                                                                                           | Verification evidence                                                                                                                     | Result |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T18-AC1   | `apps/server/src/persistence/Migrations.ts` (lines 211–224)                                                                                               | `node scripts/check-migration-lineage.ts` (exit code 0 across 84 release tags)                                                            | passed |
+| T18-AC2   | `apps/server/src/persistence/Migrations.ts` (`MIGRATION_LINEAGE_ALIASES`), `apps/server/src/persistence/Migrations.test.ts` (`releasedSymphonyV072Layer`) | `vitest run src/persistence/Migrations.test.ts` (asserts pre-existing `synara_mcp_desired_state` and activation version survive)          | passed |
+| T18-AC3   | `apps/server/src/persistence/Migrations/090..096`                                                                                                         | `vitest run src/persistence/Migrations/091..094*.test.ts`, `vitest run src/persistence/Migrations/MigrationLineageReconciliation.test.ts` | passed |
+| T18-AC4   | `apps/server/src/persistence/Migrations/098..099`, `apps/server/src/persistence/Layers/PiSubagentExecutionRepository.test.ts`                             | `vitest run src/persistence/Layers/PiSubagentExecutionRepository.test.ts` (8 tests pass)                                                  | passed |
+| T18-AC5   | `apps/server/src/persistence/Migrations/MigrationLineageReconciliation.test.ts`                                                                           | Fresh, Symphony, and Upstream fixtures migrate and compare `sqlite_master` objects byte-for-byte; pre-existing rows verified              | passed |
+| T18-AC6   | `scripts/check-migration-lineage.ts`, `scripts/check-migration-lineage.test.ts`                                                                           | `vitest run scripts/check-migration-lineage.test.ts` (11 tests pass), `node scripts/check-migration-lineage.ts` (code 0)                  | passed |
+| T18-AC7   | `apps/server/src/persistence/Migrations/MigrationLineageReconciliation.test.ts`                                                                           | Second and third `runMigrations()` passes return `[]`, assert 0 schema mutations or data changes                                          | passed |
 
 ### Failure and diagnostic evidence
 
@@ -150,6 +150,7 @@ None. All 84 git release tags in the repository history are verified against the
 ### Reviewer handoff
 
 To reproduce verification:
+
 ```bash
 # Verify migration lineage checker against all tags
 node scripts/check-migration-lineage.ts

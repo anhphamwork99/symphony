@@ -11,18 +11,18 @@ entries cannot create follow-up effects.
 **Status:** ready-for-agent
 
 - [ ] **T08-AC1:** Terminal persistence and outbox creation are atomic or
-  equivalently journal-first recoverable before notification.
+      equivalently journal-first recoverable before notification.
 - [ ] **T08-AC2:** Delivery state is independently represented as pending,
-  delivered, acknowledged, failed/retryable, or superseded without mutating
-  execution outcome.
+      delivered, acknowledged, failed/retryable, or superseded without mutating
+      execution outcome.
 - [ ] **T08-AC3:** Replayed terminal or outbox processing creates no duplicate
-  entry or follow-up effect.
+      entry or follow-up effect.
 - [ ] **T08-AC4:** Crash or failure between terminal persistence and delivery
-  leaves the execution terminal and the outbox recoverably pending.
+      leaves the execution terminal and the outbox recoverably pending.
 - [ ] **T08-AC5:** Retry uses a stable dedupe identity and can reach
-  acknowledgement without duplicate parent content.
+      acknowledgement without duplicate parent content.
 - [ ] **T08-AC6:** A completion superseded by a newer generation produces no
-  delivery effect while its original execution evidence remains readable.
+      delivery effect while its original execution evidence remains readable.
 
 ## Testing Seams
 
@@ -36,4 +36,3 @@ on 2026-08-16.
   outcome/delivery separation and supersede rules.
 - **T08-AC5:** Parent completion-injection boundary — same dedupe identity
   cannot create duplicate parent effects.
-
