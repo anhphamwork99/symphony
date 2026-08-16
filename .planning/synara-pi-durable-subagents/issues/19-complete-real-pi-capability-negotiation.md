@@ -9,7 +9,7 @@ diagnostics.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-review
+**Status:** completed — final acceptance recorded in Decision 0003.
 
 - [x] **T19-AC1:** A production Pi provider session with the actual compatible
       extension negotiates the protocol version and complete capability set.
@@ -45,7 +45,7 @@ known seams on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** ready-for-review
+**Implementation state:** completed
 
 ### Delivered scope
 
