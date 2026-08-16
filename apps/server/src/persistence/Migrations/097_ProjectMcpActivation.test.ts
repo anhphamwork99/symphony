@@ -5,11 +5,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
-it.layer(NodeSqliteClient.layerMemory())("090_ProjectMcpActivation", (it) => {
+it.layer(NodeSqliteClient.layerMemory())("097_ProjectMcpActivation", (it) => {
   it.effect("hydrates legacy project rows as disabled and adds durable operation columns", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 89 });
+      yield* runMigrations({ toMigrationInclusive: 96 });
       yield* sql`
         INSERT INTO projection_projects (
           project_id, kind, title, workspace_root, scripts_json,
@@ -20,7 +20,7 @@ it.layer(NodeSqliteClient.layerMemory())("090_ProjectMcpActivation", (it) => {
         )
       `;
 
-      yield* runMigrations({ toMigrationInclusive: 90 });
+      yield* runMigrations({ toMigrationInclusive: 97 });
       const rows = yield* sql<{
         readonly desiredState: string;
         readonly activationVersion: number;
@@ -42,7 +42,7 @@ it.layer(NodeSqliteClient.layerMemory())("090_ProjectMcpActivation", (it) => {
   it.effect("does not allow invalid desired state through the migration schema", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 90 });
+      yield* runMigrations({ toMigrationInclusive: 97 });
       yield* sql`
         INSERT INTO projection_projects (
           project_id, kind, title, workspace_root, scripts_json,

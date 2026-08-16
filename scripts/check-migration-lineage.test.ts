@@ -172,11 +172,13 @@ describe("migration lineage guard", () => {
   });
 
   it("reads the alias allowances this repository actually declares", () => {
-    // The v0.6.0 renumber is repaired at runtime, so the guard must not keep
-    // failing on it forever.
     expect(parseMigrationLineageAllowances(migrationsSource())).toContainEqual({
       id: 54,
       name: "ProjectPullRequestPins",
+    });
+    expect(parseMigrationLineageAllowances(migrationsSource())).toContainEqual({
+      id: 90,
+      name: "ProjectMcpActivation",
     });
     expect(parseMigrationLineageAllowances("export const other = [];")).toEqual([]);
   });

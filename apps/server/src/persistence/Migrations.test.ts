@@ -14,6 +14,7 @@ import DurableProviderCommandDeliveryMigration from "./Migrations/064_DurablePro
 import ProjectionThreadsGatewayProvenanceMigration from "./Migrations/071_ProjectionThreadsGatewayProvenance.ts";
 import ProjectPullRequestPinsMigration from "./Migrations/069_ProjectPullRequestPins.ts";
 import SpacesMigration from "./Migrations/079_Spaces.ts";
+import ProjectMcpActivationMigration from "./Migrations/097_ProjectMcpActivation.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
@@ -291,11 +292,20 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [87, "DropUnusedOrchestrationEventIndexes"],
         [88, "ProjectionThreadsSettledAt"],
         [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectMcpActivation"],
+        [90, "ProjectionThreadMessageTextSegments"],
+        [91, "AutomationFailureTolerance"],
+        [92, "BackfillAutomationRunThreadSource"],
+        [93, "BackfillMaxIterationsDisabledReason"],
+        [94, "ProjectionThreadsGoal"],
+        [95, "ProjectionThreadsGoalTiming"],
+        [96, "ProjectionThreadsGoalAchievements"],
+        [97, "ProjectMcpActivation"],
+        [98, "PiSubagentExecutions"],
+        [99, "PiSubagentLeasesAndProgress"],
       ]);
 
       const tracker = yield* trackerRows(sql);
-      assert.deepStrictEqual(tracker.slice(-37), [
+      assert.deepStrictEqual(tracker.slice(-46), [
         { migration_id: 54, name: "DurableProviderCommandDelivery" },
         { migration_id: 55, name: "ManagedAttachments" },
         { migration_id: 56, name: "CommandReceiptFingerprints" },
@@ -332,7 +342,16 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         { migration_id: 87, name: "DropUnusedOrchestrationEventIndexes" },
         { migration_id: 88, name: "ProjectionThreadsSettledAt" },
         { migration_id: 89, name: "RecoverRetentionHiddenThreads" },
-        { migration_id: 90, name: "ProjectMcpActivation" },
+        { migration_id: 90, name: "ProjectionThreadMessageTextSegments" },
+        { migration_id: 91, name: "AutomationFailureTolerance" },
+        { migration_id: 92, name: "BackfillAutomationRunThreadSource" },
+        { migration_id: 93, name: "BackfillMaxIterationsDisabledReason" },
+        { migration_id: 94, name: "ProjectionThreadsGoal" },
+        { migration_id: 95, name: "ProjectionThreadsGoalTiming" },
+        { migration_id: 96, name: "ProjectionThreadsGoalAchievements" },
+        { migration_id: 97, name: "ProjectMcpActivation" },
+        { migration_id: 98, name: "PiSubagentExecutions" },
+        { migration_id: 99, name: "PiSubagentLeasesAndProgress" },
       ]);
       const preserved = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count FROM orchestration_consumer_state
@@ -414,7 +433,16 @@ agentGatewayRetentionLegacyLayer(
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-          [90, "ProjectMcpActivation"],
+          [90, "ProjectionThreadMessageTextSegments"],
+          [91, "AutomationFailureTolerance"],
+          [92, "BackfillAutomationRunThreadSource"],
+          [93, "BackfillMaxIterationsDisabledReason"],
+          [94, "ProjectionThreadsGoal"],
+          [95, "ProjectionThreadsGoalTiming"],
+          [96, "ProjectionThreadsGoalAchievements"],
+          [97, "ProjectMcpActivation"],
+          [98, "PiSubagentExecutions"],
+          [99, "PiSubagentLeasesAndProgress"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -499,12 +527,21 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [87, "DropUnusedOrchestrationEventIndexes"],
         [88, "ProjectionThreadsSettledAt"],
         [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectMcpActivation"],
+        [90, "ProjectionThreadMessageTextSegments"],
+        [91, "AutomationFailureTolerance"],
+        [92, "BackfillAutomationRunThreadSource"],
+        [93, "BackfillMaxIterationsDisabledReason"],
+        [94, "ProjectionThreadsGoal"],
+        [95, "ProjectionThreadsGoalTiming"],
+        [96, "ProjectionThreadsGoalAchievements"],
+        [97, "ProjectMcpActivation"],
+        [98, "PiSubagentExecutions"],
+        [99, "PiSubagentLeasesAndProgress"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-21).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-30).map((row) => [row.migration_id, row.name]),
         [
           [70, "AgentGatewayOperations"],
           [71, "ProjectionThreadsGatewayProvenance"],
@@ -526,7 +563,16 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-          [90, "ProjectMcpActivation"],
+          [90, "ProjectionThreadMessageTextSegments"],
+          [91, "AutomationFailureTolerance"],
+          [92, "BackfillAutomationRunThreadSource"],
+          [93, "BackfillMaxIterationsDisabledReason"],
+          [94, "ProjectionThreadsGoal"],
+          [95, "ProjectionThreadsGoalTiming"],
+          [96, "ProjectionThreadsGoalAchievements"],
+          [97, "ProjectMcpActivation"],
+          [98, "PiSubagentExecutions"],
+          [99, "PiSubagentLeasesAndProgress"],
         ],
       );
 
@@ -606,12 +652,21 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [87, "DropUnusedOrchestrationEventIndexes"],
         [88, "ProjectionThreadsSettledAt"],
         [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectMcpActivation"],
+        [90, "ProjectionThreadMessageTextSegments"],
+        [91, "AutomationFailureTolerance"],
+        [92, "BackfillAutomationRunThreadSource"],
+        [93, "BackfillMaxIterationsDisabledReason"],
+        [94, "ProjectionThreadsGoal"],
+        [95, "ProjectionThreadsGoalTiming"],
+        [96, "ProjectionThreadsGoalAchievements"],
+        [97, "ProjectMcpActivation"],
+        [98, "PiSubagentExecutions"],
+        [99, "PiSubagentLeasesAndProgress"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-17).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-26).map((row) => [row.migration_id, row.name]),
         [
           [74, "ExternalMcpIntegrations"],
           [75, "ExternalMcpActiveCapacity"],
@@ -629,7 +684,16 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-          [90, "ProjectMcpActivation"],
+          [90, "ProjectionThreadMessageTextSegments"],
+          [91, "AutomationFailureTolerance"],
+          [92, "BackfillAutomationRunThreadSource"],
+          [93, "BackfillMaxIterationsDisabledReason"],
+          [94, "ProjectionThreadsGoal"],
+          [95, "ProjectionThreadsGoalTiming"],
+          [96, "ProjectionThreadsGoalAchievements"],
+          [97, "ProjectMcpActivation"],
+          [98, "PiSubagentExecutions"],
+          [99, "PiSubagentLeasesAndProgress"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`
@@ -833,6 +897,15 @@ describe("migration lineage aliases", () => {
     ]);
   });
 
+  it("repairs a released Symphony v0.7.2 tracker by removing slot 90 to re-run upstream 90-96", () => {
+    const recorded = canonicalTrackerThrough(89);
+    recorded.set(90, "ProjectMcpActivation");
+
+    assert.deepStrictEqual(planMigrationLineageAliasRepairs(recorded), [
+      { kind: "remove", migrationId: 90 },
+    ]);
+  });
+
   it("declines when the tracker also diverges outside the alias", () => {
     const recorded = canonicalTrackerThrough(53);
     recorded.set(54, "ProjectPullRequestPins");
@@ -852,6 +925,78 @@ describe("migration lineage aliases", () => {
     for (let id = 17; id <= 60; id++) foreign.set(id, `ForeignMigration${id}`);
     assert.deepStrictEqual(planMigrationLineageAliasRepairs(foreign), []);
   });
+});
+
+const releasedSymphonyV072Layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+
+releasedSymphonyV072Layer("released Symphony v0.7.2 database", (it) => {
+  it.effect("reconciles ProjectMcpActivation from 90 to 97 and applies upstream migrations", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+
+      // Reproduce a database written by v0.7.2-symphony.1 / v0.7.2-symphony.2:
+      // Canonical rows 1-89, then ProjectMcpActivation recorded at ID 90 with real data.
+      yield* runMigrations({ toMigrationInclusive: 89 });
+      yield* ProjectMcpActivationMigration;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, kind, title, workspace_root, scripts_json,
+          synara_mcp_desired_state, synara_mcp_activation_version, synara_mcp_activation_operation_json,
+          created_at, updated_at
+        ) VALUES (
+          'symphony-project', 'project', 'Symphony Project', '/workspace/symphony', '[]',
+          'enabled', 1, '{"operationId":"op-1"}',
+          '2026-08-12T10:00:00.000Z', '2026-08-12T10:00:00.000Z'
+        )
+      `;
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, name)
+        VALUES (90, 'ProjectMcpActivation')
+      `;
+
+      const executed = yield* runMigrations();
+
+      // Migrations 90-96 (upstream), 97 (ProjectMcpActivation), 98 (PiSubagentExecutions),
+      // 99 (PiSubagentLeasesAndProgress) all run.
+      assert.deepStrictEqual(
+        executed.map(([id]) => id),
+        [90, 91, 92, 93, 94, 95, 96, 97, 98, 99],
+      );
+
+      const rows = yield* trackerRows(sql);
+      assert.deepStrictEqual(
+        rows.map((row) => [row.migration_id, row.name]),
+        migrationEntries.map(([id, name]) => [id, name]),
+      );
+
+      // Pre-existing Symphony project data is preserved!
+      const project = yield* sql<{
+        readonly desiredState: string;
+        readonly activationVersion: number;
+        readonly operationJson: string | null;
+      }>`
+        SELECT
+          synara_mcp_desired_state AS "desiredState",
+          synara_mcp_activation_version AS "activationVersion",
+          synara_mcp_activation_operation_json AS "operationJson"
+        FROM projection_projects
+        WHERE project_id = 'symphony-project'
+      `;
+      assert.deepStrictEqual(project, [
+        {
+          desiredState: "enabled",
+          activationVersion: 1,
+          operationJson: '{"operationId":"op-1"}',
+        },
+      ]);
+
+      // Upstream tables exist (e.g. message_text_segments)
+      const tables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_text_segments'
+      `;
+      assert.strictEqual(tables.length, 1);
+    }),
+  );
 });
 
 const releasedV055Layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
