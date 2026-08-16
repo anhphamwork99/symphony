@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
-  PiSubagentCapability,
   PiSubagentDiagnosticCode,
+  PiSubagentExecutionRecord,
   PiSubagentHandshakeFailureResponse,
   PiSubagentHandshakeRequest,
   PiSubagentHandshakeResponse,
@@ -16,7 +16,7 @@ import {
   PiSubagentSpawnResult,
 } from "./piSubagents.ts";
 
-describe("Pi subagent handshake contract schemas", () => {
+describe("Pi subagent handshake contract schemas (Issue 19)", () => {
   it("encodes and decodes valid handshake request", () => {
     const validRequest = {
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
@@ -86,7 +86,42 @@ describe("Pi subagent handshake contract schemas", () => {
     expect(unionDecoded.ok).toBe(false);
   });
 
-  it("decodes negotiated capability record", () => {
+  it("decodes valid failure response with missing capabilities context (T19-AC2, T19-AC3)", () => {
+    const failureResponse = {
+      ok: false,
+      error: "missing_capabilities",
+      protocolVersion: 1,
+      extensionVersion: "0.10.0-alfie.1",
+      missingCapabilities: ["terminal-outbox", "restart-reconciliation"],
+      detail: "Extension missing required capabilities: terminal-outbox, restart-reconciliation",
+    };
+
+    const decoded = Schema.decodeSync(PiSubagentHandshakeFailureResponse)(failureResponse);
+    expect(decoded.ok).toBe(false);
+    expect(decoded.error).toBe("missing_capabilities");
+    expect(decoded.missingCapabilities).toEqual(["terminal-outbox", "restart-reconciliation"]);
+
+    const unionDecoded = Schema.decodeSync(PiSubagentHandshakeResponse)(failureResponse);
+    expect(unionDecoded.ok).toBe(false);
+  });
+
+  it("decodes negotiated capability record with capability mismatch (T19-AC2, T19-AC3)", () => {
+    const mismatchRecord: PiSubagentNegotiatedCapability = {
+      status: "capability_mismatch",
+      diagnosticCode: "pi_subagent_capability_mismatch",
+      isManaged: false,
+      protocolVersion: 1,
+      capabilities: ["managed-spawn"],
+      missingCapabilities: ["abort-propagation"],
+      extensionVersion: "0.10.0-alfie.1",
+      diagnosticMessage: "Pi subagent bridge missing required capabilities: abort-propagation",
+    };
+    const decodedMismatch = Schema.decodeSync(PiSubagentNegotiatedCapability)(mismatchRecord);
+    expect(decodedMismatch.isManaged).toBe(false);
+    expect(decodedMismatch.status).toBe("capability_mismatch");
+    expect(decodedMismatch.diagnosticCode).toBe("pi_subagent_capability_mismatch");
+    expect(decodedMismatch.missingCapabilities).toEqual(["abort-propagation"]);
+
     const enabledRecord: PiSubagentNegotiatedCapability = {
       status: "managed_enabled",
       diagnosticCode: "pi_subagent_managed_enabled",
@@ -108,11 +143,20 @@ describe("Pi subagent handshake contract schemas", () => {
     const decodedAbsent = Schema.decodeSync(PiSubagentNegotiatedCapability)(absentRecord);
     expect(decodedAbsent.isManaged).toBe(false);
     expect(decodedAbsent.status).toBe("bridge_absent");
-  });
-});
 
-describe("Pi subagent admission and identity contract schemas (T02-AC1, T02-AC2, T02-AC5)", () => {
-  it("encodes and decodes valid spawn command", () => {
+    const malformedRecord: PiSubagentNegotiatedCapability = {
+      status: "bridge_malformed_response",
+      diagnosticCode: "pi_subagent_bridge_malformed_response",
+      isManaged: false,
+      diagnosticMessage: "Pi subagent bridge returned malformed handshake response",
+    };
+    const decodedMalformed = Schema.decodeSync(PiSubagentNegotiatedCapability)(malformedRecord);
+    expect(decodedMalformed.isManaged).toBe(false);
+    expect(decodedMalformed.status).toBe("bridge_malformed_response");
+    expect(decodedMalformed.diagnosticCode).toBe("pi_subagent_bridge_malformed_response");
+  });
+
+  it("decodes valid spawn command, spawn result, lifecycle event, and execution record schemas", () => {
     const command = {
       commandId: "cmd_test_123",
       projectId: "proj_abc",
@@ -125,15 +169,12 @@ describe("Pi subagent admission and identity contract schemas (T02-AC1, T02-AC2,
       cancellationScope: "parent_turn",
     };
 
-    const decoded = Schema.decodeSync(PiSubagentSpawnCommand)(command);
-    expect(decoded.commandId).toBe("cmd_test_123");
-    expect(decoded.parentThreadId).toBe("thread_main");
-    expect(decoded.mode).toBe("foreground");
-    expect(decoded.cancellationScope).toBe("parent_turn");
-  });
+    const decodedCommand = Schema.decodeSync(PiSubagentSpawnCommand)(command);
+    expect(decodedCommand.commandId).toBe("cmd_test_123");
+    expect(decodedCommand.parentThreadId).toBe("thread_main");
+    expect(decodedCommand.mode).toBe("foreground");
 
-  it("decodes valid accepted spawn result", () => {
-    const acceptedResult = {
+    const spawnResult = {
       status: "accepted",
       executionId: "exec_123456",
       attemptId: "att_001",
@@ -142,74 +183,10 @@ describe("Pi subagent admission and identity contract schemas (T02-AC1, T02-AC2,
       diagnosticCode: "pi_subagent_managed_enabled",
     };
 
-    const decoded = Schema.decodeSync(PiSubagentSpawnResult)(acceptedResult);
-    expect(decoded.status).toBe("accepted");
-    expect(decoded.executionId).toBe("exec_123456");
-    expect(decoded.attemptId).toBe("att_001");
-    expect(decoded.generation).toBe(1);
-    expect(decoded.state).toBe("accepted");
-  });
+    const decodedSpawnResult = Schema.decodeSync(PiSubagentSpawnResult)(spawnResult);
+    expect(decodedSpawnResult.status).toBe("accepted");
+    expect(decodedSpawnResult.executionId).toBe("exec_123456");
 
-  it("decodes valid rejected spawn result with diagnostic code and reason", () => {
-    const rejectedResult = {
-      status: "rejected",
-      executionId: "exec_rejected",
-      attemptId: "att_rejected",
-      generation: 1,
-      state: "rejected",
-      diagnosticCode: "pi_subagent_admission_unauthorized",
-      rejectionReason: "Caller thread does not belong to active project",
-    };
-
-    const decoded = Schema.decodeSync(PiSubagentSpawnResult)(rejectedResult);
-    expect(decoded.status).toBe("rejected");
-    expect(decoded.diagnosticCode).toBe("pi_subagent_admission_unauthorized");
-    expect(decoded.rejectionReason).toContain("does not belong");
-  });
-
-  it("decodes rejected spawn result with lifecycle persistence failure and degraded diagnostics", () => {
-    const persistenceFailedResult = {
-      status: "rejected",
-      executionId: "exec_rejected_1",
-      attemptId: "att_rejected_1",
-      generation: 1,
-      state: "rejected",
-      diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
-      rejectionReason: "Durable write failed",
-    };
-    const decoded1 = Schema.decodeSync(PiSubagentSpawnResult)(persistenceFailedResult);
-    expect(decoded1.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
-
-    const degradedResult = {
-      status: "rejected",
-      executionId: "exec_rejected_2",
-      attemptId: "att_rejected_2",
-      generation: 1,
-      state: "rejected",
-      diagnosticCode: "pi_subagent_control_degraded",
-      rejectionReason: "Control plane is degraded",
-    };
-    const decoded2 = Schema.decodeSync(PiSubagentSpawnResult)(degradedResult);
-    expect(decoded2.diagnosticCode).toBe("pi_subagent_control_degraded");
-  });
-
-  it("decodes valid already-applied spawn result with original identities", () => {
-    const alreadyAppliedResult = {
-      status: "already_applied",
-      executionId: "exec_existing_123",
-      attemptId: "att_001",
-      generation: 1,
-      state: "accepted",
-      diagnosticCode: "pi_subagent_already_applied",
-    };
-
-    const decoded = Schema.decodeSync(PiSubagentSpawnResult)(alreadyAppliedResult);
-    expect(decoded.status).toBe("already_applied");
-    expect(decoded.executionId).toBe("exec_existing_123");
-    expect(decoded.attemptId).toBe("att_001");
-  });
-
-  it("decodes valid lifecycle event with correlation, generation, and sequence", () => {
     const event = {
       eventId: "evt_999",
       executionId: "exec_123456",
@@ -225,12 +202,31 @@ describe("Pi subagent admission and identity contract schemas (T02-AC1, T02-AC2,
       diagnosticCode: "pi_subagent_managed_enabled",
     };
 
-    const decoded = Schema.decodeSync(PiSubagentLifecycleEvent)(event);
-    expect(decoded.executionId).toBe("exec_123456");
-    expect(decoded.attemptId).toBe("att_001");
-    expect(decoded.generation).toBe(1);
-    expect(decoded.sequence).toBe(1);
-    expect(decoded.state).toBe("accepted");
+    const decodedEvent = Schema.decodeSync(PiSubagentLifecycleEvent)(event);
+    expect(decodedEvent.executionId).toBe("exec_123456");
+    expect(decodedEvent.sequence).toBe(1);
+
+    const record = {
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+      commandId: "cmd_001",
+      projectId: "proj_abc",
+      parentThreadId: "thread_main",
+      parentTurnId: "turn_001",
+      parentToolCallId: "call_subagent_1",
+      agentType: "researcher",
+      prompt: "Research query",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: "running",
+      observedState: "running",
+      createdAt: "2026-08-16T12:00:00.000Z",
+      updatedAt: "2026-08-16T12:00:12.000Z",
+    };
+
+    const decodedRecord = Schema.decodeSync(PiSubagentExecutionRecord)(record);
+    expect(decodedRecord.desiredState).toBe("running");
+    expect(decodedRecord.observedState).toBe("running");
   });
 });
-

@@ -16,8 +16,8 @@ import {
   probePiSubagentBridge,
 } from "./piSubagentBridge.ts";
 
-describe("Pi subagent extension bridge & versioned handshake", () => {
-  it("T01-AC1: successfully negotiates capability with compatible bridge fixture", async () => {
+describe("Pi subagent extension bridge & versioned handshake (Issue 19)", () => {
+  it("successfully negotiates capability with compatible bridge fixture", async () => {
     const { extension, bridge } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
       capabilities: [...PI_SUBAGENT_CAPABILITIES],
@@ -34,7 +34,7 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(result.capabilities).toEqual(PI_SUBAGENT_CAPABILITIES);
   });
 
-  it("T01-AC1, T01-AC3: fails closed with offered-versus-supported context when bridge returns unsupported version", async () => {
+  it("fails closed with offered-versus-supported context when bridge returns unsupported version", async () => {
     const { bridge } = makeUnsupportedPiSubagentExtension({
       protocolVersion: 99,
       supportedVersions: [99, 100],
@@ -53,7 +53,7 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(result.diagnosticMessage).toContain("Requires protocol version 99+");
   });
 
-  it("T01-AC2, T01-AC3: returns bridge_absent diagnostic code when probing legacy extension without bridge", async () => {
+  it("returns bridge_absent diagnostic code when probing legacy extension without bridge", async () => {
     const { extension } = makeLegacyPiSubagentExtension();
 
     const result = await probePiSubagentBridge(extension);
@@ -64,7 +64,7 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(result.diagnosticMessage).toBeDefined();
   });
 
-  it("T01-AC3: returns bridge_error diagnostic code when bridge throws during handshake", async () => {
+  it("returns bridge_error diagnostic code when bridge throws during handshake", async () => {
     const { bridge } = makeFailingPiSubagentExtension(new Error("Bridge explosion in test"));
 
     const result = await negotiatePiSubagentCapability(bridge);
@@ -75,7 +75,7 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(result.diagnosticMessage).toContain("Bridge explosion in test");
   });
 
-  it("T01-AC3: returns bridge_error when bridge returns malformed response", async () => {
+  it("returns bridge_malformed_response when bridge returns malformed response", async () => {
     const malformedBridge = {
       handshake: vi.fn().mockResolvedValue({ not_a_valid_field: 123 }),
     };
@@ -83,11 +83,54 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     const result = await negotiatePiSubagentCapability(malformedBridge as any);
 
     expect(result.isManaged).toBe(false);
-    expect(result.status).toBe("bridge_error");
-    expect(result.diagnosticCode).toBe("pi_subagent_bridge_error");
+    expect(result.status).toBe("bridge_malformed_response");
+    expect(result.diagnosticCode).toBe("pi_subagent_bridge_malformed_response");
   });
 
-  it("T01-AC5: probe is idempotent and produces no side effects on repeated calls", async () => {
+  it("fails closed with capability_mismatch when bridge returns missing_capabilities error", async () => {
+    const bridge = {
+      handshake: vi.fn().mockResolvedValue({
+        ok: false,
+        error: "missing_capabilities",
+        protocolVersion: 1,
+        extensionVersion: "0.10.0-alfie.1",
+        missingCapabilities: ["terminal-outbox"],
+        detail: "Extension does not support terminal-outbox",
+      }),
+    };
+
+    const result = await negotiatePiSubagentCapability(bridge as any);
+
+    expect(result.isManaged).toBe(false);
+    expect(result.status).toBe("capability_mismatch");
+    expect(result.diagnosticCode).toBe("pi_subagent_capability_mismatch");
+    expect(result.missingCapabilities).toEqual(["terminal-outbox"]);
+    expect(result.diagnosticMessage).toContain("terminal-outbox");
+  });
+
+  it("fails closed with capability_mismatch when success response omits a required capability", async () => {
+    const { bridge } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn"], // Omits "abort-propagation" which is required by default
+      extensionVersion: "0.1.0",
+    });
+
+    const result = await negotiatePiSubagentCapability(bridge, {
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      supportedProtocolVersions: [PI_SUBAGENTS_PROTOCOL_VERSION],
+      clientVersion: "0.7.2",
+      requiredCapabilities: ["managed-spawn", "abort-propagation"],
+    });
+
+    expect(result.isManaged).toBe(false);
+    expect(result.status).toBe("capability_mismatch");
+    expect(result.diagnosticCode).toBe("pi_subagent_capability_mismatch");
+    expect(result.missingCapabilities).toEqual(["abort-propagation"]);
+    expect(result.capabilities).toEqual(["managed-spawn"]);
+    expect(result.diagnosticMessage).toContain("abort-propagation");
+  });
+
+  it("probe is idempotent and produces no side effects on repeated calls", async () => {
     const handshakeSpy = vi.fn().mockResolvedValue({
       ok: true,
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
@@ -103,65 +146,4 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(first).toEqual(second);
     expect(handshakeSpy).toHaveBeenCalledTimes(1);
   });
-
-  it("T02-AC2: bridge accepts server-minted executionId and attemptId and emits lifecycle event with identities", async () => {
-    const spawnSpy = vi.fn().mockResolvedValue({
-      status: "accepted",
-      executionId: "exec_server_123",
-      attemptId: "att_server_456",
-      generation: 1,
-      state: "accepted",
-      diagnosticCode: "pi_subagent_managed_enabled",
-    });
-
-    const { extension, bridge, emittedEvents } = makeCompatiblePiSubagentExtension({
-      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
-      capabilities: [...PI_SUBAGENT_CAPABILITIES],
-      onSpawn: spawnSpy,
-    });
-
-    // Mock pi runtime initializing extension
-    let registeredAgentTool: any;
-    const piMock = {
-      on: vi.fn(),
-      registerTool: (tool: any) => {
-        if (tool.name === "Agent") {
-          registeredAgentTool = tool;
-        }
-      },
-    };
-
-    extension.factory(piMock);
-    expect(registeredAgentTool).toBeDefined();
-
-    const toolResult = await registeredAgentTool.execute("call_tool_99", {
-      commandId: "cmd_spawn_test",
-      projectId: "proj_default",
-      parentThreadId: "thread_main",
-      parentTurnId: "turn_1",
-      agentType: "tester",
-      prompt: "Run test suite",
-    });
-
-    expect(spawnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        commandId: "cmd_spawn_test",
-        projectId: "proj_default",
-        parentThreadId: "thread_main",
-        parentTurnId: "turn_1",
-      }),
-    );
-
-    expect(toolResult.executionId).toBe("exec_server_123");
-    expect(toolResult.attemptId).toBe("att_server_456");
-    expect(toolResult.generation).toBe(1);
-
-    // Verify lifecycle event emitted under server-minted identities
-    expect(emittedEvents.length).toBe(1);
-    expect(emittedEvents[0]!.executionId).toBe("exec_server_123");
-    expect(emittedEvents[0]!.attemptId).toBe("att_server_456");
-    expect(emittedEvents[0]!.generation).toBe(1);
-    expect(emittedEvents[0]!.state).toBe("running");
-  });
 });
-

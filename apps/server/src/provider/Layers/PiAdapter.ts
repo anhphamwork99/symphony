@@ -443,9 +443,14 @@ export interface PiAdapterLiveOptions {
   readonly agentGatewayFetch?: AgentGatewayMcpFetch;
   /** Extra extension factories installed into the session resource loader. */
   readonly extensionFactories?: readonly unknown[];
-  /** Called once a fresh dormant adapter is installed for a Pi session. */
-
   readonly onSynaraMcpSession?: (lifecycle: PiSynaraMcpSessionLifecycle) => void;
+  /** Called once subagent capability has been probed for a Pi session. */
+  readonly onSubagentCapability?: (event: {
+    readonly threadId: ThreadId;
+    readonly capability: PiSubagentNegotiatedCapability;
+    readonly session: PiAgentSession;
+    readonly context: unknown;
+  }) => void;
   /**
    * Decision 35 measurement-only observer environment; defaults to the
    * process environment. Only the isolated measurement harness sets the
@@ -2460,11 +2465,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           agentDir,
           modelRuntime,
           resourceLoaderOptions: {
-            extensionFactories: [
-              synaraMcp.extension,
-              ...(options?.extensionFactories ?? []),
-            ],
-
+            extensionFactories: [synaraMcp.extension, ...(options?.extensionFactories ?? [])],
           },
         });
         const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
@@ -2582,9 +2583,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // activated capture only; runtime events keep the outer session
         // generation, so the cell never changes event/accounting semantics.
         const observerCurrentLifecycleGeneration =
-          catalogObserver === null
-            ? undefined
-            : { current: input.lifecycleGeneration };
+          catalogObserver === null ? undefined : { current: input.lifecycleGeneration };
         const synaraMcpCoordinator = makePiSessionSynaraMcpCoordinator({
           threadId: input.threadId,
           adapter: synaraMcp.adapter,
@@ -2595,9 +2594,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ...(agentGatewayCredentials === undefined
             ? {}
             : { credentials: agentGatewayCredentials }),
-          ...(options?.agentGatewayFetch === undefined
-            ? {}
-            : { fetch: options.agentGatewayFetch }),
+          ...(options?.agentGatewayFetch === undefined ? {} : { fetch: options.agentGatewayFetch }),
           // Decision 35: the measurement-only observer learns the proven
           // activation commit (reload completed) through this seam together
           // with the exact committed activation lifecycle generation. The
@@ -2707,8 +2704,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }),
         });
         context.subagentCapability = subagentCapability;
+        options?.onSubagentCapability?.({
+          threadId: input.threadId,
+          capability: subagentCapability,
+          session: runtime.session,
+          context,
+        });
         if (
           subagentCapability.status === "unsupported_version" ||
+          subagentCapability.status === "capability_mismatch" ||
+          subagentCapability.status === "bridge_malformed_response" ||
           subagentCapability.status === "bridge_error"
         ) {
           offerRuntimeEvent({
@@ -2724,6 +2729,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   : {}),
                 ...(subagentCapability.supportedVersions !== undefined
                   ? { supportedVersions: subagentCapability.supportedVersions }
+                  : {}),
+                ...(subagentCapability.missingCapabilities !== undefined
+                  ? { missingCapabilities: subagentCapability.missingCapabilities }
                   : {}),
               },
             },

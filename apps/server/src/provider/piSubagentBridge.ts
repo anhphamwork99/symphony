@@ -1,6 +1,5 @@
 import { Option, Schema } from "effect";
 
-
 import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_MAX_PROTOCOL_VERSION,
@@ -20,6 +19,15 @@ import {
 export const PI_SUBAGENT_BRIDGE_KEY = Symbol.for("synara.pi.subagents.bridge");
 const PI_SUBAGENT_PROBE_CACHE_KEY = Symbol.for("synara.pi.subagents.probe_cache");
 
+export interface PiSubagentActiveChild {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly mode: string;
+  readonly cancellationScope: string;
+  readonly isRunning: boolean;
+}
+
 export interface PiSubagentExtensionBridge {
   readonly handshake: (
     request: PiSubagentHandshakeRequest,
@@ -27,6 +35,9 @@ export interface PiSubagentExtensionBridge {
   readonly spawn?: (
     command: PiSubagentSpawnCommand,
   ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
+  readonly abort?: (id: string) => boolean | Promise<boolean>;
+  readonly abortAll?: () => number | Promise<number>;
+  readonly getActiveExecutions?: () => ReadonlyArray<PiSubagentActiveChild>;
   readonly emitLifecycleEvent?: (
     event: PiSubagentLifecycleEvent,
   ) => Promise<void> | void;
@@ -59,8 +70,8 @@ export async function negotiatePiSubagentCapability(
 
     if (Option.isNone(decodedOption)) {
       return {
-        status: "bridge_error",
-        diagnosticCode: "pi_subagent_bridge_error",
+        status: "bridge_malformed_response",
+        diagnosticCode: "pi_subagent_bridge_malformed_response",
         isManaged: false,
         diagnosticMessage: "Pi subagent bridge returned malformed handshake response",
       };
@@ -70,14 +81,39 @@ export async function negotiatePiSubagentCapability(
 
     if (!response.ok) {
       const failure = response as PiSubagentHandshakeFailureResponse;
+      if (failure.error === "missing_capabilities") {
+        return {
+          status: "capability_mismatch",
+          diagnosticCode: "pi_subagent_capability_mismatch",
+          isManaged: false,
+          missingCapabilities: failure.missingCapabilities,
+          extensionVersion: failure.extensionVersion,
+          diagnosticMessage:
+            failure.detail ??
+            `Pi subagent bridge missing required capabilities: ${(failure.missingCapabilities ?? []).join(", ")}`,
+        };
+      }
+      if (failure.error === "unsupported_version") {
+        return {
+          status: "unsupported_version",
+          diagnosticCode: "pi_subagent_unsupported_version",
+          isManaged: false,
+          offeredVersion: request.protocolVersion,
+          supportedVersions:
+            failure.supportedProtocolVersions ??
+            (failure.protocolVersion ? [failure.protocolVersion] : undefined),
+          extensionVersion: failure.extensionVersion,
+          diagnosticMessage:
+            failure.detail ?? `Pi subagent bridge rejected handshake with error: ${failure.error}`,
+        };
+      }
       return {
-        status: "unsupported_version",
-        diagnosticCode: "pi_subagent_unsupported_version",
+        status: "bridge_error",
+        diagnosticCode: "pi_subagent_bridge_error",
         isManaged: false,
-        offeredVersion: request.protocolVersion,
-        supportedVersions: failure.supportedProtocolVersions ?? (failure.protocolVersion ? [failure.protocolVersion] : undefined),
         extensionVersion: failure.extensionVersion,
-        diagnosticMessage: failure.detail ?? `Pi subagent bridge rejected handshake with error: ${failure.error}`,
+        diagnosticMessage:
+          failure.detail ?? `Pi subagent bridge rejected handshake with error: ${failure.error}`,
       };
     }
 
@@ -95,6 +131,21 @@ export async function negotiatePiSubagentCapability(
         supportedVersions: [success.protocolVersion],
         extensionVersion: success.extensionVersion,
         diagnosticMessage: `Pi subagent bridge protocol version ${success.protocolVersion} is outside supported range [${PI_SUBAGENTS_MIN_PROTOCOL_VERSION}, ${PI_SUBAGENTS_MAX_PROTOCOL_VERSION}]`,
+      };
+    }
+
+    const suppliedCapabilities = new Set(success.capabilities);
+    const missing = request.requiredCapabilities.filter((c) => !suppliedCapabilities.has(c));
+    if (missing.length > 0) {
+      return {
+        status: "capability_mismatch",
+        diagnosticCode: "pi_subagent_capability_mismatch",
+        isManaged: false,
+        protocolVersion: success.protocolVersion,
+        capabilities: success.capabilities,
+        missingCapabilities: missing,
+        extensionVersion: success.extensionVersion,
+        diagnosticMessage: `Pi subagent bridge missing required capabilities: ${missing.join(", ")}`,
       };
     }
 
@@ -215,7 +266,9 @@ export interface CompatibleExtensionOptions {
   readonly protocolVersion?: number;
   readonly capabilities?: PiSubagentCapability[];
   readonly extensionVersion?: string;
-  readonly onSpawn?: (command: PiSubagentSpawnCommand) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
+  readonly onSpawn?: (
+    command: PiSubagentSpawnCommand,
+  ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
   readonly onLifecycleEvent?: (event: PiSubagentLifecycleEvent) => Promise<void> | void;
 }
 
@@ -239,6 +292,9 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
         await options.onLifecycleEvent(event);
       }
     },
+    abort: () => true,
+    abortAll: () => 0,
+    getActiveExecutions: () => [],
   };
 
   const factory = (pi: any) => {
@@ -278,7 +334,6 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
                 };
               }
 
-              // Emit running lifecycle event under the server-minted identities
               if (bridge.emitLifecycleEvent) {
                 await bridge.emitLifecycleEvent({
                   eventId: `evt_${Date.now()}`,
@@ -408,5 +463,3 @@ export function makeFailingPiSubagentExtension(error: Error) {
 
   return { extension, bridge };
 }
-
-

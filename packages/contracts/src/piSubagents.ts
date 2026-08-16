@@ -2,7 +2,6 @@ import { Schema } from "effect";
 
 import {
   EventId,
-  NonNegativeInt,
   PositiveInt,
   ProjectId,
   ThreadId,
@@ -29,6 +28,7 @@ export type PiSubagentCapability = typeof PiSubagentCapability.Type;
 export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_managed_enabled",
   "pi_subagent_bridge_absent",
+  "pi_subagent_bridge_malformed_response",
   "pi_subagent_bridge_error",
   "pi_subagent_unsupported_version",
   "pi_subagent_capability_mismatch",
@@ -76,8 +76,10 @@ export const PiSubagentHandshakeRequest = Schema.Struct({
   protocolVersion: PositiveInt,
   supportedProtocolVersions: Schema.Array(PositiveInt),
   clientVersion: TrimmedNonEmptyString,
-  requiredCapabilities: Schema.Array(PiSubagentCapability),
-  optionalCapabilities: Schema.optional(Schema.Array(PiSubagentCapability)),
+  requiredCapabilities: Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
+  optionalCapabilities: Schema.optional(
+    Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
+  ),
 });
 export type PiSubagentHandshakeRequest = typeof PiSubagentHandshakeRequest.Type;
 
@@ -85,7 +87,7 @@ export const PiSubagentHandshakeSuccessResponse = Schema.Struct({
   ok: Schema.Literal(true),
   protocolVersion: PositiveInt,
   extensionVersion: TrimmedNonEmptyString,
-  capabilities: Schema.Array(PiSubagentCapability),
+  capabilities: Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
 });
 export type PiSubagentHandshakeSuccessResponse = typeof PiSubagentHandshakeSuccessResponse.Type;
 
@@ -100,7 +102,9 @@ export const PiSubagentHandshakeFailureResponse = Schema.Struct({
   protocolVersion: Schema.optional(PositiveInt),
   supportedProtocolVersions: Schema.optional(Schema.Array(PositiveInt)),
   extensionVersion: Schema.optional(TrimmedNonEmptyString),
-  missingCapabilities: Schema.optional(Schema.Array(PiSubagentCapability)),
+  missingCapabilities: Schema.optional(
+    Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
+  ),
   detail: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentHandshakeFailureResponse = typeof PiSubagentHandshakeFailureResponse.Type;
@@ -115,13 +119,20 @@ export const PiSubagentNegotiatedCapability = Schema.Struct({
   status: Schema.Literals([
     "managed_enabled",
     "bridge_absent",
+    "bridge_malformed_response",
     "unsupported_version",
+    "capability_mismatch",
     "bridge_error",
   ]),
   diagnosticCode: PiSubagentDiagnosticCode,
   isManaged: Schema.Boolean,
   protocolVersion: Schema.optional(PositiveInt),
-  capabilities: Schema.optional(Schema.Array(PiSubagentCapability)),
+  capabilities: Schema.optional(
+    Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
+  ),
+  missingCapabilities: Schema.optional(
+    Schema.Array(Schema.Union([PiSubagentCapability, TrimmedNonEmptyString])),
+  ),
   extensionVersion: Schema.optional(TrimmedNonEmptyString),
   offeredVersion: Schema.optional(PositiveInt),
   supportedVersions: Schema.optional(Schema.Array(PositiveInt)),
@@ -192,4 +203,3 @@ export const PiSubagentExecutionRecord = Schema.Struct({
   updatedAt: TrimmedNonEmptyString,
 });
 export type PiSubagentExecutionRecord = typeof PiSubagentExecutionRecord.Type;
-
