@@ -1,0 +1,71 @@
+import {
+  type PiSubagentCancellationScope,
+  type PiSubagentDiagnosticCode,
+  type PiSubagentExecutionRecord,
+  type PiSubagentLifecycleEvent,
+  type PiSubagentLifecycleState,
+  type PiSubagentTransportMode,
+} from "@synara/contracts";
+import { type Effect, type Option, ServiceMap } from "effect";
+
+import type { PersistenceDecodeError, PersistenceSqlError } from "../Errors.ts";
+
+export type PiSubagentExecutionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+
+export interface RecordPiSubagentAdmissionInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly commandId: string;
+  readonly projectId: string;
+  readonly parentThreadId: string;
+  readonly parentTurnId?: string | null;
+  readonly parentToolCallId?: string | null;
+  readonly agentType: string;
+  readonly prompt: string;
+  readonly mode?: PiSubagentTransportMode;
+  readonly cancellationScope?: PiSubagentCancellationScope;
+  readonly state: "accepted" | "rejected";
+  readonly diagnosticCode?: PiSubagentDiagnosticCode;
+  readonly rejectionReason?: string;
+  readonly now: string;
+}
+
+export type PiSubagentAdmissionRecordResult =
+  | {
+      readonly kind: "admitted";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
+export interface PiSubagentExecutionRepositoryShape {
+  readonly recordAdmission: (
+    input: RecordPiSubagentAdmissionInput,
+  ) => Effect.Effect<PiSubagentAdmissionRecordResult, PiSubagentExecutionRepositoryError>;
+  readonly getById: (
+    executionId: string,
+  ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
+  readonly getByCommandId: (
+    commandId: string,
+  ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
+  readonly listByThreadId: (
+    threadId: string,
+  ) => Effect.Effect<
+    ReadonlyArray<PiSubagentExecutionRecord>,
+    PiSubagentExecutionRepositoryError
+  >;
+  readonly listJournalEvents: (
+    executionId: string,
+  ) => Effect.Effect<
+    ReadonlyArray<PiSubagentLifecycleEvent>,
+    PiSubagentExecutionRepositoryError
+  >;
+}
+
+export class PiSubagentExecutionRepository extends ServiceMap.Service<
+  PiSubagentExecutionRepository,
+  PiSubagentExecutionRepositoryShape
+>()("synara/persistence/Services/PiSubagentExecutionRepository") {}

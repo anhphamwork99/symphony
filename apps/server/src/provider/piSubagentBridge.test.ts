@@ -103,4 +103,65 @@ describe("Pi subagent extension bridge & versioned handshake", () => {
     expect(first).toEqual(second);
     expect(handshakeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("T02-AC2: bridge accepts server-minted executionId and attemptId and emits lifecycle event with identities", async () => {
+    const spawnSpy = vi.fn().mockResolvedValue({
+      status: "accepted",
+      executionId: "exec_server_123",
+      attemptId: "att_server_456",
+      generation: 1,
+      state: "accepted",
+      diagnosticCode: "pi_subagent_managed_enabled",
+    });
+
+    const { extension, bridge, emittedEvents } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: [...PI_SUBAGENT_CAPABILITIES],
+      onSpawn: spawnSpy,
+    });
+
+    // Mock pi runtime initializing extension
+    let registeredAgentTool: any;
+    const piMock = {
+      on: vi.fn(),
+      registerTool: (tool: any) => {
+        if (tool.name === "Agent") {
+          registeredAgentTool = tool;
+        }
+      },
+    };
+
+    extension.factory(piMock);
+    expect(registeredAgentTool).toBeDefined();
+
+    const toolResult = await registeredAgentTool.execute("call_tool_99", {
+      commandId: "cmd_spawn_test",
+      projectId: "proj_default",
+      parentThreadId: "thread_main",
+      parentTurnId: "turn_1",
+      agentType: "tester",
+      prompt: "Run test suite",
+    });
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: "cmd_spawn_test",
+        projectId: "proj_default",
+        parentThreadId: "thread_main",
+        parentTurnId: "turn_1",
+      }),
+    );
+
+    expect(toolResult.executionId).toBe("exec_server_123");
+    expect(toolResult.attemptId).toBe("att_server_456");
+    expect(toolResult.generation).toBe(1);
+
+    // Verify lifecycle event emitted under server-minted identities
+    expect(emittedEvents.length).toBe(1);
+    expect(emittedEvents[0]!.executionId).toBe("exec_server_123");
+    expect(emittedEvents[0]!.attemptId).toBe("att_server_456");
+    expect(emittedEvents[0]!.generation).toBe(1);
+    expect(emittedEvents[0]!.state).toBe("running");
+  });
 });
+

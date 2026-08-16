@@ -11,7 +11,10 @@ import {
   type PiSubagentHandshakeRequest,
   PiSubagentHandshakeResponse,
   type PiSubagentHandshakeSuccessResponse,
+  type PiSubagentLifecycleEvent,
   type PiSubagentNegotiatedCapability,
+  type PiSubagentSpawnCommand,
+  type PiSubagentSpawnResult,
 } from "@synara/contracts";
 
 export const PI_SUBAGENT_BRIDGE_KEY = Symbol.for("synara.pi.subagents.bridge");
@@ -21,6 +24,12 @@ export interface PiSubagentExtensionBridge {
   readonly handshake: (
     request: PiSubagentHandshakeRequest,
   ) => Promise<PiSubagentHandshakeResponse> | PiSubagentHandshakeResponse;
+  readonly spawn?: (
+    command: PiSubagentSpawnCommand,
+  ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
+  readonly emitLifecycleEvent?: (
+    event: PiSubagentLifecycleEvent,
+  ) => Promise<void> | void;
 }
 
 export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
@@ -100,7 +109,6 @@ export async function negotiatePiSubagentCapability(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-
     return {
       status: "bridge_error",
       diagnosticCode: "pi_subagent_bridge_error",
@@ -158,14 +166,12 @@ function extractBridge(target: unknown): PiSubagentExtensionBridge | undefined {
     }
   }
 
-
   if ("handshake" in record && typeof record.handshake === "function") {
     return record as unknown as PiSubagentExtensionBridge;
   }
 
   return undefined;
 }
-
 
 export async function probePiSubagentBridge(
   target: unknown,
@@ -209,12 +215,15 @@ export interface CompatibleExtensionOptions {
   readonly protocolVersion?: number;
   readonly capabilities?: PiSubagentCapability[];
   readonly extensionVersion?: string;
+  readonly onSpawn?: (command: PiSubagentSpawnCommand) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
+  readonly onLifecycleEvent?: (event: PiSubagentLifecycleEvent) => Promise<void> | void;
 }
 
 export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionOptions) {
   const protocolVersion = options?.protocolVersion ?? PI_SUBAGENTS_PROTOCOL_VERSION;
   const capabilities = options?.capabilities ?? [...PI_SUBAGENT_CAPABILITIES];
   const extensionVersion = options?.extensionVersion ?? "0.1.0";
+  const emittedEvents: PiSubagentLifecycleEvent[] = [];
 
   const bridge: PiSubagentExtensionBridge = {
     handshake: async () => ({
@@ -223,6 +232,13 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
       extensionVersion,
       capabilities,
     }),
+    spawn: options?.onSpawn,
+    emitLifecycleEvent: async (event) => {
+      emittedEvents.push(event);
+      if (options?.onLifecycleEvent) {
+        await options.onLifecycleEvent(event);
+      }
+    },
   };
 
   const factory = (pi: any) => {
@@ -230,6 +246,72 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
       pi[PI_SUBAGENT_BRIDGE_KEY] = bridge;
       if (typeof pi.on === "function") {
         pi.on("synara:subagents:bridge", () => bridge);
+      }
+      if (typeof pi.registerTool === "function") {
+        pi.registerTool({
+          name: "Agent",
+          label: "Managed Agent",
+          description: "Managed Pi subagent tool",
+          parameters: {} as any,
+          execute: async (_toolCallId: string, params: any) => {
+            if (bridge.spawn) {
+              const spawnResult = await bridge.spawn({
+                commandId: params.commandId ?? `cmd_${Date.now()}`,
+                projectId: params.projectId ?? "proj_default",
+                parentThreadId: params.parentThreadId ?? "thread_main",
+                parentTurnId: params.parentTurnId ?? "turn_1",
+                agentType: params.agentType ?? "default",
+                prompt: params.prompt ?? "",
+                mode: params.mode ?? "foreground",
+                cancellationScope: params.cancellationScope ?? "parent_turn",
+              });
+
+              if (spawnResult.status === "rejected") {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected: ${spawnResult.rejectionReason ?? spawnResult.diagnosticCode}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+
+              // Emit running lifecycle event under the server-minted identities
+              if (bridge.emitLifecycleEvent) {
+                await bridge.emitLifecycleEvent({
+                  eventId: `evt_${Date.now()}`,
+                  executionId: spawnResult.executionId,
+                  attemptId: spawnResult.attemptId,
+                  generation: spawnResult.generation,
+                  sequence: 2,
+                  state: "running",
+                  occurredAt: new Date().toISOString(),
+                  parentThreadId: params.parentThreadId ?? "thread_main",
+                  parentTurnId: params.parentTurnId ?? "turn_1",
+                  parentToolCallId: _toolCallId,
+                  projectId: params.projectId ?? "proj_default",
+                  diagnosticCode: "pi_subagent_managed_enabled",
+                });
+              }
+
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Managed child started [executionId=${spawnResult.executionId}, attemptId=${spawnResult.attemptId}, generation=${spawnResult.generation}]`,
+                  },
+                ],
+                executionId: spawnResult.executionId,
+                attemptId: spawnResult.attemptId,
+                generation: spawnResult.generation,
+              };
+            }
+
+            return { content: [{ type: "text", text: "child completed" }] };
+          },
+        });
       }
     }
   };
@@ -241,7 +323,7 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
     [PI_SUBAGENT_BRIDGE_KEY]: bridge,
   };
 
-  return { extension, bridge };
+  return { extension, bridge, emittedEvents };
 }
 
 export function makeLegacyPiSubagentExtension() {

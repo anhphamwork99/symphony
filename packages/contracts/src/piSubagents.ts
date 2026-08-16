@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
+import {
+  EventId,
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+  TurnId,
+} from "./baseSchemas";
 
 export const PI_SUBAGENTS_PROTOCOL_VERSION = 1;
 export const PI_SUBAGENTS_MIN_PROTOCOL_VERSION = 1;
@@ -24,8 +32,43 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_bridge_error",
   "pi_subagent_unsupported_version",
   "pi_subagent_capability_mismatch",
+  "pi_subagent_admission_rejected",
+  "pi_subagent_admission_unauthorized",
+  "pi_subagent_admission_active_turn_required",
+  "pi_subagent_admission_project_mismatch",
+  "pi_subagent_already_applied",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
+
+export const PiSubagentExecutionId = TrimmedNonEmptyString;
+export type PiSubagentExecutionId = typeof PiSubagentExecutionId.Type;
+
+export const PiSubagentAttemptId = TrimmedNonEmptyString;
+export type PiSubagentAttemptId = typeof PiSubagentAttemptId.Type;
+
+export const PiSubagentTransportMode = Schema.Literals(["foreground", "background"]);
+export type PiSubagentTransportMode = typeof PiSubagentTransportMode.Type;
+
+export const PiSubagentCancellationScope = Schema.Literals([
+  "parent_turn",
+  "session",
+  "independent",
+]);
+export type PiSubagentCancellationScope = typeof PiSubagentCancellationScope.Type;
+
+export const PiSubagentLifecycleState = Schema.Literals([
+  "requested",
+  "accepted",
+  "queued",
+  "running",
+  "rejected",
+  "cancelling",
+  "cancelled",
+  "succeeded",
+  "failed",
+  "orphaned",
+]);
+export type PiSubagentLifecycleState = typeof PiSubagentLifecycleState.Type;
 
 export const PiSubagentHandshakeRequest = Schema.Struct({
   protocolVersion: PositiveInt,
@@ -83,3 +126,68 @@ export const PiSubagentNegotiatedCapability = Schema.Struct({
   diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentNegotiatedCapability = typeof PiSubagentNegotiatedCapability.Type;
+
+export const PiSubagentSpawnCommand = Schema.Struct({
+  commandId: TrimmedNonEmptyString,
+  projectId: ProjectId,
+  parentThreadId: ThreadId,
+  parentTurnId: Schema.NullOr(TurnId),
+  parentToolCallId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  agentType: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  mode: Schema.optional(PiSubagentTransportMode),
+  cancellationScope: Schema.optional(PiSubagentCancellationScope),
+});
+export type PiSubagentSpawnCommand = typeof PiSubagentSpawnCommand.Type;
+
+export const PiSubagentSpawnResult = Schema.Struct({
+  status: Schema.Literals(["accepted", "already_applied", "rejected"]),
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  state: PiSubagentLifecycleState,
+  diagnosticCode: PiSubagentDiagnosticCode,
+  rejectionReason: Schema.optional(TrimmedNonEmptyString),
+});
+export type PiSubagentSpawnResult = typeof PiSubagentSpawnResult.Type;
+
+export const PiSubagentLifecycleEvent = Schema.Struct({
+  eventId: Schema.Union([EventId, TrimmedNonEmptyString]),
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  sequence: PositiveInt,
+  state: PiSubagentLifecycleState,
+  occurredAt: TrimmedNonEmptyString,
+  parentThreadId: ThreadId,
+  parentTurnId: Schema.NullOr(TurnId),
+  parentToolCallId: Schema.NullOr(TrimmedNonEmptyString),
+  projectId: ProjectId,
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+  diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+});
+export type PiSubagentLifecycleEvent = typeof PiSubagentLifecycleEvent.Type;
+
+export const PiSubagentExecutionRecord = Schema.Struct({
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  commandId: TrimmedNonEmptyString,
+  projectId: ProjectId,
+  parentThreadId: ThreadId,
+  parentTurnId: Schema.NullOr(TurnId),
+  parentToolCallId: Schema.NullOr(TrimmedNonEmptyString),
+  agentType: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  mode: PiSubagentTransportMode,
+  cancellationScope: PiSubagentCancellationScope,
+  desiredState: PiSubagentLifecycleState,
+  observedState: PiSubagentLifecycleState,
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+  rejectionReason: Schema.optional(TrimmedNonEmptyString),
+  createdAt: TrimmedNonEmptyString,
+  updatedAt: TrimmedNonEmptyString,
+});
+export type PiSubagentExecutionRecord = typeof PiSubagentExecutionRecord.Type;
+

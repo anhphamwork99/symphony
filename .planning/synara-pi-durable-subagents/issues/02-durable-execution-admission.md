@@ -9,21 +9,21 @@ commands cannot create duplicates.
 
 **Blocked by:** 01 — Versioned managed-execution handshake.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] **T02-AC1:** The execution record and `executionId` are durable before any
+- [x] **T02-AC1:** The execution record and `executionId` are durable before any
   child-start evidence can be observed.
-- [ ] **T02-AC2:** Every concrete spawn receives a distinct `attemptId`, and all
+- [x] **T02-AC2:** Every concrete spawn receives a distinct `attemptId`, and all
   lifecycle events identify their execution, attempt, generation, and unique
   event or attempt-local sequence.
-- [ ] **T02-AC3:** Requested-to-accepted is journal-first and deduplicated;
+- [x] **T02-AC3:** Requested-to-accepted is journal-first and deduplicated;
   rejected is terminal with a stable diagnostic; no half-admitted execution
   reaches projection.
-- [ ] **T02-AC4:** Project/thread ownership, active-turn, approval, and provider
+- [x] **T02-AC4:** Project/thread ownership, active-turn, approval, and provider
   authority are enforced before child start; denial produces no child.
-- [ ] **T02-AC5:** Replaying a command identity returns already-applied with the
+- [x] **T02-AC5:** Replaying a command identity returns already-applied with the
   original identities and creates neither a second execution nor attempt.
-- [ ] **T02-AC6:** A legacy or unhandshaked session bypasses this managed
+- [x] **T02-AC6:** A legacy or unhandshaked session bypasses this managed
   admission path entirely and keeps the existing extension behavior.
 
 ## Testing Seams
@@ -31,15 +31,20 @@ commands cannot create duplicates.
 **Approval status:** Approved — owner approval in the ticket-breakdown review
 on 2026-08-16.
 
-- **T02-AC1, T02-AC2, T02-AC5:** Managed spawn contract and execution
-  state-machine boundary — prove identity shape, ordering, and idempotency.
-- **T02-AC1, T02-AC3, T02-AC5:** Server orchestration integration boundary —
-  inspect durable state before child start, replay the command, and restart the
-  harness without duplicating work.
-- **T02-AC4:** Orchestration authorization boundary with authorized and denied
-  project/thread principals.
-- **T02-AC2:** Pi extension bridge boundary — accept and emit the server-minted
-  execution and attempt identities.
-- **T02-AC6:** Provider-session capability boundary — compare managed and legacy
-  session admission behavior.
+- **T02-AC1, T02-AC2, T02-AC5 (Contract Schemas & Identity Shapes):**
+  - Seam: `packages/contracts/src/piSubagents.test.ts` validating `packages/contracts/src/piSubagents.ts`.
+  - Proves: Schema validation for `executionId`, `attemptId`, `generation`, attempt sequence, parent thread/turn/tool correlation, `PiSubagentSpawnCommand`, `PiSubagentSpawnResult`, and lifecycle event shapes.
+- **T02-AC1, T02-AC3, T02-AC5 (Durable Store & Journal-First Persistence):**
+  - Seam: `apps/server/src/persistence/Services/PiSubagentExecutionRepository.test.ts` validating `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts` and migration `091_PiSubagentExecutions.ts`.
+  - Proves: Execution record and first attempt are durably committed in SQLite before child start; journal events are sequentially written and deduplicated; replaying a `commandId` returns already-applied with original identities and creates no duplicate execution or attempt.
+- **T02-AC1, T02-AC3, T02-AC4, T02-AC5 (Admission & Authorization Coordinator):**
+  - Seam: `apps/server/src/provider/piSubagentAdmissionCoordinator.test.ts` validating `apps/server/src/provider/piSubagentAdmissionCoordinator.ts`.
+  - Proves: Enforces project/thread ownership, active-turn check, and provider authority before child start; unauthorized/mismatched principals produce terminal rejection with stable diagnostic codes; replaying a command identity returns already-applied without creating a second child.
+- **T02-AC2 (Extension Bridge Identities):**
+  - Seam: `apps/server/src/provider/piSubagentBridge.test.ts` validating `apps/server/src/provider/piSubagentBridge.ts`.
+  - Proves: Bridge accepts server-minted `executionId`, `attemptId`, `generation`, and emits lifecycle events identifying these.
+- **T02-AC4, T02-AC6 (Provider Session Integration & Legacy Bypass):**
+  - Seam: `apps/server/src/provider/piSubagentSession.test.ts`.
+  - Proves: Managed session admits subagent start through the coordinator and runs child under server-minted identities; denial produces no child; unhandshaked/legacy session bypasses managed admission path entirely and keeps existing extension behavior.
+
 

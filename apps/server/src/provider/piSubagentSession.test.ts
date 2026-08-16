@@ -117,3 +117,94 @@ describe("Pi provider session subagent capability negotiation (T01-AC2, T01-AC3,
     session.dispose();
   });
 });
+
+describe("Pi provider session subagent admission and legacy bypass (T02-AC2, T02-AC4, T02-AC6)", () => {
+  it("T02-AC2, T02-AC4: managed session runs subagent with server-minted identities and fails when denied", async () => {
+    let spawnCount = 0;
+    const { extension, bridge, emittedEvents } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn", "abort-propagation"],
+      onSpawn: async (cmd) => {
+        spawnCount++;
+        if (cmd.agentType === "denied_agent") {
+          return {
+            status: "rejected",
+            executionId: "exec_denied",
+            attemptId: "att_denied",
+            generation: 1,
+            state: "rejected",
+            diagnosticCode: "pi_subagent_admission_unauthorized",
+            rejectionReason: "Spawn unauthorized for this agent type",
+          };
+        }
+        return {
+          status: "accepted",
+          executionId: `exec_${spawnCount}`,
+          attemptId: `att_${spawnCount}`,
+          generation: 1,
+          state: "accepted",
+          diagnosticCode: "pi_subagent_managed_enabled",
+        };
+      },
+    });
+
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(true);
+
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
+    expect(agentTool?.definition?.execute).toBeDefined();
+
+    // 1. Authorized call
+    const authorizedResult = await agentTool.definition.execute("call_1", {
+      commandId: "cmd_auth_1",
+      agentType: "authorized_agent",
+      prompt: "Do work",
+    });
+
+    expect((authorizedResult as any).executionId).toBe("exec_1");
+    expect((authorizedResult as any).attemptId).toBe("att_1");
+    expect((authorizedResult as any).generation).toBe(1);
+    expect(emittedEvents.length).toBe(1);
+    expect(emittedEvents[0]!.executionId).toBe("exec_1");
+
+    // 2. Denied call produces no child execution / running event
+    const deniedResult = await agentTool.definition.execute("call_2", {
+      commandId: "cmd_denied_1",
+      agentType: "denied_agent",
+      prompt: "Forbidden work",
+    });
+
+    expect(deniedResult.isError).toBe(true);
+    expect((deniedResult as any).content[0].text).toContain("rejected");
+    // Emitted events count should NOT have increased for the denied call
+    expect(emittedEvents.length).toBe(1);
+
+    session.dispose();
+  });
+
+  it("T02-AC6: unhandshaked legacy session bypasses managed admission path entirely", async () => {
+    const { extension } = makeLegacyPiSubagentExtension();
+
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(false);
+
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
+    expect(agentTool?.definition?.execute).toBeDefined();
+
+    const result = await agentTool.definition.execute("call_legacy_1", {
+      prompt: "Legacy prompt without managed IDs",
+    });
+
+    expect((result as any).content[0].text).toBe("legacy response");
+    expect((result as any).executionId).toBeUndefined();
+
+    session.dispose();
+  });
+});
+
+
+
