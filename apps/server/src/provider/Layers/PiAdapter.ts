@@ -123,6 +123,8 @@ import {
   type AdmissionSnapshotQuery,
 } from "../piSubagentAdmissionCoordinator.ts";
 import type { PiSubagentControlHealthShape } from "../piSubagentControlHealth.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
 
 import {
   teardownChildProcessTree,
@@ -1744,6 +1746,20 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const piSubagentRepository =
       injectedPiSubagentRepository ??
       Option.getOrUndefined(yield* Effect.serviceOption(PiSubagentExecutionRepository));
+    // Decision 21 live authority registry. The PiAdapter captures the service
+    // so the admission boundary can re-validate the server-minted binding at
+    // spawn time (assertAdmittable against server truth). Absent (tests or a
+    // graph without the gateway layer), admission fails closed when a binding
+    // exists.
+    const mcpSessionAuthority = Option.getOrUndefined(
+      yield* Effect.serviceOption(McpSessionAuthority),
+    );
+    // Genuine server read service (projection snapshot) resolved once at
+    // adapter build, or the injected test seam. The admission boundary never
+    // fabricates a snapshot from extension params.
+    const adapterSnapshotQuery =
+      options?.snapshotQuery ??
+      Option.getOrUndefined(yield* Effect.serviceOption(ProjectionSnapshotQuery));
     const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
@@ -2770,11 +2786,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         const loadedExtensions = runtime.session.resourceLoader.getExtensions().extensions;
 
         if (subagentCapability.isManaged && piSubagentRepository) {
+          // Server-minted command identity scope: each managed Agent tool call
+          // receives a durable commandId minted here, keyed by the client
+          // correlation identity (params.commandId ?? toolCallId) for the
+          // lifetime of this session. Redelivery of the same tool call in the
+          // same session replays the same minted identity (→ already_applied);
+          // a different session/thread/turn/tool can never collide with it,
+          // and the repository additionally validates the ownership fingerprint
+          // before any already_applied answer.
+          const mintedCommandIds = new Map<string, string>();
+
           const wrapAgentTool = (target: any) => {
             if (!target || target.__synaraAdmissionWrapped) {
               return;
             }
-            const exec = typeof target.execute === "function" ? target.execute : target.definition?.execute;
+            const exec =
+              typeof target.execute === "function" ? target.execute : target.definition?.execute;
             if (typeof exec !== "function") {
               return;
             }
@@ -2789,10 +2816,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               onUpdate?: any,
               ctx?: any,
             ) => {
-              const cmdId =
+              const clientCommandKey =
                 typeof params?.commandId === "string" && params.commandId.trim().length > 0
                   ? params.commandId.trim()
                   : toolCallId;
+              let mintedCommandId = mintedCommandIds.get(clientCommandKey);
+              if (mintedCommandId === undefined) {
+                mintedCommandId = `cmd_${crypto.randomUUID()}`;
+                mintedCommandIds.set(clientCommandKey, mintedCommandId);
+              }
               const agentType =
                 typeof params?.subagent_type === "string" && params.subagent_type.trim().length > 0
                   ? params.subagent_type.trim()
@@ -2811,11 +2843,63 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   ? ("background" as const)
                   : ("foreground" as const);
 
+              // Server truth only: thread/project/turn derive from the session
+              // input, the server-tracked active turn, and the orchestration
+              // snapshot — never from extension params.
+              if (adapterSnapshotQuery === undefined) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected [pi_subagent_admission_unauthorized]: server projection snapshot is unavailable; admission cannot be authorized`,
+                    },
+                  ],
+                  isError: true,
+                  status: "rejected",
+                  diagnosticCode: "pi_subagent_admission_unauthorized",
+                  rejectionReason:
+                    "server projection snapshot is unavailable; admission cannot be authorized",
+                };
+              }
+              const snapshotResult = await Effect.runPromise(
+                Effect.result(adapterSnapshotQuery.getSnapshot()),
+              );
+              if (snapshotResult._tag === "Failure") {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected [pi_subagent_admission_unauthorized]: server projection snapshot failed to load`,
+                    },
+                  ],
+                  isError: true,
+                  status: "rejected",
+                  diagnosticCode: "pi_subagent_admission_unauthorized",
+                  rejectionReason: "server projection snapshot failed to load",
+                };
+              }
+              const thread = snapshotResult.success.threads.find((t) => t.id === input.threadId);
+              if (!thread) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected [pi_subagent_admission_unauthorized]: parent thread '${input.threadId}' not found in server projection`,
+                    },
+                  ],
+                  isError: true,
+                  status: "rejected",
+                  diagnosticCode: "pi_subagent_admission_unauthorized",
+                  rejectionReason: `Parent thread '${input.threadId}' not found in server projection`,
+                };
+              }
+
               const command: PiSubagentSpawnCommand = {
-                commandId: cmdId,
-                projectId: (params?.projectId ?? params?.project_id ?? input.projectId ?? "proj_default") as ProjectId,
-                parentThreadId: (params?.parentThreadId ?? params?.parent_thread_id ?? input.threadId) as ThreadId,
-                parentTurnId: (params?.parentTurnId ?? params?.parent_turn_id ?? context.activeTurnId ?? null) as TurnId | null,
+                commandId: mintedCommandId,
+                clientCommandId: clientCommandKey,
+                projectId: thread.projectId,
+                parentThreadId: input.threadId,
+                parentTurnId: context.activeTurnId ?? null,
                 parentToolCallId: toolCallId,
                 agentType,
                 prompt,
@@ -2823,44 +2907,45 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 cancellationScope: "parent_turn",
               };
 
-              const defaultSnapshotQuery: AdmissionSnapshotQuery = {
-                getSnapshot: () =>
-                  Effect.succeed({
-                    projects: [],
-                    threads: [
-                      {
-                        id: input.threadId,
-                        projectId: (input.projectId ?? "proj_default") as ProjectId,
-                        archivedAt: null,
-                        session: {
-                          activeTurnId: context.activeTurnId,
-                        },
-                      },
-                    ] as any,
-                  } as any),
-              };
-
-              const admissionResult = await Effect.runPromise(
-                admitSubagentSpawn({
-                  command,
-                  sessionCapability: subagentCapability,
-                  snapshotQuery: options?.snapshotQuery ?? defaultSnapshotQuery,
-                  repository: piSubagentRepository,
-                  controlHealth: options?.controlHealth,
-                  trustedContext: {
-                    trustedThreadId: input.threadId,
-                    trustedProjectId: input.projectId ?? "proj_default",
-                    trustedActiveTurnId: context.activeTurnId ?? null,
-                    trustedProvider: PROVIDER,
-                    mcpAuthority: input.mcpAuthority
-                      ? {
-                          subject: input.mcpAuthority.subject,
-                          expiresAt: input.mcpAuthority.expiresAt,
-                        }
-                      : null,
-                  },
-                }),
-              );
+              let admissionResult: PiSubagentSpawnResult;
+              try {
+                admissionResult = await Effect.runPromise(
+                  admitSubagentSpawn({
+                    command,
+                    sessionCapability: subagentCapability,
+                    snapshotQuery: adapterSnapshotQuery,
+                    repository: piSubagentRepository,
+                    ...(options?.controlHealth !== undefined
+                      ? { controlHealth: options.controlHealth }
+                      : {}),
+                    trustedContext: {
+                      trustedThreadId: input.threadId,
+                      trustedProjectId: thread.projectId,
+                      trustedActiveTurnId: context.activeTurnId ?? null,
+                      trustedProvider: PROVIDER,
+                      mcpAuthority: input.mcpAuthority ?? null,
+                    },
+                    ...(mcpSessionAuthority === undefined
+                      ? {}
+                      : { authorityRegistry: mcpSessionAuthority }),
+                  }),
+                );
+              } catch (cause) {
+                const message =
+                  cause instanceof Error ? cause.message : String(cause);
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn rejected [pi_subagent_admission_rejected]: ${message}`,
+                    },
+                  ],
+                  isError: true,
+                  status: "rejected",
+                  diagnosticCode: "pi_subagent_admission_rejected",
+                  rejectionReason: message,
+                };
+              }
 
               options?.onSubagentAdmission?.({
                 threadId: input.threadId,
@@ -2880,6 +2965,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   status: "rejected",
                   diagnosticCode: admissionResult.diagnosticCode,
                   rejectionReason: admissionResult.rejectionReason,
+                };
+              }
+
+              if (admissionResult.status === "already_applied") {
+                // Redelivered command: the identities are returned but the
+                // child is NOT started a second time (T20-AC3/AC6).
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Subagent spawn already applied [pi_subagent_already_applied]: executionId=${admissionResult.executionId}, attemptId=${admissionResult.attemptId}, generation=${admissionResult.generation}`,
+                    },
+                  ],
+                  executionId: admissionResult.executionId,
+                  attemptId: admissionResult.attemptId,
+                  generation: admissionResult.generation,
                 };
               }
 
@@ -2911,7 +3012,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           for (const ext of loadedExtensions) {
             if (ext && ext.tools instanceof Map && ext.tools.has("Agent")) {
               const agentEntry = ext.tools.get("Agent");
-              wrapAgentTool(agentEntry.definition ?? agentEntry);
+              if (agentEntry) {
+                wrapAgentTool(agentEntry.definition ?? agentEntry);
+              }
             }
           }
           const allTools = runtime.session.getAllTools();

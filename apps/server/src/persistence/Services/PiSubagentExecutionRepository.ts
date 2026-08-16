@@ -17,6 +17,18 @@ export interface RecordPiSubagentAdmissionInput {
   readonly attemptId: string;
   readonly generation: number;
   readonly commandId: string;
+  /**
+   * Server-computed ownership fingerprint for the command identity
+   * (subject/project/thread/turn/tool scope). Replay dedup is scoped to
+   * (commandId, fingerprint), so the same commandId under a different
+   * subject/project/thread/turn/tool can never receive another execution's
+   * identities — it is deterministically rejected instead.
+   */
+  readonly commandFingerprint: string;
+  /** Extension-supplied correlation id (params.commandId or tool call id). */
+  readonly clientCommandId?: string | null;
+  /** Trusted canonical principal (McpAuthorityBinding.subject), when known. */
+  readonly subject?: string | null;
   readonly projectId: string;
   readonly parentThreadId: string;
   readonly parentTurnId?: string | null;
@@ -39,6 +51,15 @@ export type PiSubagentAdmissionRecordResult =
   | {
       readonly kind: "already_applied";
       readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /**
+       * The commandId already exists under a DIFFERENT ownership scope
+       * (fingerprint). Fail-closed: the caller must NOT receive the other
+       * execution's identities and must NOT create a duplicate row.
+       */
+      readonly kind: "command_identity_mismatch";
+      readonly commandId: string;
     };
 
 export interface RecordPiSubagentLifecycleEventInput {

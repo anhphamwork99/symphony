@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   type AgentSession,
@@ -9,14 +10,17 @@ import {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, Option } from "effect";
+import { DateTime, Effect, Layer, Option } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   PI_SUBAGENTS_PROTOCOL_VERSION,
   type PiSubagentHandshakeRequest,
   type PiSubagentNegotiatedCapability,
+  type PiSubagentSpawnCommand,
+  type PiSubagentSpawnResult,
   type ThreadId,
 } from "@synara/contracts";
 
@@ -24,6 +28,15 @@ import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  makeMcpSessionAuthorityRegistry,
+} from "../agentGateway/mcpSessionAuthority.ts";
+import {
+  McpSessionAuthority,
+  type McpSessionAuthorityShape,
+} from "../agentGateway/Services/McpSessionAuthority.ts";
 import {
   makeCompatiblePiSubagentExtension,
   negotiatePiSubagentCapability,
@@ -871,20 +884,60 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       logWebSocketEvents: false,
     };
 
+    // Real Decision-21 authority registry (the same implementation the
+    // production layer builds), minted here so the test can also mint the
+    // exact binding it passes into startSession.
+    const registry = makeMcpSessionAuthorityRegistry();
+    const authorityService: McpSessionAuthorityShape = {
+      ...registry,
+      mintForLocalOwner: () =>
+        registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+      mintForAuthenticated: (session) =>
+        registry.mint({
+          subject: session.subject,
+          kind: "authenticated",
+          authSessionId: session.sessionId,
+          authExpiresAt:
+            session.expiresAt === undefined || session.expiresAt === null
+              ? null
+              : DateTime.toEpochMillis(session.expiresAt),
+        }),
+      bindingFor: (authorityId, options) => registry.bindingFor(authorityId, options),
+    };
+    const authorityRecord = registry.mint({
+      subject: "user_prod_test",
+      kind: "authenticated",
+      authSessionId: "auth-session-prod",
+      authExpiresAt: null,
+    });
+    const binding = registry.bindingFor(authorityRecord.authorityId, {
+      threadId: "th_prod_admission_1",
+      provider: "pi",
+      projectId: "proj_default",
+      lifecycleGeneration: null,
+      credentialTtlMs: 60 * 60 * 1_000,
+    })!;
+
     let observedSession: any;
-    let admittedEvent: any;
+    let admittedEvents: Array<{
+      threadId: ThreadId;
+      command: PiSubagentSpawnCommand;
+      result: PiSubagentSpawnResult;
+    }> = [];
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
       },
       onSubagentAdmission: (event) => {
-        admittedEvent = event;
+        admittedEvents.push(event);
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
       Layer.provide(NodeFileSystem.layer),
       Layer.provide(PiSubagentExecutionRepositoryLive),
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+      Layer.provide(Layer.succeed(McpSessionAuthority, authorityService)),
       Layer.provide(SqlitePersistenceMemory),
     );
 
@@ -896,16 +949,42 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     const testProgram = Effect.gen(function* () {
       const adapter = yield* PiAdapter;
       const repo = yield* PiSubagentExecutionRepository;
+      const sql = yield* SqlClient.SqlClient;
+
+      // Seed the genuine projection snapshot (server truth) with the two
+      // threads the sessions will use.
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, kind, title, workspace_root, scripts_json, created_at, updated_at
+        ) VALUES (
+          'proj_default', 'project', 'Default', ${tempAgentDir}, '[]',
+          '2026-08-16T12:00:00.000Z', '2026-08-16T12:00:00.000Z'
+        )
+      `;
+      for (const threadId of ["th_prod_admission_1", "th_prod_admission_2"]) {
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json,
+            runtime_mode, interaction_mode, env_mode, created_at, updated_at, deleted_at
+          ) VALUES (
+            ${threadId}, 'proj_default', 'Admission thread',
+            '{"provider":"pi","model":"pi"}',
+            'full-access', 'default', 'local',
+            '2026-08-16T12:00:00.000Z', '2026-08-16T12:00:00.000Z', NULL
+          )
+        `;
+      }
 
       yield* adapter.startSession({
         threadId: "th_prod_admission_1" as ThreadId,
-        projectId: "proj_default",
         cwd: tempAgentDir,
+        runtimeMode: "full-access",
         providerOptions: {
           pi: {
             agentDir: tempAgentDir,
           },
         },
+        mcpAuthority: binding,
       });
 
       expect(observedSession).toBeDefined();
@@ -919,59 +998,206 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
       expect(executeFn).toBeDefined();
 
-      // 1. Authorized Agent tool execution
+      const sessionId = observedSession.sessionManager.getSessionId();
+      const outputRoot = join(tmpdir(), `pi-subagents-${process.getuid?.() ?? 0}`);
+      const outputDir = join(
+        outputRoot,
+        tempAgentDir.replace(/[/\\]/g, "-").replace(/^-+/, ""),
+        sessionId,
+        "tasks",
+      );
+
+      // Mimic the runtime tool-execution context the extension needs for model
+      // resolution; no model is available in the hermetic agent dir, so the
+      // child fails fast after its record + transcript are created.
+      const executeCtx = {
+        ui: {
+          notify: () => {},
+          status: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
+        cwd: tempAgentDir,
+        model: undefined,
+        modelRegistry: {
+          find: () => undefined,
+          getAll: () => [],
+          getAvailable: () => [],
+        },
+        sessionManager: observedSession.sessionManager,
+        getSystemPrompt: () => "",
+      };
+
+      const listOutputFiles = () => {
+        try {
+          return readdirSync(outputDir).filter((f) => f.endsWith(".output"));
+        } catch {
+          return [];
+        }
+      };
+
+      // 1. Authorized Agent tool execution (background so the real child
+      //    writes its transcript output file synchronously after spawn).
       const toolResult = yield* Effect.promise(() =>
         executeFn("call_agent_prod_1", {
           commandId: "cmd_prod_agent_1",
           task: "Perform database index research",
+          context: "Admission remediation evidence run.",
+          link_references: "None",
+          expected_outcome: "Index research summarized.",
           subagent_type: "researcher",
-          run_in_background: false,
-        }),
+          run_in_background: true,
+        }, undefined, undefined, executeCtx),
       );
 
-      // T20-AC1, T20-AC6: Verified admitted before child start and ran with server-minted identities
-      expect(admittedEvent).toBeDefined();
-      expect(admittedEvent.result.status).toBe("accepted");
-      expect(admittedEvent.result.executionId).toMatch(/^exec_/);
-      expect(admittedEvent.result.attemptId).toMatch(/^att_/);
-      expect(admittedEvent.result.generation).toBe(1);
+      // T20-AC1/T20-AC6: admitted BEFORE child start with server-minted
+      // identities; the command identity is server-minted and the client
+      // correlation is preserved.
+      expect(admittedEvents).toHaveLength(1);
+      const admitted = admittedEvents[0]!;
+      expect(admitted.result.status).toBe("accepted");
+      expect(admitted.result.executionId).toMatch(/^exec_/);
+      expect(admitted.result.attemptId).toMatch(/^att_/);
+      expect(admitted.result.generation).toBe(1);
+      expect(admitted.command.commandId).toMatch(/^cmd_/);
+      expect(admitted.command.commandId).not.toBe("cmd_prod_agent_1");
+      expect(admitted.command.clientCommandId).toBe("cmd_prod_agent_1");
+      expect(admitted.command.projectId).toBe("proj_default");
+      expect(admitted.command.parentThreadId).toBe("th_prod_admission_1");
 
-      // Verify repository has durable record and sequence 1 journal event
-      const stored = yield* repo.getByCommandId("cmd_prod_agent_1");
+      // The wrapped result carries the server-minted identities.
+      expect(toolResult.executionId).toBe(admitted.result.executionId);
+      expect(toolResult.attemptId).toBe(admitted.result.attemptId);
+      expect(toolResult.generation).toBe(1);
+
+      // Durable record: accepted, sequence-1 journal, server-scoped
+      // correlation and ownership fingerprint.
+      const stored = yield* repo.getById(admitted.result.executionId);
       expect(Option.isSome(stored)).toBe(true);
       if (Option.isSome(stored)) {
-        expect(stored.value.executionId).toBe(admittedEvent.result.executionId);
         expect(stored.value.observedState).toBe("accepted");
         expect(stored.value.agentType).toBe("researcher");
+        expect(stored.value.projectId).toBe("proj_default");
+        expect(stored.value.parentThreadId).toBe("th_prod_admission_1");
       }
-
-      const journal = yield* repo.listJournalEvents(admittedEvent.result.executionId);
-      expect(journal.length).toBe(1);
+      const journal = yield* repo.listJournalEvents(admitted.result.executionId);
+      expect(journal).toHaveLength(1);
       expect(journal[0]!.sequence).toBe(1);
       expect(journal[0]!.state).toBe("accepted");
 
-      // 2. Denied Agent execution (project mismatch / unauthorized)
+      // The REAL Alfie child received the server-minted identities: its
+      // transcript output file (written by the actual extension for the
+      // actual child record) records them verbatim.
+      const outputFiles = listOutputFiles();
+      expect(outputFiles.length).toBeGreaterThanOrEqual(1);
+      const childEntry = JSON.parse(
+        readFileSync(join(outputDir, outputFiles[0]!), "utf-8").trim(),
+      );
+      expect(childEntry.managedExecution).toEqual({
+        executionId: admitted.result.executionId,
+        attemptId: admitted.result.attemptId,
+        generation: 1,
+      });
+
+      // 2. Denied execution: revoke the authority between calls. The spawn is
+      //    refused BEFORE child start with a stable diagnostic; no child
+      //    transcript is created and the rejection is durable.
+      const filesBeforeDenied = listOutputFiles().length;
+      registry.revoke(authorityRecord.authorityId, "test revocation");
+
       const deniedResult = yield* Effect.promise(() =>
         executeFn("call_agent_denied_1", {
           commandId: "cmd_prod_denied_1",
-          projectId: "proj_other_unauthorized",
           task: "Unauthorized task",
+          context: "Denied path evidence.",
+          link_references: "None",
+          expected_outcome: "Denied.",
           subagent_type: "researcher",
-        }),
+          run_in_background: true,
+        }, undefined, undefined, executeCtx),
       );
 
       expect(deniedResult.isError).toBe(true);
-      expect(deniedResult.content[0].text).toContain("pi_subagent_admission_project_mismatch");
+      expect(deniedResult.content[0].text).toContain("pi_subagent_admission_unauthorized");
+      expect(deniedResult.content[0].text).toContain("revoked");
+      // No child started for the denied spawn.
+      expect(listOutputFiles().length).toBe(filesBeforeDenied);
 
-      // Verify no accepted execution in repository for the denied command
-      const deniedRecord = yield* repo.getByCommandId("cmd_prod_denied_1");
-      // If recorded, its state is rejected
-      if (Option.isSome(deniedRecord)) {
-        expect(deniedRecord.value.observedState).toBe("rejected");
-      }
+      // Rejected truth is durable with the client correlation preserved.
+      const threadExecutions = yield* repo.listByThreadId("th_prod_admission_1");
+      const rejectedRow = threadExecutions.find((e) => e.observedState === "rejected");
+      expect(rejectedRow).toBeDefined();
+      expect(rejectedRow!.rejectionReason).toContain("revoked");
 
-      // Stop session cleanly
+      // 3. Cross-authority command identity (audit repro #2): thread B sends
+      //    the SAME extension-supplied commandId. With server-minted identity
+      //    it receives its OWN execution — never thread A's identities.
+      const authorityRecordB = registry.mint({
+        subject: "user_prod_test_b",
+        kind: "authenticated",
+        authSessionId: "auth-session-prod-b",
+        authExpiresAt: null,
+      });
+      const bindingB = registry.bindingFor(authorityRecordB.authorityId, {
+        threadId: "th_prod_admission_2",
+        provider: "pi",
+        projectId: "proj_default",
+        lifecycleGeneration: null,
+        credentialTtlMs: 60 * 60 * 1_000,
+      })!;
+
+      yield* adapter.startSession({
+        threadId: "th_prod_admission_2" as ThreadId,
+        cwd: tempAgentDir,
+        runtimeMode: "full-access",
+        providerOptions: {
+          pi: {
+            agentDir: tempAgentDir,
+          },
+        },
+        mcpAuthority: bindingB,
+      });
+
+      const loadedExtB = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
+      const agentEntryB = loadedExtB.tools.get("Agent");
+      const executeFnB = agentEntryB.execute ?? agentEntryB.definition?.execute;
+
+      const beforeB = admittedEvents.length;
+      const resultB = yield* Effect.promise(() =>
+        executeFnB("call_agent_prod_b", {
+          commandId: "cmd_prod_agent_1",
+          task: "Thread B work with the same extension command id",
+          context: "Cross-authority identity evidence.",
+          link_references: "None",
+          expected_outcome: "Thread B execution created.",
+          subagent_type: "researcher",
+          run_in_background: true,
+        }, undefined, undefined, executeCtx),
+      );
+      const admittedB = admittedEvents[admittedEvents.length - 1]!;
+      expect(admittedEvents.length).toBe(beforeB + 1);
+      expect(admittedB.result.status).toBe("accepted");
+      // Thread B never receives thread A's execution identities.
+      expect(admittedB.result.executionId).not.toBe(admitted.result.executionId);
+      expect(admittedB.result.attemptId).not.toBe(admitted.result.attemptId);
+      expect(resultB.executionId).toBe(admittedB.result.executionId);
+      expect(admittedB.command.clientCommandId).toBe("cmd_prod_agent_1");
+      expect(admittedB.command.parentThreadId).toBe("th_prod_admission_2");
+
+      // Two independent durable executions exist (one per server-scoped
+      // identity), each under its own thread.
+      const threadBExecutions = yield* repo.listByThreadId("th_prod_admission_2");
+      expect(threadBExecutions).toHaveLength(1);
+      expect(threadBExecutions[0]!.executionId).toBe(admittedB.result.executionId);
+
+      // Stop sessions cleanly
       yield* adapter.stopSession("th_prod_admission_1" as ThreadId);
+      yield* adapter.stopSession("th_prod_admission_2" as ThreadId);
     });
 
     await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));

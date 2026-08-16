@@ -30,6 +30,9 @@ interface ExecutionRow {
   readonly attemptId: string;
   readonly generation: number;
   readonly commandId: string;
+  readonly commandFingerprint: string;
+  readonly clientCommandId: string | null;
+  readonly subject: string | null;
   readonly projectId: string;
   readonly parentThreadId: string;
   readonly parentTurnId: string | null;
@@ -42,6 +45,8 @@ interface ExecutionRow {
   readonly observedState: PiSubagentLifecycleState;
   readonly diagnosticCode: PiSubagentDiagnosticCode | null;
   readonly rejectionReason: string | null;
+  readonly firstAttemptId: string | null;
+  readonly firstAttemptGeneration: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -82,56 +87,54 @@ function rowToExecutionRecord(row: ExecutionRow): PiSubagentExecutionRecord {
   };
 }
 
+const executionColumns = (sql: SqlClient.SqlClient) => sql`
+  execution_id AS "executionId",
+  attempt_id AS "attemptId",
+  generation,
+  command_id AS "commandId",
+  command_fingerprint AS "commandFingerprint",
+  client_command_id AS "clientCommandId",
+  subject,
+  project_id AS "projectId",
+  parent_thread_id AS "parentThreadId",
+  parent_turn_id AS "parentTurnId",
+  parent_tool_call_id AS "parentToolCallId",
+  agent_type AS "agentType",
+  prompt,
+  mode,
+  cancellation_scope AS "cancellationScope",
+  desired_state AS "desiredState",
+  observed_state AS "observedState",
+  diagnostic_code AS "diagnosticCode",
+  rejection_reason AS "rejectionReason",
+  first_attempt_id AS "firstAttemptId",
+  first_attempt_generation AS "firstAttemptGeneration",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
 export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const getByCommandIdInternal = (commandId: string) =>
+  /**
+   * Replay dedup lookup. The command identity is scoped by its ownership
+   * fingerprint: a redelivery of the same commandId under the SAME scope
+   * resolves to the original execution, while the same commandId under a
+   * different scope resolves to nothing (and is rejected by the caller — it
+   * must never receive another execution's identities).
+   */
+  const getByCommandIdInternal = (commandId: string, commandFingerprint?: string) =>
     sql<ExecutionRow>`
-      SELECT
-        execution_id AS "executionId",
-        attempt_id AS "attemptId",
-        generation,
-        command_id AS "commandId",
-        project_id AS "projectId",
-        parent_thread_id AS "parentThreadId",
-        parent_turn_id AS "parentTurnId",
-        parent_tool_call_id AS "parentToolCallId",
-        agent_type AS "agentType",
-        prompt,
-        mode,
-        cancellation_scope AS "cancellationScope",
-        desired_state AS "desiredState",
-        observed_state AS "observedState",
-        diagnostic_code AS "diagnosticCode",
-        rejection_reason AS "rejectionReason",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
+      SELECT ${executionColumns(sql)}
       FROM pi_subagent_executions
       WHERE command_id = ${commandId}
+        ${commandFingerprint === undefined ? sql`` : sql`AND command_fingerprint = ${commandFingerprint}`}
       LIMIT 1
     `;
 
   const getByIdInternal = (executionId: string) =>
     sql<ExecutionRow>`
-      SELECT
-        execution_id AS "executionId",
-        attempt_id AS "attemptId",
-        generation,
-        command_id AS "commandId",
-        project_id AS "projectId",
-        parent_thread_id AS "parentThreadId",
-        parent_turn_id AS "parentTurnId",
-        parent_tool_call_id AS "parentToolCallId",
-        agent_type AS "agentType",
-        prompt,
-        mode,
-        cancellation_scope AS "cancellationScope",
-        desired_state AS "desiredState",
-        observed_state AS "observedState",
-        diagnostic_code AS "diagnosticCode",
-        rejection_reason AS "rejectionReason",
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
+      SELECT ${executionColumns(sql)}
       FROM pi_subagent_executions
       WHERE execution_id = ${executionId}
       LIMIT 1
@@ -141,7 +144,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const existingRows = yield* getByCommandIdInternal(input.commandId);
+          const existingRows = yield* getByCommandIdInternal(
+            input.commandId,
+            input.commandFingerprint,
+          );
 
           if (existingRows.length > 0) {
             const existing = rowToExecutionRecord(existingRows[0]!);
@@ -159,8 +165,12 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           const parentToolCallId = input.parentToolCallId ?? null;
           const diagnosticCode = input.diagnosticCode ?? null;
           const rejectionReason = input.rejectionReason ?? null;
+          const clientCommandId = input.clientCommandId ?? null;
+          const subject = input.subject ?? null;
 
-          // Atomic insert into lifecycle journal and executions
+          // Atomic insert into lifecycle journal and executions: either both
+          // the sequence-1 journal event and the execution aggregate commit,
+          // or neither becomes visible (T20-AC2).
           yield* sql`
             INSERT INTO pi_subagent_lifecycle_journal (
               event_id,
@@ -193,6 +203,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               attempt_id,
               generation,
               command_id,
+              command_fingerprint,
+              client_command_id,
+              subject,
               project_id,
               parent_thread_id,
               parent_turn_id,
@@ -205,6 +218,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               observed_state,
               diagnostic_code,
               rejection_reason,
+              first_attempt_id,
+              first_attempt_generation,
               created_at,
               updated_at
             ) VALUES (
@@ -212,6 +227,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               ${input.attemptId},
               ${input.generation},
               ${input.commandId},
+              ${input.commandFingerprint},
+              ${clientCommandId},
+              ${subject},
               ${input.projectId},
               ${input.parentThreadId},
               ${parentTurnId},
@@ -224,6 +242,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               ${input.state},
               ${diagnosticCode},
               ${rejectionReason},
+              ${input.attemptId},
+              ${input.generation},
               ${input.now},
               ${input.now}
             )
@@ -259,14 +279,28 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       .pipe(
         Effect.catch((err) =>
           Effect.gen(function* () {
-            // Concurrent race on command_id unique constraint recovery
-            const existingRows = yield* getByCommandIdInternal(input.commandId).pipe(
-              Effect.mapError(toPersistenceSqlError),
-            );
-            if (existingRows.length > 0) {
+            // Concurrent race on the command_id unique constraint: re-check the
+            // scoped dedup first (same identity → already_applied), then the
+            // unscoped key. A row under a DIFFERENT ownership fingerprint is a
+            // deterministic fail-closed mismatch, never another execution's
+            // identities; anything else is a genuine persistence failure.
+            const scopedRows = yield* getByCommandIdInternal(
+              input.commandId,
+              input.commandFingerprint,
+            ).pipe(Effect.mapError(toPersistenceSqlError));
+            if (scopedRows.length > 0) {
               return {
                 kind: "already_applied" as const,
-                execution: rowToExecutionRecord(existingRows[0]!),
+                execution: rowToExecutionRecord(scopedRows[0]!),
+              };
+            }
+            const anyScopeRows = yield* getByCommandIdInternal(input.commandId).pipe(
+              Effect.mapError(toPersistenceSqlError),
+            );
+            if (anyScopeRows.length > 0) {
+              return {
+                kind: "command_identity_mismatch" as const,
+                commandId: input.commandId,
               };
             }
             return yield* Effect.fail(toPersistenceSqlError(err));
@@ -281,6 +315,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
+          // Dedup by event identity OR the attempt/generation-local sequence
+          // key. There is deliberately NO (execution_id, sequence) fallback:
+          // sequence restarts at 1 for a future attempt/generation (T20-AC4).
           const existingEventRows = yield* sql<JournalRow>`
             SELECT
               event_id AS "eventId",
@@ -295,8 +332,12 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               metadata_json AS "metadataJson"
             FROM pi_subagent_lifecycle_journal
             WHERE event_id = ${input.eventId}
-               OR (execution_id = ${input.executionId} AND attempt_id = ${input.attemptId} AND sequence = ${input.sequence})
-               OR (execution_id = ${input.executionId} AND sequence = ${input.sequence})
+               OR (
+                 execution_id = ${input.executionId}
+                 AND attempt_id = ${input.attemptId}
+                 AND generation = ${input.generation}
+                 AND sequence = ${input.sequence}
+               )
             LIMIT 1
           `;
 
@@ -364,6 +405,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             )
           `;
 
+          // Aggregate advancement is generation-gated: a late event from a
+          // stale attempt/generation is journaled as history but never
+          // regresses the current aggregate (spec: late events must not
+          // overwrite current truth).
           if (input.generation >= currentExecution.generation) {
             const nextDesired =
               input.state === "cancelled" || input.state === "cancelling"
@@ -430,8 +475,12 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 metadata_json AS "metadataJson"
               FROM pi_subagent_lifecycle_journal
               WHERE event_id = ${input.eventId}
-                 OR (execution_id = ${input.executionId} AND attempt_id = ${input.attemptId} AND sequence = ${input.sequence})
-                 OR (execution_id = ${input.executionId} AND sequence = ${input.sequence})
+                 OR (
+                   execution_id = ${input.executionId}
+                   AND attempt_id = ${input.attemptId}
+                   AND generation = ${input.generation}
+                   AND sequence = ${input.sequence}
+                 )
               LIMIT 1
             `.pipe(Effect.mapError(toPersistenceSqlError));
 
@@ -489,25 +538,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const listByThreadId: PiSubagentExecutionRepositoryShape["listByThreadId"] = (threadId) =>
     Effect.gen(function* () {
       const rows = yield* sql<ExecutionRow>`
-        SELECT
-          execution_id AS "executionId",
-          attempt_id AS "attemptId",
-          generation,
-          command_id AS "commandId",
-          project_id AS "projectId",
-          parent_thread_id AS "parentThreadId",
-          parent_turn_id AS "parentTurnId",
-          parent_tool_call_id AS "parentToolCallId",
-          agent_type AS "agentType",
-          prompt,
-          mode,
-          cancellation_scope AS "cancellationScope",
-          desired_state AS "desiredState",
-          observed_state AS "observedState",
-          diagnostic_code AS "diagnosticCode",
-          rejection_reason AS "rejectionReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+        SELECT ${executionColumns(sql)}
         FROM pi_subagent_executions
         WHERE parent_thread_id = ${threadId}
         ORDER BY created_at ASC
@@ -537,7 +568,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         FROM pi_subagent_lifecycle_journal j
         JOIN pi_subagent_executions e ON j.execution_id = e.execution_id
         WHERE j.execution_id = ${executionId}
-        ORDER BY j.sequence ASC
+        ORDER BY j.generation ASC, j.sequence ASC
       `.pipe(Effect.mapError(toPersistenceSqlError));
 
       return rows.map((row: any) => ({

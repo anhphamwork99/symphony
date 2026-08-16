@@ -37,6 +37,7 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_admission_active_turn_required",
   "pi_subagent_admission_project_mismatch",
   "pi_subagent_admission_provider_mismatch",
+  "pi_subagent_command_identity_mismatch",
   "pi_subagent_already_applied",
   "pi_subagent_lifecycle_persistence_failed",
   "pi_subagent_control_degraded",
@@ -143,6 +144,12 @@ export type PiSubagentNegotiatedCapability = typeof PiSubagentNegotiatedCapabili
 
 export const PiSubagentSpawnCommand = Schema.Struct({
   commandId: TrimmedNonEmptyString,
+  /**
+   * Extension-supplied correlation identity (params.commandId or tool call
+   * id). The durable dedup identity is the server-minted commandId scoped by
+   * the ownership fingerprint; this field preserves the client correlation.
+   */
+  clientCommandId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectId: ProjectId,
   parentThreadId: ThreadId,
   parentTurnId: Schema.NullOr(TurnId),
