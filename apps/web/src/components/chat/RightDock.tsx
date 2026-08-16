@@ -6,6 +6,7 @@
 import {
   type CSSProperties,
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -18,6 +19,11 @@ import {
   EMPTY_PANE_ID_SET,
   reconcileKeepMountedPaneIds,
 } from "~/lib/dockPaneActivation";
+import {
+  clampRightDockOpenWidth,
+  clampRightDockShrinkWidth,
+  rightDockEffectiveBounds,
+} from "~/lib/rightDockSizing";
 import { PanelRightCloseIcon, PlusIcon } from "~/lib/icons";
 import type {
   RightDockPane,
@@ -69,6 +75,10 @@ interface RightDockProps {
   state: RightDockThreadState;
   minWidth: number;
   defaultWidth: string;
+  // Desktop single-chat hosts bound the dock so the Main conversation never
+  // renders below this width (px) during open, drag, or shell/window shrink.
+  // Hosts without the bound keep the legacy unbounded open/drag behavior.
+  mainMinWidth?: number;
   shouldAcceptWidth: (context: { nextWidth: number; wrapper: HTMLElement }) => boolean;
   paneLabelOverrides?: Record<string, string | undefined>;
   // Per-pane tab glyph overrides (same shape as label overrides) — e.g. a pull request pane
@@ -179,6 +189,13 @@ function useKeepMountedPaneIds(
   return renderedPaneIds;
 }
 
+// The flex shell hosting chat + dock is the sidebar wrapper's parent (the wrapper
+// itself is the flex-none dock column inside that row).
+function resolveRightDockShell(content: HTMLDivElement | null): HTMLElement | null {
+  const wrapper = content?.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+  return wrapper?.parentElement ?? null;
+}
+
 export function RightDock(props: RightDockProps) {
   const activePane = resolveActivePane(props.state);
   const onSelectPane = props.onSelectPane;
@@ -189,14 +206,154 @@ export function RightDock(props: RightDockProps) {
     useDesktopTopBarWindowControlsGutterClassName();
 
   const keepMountedPaneIds = useKeepMountedPaneIds(props.state.panes, activePane);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const minWidth = props.minWidth;
+  const mainMinWidth = props.mainMinWidth;
+  const activePaneKind = activePane?.kind ?? null;
+  const boundsActive = mainMinWidth !== undefined;
+  const [shellWidth, setShellWidth] = useState(0);
+  const bounds = boundsActive ? rightDockEffectiveBounds(shellWidth) : null;
+
+  // The automatic shrink write must not animate: the dock's width transitions
+  // are intentionally enabled for open/close and manual drags, so a passive
+  // write would glide the dock down over ~300ms and leave the Main conversation
+  // below its floor for that whole window. The clamp therefore runs
+  // synchronously (layout effect + ResizeObserver callback) and suppresses the
+  // transition on the sidebar gap/container only for that automatic write,
+  // restoring the prior inline values on the next animation frame.
+  const shrinkWriteRef = useRef<{
+    frameId: number | null;
+    targets: ReadonlyArray<{ element: HTMLElement; priorTransitionDuration: string }>;
+  } | null>(null);
+
+  // Cancel a pending restore frame and put back the inline transition-duration
+  // values suppressed by the last automatic shrink write. Idempotent; also used
+  // as unmount cleanup so no frame or inline style is ever left dangling.
+  const restoreShrinkWriteTransitions = useCallback(() => {
+    const pending = shrinkWriteRef.current;
+    shrinkWriteRef.current = null;
+    if (!pending) {
+      return;
+    }
+    if (pending.frameId !== null) {
+      window.cancelAnimationFrame(pending.frameId);
+    }
+    for (const { element, priorTransitionDuration } of pending.targets) {
+      if (priorTransitionDuration === "") {
+        element.style.removeProperty("transition-duration");
+      } else {
+        element.style.setProperty("transition-duration", priorTransitionDuration);
+      }
+    }
+  }, []);
+
+  // Shrink-only clamp: when the shell can no longer afford the current dock
+  // width, write the exact (non-rounded) geometric ceiling so a fractional
+  // shell can never produce a dock wider than shell - mainMinWidth. Shell
+  // growth and already-affordable widths never write (currentWidth <= ceiling),
+  // so the dock never auto-grows and repeated shell changes converge without
+  // oscillation (writes never resize the shell, so the observer never re-fires
+  // from them). The transition suppression is scoped to this automatic write.
+  //
+  // Accepted asymmetry (accepted design decision): this automatic write
+  // deliberately bypasses the composer feasibility probe (shouldAcceptWidth /
+  // canComposerHandlePanelWidth) that manual drags go through. The strict
+  // 360px Main-conversation floor contract outranks the soft composer buffer,
+  // so an automatic shrink pins Main to exactly 360 even if a manual drag to
+  // that same width would have been rejected by the probe.
+  const writeShrinkClamp = useCallback(
+    (wrapper: HTMLElement, shellWidthPx: number) => {
+      const currentWidth = wrapper.getBoundingClientRect().width;
+      const nextWidth = clampRightDockShrinkWidth(currentWidth, shellWidthPx);
+      if (nextWidth >= currentWidth) {
+        return;
+      }
+      const targets = [
+        wrapper.querySelector<HTMLElement>("[data-slot='sidebar-gap']"),
+        wrapper.querySelector<HTMLElement>("[data-slot='sidebar-container']"),
+      ].filter((element): element is HTMLElement => element !== null);
+      // A pending restore would re-enable the transition between now and the
+      // next frame; cancel it so the width stays suppressed until the latest
+      // write has painted.
+      restoreShrinkWriteTransitions();
+      const targetEntries = targets.map((element) => ({
+        element,
+        priorTransitionDuration: element.style.getPropertyValue("transition-duration"),
+      }));
+      for (const { element } of targetEntries) {
+        element.style.setProperty("transition-duration", "0ms");
+      }
+      wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+      const frameId = window.requestAnimationFrame(() => {
+        const pending = shrinkWriteRef.current;
+        if (!pending) {
+          return;
+        }
+        shrinkWriteRef.current = null;
+        for (const { element, priorTransitionDuration } of pending.targets) {
+          if (priorTransitionDuration === "") {
+            element.style.removeProperty("transition-duration");
+          } else {
+            element.style.setProperty("transition-duration", priorTransitionDuration);
+          }
+        }
+      });
+      shrinkWriteRef.current = { frameId, targets: targetEntries };
+    },
+    [restoreShrinkWriteTransitions],
+  );
+
+  // Track the actual flex shell hosting chat + dock so open/drag/shrink bounds
+  // (and the shrink-only clamp above) always follow the live shell width,
+  // including left-sidebar and window-size changes that CSS cannot observe.
+  // The clamp runs synchronously here — before the first paint in the layout
+  // effect, and directly in the ResizeObserver callback — so the Main
+  // conversation never renders below its minimum width, even transiently.
+  useLayoutEffect(() => {
+    if (!boundsActive) {
+      return;
+    }
+    const shell = resolveRightDockShell(contentRef.current);
+    if (!shell) {
+      return;
+    }
+    // Measure synchronously so the first paint already has real bounds (the
+    // observer's initial callback is async), and clamp a too-wide dock before
+    // that first paint.
+    const shellWidthPx = shell.getBoundingClientRect().width;
+    setShellWidth(shellWidthPx);
+    const wrapper = contentRef.current?.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+    if (wrapper) {
+      writeShrinkClamp(wrapper, shellWidthPx);
+    }
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width !== "number" || width < 0) {
+        return;
+      }
+      setShellWidth(width);
+      const liveWrapper = contentRef.current?.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      if (liveWrapper) {
+        writeShrinkClamp(liveWrapper, width);
+      }
+    });
+    observer.observe(shell);
+    return () => {
+      observer.disconnect();
+      restoreShrinkWriteTransitions();
+    };
+  }, [boundsActive, restoreShrinkWriteTransitions, writeShrinkClamp]);
   // The dock must open as an exact 50/50 split of the chat shell. The CSS
   // default can only approximate half (it cannot observe the resizable left
   // sidebar), so on every open we measure the shell row hosting chat + dock and
   // pin the dock width to exactly half of it. Mid-session drags still resize
-  // freely; the next open re-centers the split.
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const minWidth = props.minWidth;
-  const activePaneKind = activePane?.kind ?? null;
+  // freely; the next open re-centers the split. With a mainMinWidth bound the
+  // half-shell (or pane-preferred) default is clamped only downward, so narrow
+  // shells keep the Main conversation at or above that bound instead of
+  // over-running it.
   useEffect(() => {
     if (!props.state.open) {
       return;
@@ -210,11 +367,16 @@ export function RightDock(props: RightDockProps) {
     // stranded in empty space, so kinds that render a fixed-aspect object open
     // at their own comfortable size instead of the even split.
     const preferredWidth = activePaneKind ? RIGHT_DOCK_PREFERRED_WIDTH[activePaneKind] : undefined;
-    const openWidth = preferredWidth ?? Math.round(shell.getBoundingClientRect().width / 2);
+    const shellWidthPx = shell.getBoundingClientRect().width;
+    const openWidth = preferredWidth ?? Math.round(shellWidthPx / 2);
     if (openWidth > 0) {
-      wrapper.style.setProperty("--sidebar-width", `${Math.max(minWidth, openWidth)}px`);
+      const dockWidth =
+        mainMinWidth === undefined
+          ? Math.max(minWidth, openWidth)
+          : clampRightDockOpenWidth(openWidth, shellWidthPx, minWidth);
+      wrapper.style.setProperty("--sidebar-width", `${dockWidth}px`);
     }
-  }, [props.state.open, minWidth, activePaneKind]);
+  }, [props.state.open, minWidth, activePaneKind, mainMinWidth]);
   const renderedPanes = props.state.panes.filter(
     (pane) => pane.id === activePane?.id || keepMountedPaneIds.has(pane.id),
   );
@@ -264,10 +426,20 @@ export function RightDock(props: RightDockProps) {
         innerClassName={CHAT_BACKGROUND_CLASS_NAME}
         gapClassName={chromeMotionClass}
         transparentSurface
-        resizable={{
-          minWidth: props.minWidth,
-          shouldAcceptWidth: props.shouldAcceptWidth,
-        }}
+        resizable={
+          bounds
+            ? {
+                // Geometric invariant first: the rail clamps every drag candidate
+                // into these bounds before the composer feasibility probe runs.
+                minWidth: bounds.minDock,
+                maxWidth: bounds.maxDock,
+                shouldAcceptWidth: props.shouldAcceptWidth,
+              }
+            : {
+                minWidth: props.minWidth,
+                shouldAcceptWidth: props.shouldAcceptWidth,
+              }
+        }
       >
         <div
           ref={contentRef}

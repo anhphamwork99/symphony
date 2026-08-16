@@ -43,6 +43,7 @@ import type { DockPaneRuntimeMode } from "../../lib/dockPaneActivation";
 import type { FileCommentSelection } from "../../lib/fileComments";
 import { gitBranchesQueryOptions } from "../../lib/gitReactQuery";
 import { canComposerHandlePanelWidth } from "../../lib/panelResize";
+import { RIGHT_DOCK_MAIN_MIN_WIDTH } from "../../lib/rightDockSizing";
 import { projectListDirectoriesQueryOptions } from "../../lib/projectReactQuery";
 import { waitForSidechatCreator } from "../../lib/sidechatCreatorRegistry";
 import {
@@ -1120,6 +1121,7 @@ export function SingleChatSurface(props: {
           state={dockState}
           minWidth={SINGLE_PANEL_MIN_WIDTH}
           defaultWidth={DIFF_INLINE_DEFAULT_WIDTH}
+          mainMinWidth={RIGHT_DOCK_MAIN_MIN_WIDTH}
           shouldAcceptWidth={shouldAcceptDockWidth}
           addMenuKinds={availableDockPaneKinds}
           launcherItems={dockLauncherItems}
