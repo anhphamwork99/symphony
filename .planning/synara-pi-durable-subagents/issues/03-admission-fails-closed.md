@@ -8,19 +8,19 @@ health until durable writes recover.
 
 **Blocked by:** 02 — Durable execution admission and identity.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] **T03-AC1:** Failure to persist requested or accepted lifecycle prevents
+- [x] **T03-AC1:** Failure to persist requested or accepted lifecycle prevents
   child spawn and returns a stable lifecycle-persistence diagnostic.
-- [ ] **T03-AC2:** No execution is projected as accepted or running when its
+- [x] **T03-AC2:** No execution is projected as accepted or running when its
   durable admission did not complete.
-- [ ] **T03-AC3:** Managed control health becomes degraded and new managed
+- [x] **T03-AC3:** Managed control health becomes degraded and new managed
   admissions fail closed while persistence remains unavailable.
-- [ ] **T03-AC4:** Existing execution records and terminal truth are not deleted,
+- [x] **T03-AC4:** Existing execution records and terminal truth are not deleted,
   rewritten, or misreported by admission degradation.
-- [ ] **T03-AC5:** Once durable writes recover, health can return to available
+- [x] **T03-AC5:** Once durable writes recover, health can return to available
   and a new command can be admitted without replaying prior rejected work.
-- [ ] **T03-AC6:** Legacy Pi behavior remains available according to the
+- [x] **T03-AC6:** Legacy Pi behavior remains available according to the
   negotiated capability policy and is never mislabeled managed.
 
 ## Testing Seams

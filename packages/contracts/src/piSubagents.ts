@@ -37,6 +37,8 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_admission_active_turn_required",
   "pi_subagent_admission_project_mismatch",
   "pi_subagent_already_applied",
+  "pi_subagent_lifecycle_persistence_failed",
+  "pi_subagent_control_degraded",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 

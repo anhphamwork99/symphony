@@ -17,6 +17,7 @@ import {
   admitSubagentSpawn,
   type AdmissionSnapshotQuery,
 } from "./piSubagentAdmissionCoordinator.ts";
+import { makePiSubagentControlHealth } from "./piSubagentControlHealth.ts";
 
 function createMockSnapshotQuery(threads: OrchestrationReadModel["threads"] = []): AdmissionSnapshotQuery {
   return {
@@ -278,3 +279,293 @@ describe("Pi subagent admission coordinator (T02-AC1, T02-AC3, T02-AC4, T02-AC5)
     );
   });
 });
+
+describe("Pi subagent admission fails closed (Ticket 03: T03-AC1, T03-AC2, T03-AC3, T03-AC4, T03-AC5, T03-AC6)", () => {
+  it("T03-AC1, T03-AC2: failure to persist lifecycle fails closed with stable lifecycle persistence diagnostic and projects no accepted/running execution", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+
+      // Injected store fault: repository that fails on recordAdmission
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: () =>
+          Effect.fail({
+            _tag: "PersistenceSqlError",
+            cause: new Error("Simulated SQLite disk I/O error"),
+            operation: "recordAdmission",
+          } as any),
+      };
+
+      const result = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        now: "2026-08-16T12:00:00.000Z",
+      });
+
+      // T03-AC1: fails closed with stable diagnostic
+      expect(result.status).toBe("rejected");
+      expect(result.state).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(result.rejectionReason).toContain("Failed to persist execution lifecycle truth");
+
+      // T03-AC2: No execution is projected as accepted or running in the store
+      const stored = yield* liveRepo.getByCommandId("cmd_spawn_001");
+      expect(Option.isNone(stored)).toBe(true);
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("T03-AC3: managed control health becomes degraded upon persistence failure and subsequent admissions fail closed", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+
+      const initialHealth = yield* controlHealth.getHealth();
+      expect(initialHealth.status).toBe("available");
+
+      // Store fault on first admission
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: () =>
+          Effect.fail({
+            _tag: "PersistenceSqlError",
+            cause: new Error("Disk full"),
+            operation: "recordAdmission",
+          } as any),
+      };
+
+      const firstResult = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        controlHealth,
+        now: "2026-08-16T12:00:00.000Z",
+      });
+
+      expect(firstResult.status).toBe("rejected");
+      expect(firstResult.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+
+      // Verify control health is now degraded
+      const degradedHealth = yield* controlHealth.getHealth();
+      expect(degradedHealth.status).toBe("degraded");
+      expect(degradedHealth.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+
+      // Subsequent admission fails closed immediately while health remains degraded
+      const secondCommand: PiSubagentSpawnCommand = {
+        ...validCommand,
+        commandId: "cmd_spawn_002",
+      };
+
+      const secondResult = yield* admitSubagentSpawn({
+        command: secondCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: liveRepo, // even with liveRepo, control health gate rejects
+        controlHealth,
+        now: "2026-08-16T12:01:00.000Z",
+      });
+
+      expect(secondResult.status).toBe("rejected");
+      expect(secondResult.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(secondResult.rejectionReason).toContain("Failed to persist execution lifecycle truth");
+
+      // No execution for command 2 in the database
+      const stored = yield* liveRepo.getByCommandId("cmd_spawn_002");
+      expect(Option.isNone(stored)).toBe(true);
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("T03-AC4: existing execution records and terminal truth are not deleted, rewritten, or misreported by admission degradation", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+
+      // 1. Durably record existing execution 1
+      const initialResult = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: liveRepo,
+        controlHealth,
+        now: "2026-08-16T12:00:00.000Z",
+      });
+      expect(initialResult.status).toBe("accepted");
+
+      const existingRecord = yield* liveRepo.getById(initialResult.executionId);
+      expect(Option.isSome(existingRecord)).toBe(true);
+
+      // 2. Introduce store fault for a second execution
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: () =>
+          Effect.fail({
+            _tag: "PersistenceSqlError",
+            cause: new Error("Store connection lost"),
+            operation: "recordAdmission",
+          } as any),
+      };
+
+      const failingCommand: PiSubagentSpawnCommand = {
+        ...validCommand,
+        commandId: "cmd_spawn_failing",
+      };
+
+      const failedResult = yield* admitSubagentSpawn({
+        command: failingCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        controlHealth,
+        now: "2026-08-16T12:02:00.000Z",
+      });
+      expect(failedResult.status).toBe("rejected");
+
+      // 3. Verify existing execution 1 is intact and completely unaffected
+      const afterRecord = yield* liveRepo.getById(initialResult.executionId);
+      expect(Option.isSome(afterRecord)).toBe(true);
+      if (Option.isSome(afterRecord)) {
+        expect(afterRecord.value.executionId).toBe(initialResult.executionId);
+        expect(afterRecord.value.observedState).toBe("accepted");
+        expect(afterRecord.value.commandId).toBe("cmd_spawn_001");
+      }
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("T03-AC5: once durable writes recover, health returns to available and a new command can be admitted without replaying rejected work", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+
+      // Degrade health
+      yield* controlHealth.markDegraded(
+        "Temporary DB lock",
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+
+      // Admission during degradation fails closed
+      const rejectedCommand: PiSubagentSpawnCommand = {
+        ...validCommand,
+        commandId: "cmd_during_outage",
+      };
+      const rejectedResult = yield* admitSubagentSpawn({
+        command: rejectedCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: liveRepo,
+        controlHealth,
+        now: "2026-08-16T12:00:00.000Z",
+      });
+      expect(rejectedResult.status).toBe("rejected");
+
+      // Recover health
+      yield* controlHealth.markAvailable();
+      const currentHealth = yield* controlHealth.getHealth();
+      expect(currentHealth.status).toBe("available");
+
+      // Admit fresh command after recovery
+      const freshCommand: PiSubagentSpawnCommand = {
+        ...validCommand,
+        commandId: "cmd_after_recovery",
+      };
+      const freshResult = yield* admitSubagentSpawn({
+        command: freshCommand,
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: liveRepo,
+        controlHealth,
+        now: "2026-08-16T12:05:00.000Z",
+      });
+      expect(freshResult.status).toBe("accepted");
+      expect(freshResult.executionId).toBeDefined();
+
+      // Prior rejected command was not admitted / replayed
+      const rejectedStored = yield* liveRepo.getByCommandId("cmd_during_outage");
+      expect(Option.isNone(rejectedStored)).toBe(true);
+
+      // Only the fresh command exists
+      const all = yield* liveRepo.listByThreadId("thread_main");
+      expect(all.length).toBe(1);
+      expect(all[0]!.commandId).toBe("cmd_after_recovery");
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+
+  it("T03-AC6: legacy Pi behavior remains available according to negotiated capability policy and is never mislabeled managed", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth({
+        status: "degraded",
+        diagnosticCode: "pi_subagent_control_degraded",
+      });
+
+      // Legacy capability session
+      const result = yield* admitSubagentSpawn({
+        command: validCommand,
+        sessionCapability: unmanagedCapability,
+        snapshotQuery,
+        repository: liveRepo,
+        controlHealth,
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_bridge_absent");
+      expect(result.rejectionReason).toContain("Legacy session");
+
+      // Nothing written to repository
+      const stored = yield* liveRepo.getByCommandId("cmd_spawn_001");
+      expect(Option.isNone(stored)).toBe(true);
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
+  });
+});
+

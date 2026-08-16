@@ -206,5 +206,79 @@ describe("Pi provider session subagent admission and legacy bypass (T02-AC2, T02
   });
 });
 
+describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC3, T03-AC6)", () => {
+  it("T03-AC1, T03-AC2: tool execution fails closed and emits no child running event when admission persistence fails", async () => {
+    const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn", "abort-propagation"],
+      onSpawn: async () => ({
+        status: "rejected",
+        executionId: "exec_rejected_pers",
+        attemptId: "att_rejected_pers",
+        generation: 1,
+        state: "rejected",
+        diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+        rejectionReason: "Failed to persist execution lifecycle truth to durable store",
+      }),
+    });
+
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(true);
+
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
+
+    const result = await agentTool.definition.execute("call_fail_1", {
+      commandId: "cmd_fail_1",
+      agentType: "researcher",
+      prompt: "Research task",
+    });
+
+    // Proves child spawn is prevented and stable persistence diagnostic is returned
+    expect(result.isError).toBe(true);
+    expect((result as any).content[0].text).toContain("pi_subagent_lifecycle_persistence_failed");
+    expect(emittedEvents.length).toBe(0);
+
+    session.dispose();
+  });
+
+  it("T03-AC3: tool execution fails closed with degraded diagnostic when control health is degraded", async () => {
+    const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn", "abort-propagation"],
+      onSpawn: async () => ({
+        status: "rejected",
+        executionId: "exec_rejected_degraded",
+        attemptId: "att_rejected_degraded",
+        generation: 1,
+        state: "rejected",
+        diagnosticCode: "pi_subagent_control_degraded",
+        rejectionReason: "Managed subagent control health is degraded due to persistence unavailability",
+      }),
+    });
+
+    const { session, services } = await createTestPiSession([extension]);
+    const capability = await probePiSubagentBridge(session);
+    expect(capability.isManaged).toBe(true);
+
+    const loadedExt = services.resourceLoader.getExtensions().extensions[0] as any;
+    const agentTool = loadedExt.tools.get("Agent");
+
+    const result = await agentTool.definition.execute("call_fail_2", {
+      commandId: "cmd_fail_2",
+      agentType: "researcher",
+      prompt: "Research task",
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result as any).content[0].text).toContain("pi_subagent_control_degraded");
+    expect(emittedEvents.length).toBe(0);
+
+    session.dispose();
+  });
+});
+
+
 
 

@@ -271,7 +271,7 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
                   content: [
                     {
                       type: "text",
-                      text: `Subagent spawn rejected: ${spawnResult.rejectionReason ?? spawnResult.diagnosticCode}`,
+                      text: `Subagent spawn rejected [${spawnResult.diagnosticCode}]: ${spawnResult.rejectionReason ?? spawnResult.diagnosticCode}`,
                     },
                   ],
                   isError: true,

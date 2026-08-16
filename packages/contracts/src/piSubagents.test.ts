@@ -167,6 +167,32 @@ describe("Pi subagent admission and identity contract schemas (T02-AC1, T02-AC2,
     expect(decoded.rejectionReason).toContain("does not belong");
   });
 
+  it("decodes rejected spawn result with lifecycle persistence failure and degraded diagnostics", () => {
+    const persistenceFailedResult = {
+      status: "rejected",
+      executionId: "exec_rejected_1",
+      attemptId: "att_rejected_1",
+      generation: 1,
+      state: "rejected",
+      diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+      rejectionReason: "Durable write failed",
+    };
+    const decoded1 = Schema.decodeSync(PiSubagentSpawnResult)(persistenceFailedResult);
+    expect(decoded1.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+
+    const degradedResult = {
+      status: "rejected",
+      executionId: "exec_rejected_2",
+      attemptId: "att_rejected_2",
+      generation: 1,
+      state: "rejected",
+      diagnosticCode: "pi_subagent_control_degraded",
+      rejectionReason: "Control plane is degraded",
+    };
+    const decoded2 = Schema.decodeSync(PiSubagentSpawnResult)(degradedResult);
+    expect(decoded2.diagnosticCode).toBe("pi_subagent_control_degraded");
+  });
+
   it("decodes valid already-applied spawn result with original identities", () => {
     const alreadyAppliedResult = {
       status: "already_applied",

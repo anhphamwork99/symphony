@@ -68,4 +68,26 @@ describe("Pi subagent admission guard (T01-AC6)", () => {
     expect(result.diagnosticCode).toBe("pi_subagent_bridge_error");
     expect(result.reason).toContain("Bridge threw exception");
   });
+
+  it("rejects managed admission when control health is degraded even if capability is enabled (T03-AC3)", () => {
+    const enabledCapability: PiSubagentNegotiatedCapability = {
+      status: "managed_enabled",
+      diagnosticCode: "pi_subagent_managed_enabled",
+      isManaged: true,
+      protocolVersion: 1,
+      capabilities: ["managed-spawn", "abort-propagation"],
+    };
+
+    const degradedHealth = {
+      status: "degraded" as const,
+      diagnosticCode: "pi_subagent_control_degraded" as const,
+      reason: "Persistence unavailable",
+    };
+
+    const result = checkManagedSubagentAdmission(enabledCapability, degradedHealth);
+    expect(result.admitted).toBe(false);
+    expect(result.diagnosticCode).toBe("pi_subagent_control_degraded");
+    expect(result.reason).toContain("Persistence unavailable");
+  });
 });
+
