@@ -3997,6 +3997,12 @@ function getTitleBarOptions(): BrowserWindowConstructorOptions {
 function createWindow(): BrowserWindow {
   const savedWindowState = readDesktopWindowState(DESKTOP_WINDOW_STATE_PATH);
   const primaryDisplay = screen.getPrimaryDisplay();
+  // Narrowest window width: one full chat frame. Below 768px the web app
+  // switches to its mobile sheet layout (designed for exactly these narrow
+  // widths), so the floor sits at the chat frame's own 360px minimum and the
+  // window can shrink down to just the conversation.
+  const minimumWindowWidth = 360;
+  const minimumWindowHeight = 620;
   const restoredBounds = savedWindowState
     ? resolveVisibleWindowBounds({
         savedBounds: savedWindowState.bounds,
@@ -4007,14 +4013,14 @@ function createWindow(): BrowserWindow {
             .filter((display) => display.id !== primaryDisplay.id)
             .map((display) => display.workArea),
         ],
-        minimumWidth: 840,
-        minimumHeight: 620,
+        minimumWidth: minimumWindowWidth,
+        minimumHeight: minimumWindowHeight,
       })
     : { width: 1100, height: 780 };
   const window = new BrowserWindow({
     ...restoredBounds,
-    minWidth: 840,
-    minHeight: 620,
+    minWidth: minimumWindowWidth,
+    minHeight: minimumWindowHeight,
     show: false,
     autoHideMenuBar: true,
     ...getIconOption(),
