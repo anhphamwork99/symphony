@@ -396,13 +396,17 @@ afterEach(() => {
   createdDirs.length = 0;
 });
 
-async function createRealPiSession(): Promise<{
+export async function createRealPiSession(options?: {
+  tempAgentDir?: string;
+}): Promise<{
   session: AgentSession;
   services: any;
   tempAgentDir: string;
 }> {
   const versionedDir = resolveVersionedExtensionDir();
-  const tempAgentDir = `/tmp/synara-real-pi-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tempAgentDir =
+    options?.tempAgentDir ??
+    `/tmp/synara-real-pi-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   createdDirs.push(tempAgentDir);
 
   const extensionsDir = join(tempAgentDir, "extensions");
