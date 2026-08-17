@@ -185,7 +185,36 @@ the wall-clock-sensitive suites; the WP-08 isolation config is kept as a strict 
 improvement (wallclock-first ordering, per-file forked runners, documented in
 `apps/server/vitest.config.ts`); no assertion, timeout, or envelope value was widened anywhere.
 
-### Acceptance evidence matrix (remediation)
+### Independent re-review (2026-08-17, second gate of the WP-05 lifecycle)
+
+Read-only re-review at Symphony `1ecf866a` + pinned Alfie `82406bd8`: verdict **RECOMMEND
+ACCEPT (high confidence)** — AC1–AC8 all PASS with reproduced evidence (per-file standalone runs
+per owner option A; full suite 2/2 green; Alfie 469/469; provenance hashes independently
+recomputed and matching; all ten WP-05 audit items covered; both repositories verified clean).
+Findings disposition:
+
+- **M1 (harness regression, fixed):** the first WP-08 project split silently dropped
+  `apps/server/integration/*.test.ts` (6 files, ~30 tests) from default discovery (371 → 365
+  files). Fixed in `4866644e` (unit include now `src/**` + `integration/**`); full suite
+  verified twice: **371 files (368 passed | 3 skipped), 4384 passed | 17 skipped, exit 0**.
+- **M2 (recorded nonblocking risk):** standalone acceptance invocations remain load-sensitive
+  (1 of 8 reviewer standalone runs failed AC2 at 2526 ms under deliberately induced concurrent
+  load; dedicated loops and both full-suite runs green). Consistent with WP-08 challenge evidence
+  and Decision 0006's "event loop is not a hard wall-clock guarantee" assumption. Recorded, no
+  code change.
+- **L1 (fixed by supersession note):** the ticket's earlier "run the four-file command to observe
+  the envelope tail" instruction remains intermittently red **by design**; the option-A
+  adjudication above is the acceptance method, and this note supersedes that instruction.
+- **L2 (noted):** the reopened-disposition block's "Alfie 464" count predates WP-06; the current
+  extension suite count is 469 (five new tests).
+- **L3 (informational):** the managed `manager.startForeground` throw path returns a success-shaped
+  `textResult`; unchanged legacy behavior, outside the WP-06 required shape list.
+
+**Envelope acceptance invocation (binding, per owner option A):** each wall-clock-sensitive file
+is run standalone — `piSubagentForegroundAcceptance`, `piSubagentForegroundReopen`,
+`piSubagentForegroundLifecycle`, `piSubagentRealExtension` — plus `main.test.ts`/`config.test.ts`
+for the AC5 wiring. Multi-file invocations of these files are expected to be intermittently red
+under load (documented harness noise, not a product defect).
 
 | Criterion | Source evidence | Verification evidence | Result |
 | --------- | --------------- | --------------------- | ------ |
