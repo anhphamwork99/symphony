@@ -13,7 +13,11 @@ import { Effect } from "effect";
 import type { McpAuthorityBinding } from "../agentGateway/mcpSessionAuthority.ts";
 import type { McpSessionAuthorityShape } from "../agentGateway/Services/McpSessionAuthority.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
-import type { PiSubagentControlHealthShape } from "./piSubagentControlHealth.ts";
+import type {
+  PiSubagentControlHealthMarkContext,
+  PiSubagentControlHealthShape,
+  PiSubagentControlHealthTransition,
+} from "./piSubagentControlHealth.ts";
 
 export interface AdmissionSnapshotQuery {
   readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, unknown>;
@@ -55,6 +59,13 @@ export interface AdmitSubagentSpawnInput {
    * re-validated against server truth.
    */
   readonly authorityRegistry?: Pick<McpSessionAuthorityShape, "assertAdmittable">;
+  /**
+   * Operator observation seam for control-health status transitions
+   * (Ticket 21). Called at most once per status change with safe metadata
+   * only (from/to status, diagnostic code, timestamp, admission thread) —
+   * never prompt, result, raw SQL, or rejection reason content.
+   */
+  readonly onHealthTransition?: (transition: PiSubagentControlHealthTransition) => void;
   readonly now?: string;
 }
 
@@ -131,11 +142,11 @@ export const admitSubagentSpawn = (
   input: AdmitSubagentSpawnInput,
 ): Effect.Effect<PiSubagentSpawnResult, unknown> =>
   Effect.gen(function* () {
-    const now = input.now ?? new Date().toISOString();
     const command = input.command;
-    const trusted = input.trustedContext;
 
-    // 1. Capability handshake (managed sessions only)
+    // 1. Capability handshake (managed sessions only). Legacy and unhandshaked
+    //    sessions are never gated by control health and are never labeled
+    //    managed (T21-AC7).
     if (
       !input.sessionCapability ||
       !input.sessionCapability.isManaged ||
@@ -154,22 +165,57 @@ export const admitSubagentSpawn = (
       } satisfies PiSubagentSpawnResult;
     }
 
-    // 2. Managed control health (fails closed when degraded)
+    // 2. Managed control health (Ticket 21). While degraded there is no
+    //    immediate rejection: recovery is admission-driven and single-flight.
+    //    This fresh command enters the shared recovery gate; at most one
+    //    admission at a time executes its normal atomic `recordAdmission` as
+    //    the durable recovery probe. A still-failing store keeps health
+    //    degraded and rejects this command (fail-closed, no child, no row);
+    //    a succeeding store marks health available and admits this same
+    //    command. Waiters re-read health and then perform their own normal
+    //    admission. There is no timer and no replay of rejected work.
     if (input.controlHealth) {
       const health = yield* input.controlHealth.getHealth();
       if (health.status === "degraded") {
-        return {
-          status: "rejected",
-          executionId: `exec_rejected_${randomUUID()}`,
-          attemptId: `att_rejected_${randomUUID()}`,
-          generation: 1,
-          state: "rejected",
-          diagnosticCode: health.diagnosticCode ?? "pi_subagent_control_degraded",
-          rejectionReason:
-            health.reason ?? "Managed subagent control health is degraded due to persistence unavailability",
-        } satisfies PiSubagentSpawnResult;
+        return yield* input.controlHealth.withRecoveryProbe(
+          Effect.gen(function* () {
+            const rechecked = yield* input.controlHealth!.getHealth();
+            const recoveryProbe = rechecked.status === "degraded";
+            return yield* runManagedAdmission(input, { recoveryProbe });
+          }),
+        );
       }
     }
+
+    return yield* runManagedAdmission(input, { recoveryProbe: false });
+  });
+
+/**
+ * The managed admission path (Ticket 21): provider authority, server-minted
+ * ownership cross-checks, projection truth, approval gate, subject authority,
+ * and the atomic durable admission write. Authorization is evaluated before
+ * any recovery-probe write so degraded control health can never mask an
+ * authorization diagnostic. When `recoveryProbe` is true, this execution is
+ * the single-flight recovery probe: a successful durable write marks control
+ * health available again and admits this same fresh command.
+ */
+const runManagedAdmission = (
+  input: AdmitSubagentSpawnInput,
+  probeOptions: { readonly recoveryProbe: boolean },
+): Effect.Effect<PiSubagentSpawnResult, unknown> =>
+  Effect.gen(function* () {
+    const now = input.now ?? new Date().toISOString();
+    const command = input.command;
+    const trusted = input.trustedContext;
+    const reportTransition = (transition: PiSubagentControlHealthTransition | null) => {
+      if (transition !== null) {
+        input.onHealthTransition?.(transition);
+      }
+      return transition;
+    };
+    const healthContext: PiSubagentControlHealthMarkContext = {
+      threadId: command.parentThreadId,
+    };
 
     // 3. Provider authority (server-minted adapter constant)
     if (trusted.trustedProvider !== "pi") {
@@ -455,9 +501,14 @@ export const admitSubagentSpawn = (
             : String(error);
 
       if (input.controlHealth) {
-        yield* input.controlHealth.markDegraded(
-          `Failed to persist execution lifecycle truth: ${errorMessage}`,
-          "pi_subagent_lifecycle_persistence_failed",
+        // Exactly one degraded transition is reported per outage; repeated
+        // failures while already degraded keep the first diagnostic stable.
+        reportTransition(
+          yield* input.controlHealth.markDegraded(
+            `Failed to persist execution lifecycle truth: ${errorMessage}`,
+            "pi_subagent_lifecycle_persistence_failed",
+            healthContext,
+          ),
         );
       }
 
@@ -473,6 +524,13 @@ export const admitSubagentSpawn = (
     }
 
     const admissionResult = admissionResultOrError.result;
+
+    // The durable recovery probe succeeded (Ticket 21): control health
+    // returns to available and this same fresh command is admitted. No
+    // previously rejected command is replayed.
+    if (probeOptions.recoveryProbe && input.controlHealth) {
+      reportTransition(yield* input.controlHealth.markAvailable(healthContext));
+    }
 
     if (admissionResult.kind === "already_applied") {
       return {

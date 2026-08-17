@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 
 import type {
   OrchestrationReadModel,
@@ -1042,6 +1042,635 @@ describe("Pi subagent admission fails closed (Ticket 03: T03-AC1, T03-AC2, T03-A
       expect(result.diagnosticCode).toBe("pi_subagent_bridge_absent");
       const stored = yield* repository.getByCommandId("cmd_spawn_001");
       expect(Option.isNone(stored)).toBe(true);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+});
+
+describe("Pi subagent production fail-closed control health (Ticket 21: T21-AC1, T21-AC2, T21-AC3, T21-AC4)", () => {
+  it("T21-AC1/T21-AC3: degraded admissions keep probing the durable store fail-closed with the stable persistence diagnostic and exactly one degraded transition", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+      const transitions: Array<Record<string, unknown>> = [];
+      let storeFailing = true;
+      let recordAdmissionCalls = 0;
+
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: (input) => {
+          recordAdmissionCalls += 1;
+          return storeFailing
+            ? Effect.fail({
+                _tag: "PersistenceSqlError",
+                cause: new Error("Simulated SQLite disk I/O error"),
+                operation: "recordAdmission",
+              } as any)
+            : liveRepo.recordAdmission(input);
+        },
+      };
+
+      const admit = (commandId: string, now: string) =>
+        admitSubagentSpawn({
+          command: { ...validCommand, commandId },
+          sessionCapability: managedCapability,
+          snapshotQuery,
+          repository: failingRepo,
+          controlHealth,
+          authorityRegistry: registry,
+          trustedContext: makeTrustedContext(binding),
+          onHealthTransition: (transition) => {
+            transitions.push(transition as unknown as Record<string, unknown>);
+          },
+          now,
+        });
+
+      const first = yield* admit("cmd_t21_probe_1", "2026-08-17T12:00:00.000Z");
+      expect(first.status).toBe("rejected");
+      expect(first.state).toBe("rejected");
+      expect(first.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(recordAdmissionCalls).toBe(1);
+
+      const healthAfterFirst = yield* controlHealth.getHealth();
+      expect(healthAfterFirst.status).toBe("degraded");
+      expect(healthAfterFirst.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+
+      // While persistence remains unavailable every fresh managed admission
+      // is still refused with the SAME stable persistence diagnostic. The
+      // admission-driven recovery probe actually attempts the durable store
+      // (T21-AC5 precondition), so the failure is re-proven, not assumed.
+      const second = yield* admit("cmd_t21_probe_2", "2026-08-17T12:01:00.000Z");
+      expect(second.status).toBe("rejected");
+      expect(second.state).toBe("rejected");
+      expect(second.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(second.rejectionReason).toContain("Failed to persist execution lifecycle truth");
+      expect(recordAdmissionCalls).toBe(2);
+
+      // Exactly one degraded transition across repeated failures (T21-AC3).
+      expect(transitions).toHaveLength(1);
+      expect(transitions[0]!.from).toBe("available");
+      expect(transitions[0]!.to).toBe("degraded");
+      expect(transitions[0]!.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(transitions[0]!.threadId).toBe("thread_main");
+
+      const healthAfterSecond = yield* controlHealth.getHealth();
+      expect(healthAfterSecond.status).toBe("degraded");
+
+      // T21-AC2: neither failed admission projected accepted/running state.
+      const stored1 = yield* liveRepo.getByCommandId("cmd_t21_probe_1");
+      const stored2 = yield* liveRepo.getByCommandId("cmd_t21_probe_2");
+      expect(Option.isNone(stored1)).toBe(true);
+      expect(Option.isNone(stored2)).toBe(true);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("T21-AC3: degraded control health never masks authorization diagnostics — provider mismatch still fails closed with its own stable code", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+
+      yield* controlHealth.markDegraded(
+        "Failed to persist execution lifecycle truth: disk I/O",
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+
+      const result = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_degraded_provider" },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository,
+        controlHealth,
+        authorityRegistry: registry,
+        trustedContext: {
+          ...makeTrustedContext(binding),
+          trustedProvider: "codex",
+        },
+        now: "2026-08-17T12:00:00.000Z",
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_provider_mismatch");
+      expect(result.rejectionReason).toContain("Provider mismatch");
+
+      const health = yield* controlHealth.getHealth();
+      expect(health.status).toBe("degraded");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("T21-AC2/T21-AC4: a degraded admission's failed probe preserves existing running, orphaned, and terminal truth field-for-field and leaves no partial rows", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+
+      // Existing truth in every aggregate family: running, orphaned, terminal.
+      const seed = (
+        executionId: string,
+        commandId: string,
+        observedState: "running" | "orphaned" | "succeeded",
+      ) =>
+        Effect.gen(function* () {
+          yield* liveRepo.recordAdmission({
+            executionId,
+            attemptId: `att_${executionId}`,
+            generation: 1,
+            commandId,
+            commandFingerprint: `fp_${commandId}`,
+            clientCommandId: null,
+            subject: "user_456",
+            projectId: "proj_default",
+            parentThreadId: "thread_main",
+            parentTurnId: "turn_001",
+            parentToolCallId: `call_${commandId}`,
+            agentType: "researcher",
+            prompt: `Existing ${observedState} work`,
+            mode: "foreground",
+            cancellationScope: "parent_turn",
+            state: "accepted",
+            diagnosticCode: "pi_subagent_managed_enabled",
+            now: "2026-08-17T10:00:00.000Z",
+          });
+          yield* liveRepo.recordLifecycleEvent({
+            eventId: `evt_${executionId}`,
+            executionId,
+            attemptId: `att_${executionId}`,
+            generation: 1,
+            sequence: 2,
+            state: observedState,
+            occurredAt: "2026-08-17T11:00:00.000Z",
+          });
+        });
+
+      yield* seed("exec_t21_running", "cmd_t21_running", "running");
+      yield* seed("exec_t21_orphaned", "cmd_t21_orphaned", "orphaned");
+      yield* seed("exec_t21_terminal", "cmd_t21_terminal", "succeeded");
+
+      const snapshotBefore = yield* Effect.all(
+        ["exec_t21_running", "exec_t21_orphaned", "exec_t21_terminal"].map((id) =>
+          Effect.gen(function* () {
+            const record = yield* liveRepo.getById(id);
+            const journal = yield* liveRepo.listJournalEvents(id);
+            return {
+              record: Option.getOrThrow(record),
+              journal,
+            };
+          }),
+        ),
+        { concurrency: "unbounded" },
+      );
+
+      let recordAdmissionCalls = 0;
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: (input) => {
+          recordAdmissionCalls += 1;
+          return Effect.fail({
+            _tag: "PersistenceSqlError",
+            cause: new Error("Simulated SQLite disk I/O error"),
+            operation: "recordAdmission",
+          } as any);
+        },
+      };
+
+      const degraded = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_truth_probe" },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        controlHealth,
+        authorityRegistry: registry,
+        trustedContext: makeTrustedContext(binding),
+        now: "2026-08-17T12:00:00.000Z",
+      });
+      expect(degraded.status).toBe("rejected");
+      expect(degraded.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect((yield* controlHealth.getHealth()).status).toBe("degraded");
+
+      // A second fresh command while degraded re-proves the outage through
+      // the admission-driven recovery probe (the durable store is actually
+      // attempted again while degraded).
+      const degradedAgain = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_truth_probe_2" },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        controlHealth,
+        authorityRegistry: registry,
+        trustedContext: makeTrustedContext(binding),
+        now: "2026-08-17T12:01:00.000Z",
+      });
+      expect(degradedAgain.status).toBe("rejected");
+      expect(degradedAgain.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      expect(recordAdmissionCalls).toBe(2);
+
+      // Field-equivalent preservation before/during/after the degraded
+      // admission (the durable snapshot seam reads through the repository).
+      const snapshotAfter = yield* Effect.all(
+        ["exec_t21_running", "exec_t21_orphaned", "exec_t21_terminal"].map((id) =>
+          Effect.gen(function* () {
+            const record = yield* liveRepo.getById(id);
+            const journal = yield* liveRepo.listJournalEvents(id);
+            return {
+              record: Option.getOrThrow(record),
+              journal,
+            };
+          }),
+        ),
+        { concurrency: "unbounded" },
+      );
+      expect(snapshotAfter).toEqual(snapshotBefore);
+      expect(snapshotAfter[0]!.record.observedState).toBe("running");
+      expect(snapshotAfter[1]!.record.observedState).toBe("orphaned");
+      expect(snapshotAfter[2]!.record.observedState).toBe("succeeded");
+
+      // No partial truth for the degraded command itself.
+      const partial = yield* liveRepo.getByCommandId("cmd_t21_truth_probe");
+      expect(Option.isNone(partial)).toBe(true);
+      const threadRows = yield* liveRepo.listByThreadId("thread_main");
+      expect(threadRows.filter((row) => row.commandId === "cmd_t21_truth_probe")).toHaveLength(0);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+});
+
+describe("Pi subagent admission-driven recovery (Ticket 21: T21-AC5, T21-AC7)", () => {
+  it("T21-AC5: a fresh command's durable recovery probe marks health available, admits that same command, and never replays rejected work", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+      const transitions: Array<{ from: string; to: string; diagnosticCode?: string; threadId?: string }> = [];
+      let storeFailing = true;
+
+      const flakyRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: (input) =>
+          storeFailing
+            ? Effect.fail({
+                _tag: "PersistenceSqlError",
+                cause: new Error("Simulated SQLite disk I/O error"),
+                operation: "recordAdmission",
+              } as any)
+            : liveRepo.recordAdmission(input),
+      };
+
+      const admit = (commandId: string, now: string) =>
+        admitSubagentSpawn({
+          command: { ...validCommand, commandId },
+          sessionCapability: managedCapability,
+          snapshotQuery,
+          repository: flakyRepo,
+          controlHealth,
+          authorityRegistry: registry,
+          trustedContext: makeTrustedContext(binding),
+          onHealthTransition: (transition) => {
+            transitions.push({
+              from: transition.from,
+              to: transition.to,
+              ...(transition.diagnosticCode !== undefined
+                ? { diagnosticCode: transition.diagnosticCode }
+                : {}),
+              ...(transition.threadId !== undefined ? { threadId: transition.threadId } : {}),
+            });
+          },
+          now,
+        });
+
+      // Outage: the first command is rejected and health degrades.
+      const rejected = yield* admit("cmd_t21_rejected_during_outage", "2026-08-17T12:00:00.000Z");
+      expect(rejected.status).toBe("rejected");
+      expect((yield* controlHealth.getHealth()).status).toBe("degraded");
+
+      // Durable writes recover. The next FRESH command drives the recovery
+      // probe: its own atomic recordAdmission succeeds, control health
+      // returns to available, and that same command is admitted.
+      storeFailing = false;
+      const recovering = yield* admit("cmd_t21_recovery_probe", "2026-08-17T12:10:00.000Z");
+      expect(recovering.status).toBe("accepted");
+      expect(recovering.executionId).toMatch(/^exec_/);
+      expect((yield* controlHealth.getHealth()).status).toBe("available");
+
+      // Exactly one degraded and one recovery transition, scoped to the
+      // admission threads that drove them.
+      expect(transitions).toEqual([
+        {
+          from: "available",
+          to: "degraded",
+          diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+          threadId: "thread_main",
+        },
+        {
+          from: "degraded",
+          to: "available",
+          diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+          threadId: "thread_main",
+        },
+      ]);
+
+      // No replay: the rejected command never gained an execution and the
+      // recovered admission is the only new durable truth.
+      const rejectedRow = yield* liveRepo.getByCommandId("cmd_t21_rejected_during_outage");
+      expect(Option.isNone(rejectedRow)).toBe(true);
+      const recoveredRow = yield* liveRepo.getByCommandId("cmd_t21_recovery_probe");
+      expect(Option.isSome(recoveredRow)).toBe(true);
+      if (Option.isSome(recoveredRow)) {
+        expect(recoveredRow.value.observedState).toBe("accepted");
+        expect(recoveredRow.value.executionId).toBe(recovering.executionId);
+      }
+
+      // Post-recovery admissions are normal admissions (no probe marking).
+      const normal = yield* admit("cmd_t21_after_recovery", "2026-08-17T12:11:00.000Z");
+      expect(normal.status).toBe("accepted");
+      expect(transitions).toHaveLength(2);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("T21-AC5: a concurrent waiter re-reads recovered health and performs its own normal admission without a second recovery transition", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+      const transitions: Array<{ from: string; to: string }> = [];
+
+      // Degrade first (store fails once while healthy).
+      let storeFailing = true;
+      const flakyRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: (input) =>
+          storeFailing
+            ? Effect.fail({
+                _tag: "PersistenceSqlError",
+                cause: new Error("Simulated SQLite disk I/O error"),
+                operation: "recordAdmission",
+              } as any)
+            : liveRepo.recordAdmission(input),
+      };
+      const admit = (commandId: string, now: string) =>
+        admitSubagentSpawn({
+          command: { ...validCommand, commandId },
+          sessionCapability: managedCapability,
+          snapshotQuery,
+          repository: flakyRepo,
+          controlHealth,
+          authorityRegistry: registry,
+          trustedContext: makeTrustedContext(binding),
+          onHealthTransition: (transition) => {
+            transitions.push({ from: transition.from, to: transition.to });
+          },
+          now,
+        });
+
+      yield* admit("cmd_t21_waiter_outage", "2026-08-17T12:00:00.000Z");
+      expect((yield* controlHealth.getHealth()).status).toBe("degraded");
+
+      // Recovery: the store is healthy again, but the probe leader's durable
+      // write is held until the waiter has parked on the single-flight gate.
+      storeFailing = false;
+      const leaderHeld = yield* Deferred.make<void>();
+      const leaderRelease = yield* Deferred.make<void>();
+      const gatedRepo: typeof liveRepo = {
+        ...flakyRepo,
+        recordAdmission: (input) =>
+          input.commandId === "cmd_t21_probe_leader"
+            ? Deferred.succeed(leaderHeld, undefined).pipe(
+                Effect.andThen(Deferred.await(leaderRelease)),
+                Effect.andThen(liveRepo.recordAdmission(input)),
+              )
+            : flakyRepo.recordAdmission(input),
+      };
+
+      const leaderFiber = yield* Effect.forkChild(
+        admitSubagentSpawn({
+          command: { ...validCommand, commandId: "cmd_t21_probe_leader" },
+          sessionCapability: managedCapability,
+          snapshotQuery,
+          repository: gatedRepo,
+          controlHealth,
+          authorityRegistry: registry,
+          trustedContext: makeTrustedContext(binding),
+          onHealthTransition: (transition) => {
+            transitions.push({ from: transition.from, to: transition.to });
+          },
+          now: "2026-08-17T12:10:00.000Z",
+        }),
+      );
+      const waiterFiber = yield* Effect.forkChild(
+        admitSubagentSpawn({
+          command: { ...validCommand, commandId: "cmd_t21_waiter" },
+          sessionCapability: managedCapability,
+          snapshotQuery,
+          repository: gatedRepo,
+          controlHealth,
+          authorityRegistry: registry,
+          trustedContext: makeTrustedContext(binding),
+          onHealthTransition: (transition) => {
+            transitions.push({ from: transition.from, to: transition.to });
+          },
+          now: "2026-08-17T12:10:01.000Z",
+        }),
+      );
+
+      // The leader parks inside its durable write while degraded; the waiter
+      // parks on the single-flight recovery gate.
+      yield* Deferred.await(leaderHeld);
+      yield* Effect.sleep(50);
+      yield* Deferred.succeed(leaderRelease, undefined);
+      const leaderResult = yield* Fiber.join(leaderFiber);
+      const waiterResult = yield* Fiber.join(waiterFiber);
+
+      // The probe leader recovered health and was admitted; the waiter
+      // re-read available health and performed its own normal admission.
+      expect(leaderResult.status).toBe("accepted");
+      expect(waiterResult.status).toBe("accepted");
+      expect(waiterResult.executionId).not.toBe(leaderResult.executionId);
+      expect((yield* controlHealth.getHealth()).status).toBe("available");
+
+      // Exactly one degraded → available transition: the waiter's success
+      // marked nothing because it was a normal admission.
+      expect(transitions).toEqual([
+        { from: "available", to: "degraded" },
+        { from: "degraded", to: "available" },
+      ]);
+
+      const leaderRow = yield* liveRepo.getByCommandId("cmd_t21_probe_leader");
+      const waiterRow = yield* liveRepo.getByCommandId("cmd_t21_waiter");
+      expect(Option.isSome(leaderRow)).toBe(true);
+      expect(Option.isSome(waiterRow)).toBe(true);
+      expect(Option.isSome(waiterRow) && Option.isSome(leaderRow)
+        ? waiterRow.value.executionId !== leaderRow.value.executionId
+        : false).toBe(true);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("T21-AC7: legacy and unhandshaked sessions are never gated by degraded control health and never create managed truth", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+      let recordAdmissionCalls = 0;
+      const countingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: (input) => {
+          recordAdmissionCalls += 1;
+          return liveRepo.recordAdmission(input);
+        },
+      };
+
+      yield* controlHealth.markDegraded(
+        "Failed to persist execution lifecycle truth: disk I/O",
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+
+      const legacy = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_legacy_during_outage" },
+        sessionCapability: unmanagedCapability,
+        snapshotQuery,
+        repository: countingRepo,
+        controlHealth,
+        trustedContext: makeTrustedContext(binding),
+        now: "2026-08-17T12:00:00.000Z",
+      });
+      expect(legacy.status).toBe("rejected");
+      expect(legacy.diagnosticCode).toBe("pi_subagent_bridge_absent");
+
+      const unsupported = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_unsupported_during_outage" },
+        sessionCapability: {
+          ...managedCapability,
+          status: "capability_mismatch",
+          isManaged: false,
+          diagnosticCode: "pi_subagent_capability_mismatch",
+          diagnosticMessage: "Extension lacks required capabilities",
+        },
+        snapshotQuery,
+        repository: countingRepo,
+        controlHealth,
+        trustedContext: makeTrustedContext(binding),
+        now: "2026-08-17T12:00:01.000Z",
+      });
+      expect(unsupported.status).toBe("rejected");
+      expect(unsupported.diagnosticCode).toBe("pi_subagent_capability_mismatch");
+
+      // No durable write was attempted for legacy paths and degraded control
+      // health is untouched by them.
+      expect(recordAdmissionCalls).toBe(0);
+      const health = yield* controlHealth.getHealth();
+      expect(health.status).toBe("degraded");
+      const rows = yield* liveRepo.listByThreadId("thread_main");
+      expect(rows).toHaveLength(0);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+});
+
+describe("Pi subagent degraded admission concurrency (Ticket 21: T21-AC3, T21-AC5)", () => {
+  it("T21-AC3: concurrent fresh commands while degraded serialize their recovery probes, all fail closed, and report one degraded transition", async () => {
+    const snapshotQuery = createMockSnapshotQuery([validThread]);
+    const { registry, binding } = makeAuthorityFixture();
+
+    const program = Effect.gen(function* () {
+      const liveRepo = yield* PiSubagentExecutionRepository;
+      const controlHealth = yield* makePiSubagentControlHealth();
+      const transitions: Array<{ from: string; to: string }> = [];
+      let recordAdmissionAttempts = 0;
+      let inFlight = 0;
+      let maxInFlight = 0;
+
+      const failingRepo: typeof liveRepo = {
+        ...liveRepo,
+        recordAdmission: () =>
+          Effect.gen(function* () {
+            recordAdmissionAttempts += 1;
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            yield* Effect.sleep(20);
+            inFlight -= 1;
+            return yield* Effect.fail({
+              _tag: "PersistenceSqlError",
+              cause: new Error("Simulated SQLite disk I/O error"),
+              operation: "recordAdmission",
+            } as any);
+          }),
+      };
+
+      // Degrade first.
+      yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_t21_concurrent_outage" },
+        sessionCapability: managedCapability,
+        snapshotQuery,
+        repository: failingRepo,
+        controlHealth,
+        authorityRegistry: registry,
+        trustedContext: makeTrustedContext(binding),
+        onHealthTransition: (transition) => {
+          transitions.push({ from: transition.from, to: transition.to });
+        },
+        now: "2026-08-17T12:00:00.000Z",
+      });
+      expect((yield* controlHealth.getHealth()).status).toBe("degraded");
+
+      // Four concurrent fresh commands while the store is unavailable.
+      const results = yield* Effect.all(
+        [1, 2, 3, 4].map((n) =>
+          admitSubagentSpawn({
+            command: { ...validCommand, commandId: `cmd_t21_concurrent_${n}` },
+            sessionCapability: managedCapability,
+            snapshotQuery,
+            repository: failingRepo,
+            controlHealth,
+            authorityRegistry: registry,
+            trustedContext: makeTrustedContext(binding),
+            onHealthTransition: (transition) => {
+              transitions.push({ from: transition.from, to: transition.to });
+            },
+            now: `2026-08-17T12:0${n}:00.000Z`,
+          }),
+        ),
+        { concurrency: "unbounded" },
+      );
+
+      for (const result of results) {
+        expect(result.status).toBe("rejected");
+        expect(result.diagnosticCode).toBe("pi_subagent_lifecycle_persistence_failed");
+      }
+      // Every degraded admission re-proved the outage through its own probe.
+      expect(recordAdmissionAttempts).toBe(5);
+      // Single-flight: probes never overlapped.
+      expect(maxInFlight).toBe(1);
+      // Exactly one degraded transition for the entire outage.
+      expect(transitions).toEqual([{ from: "available", to: "degraded" }]);
+      expect((yield* controlHealth.getHealth()).status).toBe("degraded");
+
+      // No durable truth was projected for any degraded command.
+      for (const n of [1, 2, 3, 4]) {
+        const row = yield* liveRepo.getByCommandId(`cmd_t21_concurrent_${n}`);
+        expect(Option.isNone(row)).toBe(true);
+      }
     });
 
     await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));

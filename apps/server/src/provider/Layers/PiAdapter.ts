@@ -122,7 +122,11 @@ import {
   admitSubagentSpawn,
   type AdmissionSnapshotQuery,
 } from "../piSubagentAdmissionCoordinator.ts";
-import type { PiSubagentControlHealthShape } from "../piSubagentControlHealth.ts";
+import {
+  makePiSubagentControlHealth,
+  type PiSubagentControlHealthShape,
+  type PiSubagentControlHealthTransition,
+} from "../piSubagentControlHealth.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
 
@@ -1746,6 +1750,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const piSubagentRepository =
       injectedPiSubagentRepository ??
       Option.getOrUndefined(yield* Effect.serviceOption(PiSubagentExecutionRepository));
+    // Ticket 21: ONE adapter-lifetime managed control-health controller is
+    // shared by every Pi session in this adapter. It is auto-created here so
+    // production always fail-closes managed admissions when durable
+    // lifecycle writes become unavailable; `options.controlHealth` remains
+    // the explicit test override. The controller is deliberately NOT a
+    // service: its lifetime is the adapter, and degradation/recovery of the
+    // durable store is a property of this adapter's persistence path, shared
+    // across all managed sessions.
+    const adapterControlHealth =
+      options?.controlHealth ?? (yield* makePiSubagentControlHealth());
     // Decision 21 live authority registry. The PiAdapter captures the service
     // so the admission boundary can re-validate the server-minted binding at
     // spawn time (assertAdmittable against server truth). Absent (tests or a
@@ -1805,6 +1819,45 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
       runtimeEventIngress.offer(compactProviderRuntimeEventForIngress(event));
+    };
+
+    // Ticket 21: bounded, safe operator diagnostics for managed control
+    // health transitions only (never per-rejection). The payload is limited
+    // to fixed-vocabulary status/code/timestamp metadata scoped to the
+    // admission thread that drove the transition; prompt, result, raw SQL,
+    // and rejection-reason content are never included.
+    const offerSubagentControlHealthWarning = (
+      transition: PiSubagentControlHealthTransition,
+    ) => {
+      const threadId = transition.threadId;
+      if (threadId === undefined) {
+        // Cannot scope the warning to an admission thread; never emit an
+        // unscoped control-health event.
+        return;
+      }
+      const diagnosticCode = transition.diagnosticCode ?? "pi_subagent_control_degraded";
+      const safeDetail = {
+        from: transition.from,
+        to: transition.to,
+        diagnosticCode,
+        occurredAt: transition.occurredAt,
+      };
+      const message =
+        transition.to === "degraded"
+          ? `Pi subagent managed control health degraded (${diagnosticCode}): new managed subagent admissions fail closed until durable lifecycle writes recover`
+          : `Pi subagent managed control health recovered (${diagnosticCode}): managed subagent admissions are available again`;
+      offerRuntimeEvent({
+        ...makeEventBase({ session: { threadId }, activeTurnId: undefined }, {
+          includeTurnId: false,
+        }),
+        type: "runtime.warning",
+        payload: { message, detail: safeDetail },
+        raw: {
+          source: "pi.sdk.event",
+          method: "subagents/control-health-transition",
+          payload: safeDetail,
+        },
+      } satisfies ProviderRuntimeEvent);
     };
 
     const offerRuntimeError = (
@@ -2915,9 +2968,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     sessionCapability: subagentCapability,
                     snapshotQuery: adapterSnapshotQuery,
                     repository: piSubagentRepository,
-                    ...(options?.controlHealth !== undefined
-                      ? { controlHealth: options.controlHealth }
-                      : {}),
+                    controlHealth: adapterControlHealth,
+                    onHealthTransition: (transition) => {
+                      offerSubagentControlHealthWarning(transition);
+                    },
                     trustedContext: {
                       trustedThreadId: input.threadId,
                       trustedProjectId: thread.projectId,

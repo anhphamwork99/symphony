@@ -10,7 +10,7 @@ import {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { DateTime, Effect, Layer, Option } from "effect";
+import { DateTime, Effect, Layer, Option, Stream } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -1198,6 +1198,447 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       // Stop sessions cleanly
       yield* adapter.stopSession("th_prod_admission_1" as ThreadId);
       yield* adapter.stopSession("th_prod_admission_2" as ThreadId);
+    });
+
+    await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+  });
+});
+describe("Real Pi Subagent Extension production control health (Issue 21)", () => {
+  it("T21-AC1..AC7: shared adapter control health fails closed on persistence failure, reports one safe bounded transition per status change, keeps legacy usable, and recovers admission-driven", async () => {
+    const versionedDir = resolveVersionedExtensionDir();
+    const tempAgentDir = `/tmp/synara-piadapter-t21-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    createdDirs.push(tempAgentDir);
+    // Legacy agent dir WITHOUT the managed subagents extension.
+    const legacyAgentDir = `${tempAgentDir}-legacy`;
+    createdDirs.push(legacyAgentDir);
+    mkdirSync(legacyAgentDir, { recursive: true });
+
+    const extensionsDir = join(tempAgentDir, "extensions");
+    mkdirSync(extensionsDir, { recursive: true });
+    symlinkSync(versionedDir, join(extensionsDir, "pi-subagents"), "dir");
+    const sharedDir = join(versionedDir, "..", "shared");
+    if (existsSync(sharedDir)) {
+      symlinkSync(sharedDir, join(extensionsDir, "shared"), "dir");
+    }
+
+    const serverConfig: ServerConfigShape = {
+      mode: "web",
+      port: 3775,
+      host: "127.0.0.1",
+      cwd: tempAgentDir,
+      homeDir: tempAgentDir,
+      chatWorkspaceRoot: tempAgentDir,
+      studioWorkspaceRoot: tempAgentDir,
+      baseDir: tempAgentDir,
+      stateDir: tempAgentDir,
+      secretsDir: tempAgentDir,
+      dbPath: join(tempAgentDir, "state.sqlite"),
+      settingsPath: join(tempAgentDir, "settings.json"),
+      keybindingsConfigPath: join(tempAgentDir, "keybindings.json"),
+      worktreesDir: tempAgentDir,
+      attachmentsDir: tempAgentDir,
+      logsDir: tempAgentDir,
+      serverLogPath: join(tempAgentDir, "server.log"),
+      serverRuntimeStatePath: join(tempAgentDir, "runtime.json"),
+      providerLogsDir: tempAgentDir,
+      providerEventLogPath: join(tempAgentDir, "provider.ndjson"),
+      terminalLogsDir: tempAgentDir,
+      environmentIdPath: join(tempAgentDir, "env-id"),
+      staticDir: undefined,
+      devUrl: undefined,
+      publicUrl: undefined,
+      allowInsecureRemote: false,
+      noBrowser: true,
+      authToken: undefined,
+      autoBootstrapProjectFromCwd: false,
+      logProviderEvents: false,
+      logWebSocketEvents: false,
+    };
+
+    const registry = makeMcpSessionAuthorityRegistry();
+    const authorityService: McpSessionAuthorityShape = {
+      ...registry,
+      mintForLocalOwner: () =>
+        registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+      mintForAuthenticated: (session) =>
+        registry.mint({
+          subject: session.subject,
+          kind: "authenticated",
+          authSessionId: session.sessionId,
+          authExpiresAt:
+            session.expiresAt === undefined || session.expiresAt === null
+              ? null
+              : DateTime.toEpochMillis(session.expiresAt),
+        }),
+      bindingFor: (authorityId, options) => registry.bindingFor(authorityId, options),
+    };
+    const mintBinding = (subject: string, threadId: string) => {
+      const record = registry.mint({
+        subject,
+        kind: "authenticated",
+        authSessionId: `auth-session-${subject}`,
+        authExpiresAt: null,
+      });
+      return registry.bindingFor(record.authorityId, {
+        threadId,
+        provider: "pi",
+        projectId: "proj_default",
+        lifecycleGeneration: null,
+        credentialTtlMs: 60 * 60 * 1_000,
+      })!;
+    };
+    const bindingA = mintBinding("user_t21_a", "th_t21_a");
+    const bindingB = mintBinding("user_t21_b", "th_t21_b");
+
+    // Durable-store fault injection at the production admission boundary
+    // (approved seam): wrap the repository's atomic admission write.
+    let failAdmissionWrites = true;
+    let recordAdmissionAttempts = 0;
+    let delegateRepo: any;
+    const flakyRepo = {
+      recordAdmission: (input: any) => {
+        recordAdmissionAttempts += 1;
+        return failAdmissionWrites
+          ? Effect.fail({
+              _tag: "PersistenceSqlError",
+              cause: new Error("Simulated SQLite disk I/O error T21-INJECTED-OUTAGE"),
+              operation: "recordAdmission",
+            })
+          : delegateRepo.recordAdmission(input);
+      },
+    } as any;
+
+    const capabilitiesByThread = new Map<string, PiSubagentNegotiatedCapability>();
+    const sessionsByThread = new Map<string, any>();
+    const admittedEvents: Array<{
+      threadId: ThreadId;
+      command: PiSubagentSpawnCommand;
+      result: PiSubagentSpawnResult;
+    }> = [];
+
+    const piAdapterLayer = makePiAdapterLive({
+      onSubagentCapability: (event) => {
+        capabilitiesByThread.set(event.threadId, event.capability);
+        sessionsByThread.set(event.threadId, event.session);
+      },
+      onSubagentAdmission: (event) => {
+        admittedEvents.push(event);
+      },
+      // NOTE: no controlHealth override — production must auto-create ONE
+      // adapter-lifetime control-health controller shared by every session.
+      piSubagentRepository: flakyRepo,
+    }).pipe(
+      Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
+      Layer.provide(NodeFileSystem.layer),
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+      Layer.provide(Layer.succeed(McpSessionAuthority, authorityService)),
+      Layer.provide(SqlitePersistenceMemory),
+    );
+
+    const testLayer = Layer.mergeAll(
+      piAdapterLayer,
+      PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    );
+
+    const testProgram = Effect.gen(function* () {
+      const adapter = yield* PiAdapter;
+      const repo = yield* PiSubagentExecutionRepository;
+      const sql = yield* SqlClient.SqlClient;
+      delegateRepo = repo;
+
+      // Collect the adapter's operator runtime-event stream.
+      const runtimeEvents: Array<any> = [];
+      yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+        }),
+      ).pipe(Effect.forkChild);
+
+      const controlHealthWarnings = () =>
+        runtimeEvents.filter(
+          (event) =>
+            event.type === "runtime.warning" &&
+            event.raw?.method === "subagents/control-health-transition",
+        );
+      const waitForWarnings = (count: number) =>
+        Effect.gen(function* () {
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (controlHealthWarnings().length >= count) {
+              return;
+            }
+            yield* Effect.sleep(20);
+          }
+        });
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, kind, title, workspace_root, scripts_json, created_at, updated_at
+        ) VALUES (
+          'proj_default', 'project', 'Default', ${tempAgentDir}, '[]',
+          '2026-08-17T12:00:00.000Z', '2026-08-17T12:00:00.000Z'
+        )
+      `;
+      for (const threadId of ["th_t21_a", "th_t21_b", "th_t21_legacy"]) {
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json,
+            runtime_mode, interaction_mode, env_mode, created_at, updated_at, deleted_at
+          ) VALUES (
+            ${threadId}, 'proj_default', 'T21 thread',
+            '{"provider":"pi","model":"pi"}',
+            'full-access', 'default', 'local',
+            '2026-08-17T12:00:00.000Z', '2026-08-17T12:00:00.000Z', NULL
+          )
+        `;
+      }
+
+      const executeCtxFor = (session: any) => ({
+        ui: {
+          notify: () => {},
+          status: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
+        cwd: tempAgentDir,
+        model: undefined,
+        modelRegistry: {
+          find: () => undefined,
+          getAll: () => [],
+          getAvailable: () => [],
+        },
+        sessionManager: session.sessionManager,
+        getSystemPrompt: () => "",
+      });
+
+      const outputFilesFor = (threadId: string) => {
+        const session = sessionsByThread.get(threadId);
+        if (!session) return [];
+        const sessionId = session.sessionManager.getSessionId();
+        const outputDir = join(
+          tmpdir(),
+          `pi-subagents-${process.getuid?.() ?? 0}`,
+          tempAgentDir.replace(/[/\\]/g, "-").replace(/^-+/, ""),
+          sessionId,
+          "tasks",
+        );
+        try {
+          return readdirSync(outputDir).filter((f) => f.endsWith(".output"));
+        } catch {
+          return [];
+        }
+      };
+
+      const agentExecuteFor = (threadId: string) => {
+        const session = sessionsByThread.get(threadId);
+        const loadedExt = session.resourceLoader
+          .getExtensions()
+          .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
+        const agentEntry = loadedExt.tools.get("Agent");
+        return {
+          execute: agentEntry.execute ?? agentEntry.definition?.execute,
+          ctx: executeCtxFor(session),
+        };
+      };
+
+      const runAgent = (threadId: string, toolCallId: string, params: any) => {
+        const { execute, ctx } = agentExecuteFor(threadId);
+        return Effect.promise(() => execute(toolCallId, params, undefined, undefined, ctx));
+      };
+
+      // ── Managed session A ────────────────────────────────────────────────
+      yield* adapter.startSession({
+        threadId: "th_t21_a" as ThreadId,
+        cwd: tempAgentDir,
+        runtimeMode: "full-access",
+        providerOptions: { pi: { agentDir: tempAgentDir } },
+        mcpAuthority: bindingA,
+      });
+      expect(capabilitiesByThread.get("th_t21_a")?.isManaged).toBe(true);
+
+      // T21-AC1/AC2: persistence failure at the accepted lifecycle commit
+      // prevents child start and returns the stable persistence diagnostic.
+      const promptMarker = "T21-CONFIDENTIAL-PROMPT-MATERIAL";
+      const degradedResult = yield* runAgent("th_t21_a", "call_t21_outage_1", {
+        commandId: "cmd_t21_outage_1",
+        task: `${promptMarker} investigate the index`,
+        context: "T21 outage evidence.",
+        link_references: "None",
+        expected_outcome: "No child starts.",
+        subagent_type: "researcher",
+        run_in_background: true,
+      });
+      expect((degradedResult as any).isError).toBe(true);
+      expect((degradedResult as any).content[0].text).toContain(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+      // No child started and no durable truth was projected.
+      expect(outputFilesFor("th_t21_a")).toHaveLength(0);
+      expect(recordAdmissionAttempts).toBe(1);
+      let rows = yield* repo.listByThreadId("th_t21_a");
+      expect(rows).toHaveLength(0);
+      expect(admittedEvents).toHaveLength(1);
+      expect(admittedEvents[0]!.result.status).toBe("rejected");
+      expect(admittedEvents[0]!.result.diagnosticCode).toBe(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+
+      // T21-AC6: exactly ONE bounded runtime warning for the degraded
+      // transition, scoped to the admission thread, with safe metadata only.
+      yield* waitForWarnings(1);
+      let warnings = controlHealthWarnings();
+      expect(warnings).toHaveLength(1);
+      const degradedWarning = warnings[0]!;
+      expect(degradedWarning.threadId).toBe("th_t21_a");
+      expect(degradedWarning.payload.message).toContain("degraded");
+      expect(degradedWarning.payload.detail).toMatchObject({
+        from: "available",
+        to: "degraded",
+        diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+      });
+      expect(typeof degradedWarning.payload.detail.occurredAt).toBe("string");
+      const degradedWarningJson = JSON.stringify(degradedWarning.payload);
+      expect(degradedWarningJson).not.toContain(promptMarker);
+      expect(degradedWarningJson).not.toContain("SQLITE");
+      expect(degradedWarningJson).not.toContain("T21-INJECTED-OUTAGE");
+      expect(degradedWarningJson).not.toContain("Failed to persist execution lifecycle truth");
+
+      // T21-AC3: repeated fresh commands while persistence is unavailable keep
+      // failing closed with the same stable diagnostic, no child, and no new
+      // transition (single degraded transition for the whole outage).
+      const degradedResult2 = yield* runAgent("th_t21_a", "call_t21_outage_2", {
+        commandId: "cmd_t21_outage_2",
+        task: "Second outage attempt",
+        context: "T21 repeated rejection evidence.",
+        link_references: "None",
+        expected_outcome: "Still rejected.",
+        subagent_type: "researcher",
+        run_in_background: true,
+      });
+      expect((degradedResult2 as any).isError).toBe(true);
+      expect((degradedResult2 as any).content[0].text).toContain(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+      expect(outputFilesFor("th_t21_a")).toHaveLength(0);
+      expect(recordAdmissionAttempts).toBe(2);
+      yield* Effect.sleep(120);
+      expect(controlHealthWarnings()).toHaveLength(1);
+
+      // ── Managed session B on the SAME adapter: shared control health ────
+      yield* adapter.startSession({
+        threadId: "th_t21_b" as ThreadId,
+        cwd: tempAgentDir,
+        runtimeMode: "full-access",
+        providerOptions: { pi: { agentDir: tempAgentDir } },
+        mcpAuthority: bindingB,
+      });
+      expect(capabilitiesByThread.get("th_t21_b")?.isManaged).toBe(true);
+
+      // Session B's fresh command is governed by the SAME degraded
+      // adapter-lifetime control health created by session A's failure.
+      const sharedDegraded = yield* runAgent("th_t21_b", "call_t21_shared_outage", {
+        commandId: "cmd_t21_shared_outage",
+        task: "Shared control health evidence",
+        context: "T21 shared degradation.",
+        link_references: "None",
+        expected_outcome: "Rejected while degraded.",
+        subagent_type: "researcher",
+        run_in_background: true,
+      });
+      expect((sharedDegraded as any).isError).toBe(true);
+      expect((sharedDegraded as any).content[0].text).toContain(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
+      expect(outputFilesFor("th_t21_b")).toHaveLength(0);
+      expect(recordAdmissionAttempts).toBe(3);
+      expect(controlHealthWarnings()).toHaveLength(1);
+
+      // ── T21-AC7: legacy session stays usable during degradation ─────────
+      yield* adapter.startSession({
+        threadId: "th_t21_legacy" as ThreadId,
+        cwd: legacyAgentDir,
+        runtimeMode: "full-access",
+        providerOptions: { pi: { agentDir: legacyAgentDir } },
+      });
+      const legacyCapability = capabilitiesByThread.get("th_t21_legacy");
+      expect(legacyCapability?.isManaged).toBe(false);
+      expect(legacyCapability?.status).toBe("bridge_absent");
+      expect(legacyCapability?.diagnosticCode).toBe("pi_subagent_bridge_absent");
+      // The legacy session never reaches managed admission and creates no
+      // managed execution truth; control health warnings are unchanged.
+      const admittedBeforeLegacy = admittedEvents.length;
+      expect(admittedBeforeLegacy).toBe(3);
+      rows = yield* repo.listByThreadId("th_t21_legacy");
+      expect(rows).toHaveLength(0);
+      expect(controlHealthWarnings()).toHaveLength(1);
+      expect(recordAdmissionAttempts).toBe(3);
+
+      // ── T21-AC5: admission-driven recovery from session B ────────────────
+      failAdmissionWrites = false;
+      const recoveredResult = yield* runAgent("th_t21_b", "call_t21_recovery", {
+        commandId: "cmd_t21_recovery",
+        task: "Recovery probe evidence",
+        context: "T21 durable recovery.",
+        link_references: "None",
+        expected_outcome: "Admitted after durable writes recover.",
+        subagent_type: "researcher",
+        run_in_background: true,
+      });
+      expect((recoveredResult as any).isError).toBeUndefined();
+      expect((recoveredResult as any).executionId).toMatch(/^exec_/);
+      expect((recoveredResult as any).attemptId).toMatch(/^att_/);
+      expect((recoveredResult as any).generation).toBe(1);
+
+      // The recovered command is the ONLY admitted execution; its child
+      // started exactly once (one child transcript file).
+      expect(recordAdmissionAttempts).toBe(4);
+      yield* Effect.sleep(120);
+      expect(outputFilesFor("th_t21_b")).toHaveLength(1);
+      const recoveredRow = (yield* repo.listByThreadId("th_t21_b"))[0]!;
+      expect(recoveredRow.observedState).toBe("accepted");
+      expect(recoveredRow.executionId).toBe((recoveredResult as any).executionId);
+
+      // No replay: the rejected commands never gained durable truth.
+      const threadARows = yield* repo.listByThreadId("th_t21_a");
+      expect(threadARows).toHaveLength(0);
+
+      // T21-AC6: exactly one recovery transition, scoped to session B.
+      yield* waitForWarnings(2);
+      warnings = controlHealthWarnings();
+      expect(warnings).toHaveLength(2);
+      const recoveryWarning = warnings[1]!;
+      expect(recoveryWarning.threadId).toBe("th_t21_b");
+      expect(recoveryWarning.payload.message).toContain("recovered");
+      expect(recoveryWarning.payload.detail).toMatchObject({
+        from: "degraded",
+        to: "available",
+        diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+      });
+      const recoveryWarningJson = JSON.stringify(recoveryWarning.payload);
+      expect(recoveryWarningJson).not.toContain(promptMarker);
+      expect(recoveryWarningJson).not.toContain("SQLITE");
+
+      // Post-recovery admissions are normal admissions: no new transitions.
+      const normalResult = yield* runAgent("th_t21_a", "call_t21_after_recovery", {
+        commandId: "cmd_t21_after_recovery",
+        task: "Normal admission after recovery",
+        context: "T21 normal admission.",
+        link_references: "None",
+        expected_outcome: "Admitted normally.",
+        subagent_type: "researcher",
+        run_in_background: true,
+      });
+      expect((normalResult as any).executionId).toMatch(/^exec_/);
+      yield* Effect.sleep(120);
+      expect(outputFilesFor("th_t21_a")).toHaveLength(1);
+      expect(controlHealthWarnings()).toHaveLength(2);
+      expect(recordAdmissionAttempts).toBe(5);
+
+      yield* adapter.stopSession("th_t21_a" as ThreadId);
+      yield* adapter.stopSession("th_t21_b" as ThreadId);
+      yield* adapter.stopSession("th_t21_legacy" as ThreadId);
     });
 
     await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
