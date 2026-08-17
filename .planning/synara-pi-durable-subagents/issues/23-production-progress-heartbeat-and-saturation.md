@@ -9,7 +9,7 @@ database reopen while intermediate progress history and memory remain bounded.
 
 **Blocked by:** 22 — Real bounded foreground attachment.
 
-**Status:** implemented — pending independent review
+**Status:** accepted (Decision 0009, 2026-08-18) — Symphony 6d646fe1 + Alfie d35644a3b
 
 - [x] **T23-AC1:** The actual managed Agent producer emits no continuing 80 ms
       spinner publication; bridge-absent legacy behavior remains unchanged.
@@ -193,6 +193,21 @@ a file-backed database (ticket-18 lineage intact).
 - Symphony (this change) — feat(server): pi subagent progress coalescing,
   heartbeat leases, and saturation control (issue 23) [pending commit]
 - Final working-tree status: clean after commit.
+
+### Independent review verdict (2026-08-18)
+
+RECOMMEND ACCEPT — high confidence. All criteria T23-AC1..AC9 PASS with
+directly reproduced evidence (focused suites re-run standalone; provenance
+SHA-256 recomputed and matched; source-level audit of UPDATE-only observation
+paths, lifecycle/progress separation, failure containment, legacy-path
+preservation, invalid-config fallback, no new migration, budget-envelope
+untouched). No critical or high defects. Recorded low/info findings:
+heartbeat lease trusts producer-supplied occurredAt (observation-only until a
+lease consumer exists — ticket 24 scope), report test-count arithmetic nit
+(piSubagentBridge actual total 38, all green), tracked .pi/notifications.jsonl
+runtime mutation (pre-existing pattern), admission-coordinator dual-shape
+latestTurn read (behavior-identical, 33/33 tests), fire-and-forget
+session-stop disposeAll consistent with observation-not-control semantics.
 
 ### Reviewer handoff
 

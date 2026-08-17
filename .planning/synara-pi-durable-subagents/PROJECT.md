@@ -32,6 +32,11 @@
   accepted remediation baseline: Ticket 22 final acceptance at Symphony
   `8a5e8dac` + Alfie `82406bd8`; M2 nonblocking risk recorded; per-file
   standalone invocations are the binding envelope acceptance method.
+- [decisions/0009-t23-production-progress-heartbeat-and-saturation-final-acceptance.md](decisions/0009-t23-production-progress-heartbeat-and-saturation-final-acceptance.md) —
+  accepted Ticket 23 baseline: Symphony `6d646fe1` + Alfie `d35644a3b`
+  (`0.11.0-alfie.1`, capability `coalesced-progress`); nonblocking risks
+  recorded (lease trusts producer occurredAt — Ticket 24 must validate
+  server-side before any lease-based control).
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -44,10 +49,10 @@
   production wiring, migration compatibility, persistence correctness,
   authorization, and real-Pi/restart evidence did not.
 - **Remediation track:** tickets 18–24.
-- **Accepted remediation tickets:** tickets 18, 19, 20, 21, and 22
-  (re-accepted via Decision 0008 after the Decision 0007 reopening).
-- **Blocker-free frontier:** ticket 23 — Production coalesced progress and
-  heartbeat delivery.
+- **Accepted remediation tickets:** tickets 18, 19, 20, 21, 22 (Decision
+  0008), and 23 (Decision 0009).
+- **Blocker-free frontier:** ticket 24 — Integrated remediation acceptance
+  and review closure.
 - **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
 - Every remediation ticket owns an `Implementation Report`; an implementer must
   complete that report with exact evidence before requesting review.
