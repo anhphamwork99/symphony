@@ -1,13 +1,13 @@
 {
   "expectedRepositoryUrl": "https://github.com/anhphamwork99/alfie.git",
-  "pinnedCommit": "3cdfbdadcf0f7a1c7ab4af0f8c80ee470a0feadc",
+  "pinnedCommit": "82406bd834c5f52785fe8f3b65d316d3f8b3fd62",
   "packageName": "@alfie/pi-subagents",
   "packageVersion": "0.10.0-alfie.1",
   "extensionEntryRelativePath": "agent/extensions/pi-subagents/src/index.ts",
   "packageManifestRelativePath": "agent/extensions/pi-subagents/package.json",
   "hashes": {
     "agent/extensions/pi-subagents/package.json": "7171b731a76a8d84655a49997200433447c5e36af71574e65df7d9749eefa65f",
-    "agent/extensions/pi-subagents/src/index.ts": "f045ed2992d32253c453fcf3137171120bac4a983ab04a0f8a88da1a3f80b40f",
+    "agent/extensions/pi-subagents/src/index.ts": "6f889aad4841234768eba60485949d4713acb1957988c802ab7069afc10f965f",
     "agent/extensions/pi-subagents/src/agent-manager.ts": "f09381a2202f3e5b696af2c7e538c95076fd88f145e235c81bbaf85d88c9bbe7"
   }
 }
