@@ -1,6 +1,6 @@
 # WP-05 — Independent review and Project Supervisor final acceptance
 
-**State:** blocked until WP-04 completes
+**State:** completed
 
 **Owner roles:** reviewer, then supervisor; main orchestrator persists artifacts
 

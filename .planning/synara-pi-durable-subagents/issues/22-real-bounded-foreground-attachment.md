@@ -9,7 +9,7 @@ cleans up every timer and in-memory registry entry.
 
 **Blocked by:** 21 — Production fail-closed control health.
 
-**Status:** completed
+**Status:** completed — final acceptance recorded in Decision 0007.
 
 - [x] **T22-AC1:** An actual Pi child completing inside the budget returns the
       normal inline result and creates no unnecessary follow-up delivery.
@@ -191,8 +191,12 @@ The end-to-end production call sequence for a bounded foreground execution:
 
 ### Commits
 
+- Symphony foundation commit: `516bb3d3` (`feat(pi): add bounded foreground attachment foundation (issue 22)`)
+- Symphony integration commit: `ad28113a` (`feat(pi): integrate bounded foreground attachment (issue 22)`)
 - Symphony test commit: `c8252997` (`test(pi): prove real bounded foreground attachment (issue 22)`)
-- Symphony documentation commit: `docs(planning): complete issue 22 implementation report`
+- Symphony documentation commit: `642bcba9` (`docs(planning): complete issue 22 implementation report`)
+- Symphony test alignment commit: `d2e7a768` (`test(pi): align test fixtures and timing tolerances for issue 22 acceptance`)
+- Alfie extension commit: `3cdfbdadcf0f7a1c7ab4af0f8c80ee470a0feadc` (`feat(pi-subagents): add bounded foreground attachment (issue 22)`)
 - Working tree status: Clean with zero untracked `.pi` test artifacts.
 
 ### Reviewer handoff

@@ -25,6 +25,9 @@
 - [decisions/0006-t22-bounded-foreground-attachment-technical-direction.md](decisions/0006-t22-bounded-foreground-attachment-technical-direction.md) —
   accepted cross-repository technical direction for Ticket 22 bounded
   foreground attachment.
+- [decisions/0007-t22-real-bounded-foreground-attachment-final-acceptance.md](decisions/0007-t22-real-bounded-foreground-attachment-final-acceptance.md) —
+  accepted real bounded foreground attachment baseline and recorded
+  nonblocking risks.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -37,8 +40,8 @@
   production wiring, migration compatibility, persistence correctness,
   authorization, and real-Pi/restart evidence did not.
 - **Remediation track:** tickets 18–24.
-- **Accepted remediation tickets:** tickets 18, 19, 20, and 21.
-- **Blocker-free frontier:** ticket 22 — Real bounded foreground attachment.
+- **Accepted remediation tickets:** tickets 18, 19, 20, 21, and 22.
+- **Blocker-free frontier:** ticket 23 — Production coalesced progress and heartbeat delivery.
 - **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
 - Every remediation ticket owns an `Implementation Report`; an implementer must
   complete that report with exact evidence before requesting review.
