@@ -84,177 +84,157 @@ known seams on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** completed
+**Implementation state:** remediation in progress (WP-07 complete; timing-envelope verification returned as a challenge — see "Challenge" below). This report reflects the 2026-08-17 remediation of the reopened defects and does not claim acceptance. Acceptance belongs to the re-review / final-acceptance lifecycle.
 
-### Delivered scope
+### Remediation scope delivered by WP-07 (Symphony side)
 
-Issue 22 delivers production-grade bounded foreground attachment for Pi subagents, enforcing a clear and strict decoupling between parent-tool foreground attachment duration and underlying subagent execution lifetime:
-1. **Parent Tool Attachment vs Child Execution Lifecycle:** The parent tool call `Agent` blocks for at most `foregroundWaitMs` milliseconds (default 10,000ms, clamped between 100ms and 60,000ms). When the timeout expires, the parent tool call returns a structured execution handle (`{ executionId, attemptId, generation }`), freeing the parent agent's turn to proceed while the child agent continues executing uninterrupted in the background.
-2. **Cancellation Scope Preservation:** The child retains its server-minted identity, attempt ID, and `parent_turn` cancellation scope across detach. Detachment is strictly a presentation-layer unblocking operation, not an execution termination or child restart.
-3. **Non-Terminal Detached State & Persistence:** An execution in the detached phase remains in the non-terminal `running` state with `phase: "detached"`. In the SQLite repository journal, sequence 1 is `accepted`, sequence 2 is `running (started)`, and sequence 3 is `running (detached)`.
-4. **Zero Resource Leaks:** Single timer guarantee per foreground attachment. Timers and `liveAttachments` registry entries are cleaned up deterministically upon inline completion, timeout detachment, child abort, or session disposal.
+1. **T22-AC5 production wiring fixed.** `ServerConfigLive` (`apps/server/src/main.ts`) now resolves
+   `piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS)`
+   inside the `ServerConfigShape` literal, importing the resolver from `./config.ts` (the single
+   shared resolution site; no clamping, no logging, no second resolver). A new wiring test in
+   `apps/server/src/main.test.ts` boots `ServerConfigLive` through the real CLI path with the env key
+   set to `30000` (→ 30000), `abc` / `99` / `60001` (→ 10000), and unset (→ 10000), asserting the
+   resolved field on the produced config. The test exercises `ServerConfigLive`, not `layerTest`.
+2. **Timing envelope tightened to Decision 0006 §5 (`budget + 500 ms`).** The integrated detach
+   assertions now assert `elapsed < foregroundWaitMs + 500` (acceptance AC2/AC3) and
+   `elapsed < 800` for the 300 ms real-extension leg (previously `+2000 ms` / `3500 ms`). No
+   assertion widens beyond `budget + 500 ms` anywhere.
+3. **T22-AC6 legacy leg is now a real adjacent legacy session.** The fixture-only
+   `probePiSubagentBridge(makeLegacyPiSubagentExtension())` leg was replaced by a second real Pi
+   session started through the same production `PiAdapter` whose agent dir resolves a
+   **stripped-capability copy** of the actual pinned extension: a full copy of the extension tree
+   (src, package.json, manifest, helper scripts, symlinked `node_modules` and sibling `shared`/`system`)
+   with exactly one change — `bounded-foreground-attachment` removed from `PI_SUBAGENT_CAPABILITIES`
+   in the copied `src/index.ts` (the mixed-version condition under test). That session negotiates
+   `capability_mismatch` with `missingCapabilities: ["bounded-foreground-attachment"]`, receives no
+   admission wrapper (`__synaraAdmissionWrapped` undefined), and executes an actual Agent call whose
+   real child completes against a deterministic local model (1500 ms delayed response) concurrently
+   with two managed executions that detach at their 400 ms budget.
+4. **T22-AC1 now asserts a successful inline completion.** The AC1 test executes a real child that
+   completes against a deterministic local OpenAI-completions provider (loopback SSE server
+   registered through the agent dir's standard `models.json`/`auth.json` — no production seam is
+   mocked) and asserts the inline result contains the child's actual output text ("ACK") and the
+   extension's completion framing (`Agent completed in`), `details.status === "completed"`, no
+   `Agent failed:` / detach label, completion inside the 30000 ms budget, journal seq 1 (accepted) +
+   seq 2 (started) only, and zero live attachments/timers afterward.
+5. **Provenance re-pinned to the WP-06 Alfie commit** `82406bd834c5f52785fe8f3b65d316d3f8b3fd62`
+   ("fix(pi-subagents): clean up detached foreground settlement and error-shape lifecycle failures
+   (issue 22 remediation)"). SHA-256 hashes recomputed from that exact clean checkout (working-tree
+   bytes verified identical to the HEAD blobs): `package.json` and `src/agent-manager.ts` unchanged
+   from the previous pin; `src/index.ts` updated to
+   `6f889aad4841234768eba60485949d4713acb1957988c802ab7069afc10f965f`.
 
-### Changed production call chain
+### Deterministic-completion fixture (owner-approved seam, no lower seam invented)
 
-The end-to-end production call sequence for a bounded foreground execution:
-```
-1. Ingress & Admission:
-   User turn triggers Agent tool
-     → Server admission via PiAdapter (`admitPiSubagentSpawn`)
-     → Mint executionId, attemptId, generation
-     → PiAdapter creates immutable `PiSubagentManagedForegroundBinding` (`foregroundWaitMs`, `reportObservation`)
-     → Injected into tool execution context via `attachPiSubagentManagedForegroundBinding`
+The acceptance environment has no working hosted-model credential, so "real child completes
+successfully" cannot be proven against a hosted provider. WP-07 therefore runs the complete
+actual-Pi boundary (PiAdapter session, admission, extension, `AgentManager`, `runAgent`,
+`createAgentSession`, real `openai-completions` streaming client, settlement) against a
+**deterministic local model endpoint**: a loopback HTTP server speaking the streaming
+chat-completions wire format, registered as an ordinary custom provider via the agent dir's
+`models.json`/`auth.json`. Two models are exposed: `echo` (immediate "ACK") and `echo-slow`
+(1500 ms delayed "ACK"). Only the model endpoint is a fixture; every production seam remains real.
+This makes T22-AC1's successful completion and T22-AC6's unbounded legacy wait deterministic.
 
-2. Child Spawn:
-   `Agent` tool handler in `@alfie/pi-subagents/src/index.ts`
-     → `manager.startForeground(pi, ctx, type, delegation, options)`
-     → Returns `ManagedForegroundHandle` (`record`, `spawnToken`, `promise`, `isOperationActive`)
-     → `liveAttachments.set(executionId, { timer, handle, ... })`
+### Challenge: budget + 500 ms envelope vs multi-suite process load
 
-3. Observation 1 (Started):
-     → Calls `managedBinding.reportObservation({ kind: "started", occurredAt })`
-     → PiAdapter appends Journal sequence 2: state "running", metadata `{ phase: "started", foregroundWaitMs, attachmentMode: "foreground" }`
+Per WP-07 ("if you widen beyond +500 ms, you must stop and return challenge instead") this package
+**returns `challenge` for the timing-envelope verification portion** rather than widening any
+assertion. All detach assertions remain exactly at Decision 0006 §5's `budget + 500 ms`.
 
-4. Bounded Race:
-     → Starts single deadline timer `setTimeout(..., foregroundWaitMs - elapsed)`
-     → Races `Promise.race([handle.promise, deadlinePromise])`
+Measured evidence (all on the WP-06-pinned clean checkout, post warm-up):
 
-5. Fork A (Fast Child <= budget):
-     → `handle.promise` settles first
-     → Clear timer, delete from `liveAttachments`
-     → Return normal inline result text (or failure note)
-     → Journal has seq 1 (accepted) + seq 2 (started) only
+| Composition | Result |
+| ----------- | ------ |
+| Acceptance file standalone (`piSubagentForegroundAcceptance.test.ts`) | 13/13 green; measured AC2 detach 327 ms (300 ms budget), AC6 managed pair 429 ms (400 ms budget), AC6 legacy inline completion 2382 ms, AC1 successful completion 394 ms |
+| Real-extension file standalone (`piSubagentRealExtension.test.ts`) | ~13/15 green; tail failures at 826–1101 ms (300 ms budget, 800 ms envelope) |
+| Mandated 4-file command (acceptance + reopen + real-extension + lifecycle in one vitest process) | ~5/11 green; failures 894–1316 ms |
+| Full server suite (371 files) | run 1 failed at 1296 ms; run 2 fully green (4384 passed) |
+| Isolated production chain (60 single-shot samples) | 303–892 ms total (deadline 300 ms + seq2/seq3 SQLite commits + return) |
 
-6. Fork B (Long Child > budget):
-     → `deadlinePromise` settles first
-     → Calls `managedBinding.reportObservation({ kind: "detached", occurredAt })`
-     → PiAdapter appends Journal sequence 3: state "running", metadata `{ phase: "detached", foregroundWaitMs, attachmentMode: "foreground" }`
-     → Clear timer, delete from `liveAttachments`
-     → Return durable execution handle object `{ executionId, attemptId, generation }`
-     → Child continues background execution under original ownership and cancellation scope
+Interpretation: the production detach call chain itself meets the envelope on a functioning loop
+(303–680 ms typical). The strengthened evidence required by this remediation (real child
+completions, real legacy session, concurrent executions) leaves real-Pi session/extension teardown
+work settling in the same vitest worker process, whose scheduling tail adds 150–900 ms on top of the
+500 ms allowance. Options for the owner: (a) accept per-file verification (each file standalone
+meets the envelope in the strong majority of runs), (b) change the verification invocation to run
+wall-clock-sensitive files in separate processes, or (c) reopen Decision 0006 §5's envelope value.
+WP-07 does not have authority for (c) and deliberately did not widen any assertion.
 
-7. Cleanup:
-     → Upon settlement, error, or session disposal (`adapter.stopSession`), `bridge.getResourceSnapshot()` verifies `activeAttachmentCount === 0` and `activeTimerCount === 0`.
-```
-
-### Acceptance evidence matrix
+### Acceptance evidence matrix (remediation)
 
 | Criterion | Source evidence | Verification evidence | Result |
 | --------- | --------------- | --------------------- | ------ |
-| T22-AC1 | `apps/server/src/provider/Layers/PiAdapter.ts:3110-3180`, `alfie/agent/extensions/pi-subagents/src/index.ts:1450-1495` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC1: real Pi child completing inside budget returns normal inline result with seq1 accepted and seq2 started only") | PASSED |
-| T22-AC2 | `alfie/agent/extensions/pi-subagents/src/index.ts:1495-1540`, `apps/server/src/provider/Layers/PiAdapter.ts:3145-3185` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC2, T22-AC3: long child detaches at deadline, returns handle within budget + tolerance, preserving same execution identity and child ownership") | PASSED |
-| T22-AC3 | `alfie/agent/extensions/pi-subagents/src/agent-manager.ts:610-637`, `apps/server/src/provider/Layers/PiAdapter.ts:3125-3140` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC2, T22-AC3: long child detaches at deadline...") & `piSubagentForegroundLifecycle.test.ts` ("T22-WP03-3") | PASSED |
-| T22-AC4 | `apps/server/src/provider/Layers/PiAdapter.ts:3140-3175`, `apps/server/src/provider/PiSubagentExecutionRepository.ts` | `piSubagentForegroundReopen.test.ts` ("T22-AC4: file-backed SQLite persists detached foreground execution and recovers exact non-terminal aggregate and ordered journal across reopen") | PASSED |
-| T22-AC5 | `apps/server/src/config.ts:32-60`, `packages/contracts/src/piSubagents.ts:180-210` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC5: foreground budget default is 10000ms, valid bounds are preserved, and invalid classes fall back to 10000ms") | PASSED |
-| T22-AC6 | `apps/server/src/provider/Layers/PiAdapter.ts:3060-3195`, `alfie/agent/extensions/pi-subagents/src/agent-manager.ts` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC6: concurrent managed executions and an adjacent legacy session retain independent identities, timeouts, journal rows, and behavior") | PASSED |
-| T22-AC7 | `alfie/agent/extensions/pi-subagents/src/index.ts:2950-2985`, `apps/server/src/provider/Layers/PiAdapter.ts:3190-3220` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC7: proves zero live timers and attachment entries after all settlement, failure, and disposal paths without affecting unrelated children") | PASSED |
-| T22-AC8 | `apps/server/src/provider/piSubagentRealExtension.test.ts:70-130`, `apps/server/src/provider/piSubagentForegroundAcceptance.test.ts` | `piSubagentForegroundAcceptance.test.ts` ("T22-AC8: verifies real Git provenance and hashes, and rejects synthetic replacement Agent tools") | PASSED |
+| T22-AC1 | `PiAdapter.ts` managed foreground binding + Alfie `index.ts` Outcome A | `piSubagentForegroundAcceptance.test.ts` ("T22-AC1 …") — now asserts successful completion text/status, not just identities | PASSED (standalone) |
+| T22-AC2, T22-AC3 | same | same file ("T22-AC2, T22-AC3 …"), now `budget + 500 ms`; measured 327 ms on 300 ms budget | PASSED standalone; envelope flaky in multi-file invocations (see Challenge) |
+| T22-AC4 | `PiSubagentExecutionRepository` + reopen harness | `piSubagentForegroundReopen.test.ts` (unchanged this package) | PASSED |
+| T22-AC5 | `apps/server/src/main.ts` (`ServerConfigLive`), `apps/server/src/config.ts` resolver | new `main.test.ts` wiring test (ServerConfigLive; 30000/abc/99/60001/unset) + acceptance AC5 session-path test | PASSED |
+| T22-AC6 | `PiAdapter.ts` capability gating; stripped-capability extension copy | acceptance "T22-AC6 …" — real adjacent legacy session, concurrent managed detach, zero legacy journal rows, no binding attached, managed pair 429 ms | PASSED (standalone) |
+| T22-AC7 | Alfie WP-06 commit `82406bd8` post-detach settlement cleanup | acceptance "T22-AC7 …" snapshots + Alfie extension suite (WP-06) | PASSED |
+| T22-AC8 | provenance manifest + verifier | acceptance "T22-AC8 …" against pinned commit `82406bd8…` | PASSED |
 
-### Failure and diagnostic evidence
+### Verification commands and results (2026-08-17, WP-07)
 
-1. **Invalid Configuration Fallback:** Tested boundary conditions: `foregroundWaitMs` of `99` (< 100ms) and `60001` (> 60000ms), negative numbers, floats, and strings are rejected by `isPiSubagentManagedForegroundBinding` and safely resolved by `resolvePiSubagentForegroundWaitMs` to `DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS` (10,000ms).
-2. **Inline Failure Containment:** When a subagent fails before the deadline, `handle.promise` resolves to error status, the deadline timer is cancelled, `liveAttachments` entry is cleared, and an inline error response is returned without creating an invalid detach event.
-3. **Session Stop & Abort Cleanup:** Calling `adapter.stopSession` or `bridge.abortAll()` clears all active attachment timers and in-memory references. Post-settlement resource verification confirms `bridge.getResourceSnapshot()` returns `{ activeAttachmentCount: 0, activeTimerCount: 0 }`.
+```bash
+export PATH="$HOME/.bun/bin:$PATH"
+cd /Users/anhpham99/symphony/apps/server
+```
 
-### Verification commands and results
+- `bun run test src/main.test.ts src/config.test.ts` — **99 passed / 2 files, exit 0, 6.8 s**
+  (includes the new ServerConfigLive wiring test).
+- `ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentRealExtension.test.ts`
+  — **11 passed, exit 0, 9.8 s** (against the re-pinned clean checkout; ~13/15 across repeated
+  standalone runs due to the envelope tail — see Challenge).
+- `ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentForegroundAcceptance.test.ts`
+  — **6 passed, exit 0** (13/13 across repeated standalone runs).
+- `ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentForegroundReopen.test.ts src/provider/piSubagentForegroundLifecycle.test.ts`
+  — **6 passed / 2 files, exit 0, 2.2 s**.
+- Mandated four-file command — **intermittent** (~5/11 green; envelope tail 894–1316 ms — see
+  Challenge). No assertion was widened.
+- `bun run test` (full server suite, 371 files) — run 1: 4383 passed / 1 failed (real-extension
+  envelope 1296 ms); run 2: **4384 passed / 0 failed, exit 0, 435 s**.
+- `apps/server/.pi/` artifacts removed after every test run.
 
-- **File-backed SQLite Reopen Verification (T22-AC4):**
-  ```bash
-  bun run test src/provider/piSubagentForegroundReopen.test.ts
-  ```
-  - Result: 1 test passed in 239ms (exit code 0).
-  - Validates full persistence across close and reopen on real disk SQLite file.
+### Real-Pi evidence (re-pinned)
 
-- **Real-Pi Foreground Acceptance Verification (T22-AC1..AC8):**
-  ```bash
-  ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentForegroundAcceptance.test.ts
-  ```
-  - Result: 17 tests passed in 20.20s (exit code 0).
-
-- **Real Pi Subagent Extension Integration Suite:**
-  ```bash
-  ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentRealExtension.test.ts
-  ```
-  - Result: 11 tests passed in 8.83s (exit code 0).
-
-- **Complete Pi Subagent Server Test Suite:**
-  ```bash
-  ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test \
-    src/provider/piSubagentForegroundReopen.test.ts \
-    src/provider/piSubagentForegroundAcceptance.test.ts \
-    src/provider/piSubagentRealExtension.test.ts \
-    src/provider/piSubagentForegroundLifecycle.test.ts \
-    src/provider/piSubagentBridge.test.ts \
-    src/provider/Layers/PiAdapter.test.ts
-  ```
-  - Result: 6 test files, 97 tests passed in 35.56s (exit code 0).
-
-- **Alfie Extension Test Suite:**
-  ```bash
-  cd /Users/anhpham99/alfie/agent/extensions/pi-subagents && bun run test
-  ```
-  - Result: 29 test files, 464 tests passed in 5.77s (exit code 0).
-
-- **Contracts Package Test Suite:**
-  ```bash
-  cd /Users/anhpham99/symphony/packages/contracts && bun run test
-  ```
-  - Result: 19 test files, 215 tests passed in 1.37s (exit code 0).
-
-### Migration compatibility evidence
-
-- Reopen test executes against all 100 SQLite migrations, specifically verifying:
-  - Migration 98: `PiSubagentExecutions`
-  - Migration 99: `PiSubagentLeasesAndProgress`
-  - Migration 100: `PiSubagentAdmissionIdentity`
-- Issue 22 is 100% schema-compatible with the accepted Ticket 18/20/21 database schema. No additional migrations or schema adjustments were required.
-
-### Real-Pi evidence
-
-- **Extension Origin:** `/Users/anhpham99/alfie/agent/extensions/pi-subagents`
-- **Alfie HEAD Commit:** `3cdfbdadcf0f7a1c7ab4af0f8c80ee470a0feadc`
-- **Artifact SHA-256 Hashes:**
-  - `package.json`: `7171b731a76a8d84655a49997200433447c5e36af71574e65df7d9749eefa65f`
-  - `src/index.ts`: `f045ed2992d32253c453fcf3137171120bac4a983ab04a0f8a88da1a3f80b40f`
-  - `src/agent-manager.ts`: `f09381a2202f3e5b696af2c7e538c95076fd88f145e235c81bbaf85d88c9bbe7`
-- **Measured Elapsed Times:**
-  - Fast child (T22-AC1): Completes in ~6.5s within the 15,000ms budget, returns inline result, emits only seq 1 (accepted) and seq 2 (started).
-  - Detached child (T22-AC2): Detaches in ~664ms on a 300ms budget (within the budget + tolerance boundary), emits seq 1 (accepted), seq 2 (started), and seq 3 (detached).
-  - Unbroken Child Ownership: Subagent record ID, execution ID, and parent-turn cancellation scope remain identical before and after detach.
+- **Extension origin:** `/Users/anhpham99/alfie/agent/extensions/pi-subagents`
+- **Alfie pinned commit:** `82406bd834c5f52785fe8f3b65d316d3f8b3fd62` (WP-06 remediation commit;
+  extension path verified clean at this commit)
+- **Artifact SHA-256 hashes:**
+  - `package.json`: `7171b731a76a8d84655a49997200433447c5e36af71574e65df7d9749eefa65f` (unchanged)
+  - `src/index.ts`: `6f889aad4841234768eba60485949d4713acb1957988c802ab7069afc10f965f` (updated)
+  - `src/agent-manager.ts`: `f09381a2202f3e5b696af2c7e538c95076fd88f145e235c81bbaf85d88c9bbe7` (unchanged)
+- **Measured elapsed times (standalone, instrumented reruns):**
+  - T22-AC1 fast child (deterministic local model, 30000 ms budget): **394 ms** to successful
+    inline completion; journal seq 1 + seq 2 only.
+  - T22-AC2 detached child (300 ms budget): **327 ms** (envelope 800 ms).
+  - T22-AC6 managed pair (400 ms budget): **429 ms** concurrent detach, both journals seq 1→2→3.
+  - T22-AC6 legacy inline completion (deterministic 1500 ms slow model): **2382 ms** — the legacy
+    session waited unbounded for its actual child while the managed pair had already detached.
 
 ### Deviations and remaining risks
 
-- **Scheduling Jitter:** High system load can introduce minor timer scheduling delays; test assertions use a bounded tolerance range (`foregroundWaitMs - 50ms` to `foregroundWaitMs + 2000ms`) to ensure stable execution in all CI/local environments.
-- **Platform Limits:** All timers rely on Node.js `setTimeout` and are explicitly cancelled in `finally` blocks, avoiding event loop retention or memory leaks.
+- **Timing-envelope challenge (see above):** assertions stay at `budget + 500 ms`; multi-file
+  invocations intermittently exceed it. Owner decision required; no widening performed.
+- Deterministic completions depend on a loopback model fixture; a hosted-credential environment
+  could replace it without test changes (the agent-dir `models.json` is the standard configuration
+  surface).
+- T22-AC7's production behavior (post-detach settlement cleanup) is delivered by the WP-06 Alfie
+  commit; this package re-pins and verifies against it.
 
-### Commits
+### Commits (remediation)
 
-- Symphony foundation commit: `516bb3d3` (`feat(pi): add bounded foreground attachment foundation (issue 22)`)
-- Symphony integration commit: `ad28113a` (`feat(pi): integrate bounded foreground attachment (issue 22)`)
-- Symphony test commit: `c8252997` (`test(pi): prove real bounded foreground attachment (issue 22)`)
-- Symphony documentation commit: `642bcba9` (`docs(planning): complete issue 22 implementation report`)
-- Symphony test alignment commit: `d2e7a768` (`test(pi): align test fixtures and timing tolerances for issue 22 acceptance`)
-- Alfie extension commit: `3cdfbdadcf0f7a1c7ab4af0f8c80ee470a0feadc` (`feat(pi-subagents): add bounded foreground attachment (issue 22)`)
-- Working tree status: Clean with zero untracked `.pi` test artifacts.
+- Symphony wiring commit: see `git log` — `fix(pi): wire foreground budget env into production server config (issue 22 remediation)`
+- Symphony evidence commit: `test(pi): harden issue 22 acceptance evidence (issue 22 remediation)`
+- Symphony provenance commit: `chore(pi): re-pin alfie provenance for issue 22 remediation`
+- Symphony report commit: `docs(planning): refresh issue 22 implementation report for remediation`
+- Alfie WP-06 commit (pinned): `82406bd834c5f52785fe8f3b65d316d3f8b3fd62`
+- No push. Working tree: only WP-07 allowed paths changed.
 
 ### Reviewer handoff
 
-To quickly reproduce and verify Issue 22 deliverables:
-1. Run the file-backed SQLite persistence reopen test:
-   ```bash
-   cd apps/server && bun run test src/provider/piSubagentForegroundReopen.test.ts
-   ```
-2. Run the integrated acceptance test against real Alfie Pi subagent extension:
-   ```bash
-   cd apps/server && ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentForegroundAcceptance.test.ts
-   ```
-3. Run the full Pi provider test suite:
-   ```bash
-   cd apps/server && ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test \
-     src/provider/piSubagentForegroundReopen.test.ts \
-     src/provider/piSubagentForegroundAcceptance.test.ts \
-     src/provider/piSubagentRealExtension.test.ts \
-     src/provider/piSubagentForegroundLifecycle.test.ts \
-     src/provider/piSubagentBridge.test.ts \
-     src/provider/Layers/PiAdapter.test.ts
-   ```
+1. `cd apps/server && bun run test src/main.test.ts src/config.test.ts` (wiring test).
+2. `cd apps/server && ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentForegroundAcceptance.test.ts` (AC1 completion, AC2/AC3 envelope, AC6 real legacy leg).
+3. `cd apps/server && ALFIE_REPO_DIR=/Users/anhpham99/alfie bun run test src/provider/piSubagentRealExtension.test.ts` (real-extension envelope + provenance pin).
+4. Re-run 2–3 standalone times and once as the four-file command to observe the envelope tail
+   documented under "Challenge".
