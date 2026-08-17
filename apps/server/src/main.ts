@@ -23,6 +23,7 @@ import {
   preparePrivateServerPaths,
   remoteAccessPolicyError,
   resolveCanonicalWorkspaceRoots,
+  resolvePiSubagentForegroundWaitMs,
   resolveStaticDir,
   ServerConfig,
   type RuntimeMode,
@@ -332,6 +333,9 @@ const ServerConfigLive = (input: CliInput) =>
         logWebSocketEvents,
         antigravityTerminalRecoveryMode,
         antigravityTerminalRecoveryGraceMs,
+        piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
+          process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+        ),
       } satisfies ServerConfigShape;
 
       return config;

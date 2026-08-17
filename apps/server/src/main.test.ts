@@ -340,6 +340,47 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
+  it.effect("resolves the Pi subagent foreground wait budget on the production ServerConfigLive path (issue 22 remediation)", () =>
+    // The production resolution site reads the key directly from process.env
+    // (Decision 0006 §5 contract; same site as ServerConfig.layerTest), so the
+    // wiring test mutates process.env directly and always restores it.
+    Effect.gen(function* () {
+      const previousValue = process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+      const restore = Effect.sync(() => {
+        if (previousValue === undefined) {
+          delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+        } else {
+          process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = previousValue;
+        }
+      });
+      yield* Effect.onExit(Effect.gen(function* () {
+        // Valid in-range value is preserved verbatim (no clamping).
+        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "30000";
+        yield* runCli([]);
+        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 30_000);
+
+        // Invalid classes fall back to the 10000 ms default: non-numeric,
+        // under-range, and over-range are rejected (not clamped).
+        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "abc";
+        yield* runCli([]);
+        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+
+        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "99";
+        yield* runCli([]);
+        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+
+        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "60001";
+        yield* runCli([]);
+        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+
+        // Unset also resolves to the default.
+        delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+        yield* runCli([]);
+        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+      }), () => restore);
+    }),
+  );
+
   it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>
     Effect.gen(function* () {
       const messages: string[] = [];
