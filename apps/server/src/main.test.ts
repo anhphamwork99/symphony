@@ -340,45 +340,126 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
-  it.effect("resolves the Pi subagent foreground wait budget on the production ServerConfigLive path (issue 22 remediation)", () =>
-    // The production resolution site reads the key directly from process.env
-    // (Decision 0006 §5 contract; same site as ServerConfig.layerTest), so the
-    // wiring test mutates process.env directly and always restores it.
-    Effect.gen(function* () {
-      const previousValue = process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
-      const restore = Effect.sync(() => {
-        if (previousValue === undefined) {
-          delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
-        } else {
-          process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = previousValue;
-        }
-      });
-      yield* Effect.onExit(Effect.gen(function* () {
-        // Valid in-range value is preserved verbatim (no clamping).
-        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "30000";
-        yield* runCli([]);
-        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 30_000);
+  it.effect(
+    "resolves the Pi subagent foreground wait budget on the production ServerConfigLive path (issue 22 remediation)",
+    () =>
+      // The production resolution site reads the key directly from process.env
+      // (Decision 0006 §5 contract; same site as ServerConfig.layerTest), so the
+      // wiring test mutates process.env directly and always restores it.
+      Effect.gen(function* () {
+        const previousValue = process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+        const restore = Effect.sync(() => {
+          if (previousValue === undefined) {
+            delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+          } else {
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = previousValue;
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            // Valid in-range value is preserved verbatim (no clamping).
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "30000";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 30_000);
 
-        // Invalid classes fall back to the 10000 ms default: non-numeric,
-        // under-range, and over-range are rejected (not clamped).
-        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "abc";
-        yield* runCli([]);
-        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+            // Invalid classes fall back to the 10000 ms default: non-numeric,
+            // under-range, and over-range are rejected (not clamped).
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "abc";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
 
-        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "99";
-        yield* runCli([]);
-        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "99";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
 
-        process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "60001";
-        yield* runCli([]);
-        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS = "60001";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
 
-        // Unset also resolves to the default.
-        delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
-        yield* runCli([]);
-        assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
-      }), () => restore);
-    }),
+            // Unset also resolves to the default.
+            delete process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentForegroundWaitMs, 10_000);
+          }),
+          () => restore,
+        );
+      }),
+  );
+
+  it.effect(
+    "resolves Pi subagent progress/heartbeat/lease knobs on the production ServerConfigLive path (issue 23 / T23-AC7)",
+    () =>
+      // Same production resolution site as the foreground-wait knob: the env
+      // is mutated directly and always restored.
+      Effect.gen(function* () {
+        const keys = [
+          "SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ",
+          "SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS",
+          "SYNARA_PI_SUBAGENT_LEASE_DURATION_MS",
+        ] as const;
+        const previous = keys.map((key) => process.env[key]);
+        const restore = Effect.sync(() => {
+          for (const [index, key] of keys.entries()) {
+            const value = previous[index]!;
+            if (value === undefined) {
+              delete process.env[key];
+            } else {
+              process.env[key] = value;
+            }
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            // Valid in-range values are preserved verbatim (no clamping).
+            process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ = "5";
+            process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = "30000";
+            process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS = "60000";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProgressRateHz, 5);
+            assert.equal(resolvedConfig?.piSubagentHeartbeatIntervalMs, 30_000);
+            assert.equal(resolvedConfig?.piSubagentLeaseDurationMs, 60_000);
+
+            // Fractional rates are valid for the hz knob.
+            process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ = "0.5";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProgressRateHz, 0.5);
+
+            // Invalid classes fall back to defaults: non-numeric, under-range,
+            // over-range, and fractional-integer-knob are rejected (not clamped).
+            process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ = "11";
+            process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = "abc";
+            process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS = "30.5";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProgressRateHz, 2);
+            assert.equal(resolvedConfig?.piSubagentHeartbeatIntervalMs, 10_000);
+            assert.equal(resolvedConfig?.piSubagentLeaseDurationMs, 30_000);
+
+            process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ = "0.01";
+            process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = "99";
+            process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS = "999";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProgressRateHz, 2);
+            assert.equal(resolvedConfig?.piSubagentHeartbeatIntervalMs, 10_000);
+            assert.equal(resolvedConfig?.piSubagentLeaseDurationMs, 30_000);
+
+            process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = "600001";
+            process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS = "3600001";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentHeartbeatIntervalMs, 10_000);
+            assert.equal(resolvedConfig?.piSubagentLeaseDurationMs, 30_000);
+
+            // Unset also resolves to defaults.
+            delete process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ;
+            delete process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+            delete process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS;
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProgressRateHz, 2);
+            assert.equal(resolvedConfig?.piSubagentHeartbeatIntervalMs, 10_000);
+            assert.equal(resolvedConfig?.piSubagentLeaseDurationMs, 30_000);
+          }),
+          () => restore,
+        );
+      }),
   );
 
   it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>

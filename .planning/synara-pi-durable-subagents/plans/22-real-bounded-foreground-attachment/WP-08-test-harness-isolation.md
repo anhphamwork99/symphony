@@ -26,7 +26,7 @@ or full-suite invocations. Prove it with repeated full-suite runs.
 ## Background
 
 - `apps/server/package.json` script: `vitest run --maxWorkers=1
-  --no-file-parallelism` (already serial, but serial-in-one-process).
+--no-file-parallelism` (already serial, but serial-in-one-process).
 - `apps/server/vitest.config.ts` merges the root `vitest.config.ts` (aliases
   only) and sets 90 s timeouts.
 - WP-07 measured: standalone files meet the envelope (AC2 detach 327 ms on

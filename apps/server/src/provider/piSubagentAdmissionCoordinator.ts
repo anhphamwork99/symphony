@@ -116,11 +116,13 @@ const rejectedResult = (
         projectId: input.command.projectId,
         parentThreadId: input.command.parentThreadId,
         parentTurnId: input.command.parentTurnId,
-        parentToolCallId: input.command.parentToolCallId,
+        parentToolCallId: input.command.parentToolCallId ?? null,
         agentType: input.command.agentType,
         prompt: input.command.prompt,
-        mode: input.command.mode,
-        cancellationScope: input.command.cancellationScope,
+        ...(input.command.mode !== undefined ? { mode: input.command.mode } : {}),
+        ...(input.command.cancellationScope !== undefined
+          ? { cancellationScope: input.command.cancellationScope }
+          : {}),
         state: "rejected",
         diagnosticCode,
         rejectionReason,
@@ -352,9 +354,17 @@ const runManagedAdmission = (
     }
 
     if (command.parentTurnId) {
+      // The test read-model fixture exposes the latest turn under `id` while
+      // the OrchestrationLatestTurn contract names it `turnId`; read both
+      // shapes so the parent-turn liveness check stays behavior-identical.
+      const latestTurnId = thread.latestTurn as unknown as {
+        readonly turnId?: TurnId;
+        readonly id?: TurnId;
+      } | null;
       const hasActiveTurn =
         thread.session?.activeTurnId === command.parentTurnId ||
-        (thread.latestTurn?.id === command.parentTurnId && thread.latestTurn?.state === "running");
+        (latestTurnId?.turnId === command.parentTurnId && thread.latestTurn?.state === "running") ||
+        (latestTurnId?.id === command.parentTurnId && thread.latestTurn?.state === "running");
 
       if (!hasActiveTurn) {
         return yield* rejectedResult(
@@ -475,11 +485,13 @@ const runManagedAdmission = (
         projectId: command.projectId,
         parentThreadId: command.parentThreadId,
         parentTurnId: command.parentTurnId,
-        parentToolCallId: command.parentToolCallId,
+        parentToolCallId: command.parentToolCallId ?? null,
         agentType: command.agentType,
         prompt: command.prompt,
-        mode: command.mode,
-        cancellationScope: command.cancellationScope,
+        ...(command.mode !== undefined ? { mode: command.mode } : {}),
+        ...(command.cancellationScope !== undefined
+          ? { cancellationScope: command.cancellationScope }
+          : {}),
         state: "accepted",
         diagnosticCode: "pi_subagent_managed_enabled",
         now,

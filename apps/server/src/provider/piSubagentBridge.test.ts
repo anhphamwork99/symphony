@@ -401,9 +401,7 @@ describe("Pi subagent managed foreground binding (Issue 22 / WP-02)", () => {
         occurredAt: "2026-08-17T12:00:00.000Z",
       });
 
-      expect(observations1).toEqual([
-        { kind: "started", occurredAt: "2026-08-17T12:00:00.000Z" },
-      ]);
+      expect(observations1).toEqual([{ kind: "started", occurredAt: "2026-08-17T12:00:00.000Z" }]);
       expect(observations2).toEqual([]);
 
       // Perform observation on context 2
@@ -413,10 +411,178 @@ describe("Pi subagent managed foreground binding (Issue 22 / WP-02)", () => {
       });
 
       expect(observations1).toHaveLength(1);
-      expect(observations2).toEqual([
-        { kind: "detached", occurredAt: "2026-08-17T12:00:15.000Z" },
-      ]);
+      expect(observations2).toEqual([{ kind: "detached", occurredAt: "2026-08-17T12:00:15.000Z" }]);
     });
   });
 });
 
+describe("Pi subagent managed foreground binding observation kinds & policy (Issue 23 / WP-B)", () => {
+  const createValidBinding = (
+    overrides?: Record<string, unknown>,
+  ): PiSubagentManagedForegroundBinding =>
+    ({
+      executionId: "exec_t23_001",
+      attemptId: "att_t23_001",
+      generation: 1,
+      cancellationScope: "parent_turn",
+      foregroundWaitMs: 10000,
+      reportObservation: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    }) as PiSubagentManagedForegroundBinding;
+
+  describe("guard accepts the widened observation kinds pass-through (types only — reportObservation is opaque)", () => {
+    it("accepts a binding whose reportObservation will receive progress/heartbeat kinds", () => {
+      const binding = createValidBinding();
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+    });
+  });
+
+  describe("isPiSubagentManagedForegroundBinding policy field matrix", () => {
+    it("accepts a valid progress + heartbeat policy", () => {
+      const binding = createValidBinding({
+        progress: { rateHz: 2 },
+        heartbeat: { intervalMs: 10000, leaseMs: 30000 },
+      });
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+    });
+
+    it("accepts a binding with NO policy fields (legacy binding)", () => {
+      const binding = createValidBinding();
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+      expect("progress" in binding).toBe(false);
+      expect("heartbeat" in binding).toBe(false);
+    });
+
+    it("accepts a binding with only a progress policy", () => {
+      const binding = createValidBinding({ progress: { rateHz: 0.5 } });
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+    });
+
+    it("accepts a binding with only a heartbeat policy", () => {
+      const binding = createValidBinding({
+        heartbeat: { intervalMs: 100, leaseMs: 1000 },
+      });
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+    });
+
+    it("still accepts (but later strips) structurally invalid progress policy", () => {
+      // Policy fields are validated only when present; malformed policy does
+      // NOT reject the core binding — the extraction path strips it.
+      const binding = createValidBinding({ progress: { rateHz: 99 } });
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+      const stripped = getPiSubagentManagedForegroundBinding(
+        attachPiSubagentManagedForegroundBinding({}, binding),
+      );
+      expect(stripped).toBeDefined();
+      expect(stripped?.progress).toBeUndefined();
+    });
+
+    it("still accepts (but later strips) structurally invalid heartbeat policy", () => {
+      const binding = createValidBinding({
+        heartbeat: { intervalMs: 10, leaseMs: 30000 },
+      });
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+      const stripped = getPiSubagentManagedForegroundBinding(
+        attachPiSubagentManagedForegroundBinding({}, binding),
+      );
+      expect(stripped?.heartbeat).toBeUndefined();
+    });
+  });
+
+  describe("normalizePiSubagentManagedForegroundBinding policy matrix", () => {
+    it("passes a fully valid policy through untouched", () => {
+      const policy = { rateHz: 4 };
+      const heartbeatPolicy = { intervalMs: 5000, leaseMs: 60000 };
+      const binding = createValidBinding({
+        progress: policy,
+        heartbeat: heartbeatPolicy,
+      });
+      const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+      const extracted = getPiSubagentManagedForegroundBinding(ctx);
+      expect(extracted?.progress).toEqual(policy);
+      expect(extracted?.heartbeat).toEqual(heartbeatPolicy);
+    });
+
+    it("strips invalid rateHz but keeps a valid heartbeat policy", () => {
+      const binding = createValidBinding({
+        progress: { rateHz: 0.01 },
+        heartbeat: { intervalMs: 10000, leaseMs: 30000 },
+      });
+      const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+      const extracted = getPiSubagentManagedForegroundBinding(ctx);
+      expect(extracted?.progress).toBeUndefined();
+      expect(extracted?.heartbeat).toEqual({ intervalMs: 10000, leaseMs: 30000 });
+    });
+
+    it("strips non-finite rateHz (NaN/Infinity)", () => {
+      for (const rateHz of [Number.NaN, Number.POSITIVE_INFINITY, "2" as unknown as number]) {
+        const binding = createValidBinding({ progress: { rateHz } });
+        const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+        expect(getPiSubagentManagedForegroundBinding(ctx)?.progress).toBeUndefined();
+      }
+    });
+
+    it("strips fractional or out-of-range heartbeat interval/lease", () => {
+      for (const heartbeat of [
+        { intervalMs: 10000.5, leaseMs: 30000 },
+        { intervalMs: 99, leaseMs: 30000 },
+        { intervalMs: 600001, leaseMs: 30000 },
+        { intervalMs: 10000, leaseMs: 999 },
+        { intervalMs: 10000, leaseMs: 3600001 },
+        { intervalMs: Number.NaN, leaseMs: 30000 },
+      ]) {
+        const binding = createValidBinding({ heartbeat });
+        const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+        expect(getPiSubagentManagedForegroundBinding(ctx)?.heartbeat).toBeUndefined();
+      }
+    });
+
+    it("strips nullish/malformed policy objects entirely", () => {
+      for (const progress of [null, "fast", 2, []]) {
+        const binding = createValidBinding({ progress });
+        const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+        expect(getPiSubagentManagedForegroundBinding(ctx)?.progress).toBeUndefined();
+      }
+    });
+
+    it("keeps the attached binding immutable and frozen after sanitization", () => {
+      const binding = createValidBinding({ progress: { rateHz: 11 } });
+      const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+      expect(Object.isFrozen(ctx)).toBe(true);
+      const extracted = getPiSubagentManagedForegroundBinding(ctx);
+      expect(Object.isFrozen(extracted)).toBe(true);
+    });
+  });
+
+  describe("PiSubagentObservationInput widened kinds", () => {
+    it("reportObservation accepts progress and heartbeat observation inputs", async () => {
+      const received: PiSubagentObservationInput[] = [];
+      const binding = createValidBinding({
+        reportObservation: async (input: PiSubagentObservationInput) => {
+          received.push(input);
+        },
+      });
+      const ctx = attachPiSubagentManagedForegroundBinding({}, binding);
+      const extracted = getPiSubagentManagedForegroundBinding(ctx)!;
+
+      await extracted.reportObservation({
+        kind: "progress",
+        occurredAt: "2026-08-18T00:00:00.000Z",
+        progressJson: '{"turnCount":1}',
+      });
+      await extracted.reportObservation({
+        kind: "heartbeat",
+        occurredAt: "2026-08-18T00:00:10.000Z",
+      });
+
+      expect(received).toEqual([
+        {
+          kind: "progress",
+          occurredAt: "2026-08-18T00:00:00.000Z",
+          progressJson: '{"turnCount":1}',
+        },
+        { kind: "heartbeat", occurredAt: "2026-08-18T00:00:10.000Z" },
+      ]);
+    });
+  });
+});

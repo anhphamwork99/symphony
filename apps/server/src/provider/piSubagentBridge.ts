@@ -18,7 +18,13 @@ import {
 
 import {
   MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  MAX_PI_SUBAGENT_LEASE_DURATION_MS,
+  MAX_PI_SUBAGENT_PROGRESS_RATE_HZ,
   MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  MIN_PI_SUBAGENT_LEASE_DURATION_MS,
+  MIN_PI_SUBAGENT_PROGRESS_RATE_HZ,
 } from "../config.ts";
 
 export const PI_SUBAGENT_BRIDGE_KEY = Symbol.for("synara.pi.subagents.bridge");
@@ -27,11 +33,22 @@ export const PI_SUBAGENT_MANAGED_FOREGROUND_KEY = Symbol.for(
 );
 const PI_SUBAGENT_PROBE_CACHE_KEY = Symbol.for("synara.pi.subagents.probe_cache");
 
-export type PiSubagentObservationKind = "started" | "detached";
+export type PiSubagentObservationKind = "started" | "detached" | "progress" | "heartbeat";
 
 export interface PiSubagentObservationInput {
   readonly kind: PiSubagentObservationKind;
   readonly occurredAt: string;
+  /** Present for progress-kind observations only; opaque latest-snapshot JSON. */
+  readonly progressJson?: string;
+}
+
+export interface PiSubagentProgressPolicy {
+  readonly rateHz: number;
+}
+
+export interface PiSubagentHeartbeatPolicy {
+  readonly intervalMs: number;
+  readonly leaseMs: number;
 }
 
 export interface PiSubagentManagedForegroundBinding {
@@ -41,6 +58,9 @@ export interface PiSubagentManagedForegroundBinding {
   readonly cancellationScope: "parent_turn";
   readonly foregroundWaitMs: number;
   readonly reportObservation: (input: PiSubagentObservationInput) => Promise<void>;
+  /** Ticket 23 server policy pass-through; absent on legacy bindings. */
+  readonly progress?: PiSubagentProgressPolicy;
+  readonly heartbeat?: PiSubagentHeartbeatPolicy;
 }
 
 export function isPiSubagentManagedForegroundBinding(
@@ -50,16 +70,10 @@ export function isPiSubagentManagedForegroundBinding(
     return false;
   }
   const record = value as Record<string | symbol, unknown>;
-  if (
-    typeof record.executionId !== "string" ||
-    record.executionId.trim().length === 0
-  ) {
+  if (typeof record.executionId !== "string" || record.executionId.trim().length === 0) {
     return false;
   }
-  if (
-    typeof record.attemptId !== "string" ||
-    record.attemptId.trim().length === 0
-  ) {
+  if (typeof record.attemptId !== "string" || record.attemptId.trim().length === 0) {
     return false;
   }
   if (
@@ -86,6 +100,62 @@ export function isPiSubagentManagedForegroundBinding(
   return true;
 }
 
+function isValidPiSubagentProgressPolicy(value: unknown): value is PiSubagentProgressPolicy {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.rateHz === "number" &&
+    Number.isFinite(record.rateHz) &&
+    record.rateHz >= MIN_PI_SUBAGENT_PROGRESS_RATE_HZ &&
+    record.rateHz <= MAX_PI_SUBAGENT_PROGRESS_RATE_HZ
+  );
+}
+
+function isValidPiSubagentHeartbeatPolicy(value: unknown): value is PiSubagentHeartbeatPolicy {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.intervalMs === "number" &&
+    Number.isInteger(record.intervalMs) &&
+    record.intervalMs >= MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS &&
+    record.intervalMs <= MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS &&
+    typeof record.leaseMs === "number" &&
+    Number.isInteger(record.leaseMs) &&
+    record.leaseMs >= MIN_PI_SUBAGENT_LEASE_DURATION_MS &&
+    record.leaseMs <= MAX_PI_SUBAGENT_LEASE_DURATION_MS
+  );
+}
+
+/**
+ * Ticket 23 policy guard matrix: policy fields are validated ONLY when
+ * present; a malformed policy never rejects the core binding — the policy
+ * fields are stripped so the extension falls back to its internal defaults.
+ * Old extensions never send these fields and are unaffected.
+ */
+export function normalizePiSubagentManagedForegroundBinding(
+  binding: PiSubagentManagedForegroundBinding,
+): PiSubagentManagedForegroundBinding {
+  const progressValid =
+    binding.progress === undefined || isValidPiSubagentProgressPolicy(binding.progress);
+  const heartbeatValid =
+    binding.heartbeat === undefined || isValidPiSubagentHeartbeatPolicy(binding.heartbeat);
+  if (progressValid && heartbeatValid) {
+    return binding;
+  }
+  const sanitized: Record<string, unknown> = { ...binding };
+  if (!progressValid) {
+    delete sanitized.progress;
+  }
+  if (!heartbeatValid) {
+    delete sanitized.heartbeat;
+  }
+  return sanitized as unknown as PiSubagentManagedForegroundBinding;
+}
+
 export function getPiSubagentManagedForegroundBinding(
   target: unknown,
 ): PiSubagentManagedForegroundBinding | undefined {
@@ -95,7 +165,7 @@ export function getPiSubagentManagedForegroundBinding(
   const record = target as Record<string | symbol, unknown>;
   const binding = record[PI_SUBAGENT_MANAGED_FOREGROUND_KEY];
   if (isPiSubagentManagedForegroundBinding(binding)) {
-    return binding;
+    return normalizePiSubagentManagedForegroundBinding(binding);
   }
   return undefined;
 }
@@ -109,7 +179,12 @@ export function attachPiSubagentManagedForegroundBinding<
   if (!isPiSubagentManagedForegroundBinding(binding)) {
     throw new TypeError("Invalid Pi subagent managed foreground binding");
   }
-  const immutableBinding = Object.isFrozen(binding) ? binding : Object.freeze({ ...binding });
+  // A structurally invalid policy field never rejects the binding: it is
+  // stripped here (ticket 23) so the extension uses its internal defaults.
+  const sanitizedBinding = normalizePiSubagentManagedForegroundBinding(binding);
+  const immutableBinding = Object.isFrozen(sanitizedBinding)
+    ? sanitizedBinding
+    : Object.freeze({ ...sanitizedBinding });
   return Object.freeze({
     ...ctx,
     [PI_SUBAGENT_MANAGED_FOREGROUND_KEY]: immutableBinding,
@@ -135,9 +210,7 @@ export interface PiSubagentExtensionBridge {
   readonly abort?: (id: string) => boolean | Promise<boolean>;
   readonly abortAll?: () => number | Promise<number>;
   readonly getActiveExecutions?: () => ReadonlyArray<PiSubagentActiveChild>;
-  readonly emitLifecycleEvent?: (
-    event: PiSubagentLifecycleEvent,
-  ) => Promise<void> | void;
+  readonly emitLifecycleEvent?: (event: PiSubagentLifecycleEvent) => Promise<void> | void;
 }
 
 export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
@@ -145,11 +218,7 @@ export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
     protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
     supportedProtocolVersions: [PI_SUBAGENTS_PROTOCOL_VERSION],
     clientVersion: "0.7.2",
-    requiredCapabilities: [
-      "managed-spawn",
-      "abort-propagation",
-      "bounded-foreground-attachment",
-    ],
+    requiredCapabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
     optionalCapabilities: [
       "coalesced-progress",
       "terminal-outbox",
@@ -386,7 +455,7 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
       extensionVersion,
       capabilities,
     }),
-    spawn: options?.onSpawn,
+    ...(options?.onSpawn !== undefined ? { spawn: options.onSpawn } : {}),
     emitLifecycleEvent: async (event) => {
       emittedEvents.push(event);
       if (options?.onLifecycleEvent) {

@@ -71,11 +71,11 @@ background notification).
      idempotently;
    - performs no `onUpdate`, no notification, no `sendMessage`, no result
      consumption, and no journal/reportObservation call (terminal truth is a
-   downstream ticket);
+     downstream ticket);
    - never rejects (consume settlement errors; the manager already normalizes
      them).
-   The continuation must be attached exactly once per invocation and must not
-   double-run with the inline path (inline settlement path already cleans up).
+     The continuation must be attached exactly once per invocation and must not
+     double-run with the inline path (inline settlement path already cleans up).
 2. **Widget interval hygiene.** After marking the detached child finished, the
    widget's idle path (`update()` seeing nothing active) must clear the 80 ms
    interval. If the current `markFinished` + `update` flow does not do this for

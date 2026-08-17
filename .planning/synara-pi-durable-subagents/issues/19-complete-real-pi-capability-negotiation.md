@@ -87,19 +87,19 @@ known seams on 2026-08-16.
 
 Pi session startup (`startSession` in `PiAdapter.ts`) → SDK runtime initialization (`createSdkRuntime`) → Production extension auto-discovery (`DefaultResourceLoader.loadCurrentExtensionSet()` loads `@alfie/pi-subagents`) → Bridge extraction (`extractBridge` retrieves `synara:subagents:bridge` / `PI_SUBAGENT_BRIDGE_KEY` from loaded extension) → Capability negotiation (`probePiSubagentBridge` / `negotiatePiSubagentCapability` executes `bridge.handshake` and validates protocol version and required capabilities set inclusion) → Stored session capability (`context.subagentCapability` cached on session context and probe cache) → Observation seam dispatch (`onSubagentCapability`).
 
-*(Note: The Issue-19 call chain ends at the stored negotiated session capability on session context. Atomic production admission is Issue 20).*
+_(Note: The Issue-19 call chain ends at the stored negotiated session capability on session context. Atomic production admission is Issue 20)._
 
 ### Acceptance evidence matrix
 
-| Criterion | Source evidence | Verification evidence | Result |
-| --------- | --------------- | --------------------- | ------ |
-| T19-AC1 | `alfie: agent/extensions/pi-subagents/src/index.ts:2490-2570`, `apps/server/src/provider/piSubagentRealExtension.test.ts:310-335` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
-| T19-AC2 | `apps/server/src/provider/piSubagentBridge.ts:80-120`, `apps/server/src/provider/piSubagentRealExtension.test.ts:337-370` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
-| T19-AC3 | `packages/contracts/src/piSubagents.ts:29-47,103-169`, `apps/server/src/provider/piSubagentBridge.ts:60-150`, `apps/server/src/provider/piSubagentRealExtension.test.ts:372-445` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
-| T19-AC4 | `apps/server/src/provider/piSubagentBridge.ts:200-240`, `apps/server/src/provider/piSubagentRealExtension.test.ts:447-460` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
-| T19-AC5 | `apps/server/src/provider/piSubagentRealExtension.test.ts:462-480` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
-| T19-AC6 | `alfie: agent/extensions/pi-subagents/src/index.ts:758-846`, `apps/server/src/provider/piSubagentRealExtension.test.ts:482-510` | `bun run --cwd agent/extensions/pi-subagents test` in the Alfie repo (443 tests passed) | passed |
-| T19-AC7 | `apps/server/src/provider/piSubagentRealExtension.test.ts:100-280`, `apps/server/src/provider/piSubagentRealExtension.test.ts:512-615` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts` | passed |
+| Criterion | Source evidence                                                                                                                                                                  | Verification evidence                                                                   | Result |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------ |
+| T19-AC1   | `alfie: agent/extensions/pi-subagents/src/index.ts:2490-2570`, `apps/server/src/provider/piSubagentRealExtension.test.ts:310-335`                                                | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
+| T19-AC2   | `apps/server/src/provider/piSubagentBridge.ts:80-120`, `apps/server/src/provider/piSubagentRealExtension.test.ts:337-370`                                                        | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
+| T19-AC3   | `packages/contracts/src/piSubagents.ts:29-47,103-169`, `apps/server/src/provider/piSubagentBridge.ts:60-150`, `apps/server/src/provider/piSubagentRealExtension.test.ts:372-445` | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
+| T19-AC4   | `apps/server/src/provider/piSubagentBridge.ts:200-240`, `apps/server/src/provider/piSubagentRealExtension.test.ts:447-460`                                                       | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
+| T19-AC5   | `apps/server/src/provider/piSubagentRealExtension.test.ts:462-480`                                                                                                               | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
+| T19-AC6   | `alfie: agent/extensions/pi-subagents/src/index.ts:758-846`, `apps/server/src/provider/piSubagentRealExtension.test.ts:482-510`                                                  | `bun run --cwd agent/extensions/pi-subagents test` in the Alfie repo (443 tests passed) | passed |
+| T19-AC7   | `apps/server/src/provider/piSubagentRealExtension.test.ts:100-280`, `apps/server/src/provider/piSubagentRealExtension.test.ts:512-615`                                           | `bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts`           | passed |
 
 ### Failure and diagnostic evidence
 

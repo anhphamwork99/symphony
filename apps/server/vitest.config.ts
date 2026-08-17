@@ -25,6 +25,7 @@ const WALLCLOCK_TESTS = [
   "src/provider/piSubagentForegroundReopen.test.ts",
   "src/provider/piSubagentForegroundLifecycle.test.ts",
   "src/provider/piSubagentRealExtension.test.ts",
+  "src/provider/piSubagentProgressAcceptance.test.ts",
 ];
 
 const wallclockProject = defineConfig({
@@ -58,10 +59,7 @@ const unitProject = defineConfig({
     // WP-08 project split (reviewer finding M1: full-suite file count fell
     // 371 -> 365, silently skipping ~30 integration tests). Keep it included.
     include: ["src/**/*.test.ts", "integration/**/*.test.ts"],
-    exclude: [
-      "**/node_modules/**",
-      ...WALLCLOCK_TESTS.map((file) => `**/${file}`),
-    ],
+    exclude: ["**/node_modules/**", ...WALLCLOCK_TESTS.map((file) => `**/${file}`)],
     maxWorkers: 1,
     sequence: { groupOrder: 2 },
     testTimeout: 90_000,

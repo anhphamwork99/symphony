@@ -105,7 +105,7 @@ execution + first attempt + sequence-1 lifecycle journal, then child start.
   `client_command_id`, `subject`), durable first-attempt columns
   (`first_attempt_id`, `first_attempt_generation` + backfill), and rebuilds the
   lifecycle journal table so uniqueness is `(execution_id, attempt_id,
-  generation, sequence)` — attempt 2 may restart its own sequence at 1. The
+generation, sequence)` — attempt 2 may restart its own sequence at 1. The
   rebuild is guarded on the released 098 pre-state and is a second-pass no-op;
   released 098/099 data is preserved (proven by migration test).
 - **Alfie extension** (separate repo, commit `2a3f69bd6`): the `Agent` tool
@@ -148,16 +148,16 @@ child start ONLY on accepted: childParams carry executionId/attemptId/generation
 
 ### Acceptance evidence matrix
 
-| Criterion | Source evidence | Verification evidence | Result |
-| --------- | --------------- | --------------------- | ------ |
-| T20-AC1 | PiAdapter wrap; `runtimeLayer.ts`/`serverLayers.ts` composition; `ProjectionSnapshotQuery` service | `piSubagentRealExtension.test.ts` "T20-AC1…": real extension session; admission observed before child; durable row + sequence-1 journal; child transcript output entry carries the server-minted identity | Passed |
-| T20-AC2 | `recordAdmission` single `sql.withTransaction` | repo test "cross-fingerprint mid-transaction fault": journal write succeeds, executions INSERT hits the released `command_id` UNIQUE constraint (real injected failure between the two writes) → rollback proven: zero partial journal events, zero partial rows | Passed |
-| T20-AC3 | `(command_id, command_fingerprint)` dedup + race recovery | repo concurrent test (8 callers → 1 admitted/7 already_applied, identical identities); coordinator concurrent same-authority test (8 → 1/7); no raw uniqueness failure | Passed |
-| T20-AC4 | attempt/generation-local journal uniqueness (migration 100) + dedup key | repo T20-AC4 test: attempt 2 generation 2 sequence 1 recorded (audit repro retired), stale attempt-1 event journaled but aggregate not regressed; journal ordering deterministic (generation, sequence) | Passed |
-| T20-AC5 | coordinator trusted-context + projection + `assertAdmittable` | coordinator tests: missing-binding, unknown-authority, revoked, expired-auth, expired-credential, stale-session-generation, subject-mismatch, project-mismatch, thread hijack, turn mismatch, approval-required, provider mismatch — all rejected with stable diagnostics; cross-authority same-commandId rejected | Passed |
-| T20-AC6 | wrap: rejected/already_applied never call the child; accepted runs under server-minted identities | real-extension test: denied spawn (revoked authority) returns terminal error, zero additional child transcript files; accepted spawn's child transcript records the server-minted identity; wrapper result carries them | Passed |
-| T20-AC7 | wrap installed only when `isManaged && repository`; legacy sessions untouched | `piSubagentSession.test.ts` T20-AC7 (legacy fixture bypasses admission, no record, no identity) + bridge/legacy tests; real-extension legacy test unchanged | Passed |
-| T20-AC8 | SQLite disk persistence | repo disk-reopen test: fresh connection re-reads the same aggregate, ordered journal, fingerprint, subject, first-attempt columns | Passed |
+| Criterion | Source evidence                                                                                    | Verification evidence                                                                                                                                                                                                                                                                                              | Result |
+| --------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| T20-AC1   | PiAdapter wrap; `runtimeLayer.ts`/`serverLayers.ts` composition; `ProjectionSnapshotQuery` service | `piSubagentRealExtension.test.ts` "T20-AC1…": real extension session; admission observed before child; durable row + sequence-1 journal; child transcript output entry carries the server-minted identity                                                                                                          | Passed |
+| T20-AC2   | `recordAdmission` single `sql.withTransaction`                                                     | repo test "cross-fingerprint mid-transaction fault": journal write succeeds, executions INSERT hits the released `command_id` UNIQUE constraint (real injected failure between the two writes) → rollback proven: zero partial journal events, zero partial rows                                                   | Passed |
+| T20-AC3   | `(command_id, command_fingerprint)` dedup + race recovery                                          | repo concurrent test (8 callers → 1 admitted/7 already_applied, identical identities); coordinator concurrent same-authority test (8 → 1/7); no raw uniqueness failure                                                                                                                                             | Passed |
+| T20-AC4   | attempt/generation-local journal uniqueness (migration 100) + dedup key                            | repo T20-AC4 test: attempt 2 generation 2 sequence 1 recorded (audit repro retired), stale attempt-1 event journaled but aggregate not regressed; journal ordering deterministic (generation, sequence)                                                                                                            | Passed |
+| T20-AC5   | coordinator trusted-context + projection + `assertAdmittable`                                      | coordinator tests: missing-binding, unknown-authority, revoked, expired-auth, expired-credential, stale-session-generation, subject-mismatch, project-mismatch, thread hijack, turn mismatch, approval-required, provider mismatch — all rejected with stable diagnostics; cross-authority same-commandId rejected | Passed |
+| T20-AC6   | wrap: rejected/already_applied never call the child; accepted runs under server-minted identities  | real-extension test: denied spawn (revoked authority) returns terminal error, zero additional child transcript files; accepted spawn's child transcript records the server-minted identity; wrapper result carries them                                                                                            | Passed |
+| T20-AC7   | wrap installed only when `isManaged && repository`; legacy sessions untouched                      | `piSubagentSession.test.ts` T20-AC7 (legacy fixture bypasses admission, no record, no identity) + bridge/legacy tests; real-extension legacy test unchanged                                                                                                                                                        | Passed |
+| T20-AC8   | SQLite disk persistence                                                                            | repo disk-reopen test: fresh connection re-reads the same aggregate, ordered journal, fingerprint, subject, first-attempt columns                                                                                                                                                                                  | Passed |
 
 ### Failure and diagnostic evidence
 
@@ -195,6 +195,7 @@ ALFIE_REPO_DIR=/private/tmp/alfie-issue20-remediation bun run --cwd apps/server 
   src/provider/piSubagentRealExtension.test.ts \
   src/provider/piSubagentSession.test.ts
 ```
+
 - Result: 6 files passed, 62 tests passed (baseline candidate was 5 files /
   51 tests; the suite grew with the remediation tests).
 - Migration suites: `Migrations.test.ts` + `MigrationReplay.test.ts` +

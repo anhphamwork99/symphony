@@ -151,13 +151,13 @@ assertion. All detach assertions remain exactly at Decision 0006 §5's `budget +
 
 Measured evidence (all on the WP-06-pinned clean checkout, post warm-up):
 
-| Composition | Result |
-| ----------- | ------ |
-| Acceptance file standalone (`piSubagentForegroundAcceptance.test.ts`) | 13/13 green; measured AC2 detach 327 ms (300 ms budget), AC6 managed pair 429 ms (400 ms budget), AC6 legacy inline completion 2382 ms, AC1 successful completion 394 ms |
-| Real-extension file standalone (`piSubagentRealExtension.test.ts`) | ~13/15 green; tail failures at 826–1101 ms (300 ms budget, 800 ms envelope) |
-| Mandated 4-file command (acceptance + reopen + real-extension + lifecycle in one vitest process) | ~5/11 green; failures 894–1316 ms |
-| Full server suite (371 files) | run 1 failed at 1296 ms; run 2 fully green (4384 passed) |
-| Isolated production chain (60 single-shot samples) | 303–892 ms total (deadline 300 ms + seq2/seq3 SQLite commits + return) |
+| Composition                                                                                      | Result                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Acceptance file standalone (`piSubagentForegroundAcceptance.test.ts`)                            | 13/13 green; measured AC2 detach 327 ms (300 ms budget), AC6 managed pair 429 ms (400 ms budget), AC6 legacy inline completion 2382 ms, AC1 successful completion 394 ms |
+| Real-extension file standalone (`piSubagentRealExtension.test.ts`)                               | ~13/15 green; tail failures at 826–1101 ms (300 ms budget, 800 ms envelope)                                                                                              |
+| Mandated 4-file command (acceptance + reopen + real-extension + lifecycle in one vitest process) | ~5/11 green; failures 894–1316 ms                                                                                                                                        |
+| Full server suite (371 files)                                                                    | run 1 failed at 1296 ms; run 2 fully green (4384 passed)                                                                                                                 |
+| Isolated production chain (60 single-shot samples)                                               | 303–892 ms total (deadline 300 ms + seq2/seq3 SQLite commits + return)                                                                                                   |
 
 Interpretation: the production detach call chain itself meets the envelope on a functioning loop
 (303–680 ms typical). The strengthened evidence required by this remediation (real child
@@ -223,15 +223,15 @@ is run standalone — `piSubagentForegroundAcceptance`, `piSubagentForegroundReo
 for the AC5 wiring. Multi-file invocations of these files are expected to be intermittently red
 under load (documented harness noise, not a product defect).
 
-| Criterion | Source evidence | Verification evidence | Result |
-| --------- | --------------- | --------------------- | ------ |
-| T22-AC1 | `PiAdapter.ts` managed foreground binding + Alfie `index.ts` Outcome A | `piSubagentForegroundAcceptance.test.ts` ("T22-AC1 …") — now asserts successful completion text/status, not just identities | PASSED (standalone) |
-| T22-AC2, T22-AC3 | same | same file ("T22-AC2, T22-AC3 …"), now `budget + 500 ms`; measured 327 ms on 300 ms budget | PASSED standalone; envelope flaky in multi-file invocations (see Challenge) |
-| T22-AC4 | `PiSubagentExecutionRepository` + reopen harness | `piSubagentForegroundReopen.test.ts` (unchanged this package) | PASSED |
-| T22-AC5 | `apps/server/src/main.ts` (`ServerConfigLive`), `apps/server/src/config.ts` resolver | new `main.test.ts` wiring test (ServerConfigLive; 30000/abc/99/60001/unset) + acceptance AC5 session-path test | PASSED |
-| T22-AC6 | `PiAdapter.ts` capability gating; stripped-capability extension copy | acceptance "T22-AC6 …" — real adjacent legacy session, concurrent managed detach, zero legacy journal rows, no binding attached, managed pair 429 ms | PASSED (standalone) |
-| T22-AC7 | Alfie WP-06 commit `82406bd8` post-detach settlement cleanup | acceptance "T22-AC7 …" snapshots + Alfie extension suite (WP-06) | PASSED |
-| T22-AC8 | provenance manifest + verifier | acceptance "T22-AC8 …" against pinned commit `82406bd8…` | PASSED |
+| Criterion        | Source evidence                                                                      | Verification evidence                                                                                                                                | Result                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| T22-AC1          | `PiAdapter.ts` managed foreground binding + Alfie `index.ts` Outcome A               | `piSubagentForegroundAcceptance.test.ts` ("T22-AC1 …") — now asserts successful completion text/status, not just identities                          | PASSED (standalone)                                                         |
+| T22-AC2, T22-AC3 | same                                                                                 | same file ("T22-AC2, T22-AC3 …"), now `budget + 500 ms`; measured 327 ms on 300 ms budget                                                            | PASSED standalone; envelope flaky in multi-file invocations (see Challenge) |
+| T22-AC4          | `PiSubagentExecutionRepository` + reopen harness                                     | `piSubagentForegroundReopen.test.ts` (unchanged this package)                                                                                        | PASSED                                                                      |
+| T22-AC5          | `apps/server/src/main.ts` (`ServerConfigLive`), `apps/server/src/config.ts` resolver | new `main.test.ts` wiring test (ServerConfigLive; 30000/abc/99/60001/unset) + acceptance AC5 session-path test                                       | PASSED                                                                      |
+| T22-AC6          | `PiAdapter.ts` capability gating; stripped-capability extension copy                 | acceptance "T22-AC6 …" — real adjacent legacy session, concurrent managed detach, zero legacy journal rows, no binding attached, managed pair 429 ms | PASSED (standalone)                                                         |
+| T22-AC7          | Alfie WP-06 commit `82406bd8` post-detach settlement cleanup                         | acceptance "T22-AC7 …" snapshots + Alfie extension suite (WP-06)                                                                                     | PASSED                                                                      |
+| T22-AC8          | provenance manifest + verifier                                                       | acceptance "T22-AC8 …" against pinned commit `82406bd8…`                                                                                             | PASSED                                                                      |
 
 ### Verification commands and results (2026-08-17, WP-07)
 

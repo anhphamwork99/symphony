@@ -35,14 +35,14 @@ Envelope: Decision 0006 §5 `budget + 500 ms` = **800 ms** for AC2
 (300 ms budget). Failing assertion:
 `piSubagentForegroundAcceptance.test.ts:900` `expect(elapsed).toBeLessThan(foregroundWaitMs + 500)`.
 
-| # | Composition (under isolation config) | Result |
-|---|--------------------------------------|--------|
-| R1–R17 | Mandated 4-file invocation (`bun run test <acceptance> <reopen> <lifecycle> <realExtension>`) | **10 fail / 17 runs** (R2,R3,R7=1002 ms,R8=1119 ms,R10=937,R11=950,R12=1032,R13=935,R15=930,R17=963; green: R1,R4,R5,R6,R9,R14,R16) |
-| S1–S7 | Acceptance standalone (`bun run test src/provider/piSubagentForegroundAcceptance.test.ts`) | **7/7 green** (S5–S7 run immediately before R13–R15 in the same load window) |
-| E1 ×3 | Acceptance + 1 tiny dummy test file | 3/3 green |
-| E6 ×3 | Acceptance + 3 tiny dummy test files | 3/3 green |
-| E2 ×3 | Acceptance + realExtension (2 heavy files) | 1 fail (1061 ms) / 3 |
-| E4 ×3 | Fully separate invocations: acceptance alone, then reopen+lifecycle+realExtension together | acceptance standalone: 2 timing fails (943, 923 ms) + 1 completion-text fail ("Agent detached…" vs "Agent completed in"); rest-invocation 1/3 failed with **two** envelope fails in realExtension (923 ms in T21 suite, 1178 ms in T22-AC1..AC8) |
+| #      | Composition (under isolation config)                                                          | Result                                                                                                                                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1–R17 | Mandated 4-file invocation (`bun run test <acceptance> <reopen> <lifecycle> <realExtension>`) | **10 fail / 17 runs** (R2,R3,R7=1002 ms,R8=1119 ms,R10=937,R11=950,R12=1032,R13=935,R15=930,R17=963; green: R1,R4,R5,R6,R9,R14,R16)                                                                                                              |
+| S1–S7  | Acceptance standalone (`bun run test src/provider/piSubagentForegroundAcceptance.test.ts`)    | **7/7 green** (S5–S7 run immediately before R13–R15 in the same load window)                                                                                                                                                                     |
+| E1 ×3  | Acceptance + 1 tiny dummy test file                                                           | 3/3 green                                                                                                                                                                                                                                        |
+| E6 ×3  | Acceptance + 3 tiny dummy test files                                                          | 3/3 green                                                                                                                                                                                                                                        |
+| E2 ×3  | Acceptance + realExtension (2 heavy files)                                                    | 1 fail (1061 ms) / 3                                                                                                                                                                                                                             |
+| E4 ×3  | Fully separate invocations: acceptance alone, then reopen+lifecycle+realExtension together    | acceptance standalone: 2 timing fails (943, 923 ms) + 1 completion-text fail ("Agent detached…" vs "Agent completed in"); rest-invocation 1/3 failed with **two** envelope fails in realExtension (923 ms in T21 suite, 1178 ms in T22-AC1..AC8) |
 
 Key discriminator (same load window, sequential): S5/S6/S7 standalone green
 3/3 → immediately R13 fail (935 ms), R14 green, R15 fail (930 ms).

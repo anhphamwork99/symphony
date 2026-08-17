@@ -14,12 +14,24 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS,
+  DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ,
   MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  MAX_PI_SUBAGENT_LEASE_DURATION_MS,
+  MAX_PI_SUBAGENT_PROGRESS_RATE_HZ,
   MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  MIN_PI_SUBAGENT_LEASE_DURATION_MS,
+  MIN_PI_SUBAGENT_PROGRESS_RATE_HZ,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
   resolvePiSubagentForegroundWaitMs,
+  resolvePiSubagentHeartbeatIntervalMs,
+  resolvePiSubagentLeaseDurationMs,
+  resolvePiSubagentProgressRateHz,
   resolveStaticDir,
 } from "./config";
 
@@ -275,9 +287,193 @@ describe("resolvePiSubagentForegroundWaitMs (Issue 22 / WP-02)", () => {
 
     for (const { label, input } of invalidCases) {
       it(`falls back to default 10000 for ${label}`, () => {
-        expect(resolvePiSubagentForegroundWaitMs(input)).toBe(DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS);
+        expect(resolvePiSubagentForegroundWaitMs(input)).toBe(
+          DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+        );
       });
     }
   });
 });
 
+describe("resolvePiSubagentProgressRateHz (Issue 23 / WP-B)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ).toBe(2);
+    expect(MIN_PI_SUBAGENT_PROGRESS_RATE_HZ).toBe(0.1);
+    expect(MAX_PI_SUBAGENT_PROGRESS_RATE_HZ).toBe(10);
+  });
+
+  describe("valid inputs", () => {
+    const validCases: Array<{ label: string; input: unknown; expected: number }> = [
+      { label: "exact min endpoint (number)", input: 0.1, expected: 0.1 },
+      { label: "exact min endpoint (string)", input: "0.1", expected: 0.1 },
+      { label: "exact max endpoint (number)", input: 10, expected: 10 },
+      { label: "exact max endpoint (string)", input: "10", expected: 10 },
+      { label: "default (number)", input: 2, expected: 2 },
+      { label: "default (string)", input: "2", expected: 2 },
+      { label: "fractional interior 2.5 (number)", input: 2.5, expected: 2.5 },
+      { label: "fractional interior 2.5 (string)", input: "2.5", expected: 2.5 },
+      { label: "leading-dot fractional '.5'", input: ".5", expected: 0.5 },
+      { label: "trailing-dot fractional '2.'", input: "2.", expected: 2 },
+      { label: "integer-valued float 4.0 (number)", input: 4.0, expected: 4 },
+      { label: "whitespace-trimmed '  3  '", input: "  3  ", expected: 3 },
+      { label: "explicit sign '+5'", input: "+5", expected: 5 },
+    ];
+    for (const { label, input, expected } of validCases) {
+      it(`resolves ${label}`, () => {
+        expect(resolvePiSubagentProgressRateHz(input)).toBe(expected);
+      });
+    }
+  });
+
+  describe("invalid inputs (fallback to 2 without clamping)", () => {
+    const invalidCases: Array<{ label: string; input: unknown }> = [
+      { label: "undefined input", input: undefined },
+      { label: "null input", input: null },
+      { label: "empty string", input: "" },
+      { label: "whitespace-only string", input: "   " },
+      { label: "alphanumeric string 'abc'", input: "abc" },
+      { label: "unit-suffixed string '2hz'", input: "2hz" },
+      { label: "hex string '0x2'", input: "0x2" },
+      { label: "exponent string '2e1'", input: "2e1" },
+      { label: "underscore string '1_0'", input: "1_0" },
+      { label: "boolean true", input: true },
+      { label: "plain object", input: {} },
+      { label: "array", input: [2] },
+      { label: "Infinity (number)", input: Infinity },
+      { label: "NaN (number)", input: NaN },
+      { label: "'Infinity' (string)", input: "Infinity" },
+      { label: "'NaN' (string)", input: "NaN" },
+      { label: "under-range 0.09 (number)", input: 0.09 },
+      { label: "under-range '0.05' (string)", input: "0.05" },
+      { label: "zero 0 (number)", input: 0 },
+      { label: "negative -2 (number)", input: -2 },
+      { label: "negative '-2' (string)", input: "-2" },
+      { label: "over-range 10.1 (number)", input: 10.1 },
+      { label: "over-range '11' (string)", input: "11" },
+      { label: "over-range 1000 (number)", input: 1000 },
+    ];
+    for (const { label, input } of invalidCases) {
+      it(`falls back to default 2 for ${label}`, () => {
+        expect(resolvePiSubagentProgressRateHz(input)).toBe(DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ);
+      });
+    }
+  });
+});
+
+describe("resolvePiSubagentHeartbeatIntervalMs (Issue 23 / WP-B)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS).toBe(10000);
+    expect(MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS).toBe(100);
+    expect(MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS).toBe(600000);
+  });
+
+  describe("valid inputs", () => {
+    const validCases: Array<{ label: string; input: unknown; expected: number }> = [
+      { label: "exact min endpoint (number)", input: 100, expected: 100 },
+      { label: "exact min endpoint (string)", input: "100", expected: 100 },
+      { label: "exact max endpoint (number)", input: 600000, expected: 600000 },
+      { label: "exact max endpoint (string)", input: "600000", expected: 600000 },
+      { label: "default (number)", input: 10000, expected: 10000 },
+      { label: "default (string)", input: "10000", expected: 10000 },
+      { label: "interior 5000 (number)", input: 5000, expected: 5000 },
+      { label: "interior 5000 (string)", input: "5000", expected: 5000 },
+      { label: "whitespace-trimmed '  15000  '", input: "  15000  ", expected: 15000 },
+      { label: "explicit sign '+30000'", input: "+30000", expected: 30000 },
+    ];
+    for (const { label, input, expected } of validCases) {
+      it(`resolves ${label}`, () => {
+        expect(resolvePiSubagentHeartbeatIntervalMs(input)).toBe(expected);
+      });
+    }
+  });
+
+  describe("invalid inputs (fallback to 10000 without clamping)", () => {
+    const invalidCases: Array<{ label: string; input: unknown }> = [
+      { label: "undefined input", input: undefined },
+      { label: "null input", input: null },
+      { label: "empty string", input: "" },
+      { label: "whitespace-only string", input: "   " },
+      { label: "alphanumeric string 'abc'", input: "abc" },
+      { label: "unit-suffixed string '10000ms'", input: "10000ms" },
+      { label: "underscore string '10_000'", input: "10_000" },
+      { label: "boolean true", input: true },
+      { label: "plain object", input: {} },
+      { label: "Infinity (number)", input: Infinity },
+      { label: "NaN (number)", input: NaN },
+      { label: "fractional 10000.5 (number)", input: 10000.5 },
+      { label: "fractional '100.5' (string)", input: "100.5" },
+      { label: "under-range 99 (number)", input: 99 },
+      { label: "under-range '99' (string)", input: "99" },
+      { label: "zero 0 (number)", input: 0 },
+      { label: "negative -1 (number)", input: -1 },
+      { label: "over-range 600001 (number)", input: 600001 },
+      { label: "over-range '600001' (string)", input: "600001" },
+      { label: "over-range 1000000 (number)", input: 1000000 },
+    ];
+    for (const { label, input } of invalidCases) {
+      it(`falls back to default 10000 for ${label}`, () => {
+        expect(resolvePiSubagentHeartbeatIntervalMs(input)).toBe(
+          DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+        );
+      });
+    }
+  });
+});
+
+describe("resolvePiSubagentLeaseDurationMs (Issue 23 / WP-B)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS).toBe(30000);
+    expect(MIN_PI_SUBAGENT_LEASE_DURATION_MS).toBe(1000);
+    expect(MAX_PI_SUBAGENT_LEASE_DURATION_MS).toBe(3600000);
+  });
+
+  describe("valid inputs", () => {
+    const validCases: Array<{ label: string; input: unknown; expected: number }> = [
+      { label: "exact min endpoint (number)", input: 1000, expected: 1000 },
+      { label: "exact min endpoint (string)", input: "1000", expected: 1000 },
+      { label: "exact max endpoint (number)", input: 3600000, expected: 3600000 },
+      { label: "exact max endpoint (string)", input: "3600000", expected: 3600000 },
+      { label: "default (number)", input: 30000, expected: 30000 },
+      { label: "default (string)", input: "30000", expected: 30000 },
+      { label: "interior 120000 (number)", input: 120000, expected: 120000 },
+      { label: "interior 120000 (string)", input: "120000", expected: 120000 },
+      { label: "whitespace-trimmed '  45000  '", input: "  45000  ", expected: 45000 },
+      { label: "explicit sign '+60000'", input: "+60000", expected: 60000 },
+    ];
+    for (const { label, input, expected } of validCases) {
+      it(`resolves ${label}`, () => {
+        expect(resolvePiSubagentLeaseDurationMs(input)).toBe(expected);
+      });
+    }
+  });
+
+  describe("invalid inputs (fallback to 30000 without clamping)", () => {
+    const invalidCases: Array<{ label: string; input: unknown }> = [
+      { label: "undefined input", input: undefined },
+      { label: "null input", input: null },
+      { label: "empty string", input: "" },
+      { label: "whitespace-only string", input: "   " },
+      { label: "alphanumeric string 'abc'", input: "abc" },
+      { label: "unit-suffixed string '30s'", input: "30s" },
+      { label: "underscore string '30_000'", input: "30_000" },
+      { label: "boolean true", input: true },
+      { label: "plain object", input: {} },
+      { label: "Infinity (number)", input: Infinity },
+      { label: "NaN (number)", input: NaN },
+      { label: "fractional 30000.5 (number)", input: 30000.5 },
+      { label: "fractional '1000.5' (string)", input: "1000.5" },
+      { label: "under-range 999 (number)", input: 999 },
+      { label: "under-range '999' (string)", input: "999" },
+      { label: "zero 0 (number)", input: 0 },
+      { label: "negative -1000 (number)", input: -1000 },
+      { label: "over-range 3600001 (number)", input: 3600001 },
+      { label: "over-range '3600001' (string)", input: "3600001" },
+      { label: "over-range 7200000 (number)", input: 7200000 },
+    ];
+    for (const { label, input } of invalidCases) {
+      it(`falls back to default 30000 for ${label}`, () => {
+        expect(resolvePiSubagentLeaseDurationMs(input)).toBe(DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS);
+      });
+    }
+  });
+});

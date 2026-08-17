@@ -24,6 +24,9 @@ import {
   remoteAccessPolicyError,
   resolveCanonicalWorkspaceRoots,
   resolvePiSubagentForegroundWaitMs,
+  resolvePiSubagentHeartbeatIntervalMs,
+  resolvePiSubagentLeaseDurationMs,
+  resolvePiSubagentProgressRateHz,
   resolveStaticDir,
   ServerConfig,
   type RuntimeMode,
@@ -169,9 +172,10 @@ const CliEnvConfig = Config.all({
   ),
   logProviderEvents: optionalBooleanEnvironmentConfig("SYNARA_LOG_PROVIDER_EVENTS"),
   logWebSocketEvents: optionalBooleanEnvironmentConfig("SYNARA_LOG_WS_EVENTS"),
-  antigravityTerminalRecoveryMode: Config.string(
-    "SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE",
-  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityTerminalRecoveryMode: Config.string("SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   antigravityTerminalRecoveryGraceMs: Config.string(
     "SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS",
   ).pipe(Config.option, Config.map(Option.getOrUndefined)),
@@ -335,6 +339,15 @@ const ServerConfigLive = (input: CliInput) =>
         antigravityTerminalRecoveryGraceMs,
         piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
           process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+        ),
+        piSubagentProgressRateHz: resolvePiSubagentProgressRateHz(
+          process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ,
+        ),
+        piSubagentHeartbeatIntervalMs: resolvePiSubagentHeartbeatIntervalMs(
+          process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+        ),
+        piSubagentLeaseDurationMs: resolvePiSubagentLeaseDurationMs(
+          process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS,
         ),
       } satisfies ServerConfigShape;
 

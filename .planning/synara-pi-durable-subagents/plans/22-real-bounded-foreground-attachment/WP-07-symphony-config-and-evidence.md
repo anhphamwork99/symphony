@@ -24,7 +24,7 @@ This package owns the Symphony half:
 - **T22-AC5:** `SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS` is resolved only inside
   `ServerConfig.layerTest` (`apps/server/src/config.ts` — the `layerTest`
   builder sets `piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
-  process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS)`). The production
+process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS)`). The production
   `ServerConfigLive` builder in `apps/server/src/main.ts` never sets the field,
   so `PiAdapter`'s `serverConfig.piSubagentForegroundWaitMs ?? DEFAULT`
   fallback always wins in a real server. Decision 0006 §5 makes this env key

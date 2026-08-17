@@ -9,7 +9,11 @@
 // hold across valid paired repetitions) feeds the non-binding recommendation,
 // not the run-set sufficiency gate; per-repetition component sign agreement in
 // paired deltas stays descriptive data.
-import { PI_RECONCILIATION_RULE, reconcileRawVsNormalized, reconcileSessionStats } from "./reconciliation.ts";
+import {
+  PI_RECONCILIATION_RULE,
+  reconcileRawVsNormalized,
+  reconcileSessionStats,
+} from "./reconciliation.ts";
 import type {
   ComponentSummary,
   EvidenceVerdict,
@@ -61,9 +65,10 @@ export interface TurnMeasurementInput {
 
 export function makeTurnMeasurement(input: TurnMeasurementInput): TurnMeasurement {
   const reconcile = reconcileSessionStats(input.after);
-  const crossCheck = input.skipCrossCheck === true
-    ? { ok: true as const, failures: [] as readonly string[] }
-    : reconcileRawVsNormalized(input.after, input.normalized);
+  const crossCheck =
+    input.skipCrossCheck === true
+      ? { ok: true as const, failures: [] as readonly string[] }
+      : reconcileRawVsNormalized(input.after, input.normalized);
   const invalidReasons: string[] = [];
   if (!reconcile.ok) invalidReasons.push(`reconciliation: ${reconcile.failures.join("; ")}`);
   if (!crossCheck.ok) invalidReasons.push(`cross-check: ${crossCheck.failures.join("; ")}`);
@@ -172,10 +177,7 @@ export function buildRunSetSummary(input: {
   const pairedDeltas = computePairedDeltas(validRepetitions);
   const componentKeys = ["input", "output", "cacheRead", "cacheWrite", "total"] as const;
   const components = Object.fromEntries(
-    componentKeys.map((key) => [
-      key,
-      componentSummary(pairedDeltas.map((delta) => delta[key])),
-    ]),
+    componentKeys.map((key) => [key, componentSummary(pairedDeltas.map((delta) => delta[key]))]),
   ) as RunSetSummary["components"];
   return {
     mode: input.mode,

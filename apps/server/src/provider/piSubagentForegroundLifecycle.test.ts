@@ -75,7 +75,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       autoBootstrapProjectFromCwd: false,
       logProviderEvents: false,
       logWebSocketEvents: false,
-      piSubagentForegroundWaitMs: options?.foregroundWaitMs,
+      ...(options?.foregroundWaitMs !== undefined
+        ? { piSubagentForegroundWaitMs: options.foregroundWaitMs }
+        : {}),
     };
 
     const registry = makeMcpSessionAuthorityRegistry();

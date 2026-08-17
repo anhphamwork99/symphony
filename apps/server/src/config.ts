@@ -28,6 +28,127 @@ export const DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS = 10000;
 export const MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS = 100;
 export const MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS = 60000;
 
+// Ticket 23: progress / heartbeat / lease knobs follow the exact resolver
+// contract of resolvePiSubagentForegroundWaitMs — nullish → default, range
+// check, invalid anything → default, never clamped (T23-AC7).
+export const DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ = 2;
+export const MIN_PI_SUBAGENT_PROGRESS_RATE_HZ = 0.1;
+export const MAX_PI_SUBAGENT_PROGRESS_RATE_HZ = 10;
+
+export const DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = 10000;
+export const MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = 100;
+export const MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS = 600000;
+
+export const DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS = 30000;
+export const MIN_PI_SUBAGENT_LEASE_DURATION_MS = 1000;
+export const MAX_PI_SUBAGENT_LEASE_DURATION_MS = 3600000;
+
+export function resolvePiSubagentProgressRateHz(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_PROGRESS_RATE_HZ ||
+      rawInput > MAX_PI_SUBAGENT_PROGRESS_RATE_HZ
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (trimmed === "" || !/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      parsed < MIN_PI_SUBAGENT_PROGRESS_RATE_HZ ||
+      parsed > MAX_PI_SUBAGENT_PROGRESS_RATE_HZ
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+}
+
+export function resolvePiSubagentHeartbeatIntervalMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS ||
+      rawInput > MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS ||
+      parsed > MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+}
+
+export function resolvePiSubagentLeaseDurationMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_LEASE_DURATION_MS ||
+      rawInput > MAX_PI_SUBAGENT_LEASE_DURATION_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_LEASE_DURATION_MS ||
+      parsed > MAX_PI_SUBAGENT_LEASE_DURATION_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+}
+
 export function resolvePiSubagentForegroundWaitMs(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -152,6 +273,9 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly antigravityTerminalRecoveryMode?: AntigravityTerminalRecoveryMode;
   readonly antigravityTerminalRecoveryGraceMs?: number;
   readonly piSubagentForegroundWaitMs?: number;
+  readonly piSubagentProgressRateHz?: number;
+  readonly piSubagentHeartbeatIntervalMs?: number;
+  readonly piSubagentLeaseDurationMs?: number;
 }
 
 export function preparePrivateServerPaths(
@@ -312,6 +436,15 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           noBrowser: false,
           piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
             process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+          ),
+          piSubagentProgressRateHz: resolvePiSubagentProgressRateHz(
+            process.env.SYNARA_PI_SUBAGENT_PROGRESS_RATE_HZ,
+          ),
+          piSubagentHeartbeatIntervalMs: resolvePiSubagentHeartbeatIntervalMs(
+            process.env.SYNARA_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+          ),
+          piSubagentLeaseDurationMs: resolvePiSubagentLeaseDurationMs(
+            process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS,
           ),
         } satisfies ServerConfigShape;
       }),

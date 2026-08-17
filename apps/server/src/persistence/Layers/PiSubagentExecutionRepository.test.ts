@@ -1,8 +1,13 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Exit, Layer, Option } from "effect";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect } from "vitest";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../Layers/Sqlite.ts";
+import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "../Layers/Sqlite.ts";
 import { PiSubagentExecutionRepository } from "../Services/PiSubagentExecutionRepository.ts";
 import { PiSubagentExecutionRepositoryLive } from "./PiSubagentExecutionRepository.ts";
 
@@ -37,7 +42,7 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
       const repo = yield* PiSubagentExecutionRepository;
 
       const result = yield* repo.recordAdmission(baseAdmission);
-      assert.equal(result.kind, "admitted");
+      assert(result.kind === "admitted");
       assert.equal(result.execution.executionId, "exec_test_001");
       assert.equal(result.execution.attemptId, "att_001");
       assert.equal(result.execution.generation, 1);
@@ -61,218 +66,227 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
     }),
   );
 
-  it.effect("T20-AC3: replaying commandId within the same ownership scope returns already_applied and creates no duplicate", () =>
-    Effect.gen(function* () {
-      const repo = yield* PiSubagentExecutionRepository;
+  it.effect(
+    "T20-AC3: replaying commandId within the same ownership scope returns already_applied and creates no duplicate",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* PiSubagentExecutionRepository;
 
-      const replayResult = yield* repo.recordAdmission({
-        ...baseAdmission,
-        executionId: "exec_test_should_not_overwrite",
-        attemptId: "att_002",
-        now: "2026-08-16T12:05:00.000Z",
-      });
+        const replayResult = yield* repo.recordAdmission({
+          ...baseAdmission,
+          executionId: "exec_test_should_not_overwrite",
+          attemptId: "att_002",
+          now: "2026-08-16T12:05:00.000Z",
+        });
 
-      assert.equal(replayResult.kind, "already_applied");
-      assert.equal(replayResult.execution.executionId, "exec_test_001");
-      assert.equal(replayResult.execution.attemptId, "att_001");
+        assert(replayResult.kind === "already_applied");
+        assert.equal(replayResult.execution.executionId, "exec_test_001");
+        assert.equal(replayResult.execution.attemptId, "att_001");
 
-      // Confirm no second journal event was created for the existing execution
-      const journalEvents = yield* repo.listJournalEvents("exec_test_001");
-      assert.equal(journalEvents.length, 1);
-    }),
+        // Confirm no second journal event was created for the existing execution
+        const journalEvents = yield* repo.listJournalEvents("exec_test_001");
+        assert.equal(journalEvents.length, 1);
+      }),
   );
 
-  it.effect("T20-AC3: concurrent duplicate commands within the same scope create exactly 1 execution without SQL uniqueness error", () =>
-    Effect.gen(function* () {
-      const repo = yield* PiSubagentExecutionRepository;
-      const concurrentCommandId = "cmd_concurrent_test_123";
+  it.effect(
+    "T20-AC3: concurrent duplicate commands within the same scope create exactly 1 execution without SQL uniqueness error",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* PiSubagentExecutionRepository;
+        const concurrentCommandId = "cmd_concurrent_test_123";
 
-      const attempts = Array.from({ length: 8 }, (_, i) => ({
-        ...baseAdmission,
-        executionId: `exec_concurrent_${i}`,
-        attemptId: `att_concurrent_${i}`,
-        commandId: concurrentCommandId,
-        now: new Date(Date.now() + i * 100).toISOString(),
-      }));
+        const attempts = Array.from({ length: 8 }, (_, i) => ({
+          ...baseAdmission,
+          executionId: `exec_concurrent_${i}`,
+          attemptId: `att_concurrent_${i}`,
+          commandId: concurrentCommandId,
+          now: new Date(Date.now() + i * 100).toISOString(),
+        }));
 
-      const results = yield* Effect.all(
-        attempts.map((cmd) => repo.recordAdmission(cmd)),
-        { concurrency: "unbounded" },
-      );
+        const results = yield* Effect.all(
+          attempts.map((cmd) => repo.recordAdmission(cmd)),
+          { concurrency: "unbounded" },
+        );
 
-      // Exactly 1 was admitted, others returned already_applied
-      const admitted = results.filter((r) => r.kind === "admitted");
-      const alreadyApplied = results.filter((r) => r.kind === "already_applied");
+        // Exactly 1 was admitted, others returned already_applied
+        const admitted = results.filter((r) => r.kind === "admitted");
+        const alreadyApplied = results.filter((r) => r.kind === "already_applied");
 
-      assert.equal(admitted.length, 1);
-      assert.equal(alreadyApplied.length, 7);
+        assert.equal(admitted.length, 1);
+        assert.equal(alreadyApplied.length, 7);
 
-      const winningExecutionId = admitted[0]!.execution.executionId;
-      for (const res of results) {
-        assert.equal(res.execution.executionId, winningExecutionId);
-      }
+        const winningExecutionId = admitted[0]!.execution.executionId;
+        for (const res of results) {
+          assert(res.kind === "admitted" || res.kind === "already_applied");
+          assert.equal(res.execution.executionId, winningExecutionId);
+        }
 
-      const journal = yield* repo.listJournalEvents(winningExecutionId);
-      assert.equal(journal.length, 1);
-    }),
+        const journal = yield* repo.listJournalEvents(winningExecutionId);
+        assert.equal(journal.length, 1);
+      }),
   );
 
-  it.effect("T20-AC4: lifecycle redelivery is idempotent and attempt 2 generation 2 restarts its own sequence at 1 (no collision, no stale regression)", () =>
-    Effect.gen(function* () {
-      const repo = yield* PiSubagentExecutionRepository;
-      const execId = "exec_lifecycle_001";
-      const att1 = "att_001";
-      const att2 = "att_002";
+  it.effect(
+    "T20-AC4: lifecycle redelivery is idempotent and attempt 2 generation 2 restarts its own sequence at 1 (no collision, no stale regression)",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* PiSubagentExecutionRepository;
+        const execId = "exec_lifecycle_001";
+        const att1 = "att_001";
+        const att2 = "att_002";
 
-      // 1. Admission (attempt 1)
-      yield* repo.recordAdmission({
-        ...baseAdmission,
-        executionId: execId,
-        attemptId: att1,
-        commandId: "cmd_lifecycle_001",
-        state: "accepted",
-        now: "2026-08-16T12:00:00.000Z",
-      });
+        // 1. Admission (attempt 1)
+        yield* repo.recordAdmission({
+          ...baseAdmission,
+          executionId: execId,
+          attemptId: att1,
+          commandId: "cmd_lifecycle_001",
+          state: "accepted",
+          now: "2026-08-16T12:00:00.000Z",
+        });
 
-      // 2. Lifecycle event: running
-      const record1 = yield* repo.recordLifecycleEvent({
-        eventId: "evt_running_1",
-        executionId: execId,
-        attemptId: att1,
-        generation: 1,
-        sequence: 2,
-        state: "running",
-        occurredAt: "2026-08-16T12:00:01.000Z",
-      });
-      assert.equal(record1.kind, "recorded");
-      assert.equal(record1.execution.observedState, "running");
+        // 2. Lifecycle event: running
+        const record1 = yield* repo.recordLifecycleEvent({
+          eventId: "evt_running_1",
+          executionId: execId,
+          attemptId: att1,
+          generation: 1,
+          sequence: 2,
+          state: "running",
+          occurredAt: "2026-08-16T12:00:01.000Z",
+        });
+        assert.equal(record1.kind, "recorded");
+        assert.equal(record1.execution.observedState, "running");
 
-      // 3. Redelivery of running event (idempotency)
-      const replayEvent = yield* repo.recordLifecycleEvent({
-        eventId: "evt_running_1",
-        executionId: execId,
-        attemptId: att1,
-        generation: 1,
-        sequence: 2,
-        state: "running",
-        occurredAt: "2026-08-16T12:00:01.000Z",
-      });
-      assert.equal(replayEvent.kind, "already_applied");
-      assert.equal(replayEvent.event.eventId, "evt_running_1");
+        // 3. Redelivery of running event (idempotency)
+        const replayEvent = yield* repo.recordLifecycleEvent({
+          eventId: "evt_running_1",
+          executionId: execId,
+          attemptId: att1,
+          generation: 1,
+          sequence: 2,
+          state: "running",
+          occurredAt: "2026-08-16T12:00:01.000Z",
+        });
+        assert.equal(replayEvent.kind, "already_applied");
+        assert.equal(replayEvent.event.eventId, "evt_running_1");
 
-      // 4. Attempt 1 failed
-      yield* repo.recordLifecycleEvent({
-        eventId: "evt_failed_1",
-        executionId: execId,
-        attemptId: att1,
-        generation: 1,
-        sequence: 3,
-        state: "failed",
-        occurredAt: "2026-08-16T12:00:02.000Z",
-        diagnosticCode: "pi_subagent_admission_rejected",
-        diagnosticMessage: "Attempt 1 failed",
-      });
+        // 4. Attempt 1 failed
+        yield* repo.recordLifecycleEvent({
+          eventId: "evt_failed_1",
+          executionId: execId,
+          attemptId: att1,
+          generation: 1,
+          sequence: 3,
+          state: "failed",
+          occurredAt: "2026-08-16T12:00:02.000Z",
+          diagnosticCode: "pi_subagent_admission_rejected",
+          diagnosticMessage: "Attempt 1 failed",
+        });
 
-      // 5. Future attempt 2 on resume: generation 2, attempt att_002,
-      //    sequence 1 — the audit repro: this must be RECORDED, not returned
-      //    as attempt 1's sequence-1 already_applied.
-      const resumeRecord = yield* repo.recordLifecycleEvent({
-        eventId: "evt_running_2",
-        executionId: execId,
-        attemptId: att2,
-        generation: 2,
-        sequence: 1,
-        state: "running",
-        occurredAt: "2026-08-16T12:05:00.000Z",
-      });
-      assert.equal(resumeRecord.kind, "recorded");
-      assert.equal(resumeRecord.execution.attemptId, att2);
-      assert.equal(resumeRecord.execution.generation, 2);
-      assert.equal(resumeRecord.execution.observedState, "running");
+        // 5. Future attempt 2 on resume: generation 2, attempt att_002,
+        //    sequence 1 — the audit repro: this must be RECORDED, not returned
+        //    as attempt 1's sequence-1 already_applied.
+        const resumeRecord = yield* repo.recordLifecycleEvent({
+          eventId: "evt_running_2",
+          executionId: execId,
+          attemptId: att2,
+          generation: 2,
+          sequence: 1,
+          state: "running",
+          occurredAt: "2026-08-16T12:05:00.000Z",
+        });
+        assert.equal(resumeRecord.kind, "recorded");
+        assert.equal(resumeRecord.execution.attemptId, att2);
+        assert.equal(resumeRecord.execution.generation, 2);
+        assert.equal(resumeRecord.execution.observedState, "running");
 
-      // 6. Stale-event non-regression: a LATE attempt-1 event must be
-      //    journaled as history but must NOT regress the current aggregate.
-      const stale = yield* repo.recordLifecycleEvent({
-        eventId: "evt_late_att1",
-        executionId: execId,
-        attemptId: att1,
-        generation: 1,
-        sequence: 99,
-        state: "succeeded",
-        occurredAt: "2026-08-16T12:06:00.000Z",
-      });
-      assert.equal(stale.kind, "recorded");
-      assert.equal(stale.execution.attemptId, att2);
-      assert.equal(stale.execution.generation, 2);
-      assert.equal(stale.execution.observedState, "running");
+        // 6. Stale-event non-regression: a LATE attempt-1 event must be
+        //    journaled as history but must NOT regress the current aggregate.
+        const stale = yield* repo.recordLifecycleEvent({
+          eventId: "evt_late_att1",
+          executionId: execId,
+          attemptId: att1,
+          generation: 1,
+          sequence: 99,
+          state: "succeeded",
+          occurredAt: "2026-08-16T12:06:00.000Z",
+        });
+        assert.equal(stale.kind, "recorded");
+        assert.equal(stale.execution.attemptId, att2);
+        assert.equal(stale.execution.generation, 2);
+        assert.equal(stale.execution.observedState, "running");
 
-      const journal = yield* repo.listJournalEvents(execId);
-      assert.equal(journal.length, 5);
-      // Deterministic journal ordering: generation first, then attempt-local
-      // sequence (attempt 1 history, then attempt 2).
-      assert.equal(journal[0]!.sequence, 1);
-      assert.equal(journal[0]!.attemptId, att1);
-      assert.equal(journal[0]!.state, "accepted");
-      assert.equal(journal[1]!.sequence, 2);
-      assert.equal(journal[1]!.state, "running");
-      assert.equal(journal[2]!.sequence, 3);
-      assert.equal(journal[2]!.state, "failed");
-      assert.equal(journal[3]!.sequence, 99);
-      assert.equal(journal[3]!.attemptId, att1);
-      assert.equal(journal[3]!.state, "succeeded");
-      assert.equal(journal[4]!.sequence, 1);
-      assert.equal(journal[4]!.attemptId, att2);
-      assert.equal(journal[4]!.generation, 2);
-      assert.equal(journal[4]!.state, "running");
-    }),
+        const journal = yield* repo.listJournalEvents(execId);
+        assert.equal(journal.length, 5);
+        // Deterministic journal ordering: generation first, then attempt-local
+        // sequence (attempt 1 history, then attempt 2).
+        assert.equal(journal[0]!.sequence, 1);
+        assert.equal(journal[0]!.attemptId, att1);
+        assert.equal(journal[0]!.state, "accepted");
+        assert.equal(journal[1]!.sequence, 2);
+        assert.equal(journal[1]!.state, "running");
+        assert.equal(journal[2]!.sequence, 3);
+        assert.equal(journal[2]!.state, "failed");
+        assert.equal(journal[3]!.sequence, 99);
+        assert.equal(journal[3]!.attemptId, att1);
+        assert.equal(journal[3]!.state, "succeeded");
+        assert.equal(journal[4]!.sequence, 1);
+        assert.equal(journal[4]!.attemptId, att2);
+        assert.equal(journal[4]!.generation, 2);
+        assert.equal(journal[4]!.state, "running");
+      }),
   );
 
-  it.effect("T20-AC2/AC5: same commandId under a different ownership scope fails closed mid-transaction with zero partial rows/events", () =>
-    Effect.gen(function* () {
-      const repo = yield* PiSubagentExecutionRepository;
+  it.effect(
+    "T20-AC2/AC5: same commandId under a different ownership scope fails closed mid-transaction with zero partial rows/events",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* PiSubagentExecutionRepository;
 
-      // Scope A admits the command.
-      const first = yield* repo.recordAdmission({
-        ...baseAdmission,
-        executionId: "exec_scope_a",
-        attemptId: "att_scope_a",
-        commandId: "cmd_cross_scope_1",
-        commandFingerprint: "fingerprint_scope_a",
-        now: "2026-08-16T12:00:00.000Z",
-      });
-      assert.equal(first.kind, "admitted");
+        // Scope A admits the command.
+        const first = yield* repo.recordAdmission({
+          ...baseAdmission,
+          executionId: "exec_scope_a",
+          attemptId: "att_scope_a",
+          commandId: "cmd_cross_scope_1",
+          commandFingerprint: "fingerprint_scope_a",
+          now: "2026-08-16T12:00:00.000Z",
+        });
+        assert.equal(first.kind, "admitted");
 
-      // Scope B replays the same commandId with a different fingerprint: the
-      // journal write succeeds inside the transaction, then the executions
-      // INSERT hits the released command_id UNIQUE constraint — the real
-      // injected failure BETWEEN the two writes. The transaction must roll
-      // back completely: no partial journal event, no duplicate row, and a
-      // deterministic command_identity_mismatch (never the other execution's
-      // identities).
-      const second = yield* repo.recordAdmission({
-        ...baseAdmission,
-        executionId: "exec_scope_b",
-        attemptId: "att_scope_b",
-        commandId: "cmd_cross_scope_1",
-        commandFingerprint: "fingerprint_scope_b",
-        now: "2026-08-16T12:05:00.000Z",
-      });
-      assert.equal(second.kind, "command_identity_mismatch");
-      assert.equal(second.commandId, "cmd_cross_scope_1");
+        // Scope B replays the same commandId with a different fingerprint: the
+        // journal write succeeds inside the transaction, then the executions
+        // INSERT hits the released command_id UNIQUE constraint — the real
+        // injected failure BETWEEN the two writes. The transaction must roll
+        // back completely: no partial journal event, no duplicate row, and a
+        // deterministic command_identity_mismatch (never the other execution's
+        // identities).
+        const second = yield* repo.recordAdmission({
+          ...baseAdmission,
+          executionId: "exec_scope_b",
+          attemptId: "att_scope_b",
+          commandId: "cmd_cross_scope_1",
+          commandFingerprint: "fingerprint_scope_b",
+          now: "2026-08-16T12:05:00.000Z",
+        });
+        assert(second.kind === "command_identity_mismatch");
+        assert.equal(second.commandId, "cmd_cross_scope_1");
 
-      // Zero partial rows/events: the journal still holds exactly the single
-      // sequence-1 event from scope A and the executions table still holds
-      // exactly one row.
-      const journal = yield* repo.listJournalEvents("exec_scope_a");
-      assert.equal(journal.length, 1);
-      const scoped = yield* repo.getById("exec_scope_b");
-      assert.isTrue(Option.isNone(scoped));
-      const byCommand = yield* repo.getByCommandId("cmd_cross_scope_1");
-      assert.isTrue(Option.isSome(byCommand));
-      if (Option.isSome(byCommand)) {
-        assert.equal(byCommand.value.executionId, "exec_scope_a");
-      }
-    }),
+        // Zero partial rows/events: the journal still holds exactly the single
+        // sequence-1 event from scope A and the executions table still holds
+        // exactly one row.
+        const journal = yield* repo.listJournalEvents("exec_scope_a");
+        assert.equal(journal.length, 1);
+        const scoped = yield* repo.getById("exec_scope_b");
+        assert.isTrue(Option.isNone(scoped));
+        const byCommand = yield* repo.getByCommandId("cmd_cross_scope_1");
+        assert.isTrue(Option.isSome(byCommand));
+        if (Option.isSome(byCommand)) {
+          assert.equal(byCommand.value.executionId, "exec_scope_a");
+        }
+      }),
   );
 
   it.effect("records terminal rejected execution with stable diagnostic", () =>
@@ -290,7 +304,7 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
       };
 
       const result = yield* repo.recordAdmission(rejectAdmission);
-      assert.equal(result.kind, "admitted");
+      assert(result.kind === "admitted");
       assert.equal(result.execution.observedState, "rejected");
       assert.equal(result.execution.desiredState, "rejected");
       assert.equal(result.execution.diagnosticCode, "pi_subagent_admission_unauthorized");
@@ -422,6 +436,263 @@ describe("PiSubagentExecutionRepository disk reopen (T20-AC8)", () => {
             ),
           ),
         ),
+      );
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+describe("PiSubagentExecutionRepository observations (Issue 23 / T23-AC3/AC4/AC8)", () => {
+  it.layer(PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)))(
+    "progress/heartbeat observations and reader",
+    (it) => {
+      const execId = "exec_t23_obs_001";
+
+      it.effect(
+        "recordProgressObservation updates latest snapshot and accumulates dropped counter",
+        () =>
+          Effect.gen(function* () {
+            const repo = yield* PiSubagentExecutionRepository;
+            const admission = yield* repo.recordAdmission({
+              ...baseAdmission,
+              executionId: execId,
+              commandId: "cmd_t23_obs_001",
+              now: "2026-08-18T00:00:00.000Z",
+            });
+            assert.equal(admission.kind, "admitted");
+
+            yield* repo.recordProgressObservation({
+              executionId: execId,
+              progressJson: '{"turnCount":1}',
+              occurredAt: "2026-08-18T00:00:01.000Z",
+              droppedCountDelta: 0,
+            });
+            yield* repo.recordProgressObservation({
+              executionId: execId,
+              progressJson: '{"turnCount":5}',
+              occurredAt: "2026-08-18T00:00:02.000Z",
+              droppedCountDelta: 3,
+            });
+            yield* repo.recordProgressObservation({
+              executionId: execId,
+              progressJson: '{"turnCount":9}',
+              occurredAt: "2026-08-18T00:00:03.000Z",
+              droppedCountDelta: 7,
+            });
+
+            const observationOption = yield* repo.getObservation(execId);
+            assert.isTrue(Option.isSome(observationOption));
+            if (Option.isSome(observationOption)) {
+              const obs = observationOption.value;
+              // Latest snapshot wins (trailing edge).
+              assert.equal(obs.lastProgressJson, '{"turnCount":9}');
+              assert.equal(obs.lastProgressAt, "2026-08-18T00:00:03.000Z");
+              assert.equal(obs.droppedProgressCount, 10);
+              // Heartbeat columns untouched by progress.
+              assert.equal(obs.lastHeartbeatAt, null);
+              assert.equal(obs.leaseExpiresAt, null);
+            }
+
+            // Desired/observed states are untouched by progress observation.
+            const recordOption = yield* repo.getById(execId);
+            assert.isTrue(Option.isSome(recordOption));
+            if (Option.isSome(recordOption)) {
+              assert.equal(recordOption.value.desiredState, "running");
+              assert.equal(recordOption.value.observedState, "accepted");
+            }
+
+            // No journal rows are created by progress observation.
+            const journal = yield* repo.listJournalEvents(execId);
+            assert.equal(journal.length, 1);
+            assert.equal(journal[0]!.sequence, 1);
+            assert.equal(journal[0]!.state, "accepted");
+          }),
+      );
+
+      it.effect(
+        "recordHeartbeatObservation refreshes lease columns without touching progress",
+        () =>
+          Effect.gen(function* () {
+            const repo = yield* PiSubagentExecutionRepository;
+            yield* repo.recordHeartbeatObservation({
+              executionId: execId,
+              occurredAt: "2026-08-18T00:00:10.000Z",
+              leaseExpiresAt: "2026-08-18T00:00:40.000Z",
+            });
+            yield* repo.recordHeartbeatObservation({
+              executionId: execId,
+              occurredAt: "2026-08-18T00:00:20.000Z",
+              leaseExpiresAt: "2026-08-18T00:00:50.000Z",
+            });
+
+            const observationOption = yield* repo.getObservation(execId);
+            assert.isTrue(Option.isSome(observationOption));
+            if (Option.isSome(observationOption)) {
+              const obs = observationOption.value;
+              assert.equal(obs.lastHeartbeatAt, "2026-08-18T00:00:20.000Z");
+              assert.equal(obs.leaseExpiresAt, "2026-08-18T00:00:50.000Z");
+              // Progress columns untouched by heartbeat (previous test's data).
+              assert.equal(obs.lastProgressJson, '{"turnCount":9}');
+              assert.equal(obs.droppedProgressCount, 10);
+            }
+
+            // Desired/observed states are untouched by heartbeat observation.
+            const recordOption = yield* repo.getById(execId);
+            assert.isTrue(Option.isSome(recordOption));
+            if (Option.isSome(recordOption)) {
+              assert.equal(recordOption.value.desiredState, "running");
+              assert.equal(recordOption.value.observedState, "accepted");
+            }
+
+            // No journal rows are created by heartbeat observation.
+            const journal = yield* repo.listJournalEvents(execId);
+            assert.equal(journal.length, 1);
+          }),
+      );
+
+      it.effect("missing execution produces a defined failure for both observation paths", () =>
+        Effect.gen(function* () {
+          const repo = yield* PiSubagentExecutionRepository;
+
+          const progressExit = yield* Effect.exit(
+            repo.recordProgressObservation({
+              executionId: "exec_missing_t23",
+              progressJson: "{}",
+              occurredAt: "2026-08-18T00:00:00.000Z",
+              droppedCountDelta: 0,
+            }),
+          );
+          assert.isTrue(Exit.isFailure(progressExit));
+
+          const heartbeatExit = yield* Effect.exit(
+            repo.recordHeartbeatObservation({
+              executionId: "exec_missing_t23",
+              occurredAt: "2026-08-18T00:00:00.000Z",
+              leaseExpiresAt: "2026-08-18T00:00:30.000Z",
+            }),
+          );
+          assert.isTrue(Exit.isFailure(heartbeatExit));
+
+          // Reader returns None for a missing execution.
+          const observationOption = yield* repo.getObservation("exec_missing_t23");
+          assert.isTrue(Option.isNone(observationOption));
+        }),
+      );
+    },
+  );
+});
+
+describe("PiSubagentExecutionRepository observation reopen (Issue 23 / T23-AC8)", () => {
+  it("file-backed reopen restores latest progress + lease observation without intermediate history", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "synara-t23-obs-reopen-"));
+    const dbPath = path.join(tempDir, "state.sqlite");
+    const execId = "exec_t23_reopen_001";
+
+    const fileLayer = PiSubagentExecutionRepositoryLive.pipe(
+      Layer.provideMerge(makeSqlitePersistenceLive(dbPath).pipe(Layer.provide(NodeServices.layer))),
+    );
+
+    try {
+      // Phase 1: write admission, then multiple progress + heartbeat
+      // observations (intermediate snapshots must NOT be preserved as rows).
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* PiSubagentExecutionRepository;
+          const admission = yield* repo.recordAdmission({
+            ...baseAdmission,
+            executionId: execId,
+            commandId: "cmd_t23_reopen_001",
+            now: "2026-08-18T00:00:00.000Z",
+          });
+          expect(admission.kind).toBe("admitted");
+
+          yield* repo.recordProgressObservation({
+            executionId: execId,
+            progressJson: '{"turnCount":1,"activity":"planning"}',
+            occurredAt: "2026-08-18T00:00:01.000Z",
+            droppedCountDelta: 0,
+          });
+          yield* repo.recordProgressObservation({
+            executionId: execId,
+            progressJson: '{"turnCount":4,"activity":"researching"}',
+            occurredAt: "2026-08-18T00:00:02.000Z",
+            droppedCountDelta: 5,
+          });
+          yield* repo.recordProgressObservation({
+            executionId: execId,
+            progressJson: '{"turnCount":9,"activity":"writing"}',
+            occurredAt: "2026-08-18T00:00:03.000Z",
+            droppedCountDelta: 11,
+          });
+          yield* repo.recordHeartbeatObservation({
+            executionId: execId,
+            occurredAt: "2026-08-18T00:00:10.000Z",
+            leaseExpiresAt: "2026-08-18T00:00:40.000Z",
+          });
+          yield* repo.recordHeartbeatObservation({
+            executionId: execId,
+            occurredAt: "2026-08-18T00:00:20.000Z",
+            leaseExpiresAt: "2026-08-18T00:00:50.000Z",
+          });
+        }).pipe(Effect.provide(fileLayer)),
+      );
+
+      // Phase 2: reopen from disk with a fresh layer; only the LATEST
+      // observation survives — no intermediate progress history exists.
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* PiSubagentExecutionRepository;
+          const sql = yield* SqlClient.SqlClient;
+
+          const observationOption = yield* repo.getObservation(execId);
+          expect(Option.isSome(observationOption)).toBe(true);
+          if (Option.isSome(observationOption)) {
+            const obs = observationOption.value;
+            expect(obs.lastProgressJson).toBe('{"turnCount":9,"activity":"writing"}');
+            expect(obs.lastProgressAt).toBe("2026-08-18T00:00:03.000Z");
+            expect(obs.droppedProgressCount).toBe(16);
+            expect(obs.lastHeartbeatAt).toBe("2026-08-18T00:00:20.000Z");
+            expect(obs.leaseExpiresAt).toBe("2026-08-18T00:00:50.000Z");
+          }
+
+          // The aggregate states are unchanged from admission (accepted /
+          // running-desired) — observation never mutated control truth.
+          const recordOption = yield* repo.getById(execId);
+          expect(Option.isSome(recordOption)).toBe(true);
+          if (Option.isSome(recordOption)) {
+            expect(recordOption.value.observedState).toBe("accepted");
+            expect(recordOption.value.desiredState).toBe("running");
+          }
+
+          // No durable intermediate progress history: the journal holds only
+          // the admission event.
+          const journal = yield* repo.listJournalEvents(execId);
+          expect(journal).toHaveLength(1);
+          expect(journal[0]!.sequence).toBe(1);
+
+          // Raw on-disk column verification (migration 099 surface).
+          const rows = yield* sql<{
+            readonly last_progress_json: string | null;
+            readonly last_progress_at: string | null;
+            readonly dropped_progress_count: number;
+            readonly last_heartbeat_at: string | null;
+            readonly lease_expires_at: string | null;
+          }>`
+            SELECT
+              last_progress_json,
+              last_progress_at,
+              dropped_progress_count,
+              last_heartbeat_at,
+              lease_expires_at
+            FROM pi_subagent_executions
+            WHERE execution_id = ${execId}
+          `;
+          expect(rows).toHaveLength(1);
+          expect(rows[0]!.last_progress_json).toBe('{"turnCount":9,"activity":"writing"}');
+          expect(rows[0]!.dropped_progress_count).toBe(16);
+          expect(rows[0]!.lease_expires_at).toBe("2026-08-18T00:00:50.000Z");
+        }).pipe(Effect.provide(fileLayer)),
       );
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});

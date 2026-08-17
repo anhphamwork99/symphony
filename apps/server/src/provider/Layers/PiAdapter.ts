@@ -8,6 +8,7 @@ import {
 
 import type {
   BashOperations,
+  InlineExtension,
   ModelRegistry,
   ModelRuntime,
   SessionManager,
@@ -57,6 +58,9 @@ import {
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import {
   DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS,
+  DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ,
   ServerConfig,
 } from "../../config.ts";
 import { lazyModule } from "../../lazyModule.ts";
@@ -122,6 +126,11 @@ import {
   type PiSubagentManagedForegroundBinding,
   type PiSubagentObservationInput,
 } from "../piSubagentBridge.ts";
+import {
+  makePiSubagentProgressCoalescer,
+  makeDefaultPiSubagentProgressSchedule,
+  type PiSubagentProgressCoalescer,
+} from "../piSubagentProgressCoalescer.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -406,6 +415,8 @@ interface PiSessionContext {
   stopped: boolean;
   subagentCapability?: PiSubagentNegotiatedCapability;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
+  /** Ticket 23: session-scoped progress observation coalescer, when managed. */
+  subagentProgressCoalescer?: PiSubagentProgressCoalescer;
 
   unsubscribe: (() => void) | undefined;
 }
@@ -493,6 +504,16 @@ export interface PiAdapterLiveOptions {
    * so normal runs never enumerate, serialize, or write catalogs.
    */
   readonly catalogObserverEnv?: NodeJS.ProcessEnv;
+  /**
+   * Ticket 23 test seam: clock for the managed-progress server coalescer.
+   * Production leaves this undefined (real timers); deterministic tests
+   * inject a manually-driven virtual clock so saturation evidence never
+   * depends on wall-clock timing.
+   */
+  readonly piSubagentProgressClock?: {
+    readonly now: () => number;
+    readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -877,6 +898,50 @@ function toMessage(cause: unknown, fallback: string): string {
 function trimToUndefined(value: string | null | undefined): string | undefined {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+const PI_SUBAGENT_PROGRESS_SUMMARY_MAX_LENGTH = 200;
+
+/**
+ * Ticket 23: bounded human-readable summary derived from the latest progress
+ * snapshot JSON. Never echoes the raw payload (it can embed producer content);
+ * a fixed-vocabulary field order keeps the emitted `tool.progress` summary
+ * small and deterministic.
+ */
+function summarizePiSubagentProgressJson(progressJson: string): string {
+  try {
+    const parsed: unknown = JSON.parse(progressJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return "Subagent progress";
+    }
+    const record = parsed as Record<string, unknown>;
+    const parts: Array<string> = [];
+    const status = record["status"];
+    if (typeof status === "string" && status.trim().length > 0) {
+      parts.push(status.trim());
+    }
+    const activity = record["activity"];
+    if (typeof activity === "string" && activity.trim().length > 0) {
+      parts.push(activity.trim());
+    }
+    const turnCount = record["turnCount"];
+    const maxTurns = record["maxTurns"];
+    if (typeof turnCount === "number" && Number.isFinite(turnCount)) {
+      parts.push(
+        `turn ${Math.trunc(turnCount)}${
+          typeof maxTurns === "number" && Number.isFinite(maxTurns)
+            ? `/${Math.trunc(maxTurns)}`
+            : ""
+        }`,
+      );
+    }
+    const summary = parts.length > 0 ? `Subagent: ${parts.join(" · ")}` : "Subagent progress";
+    return summary.length > PI_SUBAGENT_PROGRESS_SUMMARY_MAX_LENGTH
+      ? `${summary.slice(0, PI_SUBAGENT_PROGRESS_SUMMARY_MAX_LENGTH - 1)}…`
+      : summary;
+  } catch {
+    return "Subagent progress";
+  }
 }
 
 function isPiThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
@@ -1766,8 +1831,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     // service: its lifetime is the adapter, and degradation/recovery of the
     // durable store is a property of this adapter's persistence path, shared
     // across all managed sessions.
-    const adapterControlHealth =
-      options?.controlHealth ?? (yield* makePiSubagentControlHealth());
+    const adapterControlHealth = options?.controlHealth ?? (yield* makePiSubagentControlHealth());
     // Decision 21 live authority registry. The PiAdapter captures the service
     // so the admission boundary can re-validate the server-minted binding at
     // spawn time (assertAdmittable against server truth). Absent (tests or a
@@ -1834,9 +1898,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     // to fixed-vocabulary status/code/timestamp metadata scoped to the
     // admission thread that drove the transition; prompt, result, raw SQL,
     // and rejection-reason content are never included.
-    const offerSubagentControlHealthWarning = (
-      transition: PiSubagentControlHealthTransition,
-    ) => {
+    const offerSubagentControlHealthWarning = (transition: PiSubagentControlHealthTransition) => {
       const threadId = transition.threadId;
       if (threadId === undefined) {
         // Cannot scope the warning to an admission thread; never emit an
@@ -1855,9 +1917,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ? `Pi subagent managed control health degraded (${diagnosticCode}): new managed subagent admissions fail closed until durable lifecycle writes recover`
           : `Pi subagent managed control health recovered (${diagnosticCode}): managed subagent admissions are available again`;
       offerRuntimeEvent({
-        ...makeEventBase({ session: { threadId }, activeTurnId: undefined }, {
-          includeTurnId: false,
-        }),
+        ...makeEventBase(
+          { session: { threadId }, activeTurnId: undefined },
+          {
+            includeTurnId: false,
+          },
+        ),
         type: "runtime.warning",
         payload: { message, detail: safeDetail },
         raw: {
@@ -2213,6 +2278,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       // revoked, and the staged-tool registry cleared.
       context.synaraMcpExecutions.fence();
       await context.synaraMcpCoordinator.dispose();
+      // Ticket 23: release every per-execution observation slot and timer
+      // owned by this session before the runtime dies (T23-AC6 cleanup).
+      context.subagentProgressCoalescer?.disposeAll().catch(() => undefined);
       for (const pending of Array.from(context.pendingUserInputs.values())) {
         pending.resolve({});
       }
@@ -2556,6 +2624,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     }) => {
       const modelRuntime = await createPiModelRuntime(input.agentDir, input.sdk);
       const synaraMcp = makePiSynaraMcpDormantExtension();
+      // The live options accept opaque caller-supplied factories (tests and
+      // measurement drivers pass real InlineExtension factories, incl. the
+      // synara.pi.subagents.bridge brand symbol); narrow to the loader's
+      // expected shape at this seam.
+      const extraExtensionFactories = (options?.extensionFactories ??
+        []) as readonly InlineExtension[];
       const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         cwd,
         agentDir,
@@ -2567,7 +2641,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           agentDir,
           modelRuntime,
           resourceLoaderOptions: {
-            extensionFactories: [synaraMcp.extension, ...(options?.extensionFactories ?? [])],
+            extensionFactories: [synaraMcp.extension, ...extraExtensionFactories],
           },
         });
         const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
@@ -2796,15 +2870,20 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           adapter: synaraMcp.adapter,
           coordinator: synaraMcpCoordinator,
         });
-        const subagentCapability = yield* Effect.tryPromise({
+        const subagentCapability: PiSubagentNegotiatedCapability = yield* Effect.tryPromise({
           try: () => probePiSubagentBridge(runtime.session),
-          catch: (cause) => ({
-            status: "bridge_error" as const,
-            diagnosticCode: "pi_subagent_bridge_error" as const,
+          catch: (cause): PiSubagentNegotiatedCapability => ({
+            status: "bridge_error",
+            diagnosticCode: "pi_subagent_bridge_error",
             isManaged: false,
             diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
           }),
-        });
+        }).pipe(
+          // A failed probe is capability DATA (bridge_error), not a session-start
+          // failure: recover it into the success channel so the session still
+          // starts and managed execution is disabled downstream.
+          Effect.catch((error) => Effect.succeed(error)),
+        );
         context.subagentCapability = subagentCapability;
         options?.onSubagentCapability?.({
           threadId: input.threadId,
@@ -2838,7 +2917,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               },
             },
             raw: {
-              source: "pi.subagents.handshake",
+              source: "pi.sdk.event",
               method: "capability/probe",
               payload: subagentCapability,
             },
@@ -2856,6 +2935,65 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // and the repository additionally validates the ownership fingerprint
           // before any already_applied answer.
           const mintedCommandIds = new Map<string, string>();
+
+          // Ticket 23 server-side progress coalescer: one session-scoped
+          // registry, one latest-slot + trailing-edge timer per execution
+          // (1/rateHz from resolved server config). Observation failures are
+          // swallowed here — progress is never control truth, so a failing
+          // durable UPDATE or event offer must neither reject back to the
+          // extension nor degrade control health.
+          const progressRateHz =
+            serverConfig.piSubagentProgressRateHz ?? DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ;
+          const heartbeatIntervalMs =
+            serverConfig.piSubagentHeartbeatIntervalMs ?? DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS;
+          const leaseDurationMs =
+            serverConfig.piSubagentLeaseDurationMs ?? DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS;
+          const subagentProgressCoalescer = makePiSubagentProgressCoalescer({
+            now: options?.piSubagentProgressClock?.now ?? (() => Date.now()),
+            schedule: (delayMs, callback) =>
+              options?.piSubagentProgressClock !== undefined
+                ? options.piSubagentProgressClock.schedule(delayMs, callback)
+                : makeDefaultPiSubagentProgressSchedule()(delayMs, callback),
+            flushIntervalMs: Math.round(1000 / progressRateHz),
+            idleTtlMs: Math.max(leaseDurationMs, 2 * heartbeatIntervalMs),
+            onFlush: (flush) => {
+              // Emission surface mirrors emitPluginProgress (tool.progress,
+              // bounded summary) — the only runtime-event kind progress may
+              // produce; projected as non-message activity by the web layer.
+              const toolCallId =
+                typeof flush.meta === "string" && flush.meta.length > 0 ? flush.meta : undefined;
+              const summary = summarizePiSubagentProgressJson(flush.progressJson);
+              offerRuntimeEvent({
+                ...makeEventBase(context),
+                type: "tool.progress",
+                payload: {
+                  toolName: "Agent",
+                  summary,
+                  ...(toolCallId !== undefined ? { toolCallId } : {}),
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/observation-progress",
+                  payload: {
+                    executionId: flush.executionId,
+                    coalescedCount: flush.coalescedCount,
+                  },
+                },
+              } satisfies ProviderRuntimeEvent);
+              // Durable latest-snapshot UPDATE (never journal, never state).
+              void Effect.runPromise(
+                piSubagentRepository.recordProgressObservation({
+                  executionId: flush.executionId,
+                  progressJson: flush.progressJson,
+                  occurredAt: new Date().toISOString(),
+                  droppedCountDelta: flush.coalescedCount,
+                }),
+              ).catch(() => {
+                // Swallowed: observation is not control (T23-AC5/AC6).
+              });
+            },
+          });
+          context.subagentProgressCoalescer = subagentProgressCoalescer;
 
           const wrapAgentTool = (target: any) => {
             if (!target || target.__synaraAdmissionWrapped) {
@@ -2993,8 +3131,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   }),
                 );
               } catch (cause) {
-                const message =
-                  cause instanceof Error ? cause.message : String(cause);
+                const message = cause instanceof Error ? cause.message : String(cause);
                 return {
                   content: [
                     {
@@ -3059,26 +3196,68 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               };
 
               const foregroundWaitMs =
-                serverConfig.piSubagentForegroundWaitMs ??
-                DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+                serverConfig.piSubagentForegroundWaitMs ?? DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
 
               let startedPromise: Promise<void> | undefined;
               let detachedPromise: Promise<void> | undefined;
+
+              const recordHeartbeatObservation = (occurredAt: string): void => {
+                // Fire-and-forget lease refresh (T23-AC3): heartbeat is
+                // observation, not control — failures are swallowed and never
+                // degrade control health, never reject the producer.
+                const leaseExpiresAt = new Date(
+                  Date.parse(occurredAt) + leaseDurationMs,
+                ).toISOString();
+                void Effect.runPromise(
+                  piSubagentRepository.recordHeartbeatObservation({
+                    executionId: admissionResult.executionId,
+                    occurredAt,
+                    leaseExpiresAt,
+                  }),
+                ).catch(() => {
+                  // Swallowed: observation is not control.
+                });
+              };
 
               const reportObservation = async (
                 obsInput: PiSubagentObservationInput,
               ): Promise<void> => {
                 if (
                   !obsInput ||
-                  (obsInput.kind !== "started" && obsInput.kind !== "detached")
+                  (obsInput.kind !== "started" &&
+                    obsInput.kind !== "detached" &&
+                    obsInput.kind !== "progress" &&
+                    obsInput.kind !== "heartbeat")
                 ) {
-                  throw new Error("Invalid observation kind: expected 'started' or 'detached'");
+                  throw new Error(
+                    "Invalid observation kind: expected 'started', 'detached', 'progress', or 'heartbeat'",
+                  );
                 }
 
                 const occurredAt =
                   typeof obsInput.occurredAt === "string" && obsInput.occurredAt.trim().length > 0
                     ? obsInput.occurredAt.trim()
                     : new Date().toISOString();
+
+                // Ticket 23 observation kinds take the coalescing/UPDATE-only
+                // paths — they never journal and never touch desired/observed
+                // state. Only started/detached keep the ticket-22 lifecycle
+                // journal semantics (T23-AC5: lifecycle is never discarded by
+                // the progress queue because it never enters it).
+                if (obsInput.kind === "progress") {
+                  const progressJson =
+                    typeof obsInput.progressJson === "string" ? obsInput.progressJson : "";
+                  await subagentProgressCoalescer.recordProgress(
+                    admissionResult.executionId,
+                    progressJson,
+                    toolCallId,
+                  );
+                  return;
+                }
+                if (obsInput.kind === "heartbeat") {
+                  recordHeartbeatObservation(occurredAt);
+                  return;
+                }
 
                 if (obsInput.kind === "started") {
                   if (startedPromise) {
@@ -3104,9 +3283,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     });
                     const result = await Effect.runPromise(Effect.result(recordEffect));
                     if (result._tag === "Failure") {
-                      const error = result.error;
-                      const errorMessage =
-                        error instanceof Error ? error.message : String(error);
+                      const error = result.failure;
+                      const errorMessage = error instanceof Error ? error.message : String(error);
                       if (adapterControlHealth) {
                         const transition = await Effect.runPromise(
                           adapterControlHealth.markDegraded(
@@ -3156,9 +3334,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   });
                   const result = await Effect.runPromise(Effect.result(recordEffect));
                   if (result._tag === "Failure") {
-                    const error = result.error;
-                    const errorMessage =
-                      error instanceof Error ? error.message : String(error);
+                    const error = result.failure;
+                    const errorMessage = error instanceof Error ? error.message : String(error);
                     if (adapterControlHealth) {
                       const transition = await Effect.runPromise(
                         adapterControlHealth.markDegraded(
@@ -3186,20 +3363,43 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 cancellationScope: "parent_turn" as const,
                 foregroundWaitMs,
                 reportObservation,
+                // Ticket 23 policy pass-through: resolved server config knobs
+                // (guard-validated range) so a managed extension coalesces at
+                // the server-configured cadence and heartbeats the lease the
+                // server expects.
+                progress: { rateHz: progressRateHz },
+                heartbeat: { intervalMs: heartbeatIntervalMs, leaseMs: leaseDurationMs },
               });
 
               const effectiveCtx = attachPiSubagentManagedForegroundBinding(baseCtx, binding);
 
-              const res = await originalExecute(toolCallId, childParams, signal, onUpdate, effectiveCtx);
-              if (res && typeof res === "object" && !res.isError) {
-                return {
-                  ...res,
-                  executionId: admissionResult.executionId,
-                  attemptId: admissionResult.attemptId,
-                  generation: admissionResult.generation,
-                };
+              try {
+                const res = await originalExecute(
+                  toolCallId,
+                  childParams,
+                  signal,
+                  onUpdate,
+                  effectiveCtx,
+                );
+                if (res && typeof res === "object" && !res.isError) {
+                  return {
+                    ...res,
+                    executionId: admissionResult.executionId,
+                    attemptId: admissionResult.attemptId,
+                    generation: admissionResult.generation,
+                  };
+                }
+                return res;
+              } finally {
+                // Inline completion releases observation ownership for this
+                // execution: pending latest snapshot is flushed once, timers
+                // are cancelled, and the per-execution slot is removed
+                // (T23-AC6). Detached executions rely on the idle-TTL
+                // self-cleanup instead.
+                await subagentProgressCoalescer
+                  .dispose(admissionResult.executionId)
+                  .catch(() => undefined);
               }
-              return res;
             };
           };
 

@@ -28,10 +28,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import {
-  ProjectMcpActivationOperation,
-  ProjectMcpDesiredState,
-} from "./projectActivation";
+import { ProjectMcpActivationOperation, ProjectMcpDesiredState } from "./projectActivation";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -465,9 +462,9 @@ export const OrchestrationProject = Schema.Struct({
   synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => 0),
   ),
-  synaraMcpActivationOperation: Schema.optional(
-    Schema.NullOr(ProjectMcpActivationOperation),
-  ).pipe(Schema.withDecodingDefault(() => null)),
+  synaraMcpActivationOperation: Schema.optional(Schema.NullOr(ProjectMcpActivationOperation)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
@@ -488,9 +485,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => 0),
   ),
-  synaraMcpActivationOperation: Schema.optional(
-    Schema.NullOr(ProjectMcpActivationOperation),
-  ).pipe(Schema.withDecodingDefault(() => null)),
+  synaraMcpActivationOperation: Schema.optional(Schema.NullOr(ProjectMcpActivationOperation)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
@@ -1736,9 +1733,9 @@ export const ProjectCreatedPayload = Schema.Struct({
   synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => 0),
   ),
-  synaraMcpActivationOperation: Schema.optional(
-    Schema.NullOr(ProjectMcpActivationOperation),
-  ).pipe(Schema.withDecodingDefault(() => null)),
+  synaraMcpActivationOperation: Schema.optional(Schema.NullOr(ProjectMcpActivationOperation)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

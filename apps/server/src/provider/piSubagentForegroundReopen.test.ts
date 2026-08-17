@@ -13,11 +13,7 @@ import {
   makePiSubagentExecutionRepository,
   PiSubagentExecutionRepositoryLive,
 } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
-import {
-  PiSubagentExecutionRepository,
-  type PiSubagentExecutionRecord,
-  type PiSubagentJournalEvent,
-} from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 
 describe("PiSubagentForegroundReopen (T22-AC4)", () => {
   it("T22-AC4: file-backed SQLite persists detached foreground execution and recovers exact non-terminal aggregate and ordered journal across reopen", async () => {
@@ -340,12 +336,12 @@ describe("PiSubagentForegroundReopen (T22-AC4)", () => {
             }),
           });
           yield* repo.recordLifecycleEvent({
-            eventId: "evt_002_completed",
+            eventId: "evt_002_succeeded",
             executionId: exec2,
             attemptId: "att_002",
             generation: 1,
             sequence: 3,
-            state: "completed",
+            state: "succeeded",
             occurredAt: "2026-08-17T09:01:00.500Z",
           });
 
@@ -399,12 +395,12 @@ describe("PiSubagentForegroundReopen (T22-AC4)", () => {
             }),
           });
           yield* repo.recordLifecycleEvent({
-            eventId: "evt_003_completed",
+            eventId: "evt_003_succeeded",
             executionId: exec3,
             attemptId: "att_003",
             generation: 1,
             sequence: 4,
-            state: "completed",
+            state: "succeeded",
             occurredAt: "2026-08-17T09:02:10.000Z",
           });
         }).pipe(
@@ -432,17 +428,17 @@ describe("PiSubagentForegroundReopen (T22-AC4)", () => {
 
           // Exec 2 is completed inline
           const rec2 = (yield* repo.getById(exec2)).pipe(Option.getOrThrow);
-          expect(rec2.observedState).toBe("completed");
+          expect(rec2.observedState).toBe("succeeded");
           const j2 = yield* repo.listJournalEvents(exec2);
           expect(j2).toHaveLength(3);
-          expect(j2.map((e) => e.state)).toEqual(["accepted", "running", "completed"]);
+          expect(j2.map((e) => e.state)).toEqual(["accepted", "running", "succeeded"]);
 
           // Exec 3 is completed after detach
           const rec3 = (yield* repo.getById(exec3)).pipe(Option.getOrThrow);
-          expect(rec3.observedState).toBe("completed");
+          expect(rec3.observedState).toBe("succeeded");
           const j3 = yield* repo.listJournalEvents(exec3);
           expect(j3).toHaveLength(4);
-          expect(j3.map((e) => e.state)).toEqual(["accepted", "running", "running", "completed"]);
+          expect(j3.map((e) => e.state)).toEqual(["accepted", "running", "running", "succeeded"]);
           expect(j3[1]!.metadata).toMatchObject({ phase: "started" });
           expect(j3[2]!.metadata).toMatchObject({ phase: "detached" });
         }).pipe(

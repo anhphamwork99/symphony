@@ -15,7 +15,7 @@ import {
   PiSubagentNegotiatedCapability,
   PiSubagentSpawnCommand,
   PiSubagentSpawnResult,
-} from "./piSubagents.ts";
+} from "./piSubagents";
 
 describe("Pi subagent handshake contract schemas (Issue 19)", () => {
   it("encodes and decodes valid handshake request", () => {
@@ -40,18 +40,18 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
       requiredCapabilities: ["managed-spawn"],
     };
 
-    expect(() => Schema.decodeSync(PiSubagentHandshakeRequest)(invalidVersion)).toThrow();
+    expect(() => Schema.decodeSync(PiSubagentHandshakeRequest)(invalidVersion as never)).toThrow();
 
     const missingFields = {
       protocolVersion: 1,
       // missing required fields
     };
-    expect(() => Schema.decodeSync(PiSubagentHandshakeRequest)(missingFields)).toThrow();
+    expect(() => Schema.decodeSync(PiSubagentHandshakeRequest)(missingFields as never)).toThrow();
   });
 
   it("decodes valid success response", () => {
     const successResponse = {
-      ok: true,
+      ok: true as const,
       protocolVersion: 1,
       extensionVersion: "0.1.0",
       capabilities: PI_SUBAGENT_CAPABILITIES,
@@ -69,8 +69,8 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
 
   it("decodes valid failure response with offered-vs-supported diagnostic context", () => {
     const failureResponse = {
-      ok: false,
-      error: "unsupported_version",
+      ok: false as const,
+      error: "unsupported_version" as const,
       protocolVersion: 99,
       supportedProtocolVersions: [99, 100],
       extensionVersion: "2.0.0",
@@ -89,8 +89,8 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
 
   it("decodes valid failure response with missing capabilities context (T19-AC2, T19-AC3)", () => {
     const failureResponse = {
-      ok: false,
-      error: "missing_capabilities",
+      ok: false as const,
+      error: "missing_capabilities" as const,
       protocolVersion: 1,
       extensionVersion: "0.10.0-alfie.1",
       missingCapabilities: ["terminal-outbox", "restart-reconciliation"],
@@ -166,8 +166,8 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
       parentToolCallId: "call_subagent_1",
       agentType: "researcher",
       prompt: "Investigate database performance",
-      mode: "foreground",
-      cancellationScope: "parent_turn",
+      mode: "foreground" as const,
+      cancellationScope: "parent_turn" as const,
     };
 
     const decodedCommand = Schema.decodeSync(PiSubagentSpawnCommand)(command);
@@ -176,12 +176,12 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
     expect(decodedCommand.mode).toBe("foreground");
 
     const spawnResult = {
-      status: "accepted",
+      status: "accepted" as const,
       executionId: "exec_123456",
       attemptId: "att_001",
       generation: 1,
-      state: "accepted",
-      diagnosticCode: "pi_subagent_managed_enabled",
+      state: "accepted" as const,
+      diagnosticCode: "pi_subagent_managed_enabled" as const,
     };
 
     const decodedSpawnResult = Schema.decodeSync(PiSubagentSpawnResult)(spawnResult);
@@ -194,13 +194,13 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
       attemptId: "att_001",
       generation: 1,
       sequence: 1,
-      state: "accepted",
+      state: "accepted" as const,
       occurredAt: "2026-08-16T12:00:00.000Z",
       parentThreadId: "thread_main",
       parentTurnId: "turn_001",
       parentToolCallId: "call_subagent_1",
       projectId: "proj_abc",
-      diagnosticCode: "pi_subagent_managed_enabled",
+      diagnosticCode: "pi_subagent_managed_enabled" as const,
     };
 
     const decodedEvent = Schema.decodeSync(PiSubagentLifecycleEvent)(event);
@@ -218,10 +218,10 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
       parentToolCallId: "call_subagent_1",
       agentType: "researcher",
       prompt: "Research query",
-      mode: "foreground",
-      cancellationScope: "parent_turn",
-      desiredState: "running",
-      observedState: "running",
+      mode: "foreground" as const,
+      cancellationScope: "parent_turn" as const,
+      desiredState: "running" as const,
+      observedState: "running" as const,
       createdAt: "2026-08-16T12:00:00.000Z",
       updatedAt: "2026-08-16T12:00:12.000Z",
     };
@@ -235,7 +235,8 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
     expect(PI_SUBAGENT_CAPABILITIES).toContain("bounded-foreground-attachment");
     const decoded = Schema.decodeSync(PiSubagentCapability)("bounded-foreground-attachment");
     expect(decoded).toBe("bounded-foreground-attachment");
-    expect(() => Schema.decodeSync(PiSubagentCapability)("unsupported-capability")).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCapability)("unsupported-capability" as never),
+    ).toThrow();
   });
 });
-

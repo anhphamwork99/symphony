@@ -54,8 +54,7 @@ export const ProjectMcpActivationOperationStatus = Schema.Literals([
   "succeeded",
   "failed",
 ]);
-export type ProjectMcpActivationOperationStatus =
-  typeof ProjectMcpActivationOperationStatus.Type;
+export type ProjectMcpActivationOperationStatus = typeof ProjectMcpActivationOperationStatus.Type;
 
 export const ProjectMcpActivationOutcomeStatus = Schema.Literals([
   "pending",
@@ -84,10 +83,9 @@ export const ProjectMcpActivationOutcome = Schema.Struct({
 export type ProjectMcpActivationOutcome = typeof ProjectMcpActivationOutcome.Type;
 
 const ProjectMcpActivationAbsoluteDeadline = IsoDateTime.check(
-  Schema.makeFilter(
-    (value) => !Number.isNaN(Date.parse(value)),
-    { identifier: "ProjectMcpActivationAbsoluteDeadline" },
-  ),
+  Schema.makeFilter((value) => !Number.isNaN(Date.parse(value)), {
+    identifier: "ProjectMcpActivationAbsoluteDeadline",
+  }),
 );
 
 const duplicateEntryIssue = (value: unknown, message: string) =>
@@ -98,8 +96,8 @@ const validateProjectMcpActivationOperation = Schema.makeFilter(
     readonly projectId: ProjectId;
     readonly requestId: string;
     readonly operationGeneration: number;
-      readonly recoveryIdentity?: string | undefined;
-      readonly issuingThreadId?: ThreadId | undefined;
+    readonly recoveryIdentity?: string | undefined;
+    readonly issuingThreadId?: ThreadId | undefined;
     readonly absoluteDeadline: string;
     readonly desiredState: ProjectMcpDesiredState;
     readonly waitSet: ReadonlyArray<ProjectMcpActivationWaitSetEntry>;
@@ -134,7 +132,9 @@ const validateProjectMcpActivationOperation = Schema.makeFilter(
           `Activation outcomes contain duplicate session '${outcome.sessionId}'.`,
         );
       }
-      const member = operation.waitSet.find((candidate) => candidate.sessionId === outcome.sessionId);
+      const member = operation.waitSet.find(
+        (candidate) => candidate.sessionId === outcome.sessionId,
+      );
       if (member?.sessionGeneration !== outcome.sessionGeneration) {
         return duplicateEntryIssue(
           operation.outcomes,
@@ -163,7 +163,9 @@ const validateProjectMcpActivationOperation = Schema.makeFilter(
       );
     }
 
-    const pendingCount = operation.outcomes.filter((outcome) => outcome.status === "pending").length;
+    const pendingCount = operation.outcomes.filter(
+      (outcome) => outcome.status === "pending",
+    ).length;
     const failedCount = operation.outcomes.filter((outcome) => outcome.status === "failed").length;
     const expectedStatus = failedCount > 0 ? "failed" : pendingCount > 0 ? "pending" : "succeeded";
     if (operation.aggregateStatus !== expectedStatus) {

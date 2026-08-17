@@ -12,7 +12,15 @@
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
 import { tmpdir } from "node:os";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   type AgentSession,
@@ -41,9 +49,7 @@ import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubag
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import {
-  makeMcpSessionAuthorityRegistry,
-} from "../agentGateway/mcpSessionAuthority.ts";
+import { makeMcpSessionAuthorityRegistry } from "../agentGateway/mcpSessionAuthority.ts";
 import {
   McpSessionAuthority,
   type McpSessionAuthorityShape,
@@ -98,7 +104,9 @@ function normalizeGitUrl(url: string): string {
 export function resolveAlfieRepoDir(): string {
   const candidates = [
     process.env.ALFIE_REPO_DIR,
-    process.env.ALFIE_EXTENSION_DIR ? resolve(process.env.ALFIE_EXTENSION_DIR, "../../..") : undefined,
+    process.env.ALFIE_EXTENSION_DIR
+      ? resolve(process.env.ALFIE_EXTENSION_DIR, "../../..")
+      : undefined,
     resolve(process.cwd(), "../../../alfie"),
     resolve(process.cwd(), "../../alfie"),
     resolve(process.cwd(), "../alfie"),
@@ -122,9 +130,7 @@ export function resolveVersionedExtensionDir(): string {
   const repoDir = resolveAlfieRepoDir();
   const extDir = join(repoDir, "agent/extensions/pi-subagents");
   if (!existsSync(extDir) || !existsSync(join(extDir, "package.json"))) {
-    throw new Error(
-      `Provenance assertion failed: extension directory not found at '${extDir}'.`,
-    );
+    throw new Error(`Provenance assertion failed: extension directory not found at '${extDir}'.`);
   }
   return extDir;
 }
@@ -229,7 +235,9 @@ export function verifyExtensionGitProvenance(repoDir?: string): {
   for (const [relPath, expectedHash] of Object.entries(manifest.hashes)) {
     const fullPath = join(dir, relPath);
     if (!existsSync(fullPath)) {
-      throw new Error(`Provenance assertion failed: file '${relPath}' missing from extension tree.`);
+      throw new Error(
+        `Provenance assertion failed: file '${relPath}' missing from extension tree.`,
+      );
     }
     const computed = computeSha256(fullPath);
     if (computed !== expectedHash) {
@@ -407,9 +415,7 @@ afterEach(() => {
   createdDirs.length = 0;
 });
 
-export async function createRealPiSession(options?: {
-  tempAgentDir?: string;
-}): Promise<{
+export async function createRealPiSession(options?: { tempAgentDir?: string }): Promise<{
   session: AgentSession;
   services: any;
   tempAgentDir: string;
@@ -456,7 +462,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     const provenance = assertProductionExtensionProvenance(session);
     expect(provenance.isProduction).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.extensionVersion).toBe("0.10.0-alfie.1");
+    expect(provenance.extensionVersion).toBe("0.11.0-alfie.1");
     expect(provenance.toolNames).toContain("Agent");
     expect(provenance.toolNames).toContain("get_subagent_result");
     expect(provenance.toolNames).toContain("steer_subagent");
@@ -468,11 +474,12 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(capability.status).toBe("managed_enabled");
     expect(capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(capability.protocolVersion).toBe(PI_SUBAGENTS_PROTOCOL_VERSION);
-    expect(capability.extensionVersion).toBe("0.10.0-alfie.1");
+    expect(capability.extensionVersion).toBe("0.11.0-alfie.1");
     expect(capability.capabilities).toEqual([
       "managed-spawn",
       "abort-propagation",
       "bounded-foreground-attachment",
+      "coalesced-progress",
     ]);
 
     session.dispose();
@@ -624,6 +631,9 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     const tools = session.getAllTools();
     const agentTool = tools.find((t: any) => t.name === "Agent");
     expect(agentTool).toBeDefined();
+    if (agentTool === undefined) {
+      throw new Error("Production Agent tool not found in session tools");
+    }
     expect(agentTool.description).toContain("Launch a new agent to handle complex");
     expect(agentTool.description).toContain("Writing the delegation request");
 
@@ -681,7 +691,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       join(lookalikeDir, "package.json"),
       JSON.stringify({
         name: "@alfie/pi-subagents",
-        version: "0.10.0-alfie.1",
+        version: "0.11.0-alfie.1",
         description: "Synthetic lookalike package",
       }),
     );
@@ -718,11 +728,12 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
                       handshake: () => ({
                         ok: true,
                         protocolVersion: 1,
-                        extensionVersion: "0.10.0-alfie.1",
+                        extensionVersion: "0.11.0-alfie.1",
                         capabilities: [
                           "managed-spawn",
                           "abort-propagation",
                           "bounded-foreground-attachment",
+                          "coalesced-progress",
                         ],
                       }),
                     }),
@@ -816,6 +827,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       const adapter = yield* PiAdapter;
       const session = yield* adapter.startSession({
         threadId: "th_prod_test_1" as ThreadId,
+        runtimeMode: "full-access",
         cwd: tempAgentDir,
         providerOptions: {
           pi: {
@@ -827,9 +839,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       return { adapter, session };
     });
 
-    const { adapter } = await Effect.runPromise(
-      testProgram.pipe(Effect.provide(piAdapterLayer)),
-    );
+    const { adapter } = await Effect.runPromise(testProgram.pipe(Effect.provide(piAdapterLayer)));
 
     // 1. Verify negotiated capability was stored and exposed via observation seam
     expect(observedEvent).toBeDefined();
@@ -837,11 +847,12 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(observedEvent!.capability.status).toBe("managed_enabled");
     expect(observedEvent!.capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(observedEvent!.capability.protocolVersion).toBe(1);
-    expect(observedEvent!.capability.extensionVersion).toBe("0.10.0-alfie.1");
+    expect(observedEvent!.capability.extensionVersion).toBe("0.11.0-alfie.1");
     expect(observedEvent!.capability.capabilities).toEqual([
       "managed-spawn",
       "abort-propagation",
       "bounded-foreground-attachment",
+      "coalesced-progress",
     ]);
 
     // 2. Verify stored in session context
@@ -917,8 +928,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     const registry = makeMcpSessionAuthorityRegistry();
     const authorityService: McpSessionAuthorityShape = {
       ...registry,
-      mintForLocalOwner: () =>
-        registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+      mintForLocalOwner: () => registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
       mintForAuthenticated: (session) =>
         registry.mint({
           subject: session.subject,
@@ -1016,9 +1026,9 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
 
       expect(observedSession).toBeDefined();
 
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       expect(loadedExt).toBeDefined();
 
       const agentEntry = loadedExt.tools.get("Agent");
@@ -1068,16 +1078,22 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
 
       // 1. Authorized Agent tool execution (background so the real child
       //    writes its transcript output file synchronously after spawn).
-      const toolResult = yield* Effect.promise(() =>
-        executeFn("call_agent_prod_1", {
-          commandId: "cmd_prod_agent_1",
-          task: "Perform database index research",
-          context: "Admission remediation evidence run.",
-          link_references: "None",
-          expected_outcome: "Index research summarized.",
-          subagent_type: "researcher",
-          run_in_background: true,
-        }, undefined, undefined, executeCtx),
+      const toolResult: any = yield* Effect.promise(() =>
+        executeFn(
+          "call_agent_prod_1",
+          {
+            commandId: "cmd_prod_agent_1",
+            task: "Perform database index research",
+            context: "Admission remediation evidence run.",
+            link_references: "None",
+            expected_outcome: "Index research summarized.",
+            subagent_type: "researcher",
+            run_in_background: true,
+          },
+          undefined,
+          undefined,
+          executeCtx,
+        ),
       );
 
       // T20-AC1/T20-AC6: admitted BEFORE child start with server-minted
@@ -1120,9 +1136,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       // actual child record) records them verbatim.
       const outputFiles = listOutputFiles();
       expect(outputFiles.length).toBeGreaterThanOrEqual(1);
-      const childEntry = JSON.parse(
-        readFileSync(join(outputDir, outputFiles[0]!), "utf-8").trim(),
-      );
+      const childEntry = JSON.parse(readFileSync(join(outputDir, outputFiles[0]!), "utf-8").trim());
       expect(childEntry.managedExecution).toEqual({
         executionId: admitted.result.executionId,
         attemptId: admitted.result.attemptId,
@@ -1135,16 +1149,22 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       const filesBeforeDenied = listOutputFiles().length;
       registry.revoke(authorityRecord.authorityId, "test revocation");
 
-      const deniedResult = yield* Effect.promise(() =>
-        executeFn("call_agent_denied_1", {
-          commandId: "cmd_prod_denied_1",
-          task: "Unauthorized task",
-          context: "Denied path evidence.",
-          link_references: "None",
-          expected_outcome: "Denied.",
-          subagent_type: "researcher",
-          run_in_background: true,
-        }, undefined, undefined, executeCtx),
+      const deniedResult: any = yield* Effect.promise(() =>
+        executeFn(
+          "call_agent_denied_1",
+          {
+            commandId: "cmd_prod_denied_1",
+            task: "Unauthorized task",
+            context: "Denied path evidence.",
+            link_references: "None",
+            expected_outcome: "Denied.",
+            subagent_type: "researcher",
+            run_in_background: true,
+          },
+          undefined,
+          undefined,
+          executeCtx,
+        ),
       );
 
       expect(deniedResult.isError).toBe(true);
@@ -1195,16 +1215,22 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       const executeFnB = agentEntryB.execute ?? agentEntryB.definition?.execute;
 
       const beforeB = admittedEvents.length;
-      const resultB = yield* Effect.promise(() =>
-        executeFnB("call_agent_prod_b", {
-          commandId: "cmd_prod_agent_1",
-          task: "Thread B work with the same extension command id",
-          context: "Cross-authority identity evidence.",
-          link_references: "None",
-          expected_outcome: "Thread B execution created.",
-          subagent_type: "researcher",
-          run_in_background: true,
-        }, undefined, undefined, executeCtx),
+      const resultB: any = yield* Effect.promise(() =>
+        executeFnB(
+          "call_agent_prod_b",
+          {
+            commandId: "cmd_prod_agent_1",
+            task: "Thread B work with the same extension command id",
+            context: "Cross-authority identity evidence.",
+            link_references: "None",
+            expected_outcome: "Thread B execution created.",
+            subagent_type: "researcher",
+            run_in_background: true,
+          },
+          undefined,
+          undefined,
+          executeCtx,
+        ),
       );
       const admittedB = admittedEvents[admittedEvents.length - 1]!;
       expect(admittedEvents.length).toBe(beforeB + 1);
@@ -1298,8 +1324,7 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
     const registry = makeMcpSessionAuthorityRegistry();
     const authorityService: McpSessionAuthorityShape = {
       ...registry,
-      mintForLocalOwner: () =>
-        registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+      mintForLocalOwner: () => registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
       mintForAuthenticated: (session) =>
         registry.mint({
           subject: session.subject,
@@ -1635,14 +1660,12 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
           modelRuntime: legacyPiModelRuntime,
         }),
       );
-      const legacyPiSession = (
-        yield* Effect.promise(() =>
-          createAgentSessionFromServices({
-            services: legacyPiServices,
-            sessionManager: SessionManager.inMemory(legacyExtAgentDir),
-          }),
-        )
-      ).session;
+      const legacyPiSession = (yield* Effect.promise(() =>
+        createAgentSessionFromServices({
+          services: legacyPiServices,
+          sessionManager: SessionManager.inMemory(legacyExtAgentDir),
+        }),
+      )).session;
       yield* Effect.promise(() => legacyPiSession.bindExtensions({}));
       // Provenance: this is the same production extension, loaded from disk —
       // the legacy leg exercises the real Agent tool, not a fixture.
@@ -1652,13 +1675,10 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
 
       const legacyLoadedExt = legacyPiSession.resourceLoader
         .getExtensions()
-        .extensions.find(
-          (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-        ) as any;
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       expect(legacyLoadedExt).toBeDefined();
       const legacyAgentEntry = legacyLoadedExt.tools.get("Agent");
-      const legacyExecute =
-        legacyAgentEntry.execute ?? legacyAgentEntry.definition?.execute;
+      const legacyExecute = legacyAgentEntry.execute ?? legacyAgentEntry.definition?.execute;
       expect(typeof legacyExecute).toBe("function");
       // No Synara admission wrapper is installed on the legacy tool: the
       // extension's own execute is the production legacy Agent.
@@ -1966,9 +1986,9 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
 
         expect(observedSession).toBeDefined();
 
-        const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-          (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-        ) as any;
+        const loadedExt = observedSession.resourceLoader
+          .getExtensions()
+          .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
         expect(loadedExt).toBeDefined();
 
         const agentEntry = loadedExt.tools.get("Agent");

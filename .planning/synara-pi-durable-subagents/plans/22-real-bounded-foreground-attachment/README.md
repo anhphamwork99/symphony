@@ -118,16 +118,16 @@ WP-02 Symphony contract/config foundation ──┘        + provenance re-pin
 
 ## Acceptance traceability
 
-| Criterion | Primary packages | Required proof |
-| --- | --- | --- |
-| T22-AC1 | WP-01, WP-04 | Actual fast child returns unchanged inline result; no follow-up |
-| T22-AC2 | WP-01, WP-03, WP-04 | One handle by budget + 500 ms; same child; spawn count one |
-| T22-AC3 | WP-01, WP-04 | Identity, token, promise, and parent scope unchanged |
-| T22-AC4 | WP-03, WP-04 | Ordered seq1/2/3 and same running aggregate after disk reopen |
-| T22-AC5 | WP-02, WP-03, WP-04 | Default/range/fallback and production-path elapsed evidence |
-| T22-AC6 | WP-03, WP-04 | Concurrent managed and adjacent legacy isolation |
-| T22-AC7 | WP-01, WP-04 | Cleanup matrix, zero attachment resources, unrelated child alive |
-| T22-AC8 | WP-03, WP-04, WP-05 | Exact clean pinned Alfie source; synthetic replacement rejected |
+| Criterion | Primary packages    | Required proof                                                   |
+| --------- | ------------------- | ---------------------------------------------------------------- |
+| T22-AC1   | WP-01, WP-04        | Actual fast child returns unchanged inline result; no follow-up  |
+| T22-AC2   | WP-01, WP-03, WP-04 | One handle by budget + 500 ms; same child; spawn count one       |
+| T22-AC3   | WP-01, WP-04        | Identity, token, promise, and parent scope unchanged             |
+| T22-AC4   | WP-03, WP-04        | Ordered seq1/2/3 and same running aggregate after disk reopen    |
+| T22-AC5   | WP-02, WP-03, WP-04 | Default/range/fallback and production-path elapsed evidence      |
+| T22-AC6   | WP-03, WP-04        | Concurrent managed and adjacent legacy isolation                 |
+| T22-AC7   | WP-01, WP-04        | Cleanup matrix, zero attachment resources, unrelated child alive |
+| T22-AC8   | WP-03, WP-04, WP-05 | Exact clean pinned Alfie source; synthetic replacement rejected  |
 
 ## Verification ladder
 

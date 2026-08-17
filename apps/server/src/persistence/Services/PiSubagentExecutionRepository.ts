@@ -87,6 +87,32 @@ export type PiSubagentLifecycleRecordResult =
       readonly execution: PiSubagentExecutionRecord;
     };
 
+/** Ticket 23 latest-snapshot progress observation (UPDATE-only path). */
+export interface RecordPiSubagentProgressObservationInput {
+  readonly executionId: string;
+  readonly progressJson: string;
+  readonly occurredAt: string;
+  /** Coalesced-since-flush count added to dropped_progress_count. */
+  readonly droppedCountDelta: number;
+}
+
+/** Ticket 23 heartbeat lease refresh (UPDATE-only path). */
+export interface RecordPiSubagentHeartbeatObservationInput {
+  readonly executionId: string;
+  readonly occurredAt: string;
+  /** Server-computed lease expiry (occurredAt + resolved leaseMs). */
+  readonly leaseExpiresAt: string;
+}
+
+/** Ticket 23 durable latest observation reader. */
+export interface PiSubagentExecutionObservation {
+  readonly lastProgressJson: string | null;
+  readonly lastProgressAt: string | null;
+  readonly droppedProgressCount: number;
+  readonly lastHeartbeatAt: string | null;
+  readonly leaseExpiresAt: string | null;
+}
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
@@ -94,6 +120,27 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordLifecycleEvent: (
     input: RecordPiSubagentLifecycleEventInput,
   ) => Effect.Effect<PiSubagentLifecycleRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 23 progress observation: UPDATE-only on the 099 columns, never
+   * touches desired/observed state, never inserts journal rows.
+   */
+  readonly recordProgressObservation: (
+    input: RecordPiSubagentProgressObservationInput,
+  ) => Effect.Effect<void, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 23 heartbeat observation: UPDATE-only lease refresh, never
+   * touches desired/observed state, never inserts journal rows.
+   */
+  readonly recordHeartbeatObservation: (
+    input: RecordPiSubagentHeartbeatObservationInput,
+  ) => Effect.Effect<void, PiSubagentExecutionRepositoryError>;
+  /** Ticket 23 durable latest-observation reader (reopen restore). */
+  readonly getObservation: (
+    executionId: string,
+  ) => Effect.Effect<
+    Option.Option<PiSubagentExecutionObservation>,
+    PiSubagentExecutionRepositoryError
+  >;
   readonly getById: (
     executionId: string,
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
@@ -102,16 +149,10 @@ export interface PiSubagentExecutionRepositoryShape {
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
   readonly listByThreadId: (
     threadId: string,
-  ) => Effect.Effect<
-    ReadonlyArray<PiSubagentExecutionRecord>,
-    PiSubagentExecutionRepositoryError
-  >;
+  ) => Effect.Effect<ReadonlyArray<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
   readonly listJournalEvents: (
     executionId: string,
-  ) => Effect.Effect<
-    ReadonlyArray<PiSubagentLifecycleEvent>,
-    PiSubagentExecutionRepositoryError
-  >;
+  ) => Effect.Effect<ReadonlyArray<PiSubagentLifecycleEvent>, PiSubagentExecutionRepositoryError>;
 }
 
 export class PiSubagentExecutionRepository extends ServiceMap.Service<

@@ -12,17 +12,17 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import {
-  toPersistenceDecodeError,
-  toPersistenceSqlError,
-} from "../Errors.ts";
+import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
   type PiSubagentAdmissionRecordResult,
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
+  type PiSubagentExecutionObservation,
   type PiSubagentLifecycleRecordResult,
   type RecordPiSubagentAdmissionInput,
+  type RecordPiSubagentHeartbeatObservationInput,
   type RecordPiSubagentLifecycleEventInput,
+  type RecordPiSubagentProgressObservationInput,
 } from "../Services/PiSubagentExecutionRepository.ts";
 
 interface ExecutionRow {
@@ -112,6 +112,14 @@ const executionColumns = (sql: SqlClient.SqlClient) => sql`
   created_at AS "createdAt",
   updated_at AS "updatedAt"
 `;
+
+interface ObservationRow {
+  readonly lastProgressJson: string | null;
+  readonly lastProgressAt: string | null;
+  readonly droppedProgressCount: number;
+  readonly lastHeartbeatAt: string | null;
+  readonly leaseExpiresAt: string | null;
+}
 
 export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -287,7 +295,13 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             const scopedRows = yield* getByCommandIdInternal(
               input.commandId,
               input.commandFingerprint,
-            ).pipe(Effect.mapError(toPersistenceSqlError));
+            ).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordAdmission:dedup-recheck-scoped",
+                ),
+              ),
+            );
             if (scopedRows.length > 0) {
               return {
                 kind: "already_applied" as const,
@@ -295,7 +309,11 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               };
             }
             const anyScopeRows = yield* getByCommandIdInternal(input.commandId).pipe(
-              Effect.mapError(toPersistenceSqlError),
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordAdmission:dedup-recheck-unscoped",
+                ),
+              ),
             );
             if (anyScopeRows.length > 0) {
               return {
@@ -303,10 +321,14 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 commandId: input.commandId,
               };
             }
-            return yield* Effect.fail(toPersistenceSqlError(err));
+            return yield* Effect.fail(
+              toPersistenceSqlError("PiSubagentExecutionRepository.recordAdmission:insert")(err),
+            );
           }),
         ),
-        Effect.mapError(toPersistenceSqlError),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordAdmission:insert"),
+        ),
       );
 
   const recordLifecycleEvent: PiSubagentExecutionRepositoryShape["recordLifecycleEvent"] = (
@@ -344,7 +366,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           const executionRows = yield* getByIdInternal(input.executionId);
           if (executionRows.length === 0) {
             return yield* Effect.fail(
-              toPersistenceSqlError(new Error(`Execution '${input.executionId}' not found`)),
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordLifecycleEvent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
             );
           }
 
@@ -413,7 +437,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             const nextDesired =
               input.state === "cancelled" || input.state === "cancelling"
                 ? "cancelled"
-                : input.state === "failed" || input.state === "succeeded" || input.state === "rejected"
+                : input.state === "failed" ||
+                    input.state === "succeeded" ||
+                    input.state === "rejected"
                   ? input.state
                   : currentExecution.desiredState;
 
@@ -432,7 +458,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           }
 
           const updatedExecutionRows = yield* getByIdInternal(input.executionId);
-          const updatedExecution = rowToExecutionRecord(updatedExecutionRows[0] ?? currentExecution);
+          const updatedExecution = rowToExecutionRecord(
+            updatedExecutionRows[0] ?? currentExecution,
+          );
 
           const event: PiSubagentLifecycleEvent = {
             eventId: input.eventId,
@@ -482,10 +510,20 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                    AND sequence = ${input.sequence}
                  )
               LIMIT 1
-            `.pipe(Effect.mapError(toPersistenceSqlError));
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordLifecycleEvent:dedup-recheck",
+                ),
+              ),
+            );
 
             const executionRows = yield* getByIdInternal(input.executionId).pipe(
-              Effect.mapError(toPersistenceSqlError),
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordLifecycleEvent:execution-recheck",
+                ),
+              ),
             );
 
             if (existingEventRows.length > 0 && executionRows.length > 0) {
@@ -513,16 +551,120 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 execution: rowToExecutionRecord(currentExecution),
               };
             }
-            return yield* Effect.fail(toPersistenceSqlError(err));
+            return yield* Effect.fail(
+              toPersistenceSqlError("PiSubagentExecutionRepository.recordLifecycleEvent:insert")(
+                err,
+              ),
+            );
           }),
         ),
-        Effect.mapError(toPersistenceSqlError),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordLifecycleEvent:insert"),
+        ),
       );
+
+  // ---------------------------------------------------------------------
+  // Ticket 23 observation paths. These are deliberately UPDATE-only with NO
+  // transaction, NO journal insert, and NO aggregate-state mutation: progress
+  // and heartbeat are observation, not control truth (T23-AC3/AC4).
+  // ---------------------------------------------------------------------
+
+  const getObservationInternal = (executionId: string) =>
+    sql<ObservationRow>`
+      SELECT
+        last_progress_json AS "lastProgressJson",
+        last_progress_at AS "lastProgressAt",
+        dropped_progress_count AS "droppedProgressCount",
+        last_heartbeat_at AS "lastHeartbeatAt",
+        lease_expires_at AS "leaseExpiresAt"
+      FROM pi_subagent_executions
+      WHERE execution_id = ${executionId}
+      LIMIT 1
+    `;
+
+  const recordProgressObservation: PiSubagentExecutionRepositoryShape["recordProgressObservation"] =
+    (input) =>
+      Effect.gen(function* () {
+        const updatedRows = yield* sql<{
+          readonly execution_id: string;
+        }>`
+          UPDATE pi_subagent_executions
+          SET
+            last_progress_json = ${input.progressJson},
+            last_progress_at = ${input.occurredAt},
+            dropped_progress_count = dropped_progress_count + ${input.droppedCountDelta},
+            updated_at = ${input.occurredAt}
+          WHERE execution_id = ${input.executionId}
+          RETURNING execution_id
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.recordProgressObservation:update"),
+          ),
+        );
+        if (updatedRows.length === 0) {
+          return yield* Effect.fail(
+            toPersistenceSqlError("PiSubagentExecutionRepository.recordProgressObservation:update")(
+              new Error(`Execution '${input.executionId}' not found for progress observation`),
+            ),
+          );
+        }
+      });
+
+  const recordHeartbeatObservation: PiSubagentExecutionRepositoryShape["recordHeartbeatObservation"] =
+    (input) =>
+      Effect.gen(function* () {
+        const updatedRows = yield* sql<{
+          readonly execution_id: string;
+        }>`
+          UPDATE pi_subagent_executions
+          SET
+            last_heartbeat_at = ${input.occurredAt},
+            lease_expires_at = ${input.leaseExpiresAt},
+            updated_at = ${input.occurredAt}
+          WHERE execution_id = ${input.executionId}
+          RETURNING execution_id
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.recordHeartbeatObservation:update",
+            ),
+          ),
+        );
+        if (updatedRows.length === 0) {
+          return yield* Effect.fail(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.recordHeartbeatObservation:update",
+            )(new Error(`Execution '${input.executionId}' not found for heartbeat observation`)),
+          );
+        }
+      });
+
+  const getObservation: PiSubagentExecutionRepositoryShape["getObservation"] = (executionId) =>
+    Effect.gen(function* () {
+      const rows = yield* getObservationInternal(executionId).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getObservation:query"),
+        ),
+      );
+      if (rows.length === 0) {
+        return Option.none();
+      }
+      const row = rows[0]!;
+      const observation: PiSubagentExecutionObservation = {
+        lastProgressJson: row.lastProgressJson ?? null,
+        lastProgressAt: row.lastProgressAt ?? null,
+        droppedProgressCount:
+          typeof row.droppedProgressCount === "number" ? row.droppedProgressCount : 0,
+        lastHeartbeatAt: row.lastHeartbeatAt ?? null,
+        leaseExpiresAt: row.leaseExpiresAt ?? null,
+      };
+      return Option.some(observation);
+    });
 
   const getById: PiSubagentExecutionRepositoryShape["getById"] = (executionId) =>
     Effect.gen(function* () {
       const rows = yield* getByIdInternal(executionId).pipe(
-        Effect.mapError(toPersistenceSqlError),
+        Effect.mapError(toPersistenceSqlError("PiSubagentExecutionRepository.getById:query")),
       );
       return rows.length > 0 ? Option.some(rowToExecutionRecord(rows[0]!)) : Option.none();
     });
@@ -530,7 +672,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const getByCommandId: PiSubagentExecutionRepositoryShape["getByCommandId"] = (commandId) =>
     Effect.gen(function* () {
       const rows = yield* getByCommandIdInternal(commandId).pipe(
-        Effect.mapError(toPersistenceSqlError),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getByCommandId:query"),
+        ),
       );
       return rows.length > 0 ? Option.some(rowToExecutionRecord(rows[0]!)) : Option.none();
     });
@@ -542,12 +686,18 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         FROM pi_subagent_executions
         WHERE parent_thread_id = ${threadId}
         ORDER BY created_at ASC
-      `.pipe(Effect.mapError(toPersistenceSqlError));
+      `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.listByThreadId:query"),
+        ),
+      );
 
       return rows.map(rowToExecutionRecord);
     });
 
-  const listJournalEvents: PiSubagentExecutionRepositoryShape["listJournalEvents"] = (executionId) =>
+  const listJournalEvents: PiSubagentExecutionRepositoryShape["listJournalEvents"] = (
+    executionId,
+  ) =>
     Effect.gen(function* () {
       const rows = yield* sql<JournalRow>`
         SELECT
@@ -569,7 +719,11 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         JOIN pi_subagent_executions e ON j.execution_id = e.execution_id
         WHERE j.execution_id = ${executionId}
         ORDER BY j.generation ASC, j.sequence ASC
-      `.pipe(Effect.mapError(toPersistenceSqlError));
+      `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.listJournalEvents:query"),
+        ),
+      );
 
       return rows.map((row: any) => ({
         eventId: row.eventId,
@@ -592,6 +746,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   return {
     recordAdmission,
     recordLifecycleEvent,
+    recordProgressObservation,
+    recordHeartbeatObservation,
+    getObservation,
     getById,
     getByCommandId,
     listByThreadId,

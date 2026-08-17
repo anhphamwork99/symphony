@@ -153,9 +153,7 @@ function resolveVersionedExtensionDir(): string {
   const repoDir = resolveAlfieRepoDir();
   const extDir = join(repoDir, "agent/extensions/pi-subagents");
   if (!existsSync(extDir) || !existsSync(join(extDir, "package.json"))) {
-    throw new Error(
-      `Provenance assertion failed: extension directory not found at '${extDir}'.`,
-    );
+    throw new Error(`Provenance assertion failed: extension directory not found at '${extDir}'.`);
   }
   return extDir;
 }
@@ -225,7 +223,9 @@ function verifyExtensionGitProvenance(repoDir?: string): {
   for (const [relPath, expectedHash] of Object.entries(manifest.hashes)) {
     const fullPath = join(dir, relPath);
     if (!existsSync(fullPath)) {
-      throw new Error(`Provenance assertion failed: file '${relPath}' missing from extension tree.`);
+      throw new Error(
+        `Provenance assertion failed: file '${relPath}' missing from extension tree.`,
+      );
     }
     const computed = computeLocalSha256(fullPath);
     if (computed !== expectedHash) {
@@ -383,7 +383,10 @@ afterEach(() => {
   createdDirs.length = 0;
 });
 
-function makeServerConfig(tempDir: string, overrides?: Partial<ServerConfigShape>): ServerConfigShape {
+function makeServerConfig(
+  tempDir: string,
+  overrides?: Partial<ServerConfigShape>,
+): ServerConfigShape {
   return {
     mode: "web",
     port: 3779,
@@ -424,8 +427,7 @@ function makeAuthorityFixture(threadId: string) {
   const registry = makeMcpSessionAuthorityRegistry();
   const authorityService: McpSessionAuthorityShape = {
     ...registry,
-    mintForLocalOwner: () =>
-      registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+    mintForLocalOwner: () => registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
     mintForAuthenticated: (session) =>
       registry.mint({
         subject: session.subject,
@@ -626,7 +628,12 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
   const versionedDir = resolveVersionedExtensionDir();
   mkdirSync(targetDir, { recursive: true });
   for (const entry of readdirSync(versionedDir)) {
-    if (entry === "node_modules" || entry === "dist" || entry === "test" || entry === ".gitignore") {
+    if (
+      entry === "node_modules" ||
+      entry === "dist" ||
+      entry === "test" ||
+      entry === ".gitignore"
+    ) {
       continue;
     }
     const from = join(versionedDir, entry);
@@ -647,6 +654,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "managed-spawn",
     "abort-propagation",
     "bounded-foreground-attachment",
+    "coalesced-progress",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -730,7 +738,11 @@ function createLegacyAgentDir(tempAgentDir: string, baseUrl: string): void {
  * child session's own services (extension loader, settings, model runtime)
  * resolve the same deterministic provider.
  */
-async function resolveDeterministicModelContext(agentDir: string, childAgentDir: string, slow: boolean) {
+async function resolveDeterministicModelContext(
+  agentDir: string,
+  childAgentDir: string,
+  slow: boolean,
+) {
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
     modelsPath: join(agentDir, "models.json"),
@@ -829,9 +841,9 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
         mcpAuthority: binding,
       });
 
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
       const bridge = loadedExt.handlers.get("synara:subagents:bridge")[0]();
@@ -975,9 +987,9 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     expect(isPiSubagentManagedForegroundBinding(validBinding)).toBe(true);
 
     // Lower bound endpoint (100)
-    expect(
-      isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 100 }),
-    ).toBe(true);
+    expect(isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 100 })).toBe(
+      true,
+    );
 
     // Upper bound endpoint (60000)
     expect(
@@ -985,14 +997,14 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     ).toBe(true);
 
     // Intermediate valid value (5000)
-    expect(
-      isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 5_000 }),
-    ).toBe(true);
+    expect(isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 5_000 })).toBe(
+      true,
+    );
 
     // Below min endpoint (< 100)
-    expect(
-      isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 99 }),
-    ).toBe(false);
+    expect(isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 99 })).toBe(
+      false,
+    );
 
     // Above max endpoint (> 60000)
     expect(
@@ -1005,9 +1017,9 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     ).toBe(false);
 
     // Zero
-    expect(
-      isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 0 }),
-    ).toBe(false);
+    expect(isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: 0 })).toBe(
+      false,
+    );
 
     // Non-integer float
     expect(
@@ -1015,9 +1027,9 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     ).toBe(false);
 
     // NaN / string
-    expect(
-      isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: NaN }),
-    ).toBe(false);
+    expect(isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: NaN })).toBe(
+      false,
+    );
     expect(
       isPiSubagentManagedForegroundBinding({ ...validBinding, foregroundWaitMs: "10000" as any }),
     ).toBe(false);
@@ -1086,14 +1098,21 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
         mcpAuthority: binding,
       });
 
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
       const parentCtx = {
-        ui: { notify: () => {}, setStatus: () => {}, setWidget: () => {}, select: async () => undefined, confirm: async () => true, input: async () => undefined },
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
         cwd: tempDir,
         model: undefined,
         modelRegistry: { find: () => undefined, getAll: () => [], getAvailable: () => [] },
@@ -1199,15 +1218,22 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
         mcpAuthority: binding,
       });
 
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
       const bridge = loadedExt.handlers.get("synara:subagents:bridge")[0]();
 
       const parentCtx = {
-        ui: { notify: () => {}, setStatus: () => {}, setWidget: () => {}, select: async () => undefined, confirm: async () => true, input: async () => undefined },
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
         cwd: tempDir,
         model: undefined,
         modelRegistry: { find: () => undefined, getAll: () => [], getAvailable: () => [] },
@@ -1224,7 +1250,15 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       const detachResult = yield* Effect.promise(() =>
         executeFn(
           "call_ac7_detach",
-          { commandId: "cmd_ac7_detach", subagent_type: "researcher", task: "Task Detach", context: "C", link_references: "L", expected_outcome: "O", run_in_background: false },
+          {
+            commandId: "cmd_ac7_detach",
+            subagent_type: "researcher",
+            task: "Task Detach",
+            context: "C",
+            link_references: "L",
+            expected_outcome: "O",
+            run_in_background: false,
+          },
           undefined,
           undefined,
           parentCtx,
@@ -1272,7 +1306,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     const provenance = verifyExtensionGitProvenance(repoDir);
     expect(provenance.isVerified).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.packageVersion).toBe("0.10.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.11.0-alfie.1");
     expect(provenance.commit).toMatch(/^[0-9a-f]{40}$/);
 
     // 2. Reject synthetic inline factory extension
@@ -1394,7 +1428,11 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
 
     const observedSessions = new Map<string, any>();
     const observedCapabilities = new Map<string, any>();
-    const admittedEvents: Array<{ threadId: ThreadId; command: PiSubagentSpawnCommand; result: PiSubagentSpawnResult }> = [];
+    const admittedEvents: Array<{
+      threadId: ThreadId;
+      command: PiSubagentSpawnCommand;
+      result: PiSubagentSpawnResult;
+    }> = [];
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSessions.set(String(event.threadId), event.session);
@@ -1453,15 +1491,22 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       const managedSession = observedSessions.get("th_t22_ac6_m1");
       expect(managedSession).toBeDefined();
 
-      const loadedExt = managedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = managedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
       const managedBridge = loadedExt.handlers.get("synara:subagents:bridge")[0]();
 
       const parentCtx = {
-        ui: { notify: () => {}, setStatus: () => {}, setWidget: () => {}, select: async () => undefined, confirm: async () => true, input: async () => undefined },
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
         cwd: tempDirManaged,
         model: undefined,
         modelRegistry: { find: () => undefined, getAll: () => [], getAvailable: () => [] },
@@ -1487,13 +1532,11 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       const legacyCapability = observedCapabilities.get("th_t22_ac6_legacy");
       expect(legacyCapability?.isManaged).toBe(false);
       expect(legacyCapability?.status).toBe("capability_mismatch");
-      expect(legacyCapability?.missingCapabilities).toContain(
-        "bounded-foreground-attachment",
-      );
+      expect(legacyCapability?.missingCapabilities).toContain("bounded-foreground-attachment");
 
-      const legacyLoadedExt = legacySession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const legacyLoadedExt = legacySession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       expect(legacyLoadedExt).toBeDefined();
       const legacyAgentEntry = legacyLoadedExt.tools.get("Agent");
       const legacyExecuteFn = legacyAgentEntry.execute ?? legacyAgentEntry.definition?.execute;
@@ -1504,7 +1547,14 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       expect(legacyAgentEntry.definition?.__synaraAdmissionWrapped).toBeUndefined();
 
       const legacyParentCtx = {
-        ui: { notify: () => {}, setStatus: () => {}, setWidget: () => {}, select: async () => undefined, confirm: async () => true, input: async () => undefined },
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
         cwd: tempDirLegacy,
         model: legacyModelContext.model,
         modelRegistry: legacyModelContext.registry,
@@ -1545,14 +1595,30 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
         Promise.all([
           executeFn(
             "call_m1",
-            { commandId: "cmd_m1", subagent_type: "researcher", task: "Task M1", context: "C1", link_references: "L1", expected_outcome: "O1", run_in_background: false },
+            {
+              commandId: "cmd_m1",
+              subagent_type: "researcher",
+              task: "Task M1",
+              context: "C1",
+              link_references: "L1",
+              expected_outcome: "O1",
+              run_in_background: false,
+            },
             undefined,
             undefined,
             parentCtx,
           ),
           executeFn(
             "call_m2",
-            { commandId: "cmd_m2", subagent_type: "researcher", task: "Task M2", context: "C2", link_references: "L2", expected_outcome: "O2", run_in_background: false },
+            {
+              commandId: "cmd_m2",
+              subagent_type: "researcher",
+              task: "Task M2",
+              context: "C2",
+              link_references: "L2",
+              expected_outcome: "O2",
+              run_in_background: false,
+            },
             undefined,
             undefined,
             parentCtx,
@@ -1581,8 +1647,14 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       expect(j2.length).toBeGreaterThanOrEqual(3);
       expect(j1[0]!.executionId).toBe((res1 as any).executionId);
       expect(j2[0]!.executionId).toBe((res2 as any).executionId);
-      expect(j1[2]!.metadata).toMatchObject({ phase: "detached", foregroundWaitMs: managedForegroundWaitMs });
-      expect(j2[2]!.metadata).toMatchObject({ phase: "detached", foregroundWaitMs: managedForegroundWaitMs });
+      expect(j1[2]!.metadata).toMatchObject({
+        phase: "detached",
+        foregroundWaitMs: managedForegroundWaitMs,
+      });
+      expect(j2[2]!.metadata).toMatchObject({
+        phase: "detached",
+        foregroundWaitMs: managedForegroundWaitMs,
+      });
 
       // Managed bridge resources are clean after both detaches.
       const managedSnapshot = managedBridge.getResourceSnapshot();
@@ -1728,9 +1800,9 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       const provenance = assertProductionExtensionProvenance(observedSession);
       expect(provenance.isProduction).toBe(true);
 
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
@@ -1844,5 +1916,4 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       await modelServer.close();
     }
   });
-
 });
