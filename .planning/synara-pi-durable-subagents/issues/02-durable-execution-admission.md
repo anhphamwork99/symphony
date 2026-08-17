@@ -9,26 +9,26 @@ commands cannot create duplicates.
 
 **Blocked by:** 01 — Versioned managed-execution handshake.
 
-**Status:** needs-remediation — see tickets 18 and 20.
+**Status:** complete — re-completed per Decision 0010 (2026-08-18); remediation evidence in tickets 18–24, integrated proof in ticket 24's second matrix
 
 **Review disposition (2026-08-16):** Failed. The repository and coordinator
 were exercised only through tests, were not in the production Pi spawn call
 chain, and did not provide atomic concurrent idempotency or complete authority
 checks. The checkboxes below represent accepted review evidence.
 
-- [ ] **T02-AC1:** The execution record and `executionId` are durable before any
+- [x] **T02-AC1:** The execution record and `executionId` are durable before any
       child-start evidence can be observed.
-- [ ] **T02-AC2:** Every concrete spawn receives a distinct `attemptId`, and all
+- [x] **T02-AC2:** Every concrete spawn receives a distinct `attemptId`, and all
       lifecycle events identify their execution, attempt, generation, and unique
       event or attempt-local sequence.
-- [ ] **T02-AC3:** Requested-to-accepted is journal-first and deduplicated;
+- [x] **T02-AC3:** Requested-to-accepted is journal-first and deduplicated;
       rejected is terminal with a stable diagnostic; no half-admitted execution
       reaches projection.
-- [ ] **T02-AC4:** Project/thread ownership, active-turn, approval, and provider
+- [x] **T02-AC4:** Project/thread ownership, active-turn, approval, and provider
       authority are enforced before child start; denial produces no child.
-- [ ] **T02-AC5:** Replaying a command identity returns already-applied with the
+- [x] **T02-AC5:** Replaying a command identity returns already-applied with the
       original identities and creates neither a second execution nor attempt.
-- [ ] **T02-AC6:** A legacy or unhandshaked session bypasses this managed
+- [x] **T02-AC6:** A legacy or unhandshaked session bypasses this managed
       admission path entirely and keeps the existing extension behavior.
 
 ## Testing Seams

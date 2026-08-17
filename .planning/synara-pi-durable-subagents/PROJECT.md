@@ -35,8 +35,13 @@
 - [decisions/0009-t23-production-progress-heartbeat-and-saturation-final-acceptance.md](decisions/0009-t23-production-progress-heartbeat-and-saturation-final-acceptance.md) —
   accepted Ticket 23 baseline: Symphony `6d646fe1` + Alfie `d35644a3b`
   (`0.11.0-alfie.1`, capability `coalesced-progress`); nonblocking risks
-  recorded (lease trusts producer occurredAt — Ticket 24 must validate
-  server-side before any lease-based control).
+  recorded (lease trusts producer occurredAt — the first lease consumer must
+  validate server-side before any lease-based control).
+- [decisions/0010-t24-integrated-remediation-final-acceptance.md](decisions/0010-t24-integrated-remediation-final-acceptance.md) —
+  accepted Ticket 24 integrated gate: Symphony `625d256a` + Alfie
+  `d35644a3b`; authorizes tickets 01–05 re-completion (second matrix, 31/31
+  rows); frontier advances to ticket 06, which inherits the lease-occurredAt
+  validation obligation.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -44,18 +49,19 @@
 
 ## Current implementation frontier
 
-- **Review verdict for tickets 01–05:** not accepted on 2026-08-16; ticket 01
-  was partial and tickets 02–05 failed. The focused fixture suites passed, but
-  production wiring, migration compatibility, persistence correctness,
-  authorization, and real-Pi/restart evidence did not.
-- **Remediation track:** tickets 18–24.
-- **Accepted remediation tickets:** tickets 18, 19, 20, 21, 22 (Decision
-  0008), and 23 (Decision 0009).
-- **Blocker-free frontier:** ticket 24 — Integrated remediation acceptance
-  and review closure.
-- **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
-- Every remediation ticket owns an `Implementation Report`; an implementer must
-  complete that report with exact evidence before requesting review.
+- **Review history for tickets 01–05:** not accepted on 2026-08-16 (ticket 01
+  partial, tickets 02–05 failed); the reviewed defects were remediated through
+  tickets 18–23 and proven fixed by the ticket-24 integrated acceptance path.
+  Tickets 01–05 are complete again per Decision 0010 (second matrix in the
+  ticket-24 report, 31/31 rows).
+- **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
+- **Blocker-free frontier:** ticket 06 — Durable parent-turn cancellation
+  (sole blocker, ticket 24, satisfied). Ticket 06 inherits the standing
+  obligation from Decisions 0009/0010: any lease-based control must
+  validate/re-derive lease authority server-side (producer-supplied
+  occurredAt is not trusted).
+- Every implementation ticket owns an `Implementation Report`; an implementer
+  must complete that report with exact evidence before requesting review.
 
 ## Supporting context
 

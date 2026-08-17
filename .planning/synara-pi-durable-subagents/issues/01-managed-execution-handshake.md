@@ -9,27 +9,27 @@ restart-recoverable.
 
 **Blocked by:** 19 — Complete real-Pi capability negotiation.
 
-**Status:** needs-remediation — see ticket 19.
+**Status:** complete — re-completed per Decision 0010 (2026-08-18); remediation evidence in tickets 18–24, integrated proof in ticket 24's second matrix
 
 **Review disposition (2026-08-16):** Partial. Production probing exists, but
 required capabilities are not validated and no compatible production Pi
 extension path was demonstrated. The implementation claim remains preserved in
 Git history; the checkboxes below now represent accepted review evidence.
 
-- [ ] **T01-AC1:** The handshake carries an explicit protocol version and
+- [x] **T01-AC1:** The handshake carries an explicit protocol version and
       capability set; compatible versions succeed and unsupported versions fail
       closed with offered-versus-supported diagnostic context.
-- [ ] **T01-AC2:** Without a successful handshake, spawn, abort, completion, and
+- [x] **T01-AC2:** Without a successful handshake, spawn, abort, completion, and
       notification behavior remain legacy behavior, and no managed execution
       record is created.
-- [ ] **T01-AC3:** Bridge absent, bridge error, and unsupported version produce
+- [x] **T01-AC3:** Bridge absent, bridge error, and unsupported version produce
       distinct stable diagnostic codes without degrading unrelated Pi session or
       provider controls.
 - [x] **T01-AC4:** The negotiated result is stable for the provider-session
       lifetime and can be correlated with executions admitted in that session.
 - [x] **T01-AC5:** Repeated probes are idempotent and produce no execution,
       transcript, notification, or model-context side effects.
-- [ ] **T01-AC6:** Managed admission and completion ownership remain inert until
+- [x] **T01-AC6:** Managed admission and completion ownership remain inert until
       successful negotiation; mixed-version rollout cannot silently enable only
       part of the managed lifecycle.
 

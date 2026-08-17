@@ -128,7 +128,7 @@ observation methods + reader.
 - Alfie extension suite (`npm test` in agent/extensions/pi-subagents at
   d35644a3b): 30 files, 483 tests passed, tsc --noEmit clean.
 - Symphony focused (per-file, apps/server): piSubagentProgressObservation 4/4;
-  piSubagentProgressSaturation 3/3; PiSubagentExecutionRepository 42/42;
+  piSubagentProgressSaturation 3/3; PiSubagentExecutionRepository 12/12;
   piSubagentBridge 16→28 tests green; config.test + main.test green;
   piSubagentForegroundLifecycle, piSubagentSession, admission coordinator,
   control-health suites green (92 tests).

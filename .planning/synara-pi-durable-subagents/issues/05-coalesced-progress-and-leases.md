@@ -9,25 +9,25 @@ truth retain reserved delivery.
 
 **Blocked by:** 04 — Bounded foreground attachment.
 
-**Status:** needs-remediation — see ticket 23.
+**Status:** complete — re-completed per Decision 0010 (2026-08-18); remediation evidence in tickets 18–24, integrated proof in ticket 24's second matrix
 
 **Review disposition (2026-08-16):** Failed. Progress, heartbeat, lease, and
 saturation behavior were implemented in synthetic or test-only coordinators,
 not production ingress. Safe configuration fallback in AC7 was independently
 verified. The checkboxes below represent accepted review evidence.
 
-- [ ] **T05-AC1:** Managed execution emits no continuing 80 ms spinner-style
+- [x] **T05-AC1:** Managed execution emits no continuing 80 ms spinner-style
       publication.
-- [ ] **T05-AC2:** Progress is capped at the configured rate, initially two
+- [x] **T05-AC2:** Progress is capped at the configured rate, initially two
       updates per second per execution, with trailing-edge latest-snapshot behavior.
-- [ ] **T05-AC3:** Heartbeat refreshes the ownership lease, initially every
+- [x] **T05-AC3:** Heartbeat refreshes the ownership lease, initially every
       approximately 10 seconds with a 30-second lease, without creating transcript
       messages, durable progress history, or auto-follow triggers.
-- [ ] **T05-AC4:** Desired state and observed queued/running/cancel activity
+- [x] **T05-AC4:** Desired state and observed queued/running/cancel activity
       remain separately readable and cannot overwrite one another.
-- [ ] **T05-AC5:** Saturation may coalesce or drop progress with counters, but
+- [x] **T05-AC5:** Saturation may coalesce or drop progress with counters, but
       lifecycle and terminal events retain reserved capacity.
-- [ ] **T05-AC6:** Sustained progress load does not make server memory grow
+- [x] **T05-AC6:** Sustained progress load does not make server memory grow
       linearly with intermediate event count.
 - [x] **T05-AC7:** Invalid rate, heartbeat, or lease configuration falls back to
       safe project defaults.

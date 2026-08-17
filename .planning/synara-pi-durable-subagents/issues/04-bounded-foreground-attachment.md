@@ -8,7 +8,7 @@ and remains durably observable as running.
 
 **Blocked by:** 03 — Managed admission fails closed.
 
-**Status:** needs-remediation — see ticket 22.
+**Status:** complete — re-completed per Decision 0010 (2026-08-18); remediation evidence in tickets 18–24, integrated proof in ticket 24's second matrix
 
 **Review disposition (2026-08-16):** Failed. Bounded foreground behavior was
 implemented in a synthetic extension fixture, not the actual production Pi
@@ -16,17 +16,17 @@ Agent path, and no restart recovery evidence was produced. Configuration
 resolution in AC5 was independently verified. The checkboxes below represent
 accepted review evidence.
 
-- [ ] **T04-AC1:** A child finishing inside the wait budget returns through the
+- [x] **T04-AC1:** A child finishing inside the wait budget returns through the
       existing inline result flow without creating unnecessary follow-up delivery.
-- [ ] **T04-AC2:** A child still active at expiry returns an execution handle
+- [x] **T04-AC2:** A child still active at expiry returns an execution handle
       within the configured budget plus a bounded scheduling tolerance.
-- [ ] **T04-AC3:** Returning the handle does not spawn a replacement, stop the
+- [x] **T04-AC3:** Returning the handle does not spawn a replacement, stop the
       original child, or detach it from the default parent-turn cancellation scope.
-- [ ] **T04-AC4:** Started and detached observations are durable, and the
+- [x] **T04-AC4:** Started and detached observations are durable, and the
       execution is represented as running rather than interrupted.
 - [x] **T04-AC5:** The initial default is 10 seconds; configuration is bounded,
       and invalid values fall back safely instead of disabling detach.
-- [ ] **T04-AC6:** Managed detach affects only its execution; concurrent managed
+- [x] **T04-AC6:** Managed detach affects only its execution; concurrent managed
       executions and legacy sessions retain their own behavior.
 
 ## Testing Seams
