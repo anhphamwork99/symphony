@@ -1987,6 +1987,29 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
           getSystemPrompt: () => "",
         };
 
+        // Warm-up (unmeasured): absorbs first-call lazy module compilation
+        // and — when this file runs after other suites in the same vitest
+        // process — the tail of the previous file's session teardown, so the
+        // measured call reflects the production detach chain on a functioning
+        // loop (Decision 0006 §5), not cross-file scheduling noise.
+        yield* Effect.promise(() =>
+          executeFn(
+            "call_t22_fg_warmup",
+            {
+              commandId: "cmd_t22_fg_warmup",
+              subagent_type: "researcher",
+              task: "Warm-up execution",
+              context: "Bounded foreground test context.",
+              link_references: "None",
+              expected_outcome: "Foreground child execution report.",
+              run_in_background: false,
+            },
+            undefined,
+            undefined,
+            parentCtx,
+          ),
+        );
+
         const startTime = Date.now();
         const result = yield* Effect.promise(() =>
           executeFn(
@@ -2007,8 +2030,8 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
         );
         const elapsed = Date.now() - startTime;
 
-        // Real extension returned detached result within timeout + tolerance (under 3000ms)
-        expect(elapsed).toBeLessThan(3500);
+        // Decision 0006 §5 acceptance envelope: budget (300ms) + 500ms.
+        expect(elapsed).toBeLessThan(800);
         expect(result).toBeDefined();
         expect((result as any).isError).toBeUndefined();
         expect((result as any).executionId).toMatch(/^exec_/);
