@@ -54,7 +54,10 @@ const wallclockProject = defineConfig({
 const unitProject = defineConfig({
   test: {
     name: "unit",
-    include: ["src/**/*.test.ts"],
+    // `integration/**` was accidentally dropped from discovery by the first
+    // WP-08 project split (reviewer finding M1: full-suite file count fell
+    // 371 -> 365, silently skipping ~30 integration tests). Keep it included.
+    include: ["src/**/*.test.ts", "integration/**/*.test.ts"],
     exclude: [
       "**/node_modules/**",
       ...WALLCLOCK_TESTS.map((file) => `**/${file}`),
