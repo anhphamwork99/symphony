@@ -22,6 +22,11 @@
 - [decisions/0005-t21-production-fail-closed-control-health-final-acceptance.md](decisions/0005-t21-production-fail-closed-control-health-final-acceptance.md) —
   accepted production fail-closed control-health baseline and recorded
   nonblocking risks.
+- [decisions/0006-t22-bounded-foreground-attachment-technical-direction.md](decisions/0006-t22-bounded-foreground-attachment-technical-direction.md) —
+  accepted cross-repository technical direction for Ticket 22 bounded
+  foreground attachment.
+- [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
+  delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
   work the blocker-free frontier one ticket at a time.
 
