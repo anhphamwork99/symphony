@@ -205,6 +205,40 @@ bun run --cwd apps/server test \
   by this ticket.
 - `bun fmt` / `bun lint`: not run (not authorized).
 
+### Final canonical verification (report finalization)
+
+All evidence above was re-confirmed at the final main HEAD in the canonical
+checkout `/Users/anhpham99/symphony` using the exact Decision 0001 command
+forms. Results are exact; no source or test file changed in this pass — the
+only change is this report.
+
+- **Exact root test command** — `PATH=$HOME/.bun/bin:$PATH bun run test`
+  run from the exact repository root at final HEAD `94ec9e46`:
+  **8/8 Turbo tasks passed, exit 0**. (Note: the first attempt at this exact
+  command aborted before any test executed because the background shell's
+  `PATH` did not yet contain the package-manager binary, so `bun` was not
+  found; retrying with the `PATH` prefix set — exactly as written above —
+  passed. This is an environment/invocation note, not a code or test
+  failure, and no suite result was affected.)
+- **Server summary at final HEAD** (`bun run --cwd apps/server test`):
+  **365 files passed / 3 skipped (368); 4250 tests passed / 17 skipped
+  (4267); exit 0; total 5m22.854s.**
+- **Focused ticket suite** (the 7 files listed above) run independently at
+  final HEAD: **7 files, 81 tests passed** — unchanged from the candidate and
+  follow-up runs.
+- **Typecheck at final HEAD:** root `bun typecheck` still exits **2** at the
+  same unchanged location — `packages/contracts/src/piSubagents.test.ts`,
+  **12 baseline errors** (pre-existing; `packages/contracts` is byte-unchanged
+  since `991bd616`). Direct `tsc --noEmit` on apps/server with the same
+  installed toolchain produced **75 errors at final HEAD vs 78 on a detached
+  `991bd616` baseline worktree** (net −3, all attributable to this ticket's
+  `piSubagentControlHealth.ts` fix, 2 → 0). Per-file ticket-relevant counts
+  remained at baseline — PiAdapter 3, coordinator 3, real-extension test 11 —
+  and **no new ticket-related error was introduced**.
+- **`bun fmt` / `bun lint`: still not run — not explicitly authorized.**
+- Status semantics: this report records implementer evidence only; owner /
+  Supervisor acceptance is a later, separate step and is not claimed here.
+
 ### Migration compatibility evidence
 
 No schema or migration change. The accepted ticket 18 migration lineage
@@ -355,10 +389,21 @@ Deviations).
 - Conformance-review follow-up on main (parent `93cac45c`): one commit adding
   the F2 legacy-Agent execution leg to
   `apps/server/src/provider/piSubagentRealExtension.test.ts` and the F2/F3
-  report updates to this file. No production change; not pushed.
-- The canonical `/Users/anhpham99/symphony` checkout was never modified,
-  staged, committed, or reset. Alfie source (`2a3f69bd6`) is unchanged and
-  clean.
+  report updates to this file. No production change; not pushed. Integrated
+  on main as `94ec9e46`.
+- **Final main lineage for this ticket:** `a029687a` (fix) → `93cac45c`
+  (implementation report) → `94ec9e46` (F2/F3 follow-up). This report's
+  finalization edit (final canonical verification evidence above, this file
+  only) is committed as one further **docs-only** commit on top of
+  `94ec9e46`; it cannot self-reference its own hash, so it is identified here
+  as the *report-finalization commit* and the exact hash is left to git
+  history / reviewer handoff.
+- Canonical checkout: during implementation the `/Users/anhpham99/symphony`
+  checkout was never modified, staged, committed, or reset; at finalization
+  it was used read-only for the verification pass above, and the only change
+  committed from it is this docs-only report update (working tree clean
+  afterward). Alfie source (`2a3f69bd6`) is unchanged and clean. Nothing
+  pushed; no commit amended.
 
 ### Reviewer handoff
 
