@@ -161,12 +161,29 @@ meets the envelope in the strong majority of runs), (b) change the verification 
 wall-clock-sensitive files in separate processes, or (c) reopen Decision 0006 §5's envelope value.
 WP-07 does not have authority for (c) and deliberately did not widen any assertion.
 
-**Owner adjudication (2026-08-17): option (b).** The timing-envelope challenge is resolved by
+**Owner adjudication (2026-08-17): option (b).** The timing-envelope challenge was to be resolved by
 test-harness process isolation, not by relaxing the envelope. Decision 0006 §5 keeps
-`budget + 500 ms` unchanged; the flakiness is attributed to shared-worker scheduling during
-adjacent real-Pi teardown, not to the production chain. Harness isolation is delivered as WP-08
-(`plans/22-real-bounded-foreground-attachment/WP-08-test-harness-isolation.md`); acceptance for the
-envelope requires the multi-file and full-suite invocations to pass with the isolation in place.
+`budget + 500 ms` unchanged; the flakiness was attributed to shared-worker scheduling during
+adjacent real-Pi teardown, not to the production chain. Harness isolation was delivered as WP-08
+(`plans/22-real-bounded-foreground-attachment/WP-08-test-harness-isolation.md`).
+
+**WP-08 outcome: challenge — attribution disproven, superseded by option (A) adjudication
+(2026-08-17).** WP-08 implemented the `unit`/`wallclock` vitest project split (four files, one
+forked process each, groups strictly sequential, wallclock first) and proved the mechanism via
+per-file child PIDs — then proved the envelope tail persists under isolation (4-file invocation
+10 fail / 17 runs at 930–1119 ms while the identical acceptance file was green 7/7 standalone in
+the same load window). Two corrected facts: vitest 4's default `forks` pool + `isolate: true`
+**already** gave every file its own child process under the old serial script, and the tail's
+actual driver is vitest MAIN-process transform/module-graph work for heavy pending files
+(3 tiny dummy pending files → 3/3 green; heavy pending files → fail; failures also appear in
+realExtension without acceptance present). The production chain itself stays well inside the
+envelope (303–680 ms typical).
+
+**Final owner adjudication (2026-08-17, option A):** Decision 0006 §5 remains `budget + 500 ms`
+and is NOT reopened; envelope acceptance is verified via **per-file standalone invocations** of
+the wall-clock-sensitive suites; the WP-08 isolation config is kept as a strict harness
+improvement (wallclock-first ordering, per-file forked runners, documented in
+`apps/server/vitest.config.ts`); no assertion, timeout, or envelope value was widened anywhere.
 
 ### Acceptance evidence matrix (remediation)
 

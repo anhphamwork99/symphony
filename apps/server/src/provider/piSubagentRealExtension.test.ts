@@ -1,3 +1,14 @@
+/**
+ * Wall-clock-sensitive suite (Ticket 22, Decision 0006 §5 `budget + 500 ms`
+ * envelope). This file runs in the `wallclock` vitest project defined in
+ * `apps/server/vitest.config.ts` (WP-08): one forked runner process per file,
+ * executed before the `unit` project. WP-08 also proved the envelope tail in
+ * multi-file invocations comes from vitest main-process transform work for
+ * pending heavy files, not from adjacent teardown (owner adjudication
+ * 2026-08-17, option A): envelope acceptance is verified per-file standalone.
+ * Do not move this file out of that project without re-adjudicating the
+ * envelope.
+ */
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
 import { tmpdir } from "node:os";
