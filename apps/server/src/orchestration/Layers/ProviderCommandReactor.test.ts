@@ -500,8 +500,7 @@ describe("ProviderCommandReactor", () => {
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const enableSynaraMcp = vi.fn<NonNullable<ProviderServiceShape["enableSynaraMcp"]>>(
-      input?.enableSynaraMcp ??
-        (() => Effect.succeed({ state: "active", alreadyActive: false })),
+      input?.enableSynaraMcp ?? (() => Effect.succeed({ state: "active", alreadyActive: false })),
     );
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
@@ -9753,9 +9752,9 @@ describe("ProviderCommandReactor", () => {
       ).toBe(true);
       // The convergence never mutates the durable project state.
       const readModel = await Effect.runPromise(harness.engine.getReadModel());
-      expect(
-        readModel.projects[0]?.synaraMcpActivationOperation?.aggregateStatus,
-      ).toBe("succeeded");
+      expect(readModel.projects[0]?.synaraMcpActivationOperation?.aggregateStatus).toBe(
+        "succeeded",
+      );
     });
 
     it("waits for a pending operation and never activates before its exact terminal", async () => {

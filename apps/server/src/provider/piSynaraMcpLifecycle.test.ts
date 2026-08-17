@@ -21,7 +21,11 @@ import {
 } from "./piSynaraMcpExtension.ts";
 
 const ACTIVATION_INPUT = { subject: "subject-1", sessionId: "session-1" };
-const AUTHORITY = { subject: "subject-1", sessionId: "session-1", lifecycleGeneration: "authority-1" };
+const AUTHORITY = {
+  subject: "subject-1",
+  sessionId: "session-1",
+  lifecycleGeneration: "authority-1",
+};
 const CREDENTIAL = { credential: "credential-1" };
 const CONNECTION = { connection: "connection-1" };
 const CATALOG = { tools: [{ name: "synara_tool_1" }, { name: "synara_tool_2" }] };
@@ -212,7 +216,15 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     }
     // Exactly one staged activation and one atomic exposure, followed by the
     // proven-commit notification that installs the fresh admission generation.
-    expect(harness.calls).toEqual(["authority", "credential", "connect", "discover", "catalog", "apply", "commit"]);
+    expect(harness.calls).toEqual([
+      "authority",
+      "credential",
+      "connect",
+      "discover",
+      "catalog",
+      "apply",
+      "commit",
+    ]);
     expect(harness.received.applied).toHaveLength(1);
   });
 
@@ -265,7 +277,9 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
 
     expect(result).toMatchObject({ ok: false, state: "unavailable", stage: "discovery" });
     expect(harness.coordinator.state).toBe("unavailable");
-    expect(harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "cleanup.uncertain")).toBe(true);
+    expect(
+      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "cleanup.uncertain"),
+    ).toBe(true);
   });
 
   it("recovers from unavailable with a fresh activation attempt", async () => {
@@ -315,7 +329,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
       stage: "catalog",
       reason: "catalog is empty",
     });
-    expect(harness.calls).toEqual(["authority", "credential", "connect", "discover", "catalog", "cleanup"]);
+    expect(harness.calls).toEqual([
+      "authority",
+      "credential",
+      "connect",
+      "discover",
+      "catalog",
+      "cleanup",
+    ]);
     expect(harness.calls).not.toContain("apply");
     expect(harness.coordinator.state).toBe("dormant");
   });
@@ -474,7 +495,9 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(result).toMatchObject({ ok: true, state: "active" });
     expect(harness.received.committed).toEqual([
       {
-        staged: expect.objectContaining({ lifecycleGeneration: (result as { lifecycleGeneration: string }).lifecycleGeneration }),
+        staged: expect.objectContaining({
+          lifecycleGeneration: (result as { lifecycleGeneration: string }).lifecycleGeneration,
+        }),
         fenceFreshAdmission: true,
       },
     ]);
@@ -551,7 +574,9 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     await expect(harness.adapter.invoke({ method: "tools/list" })).rejects.toThrow(
       PI_SYNARA_MCP_DISABLED_REFUSAL,
     );
-    expect(harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disposed")).toBe(true);
+    expect(harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disposed")).toBe(
+      true,
+    );
   });
 
   it("dispose while dormant is a no-op and permanently refuses further operations", async () => {
@@ -620,9 +645,7 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     ]);
     expect(queuedOutcome.kind).toBe("rejected");
     if (queuedOutcome.kind === "rejected") {
-      expect((queuedOutcome.error as Error).message).toBe(
-        PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
-      );
+      expect((queuedOutcome.error as Error).message).toBe(PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL);
     }
     await disposePromise;
     expect(harness.coordinator.state).toBe("dormant");
@@ -702,23 +725,28 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
       message: "x".repeat(PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT + 50),
       state: "dormant",
     });
-    expect(diagnostics.entries[4]?.message.length).toBeLessThanOrEqual(PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT);
+    expect(diagnostics.entries[4]?.message.length).toBeLessThanOrEqual(
+      PI_SYNARA_MCP_DIAGNOSTIC_MESSAGE_LIMIT,
+    );
     expect(diagnostics.entries[4]?.message.endsWith("…")).toBe(true);
   });
 
   it("orders disable settlement, gateway drain, cleanup, and boundary reload during deactivation", async () => {
     const order: string[] = [];
-    const harness = makeHarness({}, {
-      settleExecutions: async () => {
-        order.push("settle");
+    const harness = makeHarness(
+      {},
+      {
+        settleExecutions: async () => {
+          order.push("settle");
+        },
+        cancelGatewayRequests: async () => {
+          order.push("cancel");
+        },
+        reloadAtSafeBoundary: async () => {
+          order.push("reload");
+        },
       },
-      cancelGatewayRequests: async () => {
-        order.push("cancel");
-      },
-      reloadAtSafeBoundary: async () => {
-        order.push("reload");
-      },
-    });
+    );
     await activateAndCommit(harness);
 
     const handoff = await harness.coordinator.beginDeactivation();
@@ -735,11 +763,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
 
   it("passes the exact active turn identity into the gateway cancel seam (Decision 14)", async () => {
     const cancelOptions: Array<{ readonly turnId?: string }> = [];
-    const harness = makeHarness({}, {
-      cancelGatewayRequests: async (_staged, options) => {
-        cancelOptions.push(options ?? {});
+    const harness = makeHarness(
+      {},
+      {
+        cancelGatewayRequests: async (_staged, options) => {
+          cancelOptions.push(options ?? {});
+        },
       },
-    });
+    );
     await activateAndCommit(harness);
 
     const handoff = await harness.coordinator.beginDeactivation();
@@ -757,18 +788,21 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     const drainGate = new Promise<void>((resolve) => {
       releaseDrain = resolve;
     });
-    const harness = makeHarness({}, {
-      settleExecutions: async () => {
-        order.push("settle");
+    const harness = makeHarness(
+      {},
+      {
+        settleExecutions: async () => {
+          order.push("settle");
+        },
+        cancelGatewayRequests: async () => {
+          order.push("cancel");
+          await drainGate;
+        },
+        reloadAtSafeBoundary: async () => {
+          order.push("reload");
+        },
       },
-      cancelGatewayRequests: async () => {
-        order.push("cancel");
-        await drainGate;
-      },
-      reloadAtSafeBoundary: async () => {
-        order.push("reload");
-      },
-    });
+    );
     await activateAndCommit(harness);
     const handoff = await harness.coordinator.beginDeactivation();
 
@@ -786,15 +820,18 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
   });
 
   it("treats a gateway drain timeout as not clean success and leaves the session unavailable", async () => {
-    const harness = makeHarness({}, {
-      settleExecutions: async () => undefined,
-      cancelGatewayRequests: async () => {
-        // The gateway drain never settles within the configured bound.
-        await new Promise<void>(() => undefined);
+    const harness = makeHarness(
+      {},
+      {
+        settleExecutions: async () => undefined,
+        cancelGatewayRequests: async () => {
+          // The gateway drain never settles within the configured bound.
+          await new Promise<void>(() => undefined);
+        },
+        drainTimeoutMs: 25,
+        reloadAtSafeBoundary: async () => undefined,
       },
-      drainTimeoutMs: 25,
-      reloadAtSafeBoundary: async () => undefined,
-    });
+    );
     await activateAndCommit(harness);
     const handoff = await harness.coordinator.beginDeactivation();
 
@@ -805,18 +842,23 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     // Revocation/cleanup still ran best-effort after the drain timeout.
     expect(harness.calls).toContain("cleanup");
     expect(
-      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.drain.timeout"),
+      harness.coordinator.diagnostics.entries.some(
+        (entry) => entry.kind === "disable.drain.timeout",
+      ),
     ).toBe(true);
     expect(PI_SYNARA_MCP_GATEWAY_DRAIN_TIMEOUT_MS).toBe(2_000);
   });
 
   it("waits for the safe boundary before the reload when awaited, and reloads immediately otherwise", async () => {
     const reloads: string[] = [];
-    const harness = makeHarness({}, {
-      reloadAtSafeBoundary: async () => {
-        reloads.push("reload");
+    const harness = makeHarness(
+      {},
+      {
+        reloadAtSafeBoundary: async () => {
+          reloads.push("reload");
+        },
       },
-    });
+    );
     await activateAndCommit(harness);
 
     const awaitedHandoff = await harness.coordinator.beginDeactivation();
@@ -828,11 +870,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(reloads).toEqual(["reload"]);
     expect(harness.coordinator.state).toBe("dormant");
 
-    const harness2 = makeHarness({}, {
-      reloadAtSafeBoundary: async () => {
-        reloads.push("reload-immediate");
+    const harness2 = makeHarness(
+      {},
+      {
+        reloadAtSafeBoundary: async () => {
+          reloads.push("reload-immediate");
+        },
       },
-    });
+    );
     await activateAndCommit(harness2);
     const immediateHandoff = await harness2.coordinator.beginDeactivation();
     await expect(immediateHandoff.complete({ awaitSafeBoundary: false })).resolves.toEqual({
@@ -842,11 +887,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
   });
 
   it("leaves the session unavailable when the boundary reload cannot be proven", async () => {
-    const harness = makeHarness({}, {
-      reloadAtSafeBoundary: async () => {
-        throw new Error("reload exploded");
+    const harness = makeHarness(
+      {},
+      {
+        reloadAtSafeBoundary: async () => {
+          throw new Error("reload exploded");
+        },
       },
-    });
+    );
     await activateAndCommit(harness);
     const handoff = await harness.coordinator.beginDeactivation();
 
@@ -855,17 +903,22 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(outcome).toEqual({ state: "unavailable" });
     expect(harness.coordinator.state).toBe("unavailable");
     expect(
-      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.reload.uncertain"),
+      harness.coordinator.diagnostics.entries.some(
+        (entry) => entry.kind === "disable.reload.uncertain",
+      ),
     ).toBe(true);
   });
 
   it("leaves the session unavailable when in-flight settlement cannot be proven", async () => {
-    const harness = makeHarness({}, {
-      settleExecutions: async () => {
-        throw new Error("settle exploded");
+    const harness = makeHarness(
+      {},
+      {
+        settleExecutions: async () => {
+          throw new Error("settle exploded");
+        },
+        reloadAtSafeBoundary: async () => undefined,
       },
-      reloadAtSafeBoundary: async () => undefined,
-    });
+    );
     await activateAndCommit(harness);
     const handoff = await harness.coordinator.beginDeactivation();
 
@@ -874,7 +927,9 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     expect(outcome).toEqual({ state: "unavailable" });
     expect(harness.coordinator.state).toBe("unavailable");
     expect(
-      harness.coordinator.diagnostics.entries.some((entry) => entry.kind === "disable.settle.uncertain"),
+      harness.coordinator.diagnostics.entries.some(
+        (entry) => entry.kind === "disable.settle.uncertain",
+      ),
     ).toBe(true);
   });
 
@@ -895,11 +950,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
 
   it("dispose during deactivation releases the boundary wait and finalizes without a reload", async () => {
     const reloads: string[] = [];
-    const harness = makeHarness({}, {
-      reloadAtSafeBoundary: async () => {
-        reloads.push("reload");
+    const harness = makeHarness(
+      {},
+      {
+        reloadAtSafeBoundary: async () => {
+          reloads.push("reload");
+        },
       },
-    });
+    );
     await activateAndCommit(harness);
     const handoff = await harness.coordinator.beginDeactivation();
 
@@ -920,11 +978,14 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
 
   it("rolls back an apply failure with an immediate reload when the catalog was exposed", async () => {
     const order: string[] = [];
-    const harness = makeHarness({}, {
-      reloadAtSafeBoundary: async () => {
-        order.push("reload");
+    const harness = makeHarness(
+      {},
+      {
+        reloadAtSafeBoundary: async () => {
+          order.push("reload");
+        },
       },
-    });
+    );
     harness.seams.applyAtSafeBoundary = async () => {
       harness.calls.push("apply");
       throw new Error("apply failed");
@@ -980,6 +1041,8 @@ describe("makePiSynaraMcpLifecycleCoordinator", () => {
     for (let i = 0; i < PI_SYNARA_MCP_DIAGNOSTIC_LIMIT + 3; i += 1) {
       await harness.coordinator.activate(ACTIVATION_INPUT);
     }
-    expect(harness.coordinator.diagnostics.entries.length).toBeLessThanOrEqual(PI_SYNARA_MCP_DIAGNOSTIC_LIMIT);
+    expect(harness.coordinator.diagnostics.entries.length).toBeLessThanOrEqual(
+      PI_SYNARA_MCP_DIAGNOSTIC_LIMIT,
+    );
   });
 });

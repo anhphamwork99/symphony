@@ -331,9 +331,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(textGenerationLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(AgentGatewayOperationRepositoryLive),
-      Layer.provideMerge(
-        Layer.succeed(McpSessionAuthority, mcpSessionAuthorityFixture.shape),
-      ),
+      Layer.provideMerge(Layer.succeed(McpSessionAuthority, mcpSessionAuthorityFixture.shape)),
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),

@@ -39,7 +39,7 @@ spec.
   opened, and no catalog discovery runs before `/Enable Synara MCP`.
 - MCP activation refusal — any adapter-level pre-activation call fails closed
   with the stable message `Synara MCP is disabled; ask the user to run
-  /Enable Synara MCP`.
+/Enable Synara MCP`.
 - Discovery payload — after activation and at a safe turn boundary, explicit
   MCP discovery returns standard complete tool schemas; the catalog is loaded
   on demand rather than injected at session startup.

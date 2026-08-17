@@ -37,10 +37,7 @@ import {
   type AgentGatewaySessionLease,
 } from "../../agentGateway/sessionLease.ts";
 import type { McpAuthorityBinding } from "../../agentGateway/mcpSessionAuthority.ts";
-import {
-  type AntigravityTerminalRecoveryMode,
-  ServerConfig,
-} from "../../config.ts";
+import { type AntigravityTerminalRecoveryMode, ServerConfig } from "../../config.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
   ProviderAdapterRequestError,
@@ -126,7 +123,13 @@ type RecoveryTeardownOutcome =
     }
   | { readonly kind: "unproven"; readonly cause: unknown };
 
-type TerminalClaimant = "normal-close" | "watchdog" | "process-error" | "stop-hook" | "interrupt" | "session-stop";
+type TerminalClaimant =
+  | "normal-close"
+  | "watchdog"
+  | "process-error"
+  | "stop-hook"
+  | "interrupt"
+  | "session-stop";
 
 type RecoveryState =
   | {
@@ -734,10 +737,7 @@ export interface AntigravityAdapterDependencies {
   readonly now?: () => number;
   readonly terminalRecoveryMode?: AntigravityTerminalRecoveryMode;
   readonly terminalRecoveryGraceMs?: number;
-  readonly onRecoveryDiagnostic?: (
-    name: string,
-    fields: Readonly<Record<string, unknown>>,
-  ) => void;
+  readonly onRecoveryDiagnostic?: (name: string, fields: Readonly<Record<string, unknown>>) => void;
 }
 
 const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {}) =>
@@ -855,8 +855,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       ...extra,
     });
 
-    let maybeRecoverTerminalAnswer: (context: AntigravitySessionContext) => Promise<void> =
-      async () => undefined;
+    let maybeRecoverTerminalAnswer: (
+      context: AntigravitySessionContext,
+    ) => Promise<void> = async () => undefined;
 
     const clearRecoveryTimer = (recovery: RecoveryState): void => {
       if (recovery.phase === "grace") clearTimeout(recovery.timer);
@@ -932,10 +933,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       };
     };
 
-    const scheduleCandidate = (
-      context: AntigravitySessionContext,
-      stepIndex: number,
-    ): void => {
+    const scheduleCandidate = (context: AntigravitySessionContext, stepIndex: number): void => {
       if (terminalRecoveryMode === "off") return;
       const ownership = captureOwnership(context);
       if (!ownership || context.pendingTools.length > 0 || context.turnTerminalEmitted) {
@@ -1090,11 +1088,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       }
       fence.retryTimer = setTimeout(() => {
         delete fence.retryTimer;
-        const cleanup = cleanupOwnedTurnResources(
-          context,
-          fence.gatewaySessionLease,
-          fence.runDir,
-        );
+        const cleanup = cleanupOwnedTurnResources(context, fence.gatewaySessionLease, fence.runDir);
         fence.cleanupPromise = cleanup;
         void cleanup.then((cleaned) => {
           if (fence.cleanupPromise === cleanup) delete fence.cleanupPromise;
@@ -1153,12 +1147,12 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       const fence =
         existing?.runDir === runDir
           ? existing
-          : {
+          : ({
               runDir,
               ...(lease !== undefined ? { gatewaySessionLease: lease } : {}),
               admissionGeneration,
               stopRequested: context.stopRequested || context.stopped,
-            } satisfies PreparationCleanupFence;
+            } satisfies PreparationCleanupFence);
       context.preparationCleanupFence = fence;
       const metadata = {
         provider: PROVIDER,
@@ -1171,10 +1165,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         context.session = {
           ...context.session,
           status: "error",
-          lastError:
-            fence.stopRequested
-              ? "Antigravity turn preparation cleanup remains unconfirmed after the final shutdown attempt."
-              : "Antigravity turn preparation cleanup failed; new turns are blocked until cleanup succeeds.",
+          lastError: fence.stopRequested
+            ? "Antigravity turn preparation cleanup remains unconfirmed after the final shutdown attempt."
+            : "Antigravity turn preparation cleanup failed; new turns are blocked until cleanup succeeds.",
           updatedAt: new Date().toISOString(),
         };
         if (fence.stopRequested) {
@@ -1563,7 +1556,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         // close handler (or interrupt fallback) can settle the turn (#465).
         if (eventName === "stop" && context.activeProcess && !context.turnTerminalEmitted) {
           noteActivity(context, { invalidate: true, reason: "stop-hook" });
-          if (context.recovery.phase === "teardown" || context.terminalClaimant !== undefined) continue;
+          if (context.recovery.phase === "teardown" || context.terminalClaimant !== undefined)
+            continue;
           const ownership = captureOwnership(context);
           if (!ownership || !claimTerminal(context, "stop-hook")) continue;
           const settlement = settleStopHook(context, ownership);
@@ -1597,10 +1591,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         turnId: ownership.turnId,
         type: "runtime.warning",
         payload: {
-          message:
-            quarantined
-              ? "Antigravity delivered a final answer without a terminal event. Synara recovered the turn, but process cleanup is unconfirmed; new turns are blocked until cleanup succeeds."
-              : "Antigravity delivered a final answer without a terminal event; Synara recovered the turn and cleaned up the owned process.",
+          message: quarantined
+            ? "Antigravity delivered a final answer without a terminal event. Synara recovered the turn, but process cleanup is unconfirmed; new turns are blocked until cleanup succeeds."
+            : "Antigravity delivered a final answer without a terminal event; Synara recovered the turn and cleaned up the owned process.",
         },
         raw: raw("missing-terminal-recovery", metadata),
       } satisfies ProviderRuntimeEvent);
@@ -1776,9 +1769,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                   ? (cause.remainingDescendantPids?.length ?? null)
                   : null,
               captureComplete:
-                cause instanceof ProviderProcessExitUnprovenError
-                  ? cause.captureComplete
-                  : false,
+                cause instanceof ProviderProcessExitUnprovenError ? cause.captureComplete : false,
             }),
           );
           if (!record.stopRequested) scheduleQuarantineReap(context, record);
@@ -1948,7 +1939,10 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       ownership: RecoveryOwnership,
     ): Promise<void> => {
       if (!ownsRecovery(context, ownership)) return;
-      const teardownOutcome = invokeTeardown(ownership.child).then<RecoveryTeardownOutcome, RecoveryTeardownOutcome>(
+      const teardownOutcome = invokeTeardown(ownership.child).then<
+        RecoveryTeardownOutcome,
+        RecoveryTeardownOutcome
+      >(
         (result) => ({ kind: "proven", result }),
         (cause) => ({ kind: "unproven", cause }),
       );
@@ -2008,7 +2002,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         context.session = {
           ...context.session,
           status: "error",
-          lastError: "Antigravity Stop cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
+          lastError:
+            "Antigravity Stop cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
           updatedAt: new Date().toISOString(),
         };
         offer({
@@ -2182,7 +2177,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         if (!record.stopRequested) scheduleQuarantineReap(context, record);
         return;
       }
-      await Effect.runPromise(cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId));
+      await Effect.runPromise(
+        cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId),
+      );
       if (!ownsRecovery(context, ownership) || context.recovery.phase !== "teardown") {
         diagnose(
           "antigravity.stale_recovery_ignored",
@@ -2244,42 +2241,38 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           }
           existing.stopped = true;
           existing.interrupted = true;
-            existing.admissionGeneration += 1;
-            claimTerminal(existing, "session-stop");
-            setIneligible(existing, "session-replacement");
-            clearTurnScheduling(existing);
-            const existingOwnership = captureOwnership(existing);
-            const existingRunDir = existing.activeRunDir;
-            const existingLease = existing.gatewaySessionLease;
-            yield* cancelAgentGatewayTurn(existing.gatewaySessionLease, existing.activeTurnId);
-            let replacementTeardownFailure: unknown;
-            yield* teardownActiveProcess(existing, "session/restart").pipe(
-              Effect.catch((cause) =>
-                Effect.sync(() => {
-                  replacementTeardownFailure =
-                    cause instanceof ProviderAdapterRequestError && cause.cause !== undefined
-                      ? cause.cause
-                      : cause;
-                }),
-              ),
-            );
-            if (replacementTeardownFailure !== undefined) {
-              if (existingOwnership) {
-                quarantineStoppedProcess(
-                  existing,
-                  existingOwnership,
-                  replacementTeardownFailure,
-                );
-              }
-              return yield* new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session/restart",
-                detail:
-                  "The previous Antigravity process exit could not be confirmed; restart is fenced until cleanup succeeds.",
-                cause: replacementTeardownFailure,
-              });
+          existing.admissionGeneration += 1;
+          claimTerminal(existing, "session-stop");
+          setIneligible(existing, "session-replacement");
+          clearTurnScheduling(existing);
+          const existingOwnership = captureOwnership(existing);
+          const existingRunDir = existing.activeRunDir;
+          const existingLease = existing.gatewaySessionLease;
+          yield* cancelAgentGatewayTurn(existing.gatewaySessionLease, existing.activeTurnId);
+          let replacementTeardownFailure: unknown;
+          yield* teardownActiveProcess(existing, "session/restart").pipe(
+            Effect.catch((cause) =>
+              Effect.sync(() => {
+                replacementTeardownFailure =
+                  cause instanceof ProviderAdapterRequestError && cause.cause !== undefined
+                    ? cause.cause
+                    : cause;
+              }),
+            ),
+          );
+          if (replacementTeardownFailure !== undefined) {
+            if (existingOwnership) {
+              quarantineStoppedProcess(existing, existingOwnership, replacementTeardownFailure);
             }
-            if (existingRunDir !== undefined) {
+            return yield* new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "session/restart",
+              detail:
+                "The previous Antigravity process exit could not be confirmed; restart is fenced until cleanup succeeds.",
+              cause: replacementTeardownFailure,
+            });
+          }
+          if (existingRunDir !== undefined) {
             const cleaned = yield* Effect.promise(() =>
               cleanupOwnedTurnResources(existing, existingLease, existingRunDir),
             );
@@ -2523,12 +2516,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         );
         if (!ownsAdmission()) {
           const cleaned = yield* Effect.promise(() =>
-            cleanupPreparedTurnResources(
-              context,
-              admissionGeneration,
-              runDir,
-              gatewaySessionLease,
-            ),
+            cleanupPreparedTurnResources(context, admissionGeneration, runDir, gatewaySessionLease),
           );
           if (!cleaned) {
             return yield* new ProviderAdapterRequestError({
@@ -2547,12 +2535,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         const gatewayBootstrapToken = gatewaySessionLease?.issueStdioBootstrapToken?.();
         if (gatewaySessionLease && !gatewayBootstrapToken) {
           const cleaned = yield* Effect.promise(() =>
-            cleanupPreparedTurnResources(
-              context,
-              admissionGeneration,
-              runDir,
-              gatewaySessionLease,
-            ),
+            cleanupPreparedTurnResources(context, admissionGeneration, runDir, gatewaySessionLease),
           );
           return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
@@ -2582,12 +2565,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           delete context.activeTurnId;
           delete context.activeRunDir;
           const cleaned = yield* Effect.promise(() =>
-            cleanupPreparedTurnResources(
-              context,
-              admissionGeneration,
-              runDir,
-              gatewaySessionLease,
-            ),
+            cleanupPreparedTurnResources(context, admissionGeneration, runDir, gatewaySessionLease),
           );
           if (!cleaned) {
             return yield* new ProviderAdapterRequestError({
@@ -2667,12 +2645,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           delete context.activeTurnId;
           context.turns.pop();
           const cleaned = yield* Effect.promise(() =>
-            cleanupPreparedTurnResources(
-              context,
-              admissionGeneration,
-              runDir,
-              gatewaySessionLease,
-            ),
+            cleanupPreparedTurnResources(context, admissionGeneration, runDir, gatewaySessionLease),
           );
           if (cleaned) {
             const { activeTurnId: _activeTurnId, ...inactiveSession } = context.session;
@@ -2721,11 +2694,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
               if (cleaned) {
                 turnResourcesReleased = true;
               } else if (quarantineOnFailure) {
-                quarantineExitedTurnCleanup(
-                  context,
-                  turnOwnership,
-                  "turn-settlement-cleanup",
-                );
+                quarantineExitedTurnCleanup(context, turnOwnership, "turn-settlement-cleanup");
               }
               return cleaned;
             },
@@ -2771,7 +2740,10 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
               let errorQuarantine: QuarantineRecord | undefined;
               let teardownFailure: unknown;
               if (child.pid !== undefined && errorOwnership) {
-                const errorTeardown = invokeTeardown(child).then<RecoveryTeardownOutcome, RecoveryTeardownOutcome>(
+                const errorTeardown = invokeTeardown(child).then<
+                  RecoveryTeardownOutcome,
+                  RecoveryTeardownOutcome
+                >(
                   (result) => ({ kind: "proven", result }),
                   (cause) => ({ kind: "unproven", cause }),
                 );
@@ -2789,8 +2761,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                       : {}),
                     stopRequested: false,
                     reapInFlight: false,
-                    cleanupUnconfirmedDiagnostic:
-                      "antigravity.process_error_cleanup_unconfirmed",
+                    cleanupUnconfirmedDiagnostic: "antigravity.process_error_cleanup_unconfirmed",
                     cleanupUnconfirmedReported: true,
                   };
                   context.quarantine = errorQuarantine;
@@ -2891,11 +2862,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                 scheduleQuarantineReap(context, errorQuarantine);
               } else {
                 if (cleanupFence) {
-                  await cleanupSettledTurnResources(
-                    context,
-                    cleanupFence,
-                    "process-error-cleanup",
-                  );
+                  await cleanupSettledTurnResources(context, cleanupFence, "process-error-cleanup");
                 } else {
                   await cleanupTurnResources();
                 }
@@ -3030,25 +2997,21 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                 raw: raw("stderr", { code, stderr }),
               } satisfies ProviderRuntimeEvent);
             }
-              const resourcesCleaned = await cleanupTurnResources(false);
-              settleActiveTurn(context, {
-                state: settledState,
-                stopReason: settledStopReason,
-                claimant: "normal-close",
+            const resourcesCleaned = await cleanupTurnResources(false);
+            settleActiveTurn(context, {
+              state: settledState,
+              stopReason: settledStopReason,
+              claimant: "normal-close",
               ...(failed && !outputRecovered
                 ? {
                     errorMessage: stderr.trim() || `Antigravity CLI exited with code ${code ?? 1}.`,
                   }
                 : {}),
-                raw: raw("process-exit", { code, signal, stdout, stderr }),
-              });
-              if (!resourcesCleaned) {
-                quarantineExitedTurnCleanup(
-                  context,
-                  turnOwnership,
-                  "turn-settlement-cleanup",
-                );
-              }
+              raw: raw("process-exit", { code, signal, stdout, stderr }),
+            });
+            if (!resourcesCleaned) {
+              quarantineExitedTurnCleanup(context, turnOwnership, "turn-settlement-cleanup");
+            }
           })();
         });
         return {
@@ -3081,132 +3044,131 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         yield* Effect.all(
           [
             Effect.gen(function* () {
-            context.interrupted = true;
-            const hadProcess = context.activeProcess !== undefined;
-            const ownership = captureOwnership(context);
-            claimTerminal(context, "interrupt");
-            if (hadProcess) {
-              // Prefer process close for settlement so stdout/hooks still drain.
-              // If teardown cannot prove exit, force-settle so Cancel never no-ops (#465).
-              yield* teardownActiveProcess(context, "turn/interrupt").pipe(
-                Effect.catch((error) =>
-                  Effect.gen(function* () {
-                    const detail = "Antigravity interrupt cleanup could not be confirmed.";
-                    yield* Effect.logWarning("antigravity.interrupt_teardown_failed", {
-                      threadId,
-                      detail,
-                    });
-                    if (ownership && ownsRecovery(context, ownership)) {
-                      const record: QuarantineRecord = {
-                        ownership,
-                        runDir: ownership.runDir,
-                        ...(ownership.gatewaySessionLease !== undefined
-                          ? { gatewaySessionLease: ownership.gatewaySessionLease }
-                          : {}),
-                        stopRequested: false,
-                        reapInFlight: false,
-                        cleanupUnconfirmedDiagnostic:
-                          "antigravity.interrupt_cleanup_unconfirmed",
-                        cleanupUnconfirmedReported: true,
-                      };
-                      context.quarantine = record;
-                      const metadata = recoveryFields(context, {
-                        teardownStage: "interrupt",
-                        captureComplete:
-                          error instanceof ProviderAdapterRequestError &&
-                          error.cause instanceof ProviderProcessExitUnprovenError
-                            ? error.cause.captureComplete
-                            : false,
-                        remainingDescendantCount:
-                          error instanceof ProviderAdapterRequestError &&
-                          error.cause instanceof ProviderProcessExitUnprovenError
-                            ? (error.cause.remainingDescendantPids?.length ?? null)
-                            : null,
-                        settlementSource: "interrupt",
+              context.interrupted = true;
+              const hadProcess = context.activeProcess !== undefined;
+              const ownership = captureOwnership(context);
+              claimTerminal(context, "interrupt");
+              if (hadProcess) {
+                // Prefer process close for settlement so stdout/hooks still drain.
+                // If teardown cannot prove exit, force-settle so Cancel never no-ops (#465).
+                yield* teardownActiveProcess(context, "turn/interrupt").pipe(
+                  Effect.catch((error) =>
+                    Effect.gen(function* () {
+                      const detail = "Antigravity interrupt cleanup could not be confirmed.";
+                      yield* Effect.logWarning("antigravity.interrupt_teardown_failed", {
+                        threadId,
+                        detail,
                       });
-                      diagnose("antigravity.interrupt_cleanup_unconfirmed", metadata);
-                      diagnose("antigravity.quarantine_entered", metadata);
+                      if (ownership && ownsRecovery(context, ownership)) {
+                        const record: QuarantineRecord = {
+                          ownership,
+                          runDir: ownership.runDir,
+                          ...(ownership.gatewaySessionLease !== undefined
+                            ? { gatewaySessionLease: ownership.gatewaySessionLease }
+                            : {}),
+                          stopRequested: false,
+                          reapInFlight: false,
+                          cleanupUnconfirmedDiagnostic: "antigravity.interrupt_cleanup_unconfirmed",
+                          cleanupUnconfirmedReported: true,
+                        };
+                        context.quarantine = record;
+                        const metadata = recoveryFields(context, {
+                          teardownStage: "interrupt",
+                          captureComplete:
+                            error instanceof ProviderAdapterRequestError &&
+                            error.cause instanceof ProviderProcessExitUnprovenError
+                              ? error.cause.captureComplete
+                              : false,
+                          remainingDescendantCount:
+                            error instanceof ProviderAdapterRequestError &&
+                            error.cause instanceof ProviderProcessExitUnprovenError
+                              ? (error.cause.remainingDescendantPids?.length ?? null)
+                              : null,
+                          settlementSource: "interrupt",
+                        });
+                        diagnose("antigravity.interrupt_cleanup_unconfirmed", metadata);
+                        diagnose("antigravity.quarantine_entered", metadata);
+                        settleActiveTurn(context, {
+                          state: "interrupted",
+                          stopReason: "interrupted",
+                          claimant: "interrupt",
+                          raw: raw("interrupt-quarantine", metadata),
+                        });
+                        context.session = {
+                          ...context.session,
+                          status: "error",
+                          lastError:
+                            "Antigravity interrupt cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
+                          updatedAt: new Date().toISOString(),
+                        };
+                        offer({
+                          ...base(context, { includeTurn: false }),
+                          type: "session.state.changed",
+                          payload: {
+                            state: "error",
+                            reason:
+                              "Antigravity interrupt cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
+                          },
+                          raw: raw("interrupt-quarantine", metadata),
+                        } satisfies ProviderRuntimeEvent);
+                        scheduleQuarantineReap(context, record);
+                        return;
+                      }
+                      if (ownership) {
+                        diagnose(
+                          "antigravity.stale_recovery_ignored",
+                          recoveryFields(context, { settlementSource: "interrupt" }),
+                        );
+                        return;
+                      }
                       settleActiveTurn(context, {
                         state: "interrupted",
                         stopReason: "interrupted",
                         claimant: "interrupt",
-                        raw: raw("interrupt-quarantine", metadata),
+                        raw: raw("interrupt-teardown-failed", {
+                          threadId,
+                          turnId: activeTurnId,
+                          lifecycleGeneration: context.lifecycleGeneration,
+                          settlementSource: "interrupt",
+                        }),
                       });
-                      context.session = {
-                        ...context.session,
-                        status: "error",
-                        lastError:
-                          "Antigravity interrupt cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
-                        updatedAt: new Date().toISOString(),
-                      };
-                      offer({
-                        ...base(context, { includeTurn: false }),
-                        type: "session.state.changed",
-                        payload: {
-                          state: "error",
-                          reason:
-                            "Antigravity interrupt cleanup is unconfirmed; new turns are blocked until cleanup succeeds.",
-                        },
-                        raw: raw("interrupt-quarantine", metadata),
-                      } satisfies ProviderRuntimeEvent);
-                      scheduleQuarantineReap(context, record);
-                      return;
-                    }
-                    if (ownership) {
-                      diagnose(
-                        "antigravity.stale_recovery_ignored",
-                        recoveryFields(context, { settlementSource: "interrupt" }),
-                      );
-                      return;
-                    }
-                    settleActiveTurn(context, {
-                      state: "interrupted",
-                      stopReason: "interrupted",
-                      claimant: "interrupt",
-                      raw: raw("interrupt-teardown-failed", {
-                        threadId,
-                        turnId: activeTurnId,
-                        lifecycleGeneration: context.lifecycleGeneration,
-                        settlementSource: "interrupt",
-                      }),
-                    });
+                    }),
+                  ),
+                );
+              }
+              if (ownership && !ownsRecovery(context, ownership) && !context.quarantine) {
+                diagnose(
+                  "antigravity.stale_recovery_ignored",
+                  recoveryFields(context, { settlementSource: "interrupt-post-teardown" }),
+                );
+                return;
+              }
+              const cleanupFence =
+                ownership && !context.quarantine
+                  ? installExitedCleanupFence(
+                      context,
+                      ownership,
+                      "antigravity.interrupt_cleanup_unconfirmed",
+                    )
+                  : undefined;
+              if (ownership && !context.quarantine && !cleanupFence) return;
+              // Process already gone (or never attached) but turn still open — Cancel
+              // must still unlock the composer.
+              if (!context.turnTerminalEmitted && context.activeTurnId !== undefined) {
+                settleActiveTurn(context, {
+                  state: "interrupted",
+                  stopReason: "interrupted",
+                  claimant: "interrupt",
+                  raw: raw("interrupt-without-process", {
+                    hadProcess,
                   }),
-                ),
-              );
-            }
-            if (ownership && !ownsRecovery(context, ownership) && !context.quarantine) {
-              diagnose(
-                "antigravity.stale_recovery_ignored",
-                recoveryFields(context, { settlementSource: "interrupt-post-teardown" }),
-              );
-              return;
-            }
-            const cleanupFence =
-              ownership && !context.quarantine
-                ? installExitedCleanupFence(
-                    context,
-                    ownership,
-                    "antigravity.interrupt_cleanup_unconfirmed",
-                  )
-                : undefined;
-            if (ownership && !context.quarantine && !cleanupFence) return;
-            // Process already gone (or never attached) but turn still open — Cancel
-            // must still unlock the composer.
-            if (!context.turnTerminalEmitted && context.activeTurnId !== undefined) {
-              settleActiveTurn(context, {
-                state: "interrupted",
-                stopReason: "interrupted",
-                claimant: "interrupt",
-                raw: raw("interrupt-without-process", {
-                  hadProcess,
-                }),
-              });
-            }
-            if (cleanupFence) {
-              yield* Effect.promise(() =>
-                cleanupSettledTurnResources(context, cleanupFence, "interrupt-cleanup"),
-              );
-            }
+                });
+              }
+              if (cleanupFence) {
+                yield* Effect.promise(() =>
+                  cleanupSettledTurnResources(context, cleanupFence, "interrupt-cleanup"),
+                );
+              }
             }),
             cancelAgentGatewayTurn(context.gatewaySessionLease, activeTurnId),
           ] as const,

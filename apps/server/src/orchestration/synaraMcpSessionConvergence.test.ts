@@ -35,7 +35,9 @@ const now = "2026-08-12T12:00:00.000Z";
 const projectId = ProjectId.makeUnsafe("project-mcp-convergence");
 const threadId = ThreadId.makeUnsafe("thread-mcp-convergence");
 
-function operation(overrides: Partial<ProjectMcpActivationOperation> = {}): ProjectMcpActivationOperation {
+function operation(
+  overrides: Partial<ProjectMcpActivationOperation> = {},
+): ProjectMcpActivationOperation {
   return {
     projectId,
     requestId: "request-convergence",
@@ -54,7 +56,9 @@ function operation(overrides: Partial<ProjectMcpActivationOperation> = {}): Proj
   };
 }
 
-function projectWith(activationOperation: ProjectMcpActivationOperation | null): OrchestrationProject {
+function projectWith(
+  activationOperation: ProjectMcpActivationOperation | null,
+): OrchestrationProject {
   return {
     id: projectId,
     kind: "project",
@@ -137,9 +141,7 @@ describe("impl-09 AC2: session convergence from the final durable project state"
       decideSynaraMcpSessionConvergence(projectWith(operation({ desiredState: "disabled" }))),
     ).toBe("wait");
     expect(
-      decideSynaraMcpSessionConvergence(
-        projectWith(operation({ aggregateStatus: "succeeded" })),
-      ),
+      decideSynaraMcpSessionConvergence(projectWith(operation({ aggregateStatus: "succeeded" }))),
     ).toBe("activate");
     // A terminal failed operation always leaves the project disabled.
     expect(
@@ -154,9 +156,7 @@ describe("impl-09 AC2: session convergence from the final durable project state"
     ).toBe("dormant");
     expect(
       decideSynaraMcpSessionConvergence(
-        projectWith(
-          operation({ aggregateStatus: "succeeded", desiredState: "disabled" }),
-        ),
+        projectWith(operation({ aggregateStatus: "succeeded", desiredState: "disabled" })),
       ),
     ).toBe("dormant");
   });
@@ -181,12 +181,8 @@ describe("impl-09 AC2: session convergence from the final durable project state"
 
   it("stays dormant for disabled, no-operation, and missing-project states", async () => {
     const dormantStates: Array<OrchestrationReadModel> = [
-      readModelWith(
-        operation({ aggregateStatus: "succeeded", desiredState: "disabled" }),
-      ),
-      readModelWith(
-        operation({ aggregateStatus: "failed", desiredState: "disabled" }),
-      ),
+      readModelWith(operation({ aggregateStatus: "succeeded", desiredState: "disabled" })),
+      readModelWith(operation({ aggregateStatus: "failed", desiredState: "disabled" })),
       readModelWith(null),
       readModelWith(null, { includeThread: false }),
       {

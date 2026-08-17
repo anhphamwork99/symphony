@@ -3624,7 +3624,6 @@ describe("deriveWorkLogEntries Codex find regression", () => {
   });
 });
 
-
 describe("Synara MCP command acknowledgements in the work log", () => {
   it("keeps all three MCP acknowledgement kinds through normal visible-turn filtering", () => {
     const activities: OrchestrationThreadActivity[] = [
@@ -3886,7 +3885,9 @@ describe("Synara MCP command acknowledgements in the work log", () => {
       inBoundDetail,
     );
     // Oversized diagnostics are omitted at the boundary, never emitted unbounded.
-    expect(entries.find((entry) => entry.id === "synara-mcp:req-3:terminal")?.detail).toBeUndefined();
+    expect(
+      entries.find((entry) => entry.id === "synara-mcp:req-3:terminal")?.detail,
+    ).toBeUndefined();
     // Unrelated rows keep their own detail even when oversized: the 1 KiB
     // bound applies only to MCP acknowledgement kinds, never to legacy detail.
     expect(entries.find((entry) => entry.id === "turn-1-tool")).toMatchObject({

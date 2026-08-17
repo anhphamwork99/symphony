@@ -15,7 +15,9 @@ export function checkManagedSubagentAdmission(
   if (!capability || !capability.isManaged || capability.status !== "managed_enabled") {
     return {
       admitted: false,
-      reason: capability?.diagnosticMessage ?? "Pi subagent managed execution is not enabled for this session",
+      reason:
+        capability?.diagnosticMessage ??
+        "Pi subagent managed execution is not enabled for this session",
       diagnosticCode: capability?.diagnosticCode ?? "pi_subagent_bridge_absent",
     };
   }

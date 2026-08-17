@@ -47,8 +47,7 @@ const TOOLS = [
 ] as const;
 
 function stubSession(tools: readonly unknown[] | (() => readonly unknown[])): AgentSession {
-  const getAllTools =
-    typeof tools === "function" ? tools : () => tools;
+  const getAllTools = typeof tools === "function" ? tools : () => tools;
   return { getAllTools } as unknown as AgentSession;
 }
 
@@ -62,7 +61,8 @@ function makeHarness(
   mode: "synara-default" | "synara-activated",
   overrides: { readonly artifactPath?: string; readonly homeDir?: string } = {},
 ): ObserverHarness {
-  const homeDir = overrides.homeDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "pi-catalog-observer-"));
+  const homeDir =
+    overrides.homeDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "pi-catalog-observer-"));
   const artifactPath = overrides.artifactPath ?? path.join(homeDir, "catalog-artifact.json");
   const observer = makePiCatalogObserver({
     [CATALOG_OBSERVER_ENV_ENABLE]: "1",
@@ -106,9 +106,7 @@ describe("pi catalog observer dormancy (Decision 35)", () => {
     expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_ENABLE]: "0" })).toBeNull();
     expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_ENABLE]: "true" })).toBeNull();
     expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_HOME]: "" })).toBeNull();
-    expect(
-      makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_ARTIFACT]: "" }),
-    ).toBeNull();
+    expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_ARTIFACT]: "" })).toBeNull();
     expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_MODE]: "bogus" })).toBeNull();
     expect(makePiCatalogObserver({ ...base, [CATALOG_OBSERVER_ENV_MODE]: "1" })).toBeNull();
   });
@@ -195,10 +193,9 @@ describe("pi catalog observer success captures (Decision 35)", () => {
       expect(artifact.lifecycleGeneration).toBe("gen-1");
       expect(artifact.phase).toBe("ready");
       expect(artifact.toolCount).toBe(2);
-      expect(artifact.entries.map((entry: { readonly name: string }) => entry.name).sort()).toEqual([
-        "bash",
-        "write",
-      ]);
+      expect(artifact.entries.map((entry: { readonly name: string }) => entry.name).sort()).toEqual(
+        ["bash", "write"],
+      );
       // Completeness: bytes and hash equal the direct canonicalization of the
       // live API result (the artifact entries ARE the getAllTools result).
       const canonical = canonicalizeManifest(toCanonicalEntries(TOOLS));

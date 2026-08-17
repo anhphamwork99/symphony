@@ -26,7 +26,12 @@ interface FakeModel {
 
 const REGISTRY_MODELS: readonly FakeModel[] = [
   // Arbitrary first registry model (the impl-11 bug picked this one).
-  { id: "us.anthropic.claude-opus-4-6-v1", provider: "amazon-bedrock", api: {}, baseUrl: "https://bedrock.invalid" },
+  {
+    id: "us.anthropic.claude-opus-4-6-v1",
+    provider: "amazon-bedrock",
+    api: {},
+    baseUrl: "https://bedrock.invalid",
+  },
   { id: "gpt-5.6-sol", provider: "cockpit", api: {}, baseUrl: "http://localhost:59450/v1" },
   { id: "gpt-5.6-terra", provider: "cockpit", api: {}, baseUrl: "http://localhost:59450/v1" },
 ];
@@ -88,23 +93,17 @@ describe("resolveConfiguredDefaultModel", () => {
   });
 
   it("fails clearly when settings.json has no configured default", () => {
-    expect(() =>
-      resolveConfiguredDefaultModel({}, fakeRegistry(REGISTRY_MODELS)),
-    ).toThrow(/settings\.json has no configured default provider\/model/);
+    expect(() => resolveConfiguredDefaultModel({}, fakeRegistry(REGISTRY_MODELS))).toThrow(
+      /settings\.json has no configured default provider\/model/,
+    );
   });
 
   it("fails clearly on an incomplete default (provider or model missing)", () => {
     expect(() =>
-      resolveConfiguredDefaultModel(
-        { defaultProvider: "cockpit" },
-        fakeRegistry(REGISTRY_MODELS),
-      ),
+      resolveConfiguredDefaultModel({ defaultProvider: "cockpit" }, fakeRegistry(REGISTRY_MODELS)),
     ).toThrow(/incomplete default model configuration/);
     expect(() =>
-      resolveConfiguredDefaultModel(
-        { defaultModel: "gpt-5.6-sol" },
-        fakeRegistry(REGISTRY_MODELS),
-      ),
+      resolveConfiguredDefaultModel({ defaultModel: "gpt-5.6-sol" }, fakeRegistry(REGISTRY_MODELS)),
     ).toThrow(/incomplete default model configuration/);
   });
 
@@ -137,9 +136,9 @@ describe("resolveConfiguredModelId", () => {
   });
 
   it("propagates the clear failure when the configured default is missing", async () => {
-    await expect(
-      resolveConfiguredModelId("/tmp/agent", fakeSdk({})),
-    ).rejects.toThrow(/settings\.json has no configured default provider\/model/);
+    await expect(resolveConfiguredModelId("/tmp/agent", fakeSdk({}))).rejects.toThrow(
+      /settings\.json has no configured default provider\/model/,
+    );
   });
 
   it("propagates the clear failure when the configured default is invalid", async () => {
@@ -163,7 +162,10 @@ describe("explicit CLI model priority (resolveRunModelId)", () => {
 
   it("trims and keeps an explicit --model reference", async () => {
     await expect(
-      resolveRunModelId({ explicitModel: "  cockpit/gpt-5.6-sol  ", agentDir: "/nonexistent/agent" }),
+      resolveRunModelId({
+        explicitModel: "  cockpit/gpt-5.6-sol  ",
+        agentDir: "/nonexistent/agent",
+      }),
     ).resolves.toBe("cockpit/gpt-5.6-sol");
   });
 });

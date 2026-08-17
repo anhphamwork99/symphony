@@ -33,12 +33,20 @@ describe("createRepetitionWorkspace", () => {
     const second = createRepetitionWorkspace(1);
     try {
       expect(first.root).not.toBe(second.root);
-      expect(first.root.startsWith(path.join(os.tmpdir(), "synara-token-overhead-ws-0-"))).toBe(true);
-      expect(second.root.startsWith(path.join(os.tmpdir(), "synara-token-overhead-ws-1-"))).toBe(true);
+      expect(first.root.startsWith(path.join(os.tmpdir(), "synara-token-overhead-ws-0-"))).toBe(
+        true,
+      );
+      expect(second.root.startsWith(path.join(os.tmpdir(), "synara-token-overhead-ws-1-"))).toBe(
+        true,
+      );
 
       for (const workspace of [first, second]) {
-        expect(fs.readFileSync(path.join(workspace.root, "README.md"), "utf8")).toBe(FIXTURE_README_CONTENT);
-        expect(fs.readFileSync(path.join(workspace.root, "fixture.txt"), "utf8")).toBe(FIXTURE_FILE_CONTENT);
+        expect(fs.readFileSync(path.join(workspace.root, "README.md"), "utf8")).toBe(
+          FIXTURE_README_CONTENT,
+        );
+        expect(fs.readFileSync(path.join(workspace.root, "fixture.txt"), "utf8")).toBe(
+          FIXTURE_FILE_CONTENT,
+        );
         expect(workspace.fixtureDigest).toBe(computeFixtureDigest());
       }
     } finally {

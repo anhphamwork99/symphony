@@ -62,13 +62,15 @@ interface GitMetadata {
 
 function runGit(repoRoot: string, args: ReadonlyArray<string>): string | undefined {
   try {
-    return execFileSync("git", args, {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .trim()
-      .split("\n")[0] || undefined;
+    return (
+      execFileSync("git", args, {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .trim()
+        .split("\n")[0] || undefined
+    );
   } catch {
     return undefined;
   }
@@ -88,7 +90,12 @@ export function collectGitMetadata(repoRoot = process.cwd()): GitMetadata {
       diffHash = createHash("sha256").update(diff).digest("hex");
     }
   }
-  return { commit: commit ?? "unknown", branch: branch ?? "unknown", dirty, ...(diffHash === undefined ? {} : { diffHash }) };
+  return {
+    commit: commit ?? "unknown",
+    branch: branch ?? "unknown",
+    dirty,
+    ...(diffHash === undefined ? {} : { diffHash }),
+  };
 }
 
 function runSetConfig(mode: MeasurementMode, options: OrchestratorOptions): RunSetConfig {
@@ -131,7 +138,11 @@ function buildReportRunSet(
 function comparisonDirection(
   options: OrchestratorOptions,
   runSets: Partial<Record<MeasurementMode, readonly RepetitionRecord[]>>,
-): { readonly consistentDirection: boolean; readonly direction: "positive" | "negative" | "mixed" | "none"; readonly pairedCount: number } {
+): {
+  readonly consistentDirection: boolean;
+  readonly direction: "positive" | "negative" | "mixed" | "none";
+  readonly pairedCount: number;
+} {
   const standalone = runSets.standalone ?? [];
   const deltas: number[] = [];
   for (const mode of ["synara-default", "synara-activated"] as const) {
@@ -181,7 +192,9 @@ function buildConclusion(
         `turn-1 total tokens ${valid.map((repetition) => repetition.turns[0]?.raw.total ?? "n/a").join(", ")}`,
     );
     if (evidenceByMode[mode]) {
-      measuredFacts.push(`${mode}: evidence insufficient (${runSets[mode]?.length ?? 0} repetitions recorded)`);
+      measuredFacts.push(
+        `${mode}: evidence insufficient (${runSets[mode]?.length ?? 0} repetitions recorded)`,
+      );
     }
   }
   if (options.modes.includes("synara-activated")) {
@@ -209,9 +222,7 @@ function buildConclusion(
   return { measuredFacts, limitations, recommendation };
 }
 
-export async function runMeasurement(
-  options: OrchestratorOptions,
-): Promise<OrchestratorResult> {
+export async function runMeasurement(options: OrchestratorOptions): Promise<OrchestratorResult> {
   const runSets: Partial<Record<MeasurementMode, readonly RepetitionRecord[]>> = {};
   const diagnostics: string[] = [];
   const onDiagnostic = (message: string) => {
@@ -332,7 +343,9 @@ export async function runMeasurement(
 export function printReportSummary(report: MeasurementReport): void {
   const lines: string[] = [];
   lines.push(`Token-overhead measurement report (harness ${report.harnessVersion})`);
-  lines.push(`  git: ${report.git.commit} (${report.git.branch})${report.git.dirty ? " [dirty]" : ""}`);
+  lines.push(
+    `  git: ${report.git.commit} (${report.git.branch})${report.git.dirty ? " [dirty]" : ""}`,
+  );
   for (const mode of ["standalone", "synara-default", "synara-activated"] as const) {
     const runSet = report.runSets[mode];
     if (runSet === null) {
@@ -342,7 +355,9 @@ export function printReportSummary(report: MeasurementReport): void {
     const { validRepetitions, invalidRepetitions, components } = runSet.summary;
     lines.push(
       `  ${mode}: ${validRepetitions.length}/${runSet.config.repetitions} valid repetitions` +
-        (invalidRepetitions.length > 0 ? ` (${invalidRepetitions.length} invalid: ${invalidRepetitions.map((r) => r.invalidReason).join("; ")})` : ""),
+        (invalidRepetitions.length > 0
+          ? ` (${invalidRepetitions.length} invalid: ${invalidRepetitions.map((r) => r.invalidReason).join("; ")})`
+          : ""),
     );
     lines.push(
       `    turn-1 total tokens: ${validRepetitions.map((r) => r.turns[0]?.raw.total ?? "n/a").join(", ")}`,

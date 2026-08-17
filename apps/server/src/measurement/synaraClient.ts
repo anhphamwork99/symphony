@@ -41,9 +41,8 @@ const HARNESS_CLIENT_BUILD = "synara-token-overhead-harness/1";
 
 const makeRpcClient = RpcClient.make(WsFeatureRpcGroup.merge(WsDeviceRpcGroup));
 type RpcClientEffect = typeof makeRpcClient;
-type RpcClientInstance = RpcClientEffect extends Effect.Effect<infer Client, any, any>
-  ? Client
-  : never;
+type RpcClientInstance =
+  RpcClientEffect extends Effect.Effect<infer Client, any, any> ? Client : never;
 
 function negotiateUrl(port: number): string {
   const url = new URL(`http://127.0.0.1:${port}${WS_NEGOTIATE_HTTP_PATH}`);

@@ -335,7 +335,10 @@ function hasToolCallContent(event: AgentSessionEvent): boolean {
   if (event.type !== "agent_end") return false;
   return event.messages.some((message) =>
     messageContentParts(message).some(
-      (part) => typeof part === "object" && part !== null && (part as { type?: string }).type === "toolCall",
+      (part) =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as { type?: string }).type === "toolCall",
     ),
   );
 }
@@ -373,7 +376,12 @@ export async function runStimulusTurn(
           // were not observed; treat the turn as tool-calling.
           const names = event.messages
             .flatMap((message) => messageContentParts(message))
-            .filter((part) => typeof part === "object" && part !== null && (part as { type?: string }).type === "toolCall")
+            .filter(
+              (part) =>
+                typeof part === "object" &&
+                part !== null &&
+                (part as { type?: string }).type === "toolCall",
+            )
             .map((part) => (part as { name?: string }).name)
             .filter((name): name is string => typeof name === "string");
           toolCalls.push(...names);

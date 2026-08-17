@@ -6,9 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import {
-  PI_SUBAGENTS_PROTOCOL_VERSION,
-} from "@synara/contracts";
+import { PI_SUBAGENTS_PROTOCOL_VERSION } from "@synara/contracts";
 
 import {
   makeCompatiblePiSubagentExtension,
@@ -254,7 +252,8 @@ describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC
         generation: 1,
         state: "rejected",
         diagnosticCode: "pi_subagent_control_degraded",
-        rejectionReason: "Managed subagent control health is degraded due to persistence unavailability",
+        rejectionReason:
+          "Managed subagent control health is degraded due to persistence unavailability",
       }),
     });
 

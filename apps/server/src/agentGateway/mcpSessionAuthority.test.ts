@@ -217,15 +217,22 @@ describe("assertAdmittable", () => {
     credentialTtlMs: 300_000,
   };
 
-  function bind(registry: ReturnType<typeof authorityFixture>["registry"], record: {
-    authorityId: string;
-  }) {
+  function bind(
+    registry: ReturnType<typeof authorityFixture>["registry"],
+    record: {
+      authorityId: string;
+    },
+  ) {
     return registry.bindingFor(record.authorityId, DISPATCH);
   }
 
   it("admits a live binding derived from an active record", () => {
     const { registry } = authorityFixture();
-    const record = registry.mint({ subject: "user-1", kind: "authenticated", authExpiresAt: NOW + 3_600_000 });
+    const record = registry.mint({
+      subject: "user-1",
+      kind: "authenticated",
+      authExpiresAt: NOW + 3_600_000,
+    });
 
     const binding = bind(registry, record);
     expect(binding).not.toBeNull();
@@ -239,9 +246,9 @@ describe("assertAdmittable", () => {
     const record = registry.mint({ subject: "user-1", kind: "local-owner" });
     const binding = bind(registry, record);
 
-    expect(
-      registry.assertAdmittable({ ...binding!, authorityId: "mcp-authority-elsewhere" }),
-    ).toBe("unknown-authority");
+    expect(registry.assertAdmittable({ ...binding!, authorityId: "mcp-authority-elsewhere" })).toBe(
+      "unknown-authority",
+    );
   });
 
   it("fails closed for a revoked record even with an otherwise valid snapshot", () => {
@@ -331,15 +338,11 @@ describe("assertAdmittable", () => {
     });
     const binding = bind(registry, record);
 
-    expect(registry.assertAdmittable({ ...binding!, subject: "user-2" })).toBe(
+    expect(registry.assertAdmittable({ ...binding!, subject: "user-2" })).toBe("subject-mismatch");
+    expect(registry.assertAdmittable({ ...binding!, authSessionId: "session-other" })).toBe(
       "subject-mismatch",
     );
-    expect(
-      registry.assertAdmittable({ ...binding!, authSessionId: "session-other" }),
-    ).toBe("subject-mismatch");
-    expect(registry.assertAdmittable({ ...binding!, kind: "local-owner" })).toBe(
-      "kind-mismatch",
-    );
+    expect(registry.assertAdmittable({ ...binding!, kind: "local-owner" })).toBe("kind-mismatch");
   });
 
   it("fails closed when the credential's project binding disagrees with the trusted thread", () => {

@@ -82,9 +82,9 @@ describe("local manifest retention policy (Decision 34 §3)", () => {
       expect(fs.existsSync(dir)).toBe(false);
       // writeLocalManifest reports the rejection and writes nothing.
       const rejected: string[] = [];
-      expect(writeLocalManifest(dir, "standalone", 0, ENTRIES, (reason) => rejected.push(reason))).toBe(
-        false,
-      );
+      expect(
+        writeLocalManifest(dir, "standalone", 0, ENTRIES, (reason) => rejected.push(reason)),
+      ).toBe(false);
       expect(rejected).toEqual(["inside-repo-not-ignored"]);
       expect(fs.existsSync(dir)).toBe(false);
     } finally {
@@ -148,9 +148,9 @@ describe("local manifest retention policy (Decision 34 §3)", () => {
       fs.symlinkSync(outside, path.join(sub, "link"));
       const dir = path.join(sub, "link", "manifests");
       const rejected: string[] = [];
-      expect(writeLocalManifest(dir, "standalone", 0, ENTRIES, (reason) => rejected.push(reason))).toBe(
-        false,
-      );
+      expect(
+        writeLocalManifest(dir, "standalone", 0, ENTRIES, (reason) => rejected.push(reason)),
+      ).toBe(false);
       expect(rejected).toHaveLength(1);
       expect(rejected[0]).toMatch(/^(symlink-redirect-rejected|directory-create-failed)$/);
       expect(fs.existsSync(path.join(outside, "manifests", "standalone-0.manifest.json"))).toBe(
@@ -202,4 +202,3 @@ describe("local manifest retention policy (Decision 34 §3)", () => {
     }
   });
 });
-

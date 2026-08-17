@@ -77,7 +77,13 @@ export function reconcileRawVsNormalized(
 ): CrossCheckResult {
   const failures: string[] = [];
   if (normalized === undefined) {
-    if (raw.total > 0 || raw.input > 0 || raw.output > 0 || raw.cacheRead > 0 || raw.cacheWrite > 0) {
+    if (
+      raw.total > 0 ||
+      raw.input > 0 ||
+      raw.output > 0 ||
+      raw.cacheRead > 0 ||
+      raw.cacheWrite > 0
+    ) {
       failures.push(
         "normalized snapshot missing for a turn with nonzero raw usage (loss of statistics between Pi and Synara)",
       );
@@ -136,7 +142,9 @@ function readTokenComponents(value: unknown): RawSessionStats | undefined {
  */
 export function extractTurnCompletedUsage(
   payload: Record<string, unknown>,
-): { readonly ok: true; readonly value: TurnCompletedUsagePayload } | { readonly ok: false; readonly failures: readonly string[] } {
+):
+  | { readonly ok: true; readonly value: TurnCompletedUsagePayload }
+  | { readonly ok: false; readonly failures: readonly string[] } {
   const failures: string[] = [];
   const state = payload.state;
   if (typeof state !== "string") {

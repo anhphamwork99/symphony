@@ -164,11 +164,7 @@ describe("Synara MCP composite journey smoke test", () => {
   ];
 
   const journeyEvents = journeyActivities.map((activity, index) =>
-    makeDomainEvent(
-      "thread.activity-appended",
-      { threadId, activity },
-      { sequence: index + 1 },
-    ),
+    makeDomainEvent("thread.activity-appended", { threadId, activity }, { sequence: index + 1 }),
   );
 
   // The user message and real pending approval that coexist with the journey:
@@ -224,9 +220,7 @@ describe("Synara MCP composite journey smoke test", () => {
     // --- Live reduction: every journey activity lands exactly once, in
     // journey order, and the work log preserves that journey order.
     const live = applyOrchestrationEvents(
-      makeState(
-        makeThread({ messages: [userMessage], pendingInteractions: [pendingInteraction] }),
-      ),
+      makeState(makeThread({ messages: [userMessage], pendingInteractions: [pendingInteraction] })),
       journeyEvents,
     );
     const liveActivities = threadsOf(live)[0]?.activities ?? [];

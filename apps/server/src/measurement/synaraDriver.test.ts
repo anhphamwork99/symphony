@@ -136,8 +136,6 @@ describe("bootstrap turn tool-call invalidation (Decision 34 §2)", () => {
 
   it("invalidates the repetition on any bootstrap tool call with the sanitized entry", () => {
     const violation = stimulusToolCallViolation("bootstrap turn", ["bash", "synara_list_threads"]);
-    expect(violation).toBe(
-      "bootstrap turn observed tool call(s): bash, synara_list_threads",
-    );
+    expect(violation).toBe("bootstrap turn observed tool call(s): bash, synara_list_threads");
   });
 });

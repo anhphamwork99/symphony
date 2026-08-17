@@ -12,11 +12,7 @@
 // work. Pure orchestration over injected seams (read model, provider enable,
 // clock); the activation is bounded so a hung MCP discovery can never wedge a
 // session start.
-import type {
-  OrchestrationProject,
-  OrchestrationReadModel,
-  ThreadId,
-} from "@synara/contracts";
+import type { OrchestrationProject, OrchestrationReadModel, ThreadId } from "@synara/contracts";
 
 import { sanitizeSynaraMcpDiagnostic, synaraMcpSessionGeneration } from "./synaraMcpCommand.ts";
 
@@ -115,7 +111,11 @@ export async function convergeSynaraMcpSession(input: {
       }),
       new Promise<SynaraMcpSessionConvergenceEnableResolution>((resolve) =>
         setTimeout(
-          () => resolve({ state: "unavailable", detail: SYNARA_MCP_CONVERGENCE_ACTIVATION_TIMEOUT_DETAIL }),
+          () =>
+            resolve({
+              state: "unavailable",
+              detail: SYNARA_MCP_CONVERGENCE_ACTIVATION_TIMEOUT_DETAIL,
+            }),
           boundMs,
         ),
       ),
@@ -130,6 +130,8 @@ export async function convergeSynaraMcpSession(input: {
   }
   return {
     kind: "unavailable",
-    detail: sanitizeSynaraMcpDiagnostic(resolution.detail ?? "The Synara MCP activation could not be proven."),
+    detail: sanitizeSynaraMcpDiagnostic(
+      resolution.detail ?? "The Synara MCP activation could not be proven.",
+    ),
   };
 }

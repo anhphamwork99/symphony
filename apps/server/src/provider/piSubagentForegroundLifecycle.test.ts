@@ -33,13 +33,14 @@ import {
   makeLegacyPiSubagentExtension,
   type PiSubagentManagedForegroundBinding,
 } from "./piSubagentBridge.ts";
-import { makePiSubagentControlHealth, type PiSubagentControlHealthShape } from "./piSubagentControlHealth.ts";
+import {
+  makePiSubagentControlHealth,
+  type PiSubagentControlHealthShape,
+} from "./piSubagentControlHealth.ts";
 import { PiAdapter } from "./Services/PiAdapter.ts";
 
 describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 22 / WP-03)", () => {
-  function makeTestSetup(options?: {
-    readonly foregroundWaitMs?: number;
-  }) {
+  function makeTestSetup(options?: { readonly foregroundWaitMs?: number }) {
     const tempDir = `/tmp/synara-pi-fg-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const serverConfig: ServerConfigShape = {
@@ -80,8 +81,7 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
     const registry = makeMcpSessionAuthorityRegistry();
     const authorityService: McpSessionAuthorityShape = {
       ...registry,
-      mintForLocalOwner: () =>
-        registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+      mintForLocalOwner: () => registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
       mintForAuthenticated: (session) =>
         registry.mint({
           subject: session.subject,
@@ -173,7 +173,13 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
             label: "Managed Agent",
             description: "Managed Pi subagent tool",
             parameters: {} as any,
-            execute: async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: any) => {
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
               capturedBinding = getPiSubagentManagedForegroundBinding(ctx);
               capturedCtxIsFrozen = Object.isFrozen(ctx);
               return { content: [{ type: "text", text: "captured binding" }] };
@@ -181,7 +187,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
           });
         }
       },
-      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[Symbol.for("synara.pi.subagents.bridge")],
+      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[
+        Symbol.for("synara.pi.subagents.bridge")
+      ],
     };
 
     const setup = makeTestSetup({
@@ -225,9 +233,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       });
 
       expect(observedSession).toBeDefined();
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       expect(loadedExt).toBeDefined();
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
@@ -281,7 +289,13 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
             label: "Managed Agent",
             description: "Managed Pi subagent tool",
             parameters: {} as any,
-            execute: async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: any) => {
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
               capturedBinding = getPiSubagentManagedForegroundBinding(ctx);
               if (capturedBinding) {
                 // Alfie calls started first
@@ -300,7 +314,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
           });
         }
       },
-      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[Symbol.for("synara.pi.subagents.bridge")],
+      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[
+        Symbol.for("synara.pi.subagents.bridge")
+      ],
     };
 
     const setup = makeTestSetup({
@@ -344,9 +360,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       });
 
       expect(observedSession).toBeDefined();
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
@@ -423,14 +439,22 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
             label: "Managed Agent",
             description: "Managed Pi subagent tool",
             parameters: {} as any,
-            execute: async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: any) => {
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
               capturedBinding = getPiSubagentManagedForegroundBinding(ctx);
               return { content: [{ type: "text", text: "captured" }] };
             },
           });
         }
       },
-      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[Symbol.for("synara.pi.subagents.bridge")],
+      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[
+        Symbol.for("synara.pi.subagents.bridge")
+      ],
     };
 
     const setup = makeTestSetup({
@@ -474,9 +498,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       });
 
       expect(observedSession).toBeDefined();
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
@@ -557,14 +581,22 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
             label: "Managed Agent",
             description: "Managed Pi subagent tool",
             parameters: {} as any,
-            execute: async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: any) => {
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
               capturedBinding = getPiSubagentManagedForegroundBinding(ctx);
               return { content: [{ type: "text", text: "captured" }] };
             },
           });
         }
       },
-      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[Symbol.for("synara.pi.subagents.bridge")],
+      [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[
+        Symbol.for("synara.pi.subagents.bridge")
+      ],
     };
 
     const setup = makeTestSetup({
@@ -637,9 +669,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       });
 
       expect(observedSession).toBeDefined();
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
@@ -670,7 +702,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
         }
       });
       expect(seq2Error).toBeDefined();
-      expect(String(seq2Error?.message ?? seq2Error)).toContain("pi_subagent_lifecycle_persistence_failed");
+      expect(String(seq2Error?.message ?? seq2Error)).toContain(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
 
       // Control health is degraded
       const healthAfterSeq2 = yield* controlHealth.getHealth();
@@ -722,7 +756,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
         }
       });
       expect(seq3Error).toBeDefined();
-      expect(String(seq3Error?.message ?? seq3Error)).toContain("pi_subagent_lifecycle_persistence_failed");
+      expect(String(seq3Error?.message ?? seq3Error)).toContain(
+        "pi_subagent_lifecycle_persistence_failed",
+      );
 
       // Control health is degraded
       const healthAfterSeq3 = yield* controlHealth.getHealth();
@@ -757,7 +793,13 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
             label: "Legacy Agent",
             description: "Legacy unmanaged subagent tool",
             parameters: {} as any,
-            execute: async (_toolCallId: string, _params: any, _signal: any, _onUpdate: any, ctx: any) => {
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
               receivedBinding = getPiSubagentManagedForegroundBinding(ctx);
               return { content: [{ type: "text", text: "legacy response" }] };
             },
@@ -802,9 +844,9 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       });
 
       expect(observedSession).toBeDefined();
-      const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
-        (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
-      ) as any;
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 

@@ -172,7 +172,10 @@ export function validateCatalogArtifact(
   artifact: CatalogArtifactOk,
   expected: CatalogArtifactExpectation,
 ): CatalogArtifactValidation {
-  if (artifact.schema !== CATALOG_ARTIFACT_SCHEMA || artifact.schemaVersion !== CATALOG_ARTIFACT_SCHEMA_VERSION) {
+  if (
+    artifact.schema !== CATALOG_ARTIFACT_SCHEMA ||
+    artifact.schemaVersion !== CATALOG_ARTIFACT_SCHEMA_VERSION
+  ) {
     return { ok: false, reason: "unrecognized-artifact-schema" };
   }
   if (artifact.mode !== expected.mode) {

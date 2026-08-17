@@ -17,7 +17,7 @@
   `Synara MCP is disabled; ask the user to run /Enable Synara MCP`.
 - **Disabled MCP refusal** — the stable user-facing refusal returned for a
   Synara MCP call before activation: `Synara MCP is disabled; ask the user to
-  run /Enable Synara MCP`.
+run /Enable Synara MCP`.
 - **Project MCP activation** — the persisted project-level state created by
   `/Enable Synara MCP`; it applies to current and future sessions in that
   project, but does not activate Synara MCP in other projects.

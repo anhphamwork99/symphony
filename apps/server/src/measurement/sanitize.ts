@@ -71,10 +71,7 @@ function relativeToParent(child: string, parent: string): string | null {
   const childFolded = fold(child);
   const parentFolded = fold(normalizedParent);
   if (childFolded === parentFolded) return "";
-  if (
-    childFolded.startsWith(parentFolded + "\\") ||
-    childFolded.startsWith(parentFolded + "/")
-  ) {
+  if (childFolded.startsWith(parentFolded + "\\") || childFolded.startsWith(parentFolded + "/")) {
     return child.slice(normalizedParent.length).replace(/^[\\/]+/, "");
   }
   return null;
@@ -114,7 +111,9 @@ function projectAbsolutePath(value: string): string {
       return relative.length === 0 ? "~" : `~${path.sep}${relative}`;
     }
   }
-  const basename = isWindowsStylePath(value) ? path.win32.basename(value) : path.posix.basename(value);
+  const basename = isWindowsStylePath(value)
+    ? path.win32.basename(value)
+    : path.posix.basename(value);
   const safeBasename = SENSITIVE_BASENAME_PATTERN.test(basename) ? "" : basename;
   return safeBasename.length > 0 ? `<abs>${path.sep}${safeBasename}` : "<abs>";
 }

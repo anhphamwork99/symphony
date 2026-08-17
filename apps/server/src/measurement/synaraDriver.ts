@@ -27,9 +27,7 @@ import {
   SYNARA_MCP_FAILED_ACTIVITY_KIND,
 } from "../orchestration/synaraMcpCommand.ts";
 
-import {
-  manifestSummaryFromEntries,
-} from "./piSession.ts";
+import { manifestSummaryFromEntries } from "./piSession.ts";
 import { createRepetitionWorkspace, removeRepetitionWorkspace } from "./workspace.ts";
 import {
   parseCatalogArtifact,
@@ -41,7 +39,11 @@ import { sanitizePathForReport, sanitizeFailureForReport } from "./sanitize.ts";
 import { extractTurnCompletedUsage, reconcileSessionStats } from "./reconciliation.ts";
 import { makeTurnMeasurement } from "./records.ts";
 import { STIMULUS_TEXT } from "./stimulus.ts";
-import { startIsolatedServer, removeIsolatedHomeDir, type IsolatedServer } from "./serverProcess.ts";
+import {
+  startIsolatedServer,
+  removeIsolatedHomeDir,
+  type IsolatedServer,
+} from "./serverProcess.ts";
 import { connectSynaraClient, type SynaraClient } from "./synaraClient.ts";
 import type {
   CanonicalManifestSummary,
@@ -113,9 +115,7 @@ function piModelSelection(modelId: string, thinkingLevel: string) {
   };
 }
 
-export async function runSynaraMode(
-  options: SynaraDriverOptions,
-): Promise<SynaraModeResult> {
+export async function runSynaraMode(options: SynaraDriverOptions): Promise<SynaraModeResult> {
   const diagnosticsLog: string[] = [];
   const onDiagnostic = (message: string) => {
     diagnosticsLog.push(message);
@@ -416,9 +416,7 @@ async function runSynaraRepetitionWithWorkspace(
     manifest = incompleteCatalogManifest("catalog artifact not produced");
   }
   // 4. Exposure evidence finalization.
-  const snapshot = await client
-    .getSnapshot()
-    .catch(() => null);
+  const snapshot = await client.getSnapshot().catch(() => null);
   const project = snapshot?.projects.find((candidate) => candidate.id === projectId) ?? null;
   exposure.projectSynaraMcpDesiredState =
     project?.synaraMcpDesiredState ?? (options.mode === "synara-default" ? "absent" : null);
@@ -513,9 +511,7 @@ function invalidRepetition(
       promptHash: context.options.promptHash,
       promptBytes: context.options.promptBytes,
       workspaceCwd:
-        workspaceRoot === null
-          ? "<workspace-unavailable>"
-          : sanitizePathForReport(workspaceRoot),
+        workspaceRoot === null ? "<workspace-unavailable>" : sanitizePathForReport(workspaceRoot),
       agentDir: sanitizePathForReport(context.options.agentDir),
       harnessVersion: context.options.harnessVersion,
     },
@@ -575,8 +571,7 @@ function zeroStats(): RawSessionStats {
 
 function sanitizeFailure(cause: unknown): string {
   // Never surface credentials, tokens, or raw filesystem paths in the report.
-  return sanitizeFailureForReport(cause)
-    .replace(/\s\/[^\s]+/g, " <path-redacted>");
+  return sanitizeFailureForReport(cause).replace(/\s\/[^\s]+/g, " <path-redacted>");
 }
 
 interface SynaraTurnResult {
@@ -633,11 +628,7 @@ async function runSynaraTurn(
   // usage). The log is append-only, so the expected Nth completed record for
   // this thread is the one to read; earlier records belong to earlier turns.
   const [raw, toolCallEvents] = await Promise.all([
-    readTurnCompletedUsage(
-      server.providerEventLogPath,
-      String(threadId),
-      expectedCompletedCount,
-    ),
+    readTurnCompletedUsage(server.providerEventLogPath, String(threadId), expectedCompletedCount),
     readToolCallEvents(server.providerEventLogPath, String(threadId)),
   ]);
 
@@ -735,7 +726,10 @@ export function parseCanonicalToolCallEvents(
     if (record.threadId !== threadId) continue;
     if (typeof record.payload !== "object" || record.payload === null) continue;
     const payload = record.payload as Record<string, unknown>;
-    const data = typeof payload.data === "object" && payload.data !== null ? (payload.data as Record<string, unknown>) : undefined;
+    const data =
+      typeof payload.data === "object" && payload.data !== null
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
     const toolName = typeof data?.toolName === "string" ? data.toolName : undefined;
     if (toolName !== undefined) {
       toolNames.push(toolName);
@@ -744,10 +738,7 @@ export function parseCanonicalToolCallEvents(
   return toolNames;
 }
 
-async function readToolCallEvents(
-  logPath: string,
-  threadId: string,
-): Promise<readonly string[]> {
+async function readToolCallEvents(logPath: string, threadId: string): Promise<readonly string[]> {
   try {
     const content = fs.readFileSync(logPath, "utf8");
     return parseCanonicalToolCallEvents(content, threadId);
@@ -761,12 +752,11 @@ function readNormalizedFromActivities(
   turnId: string,
 ): NormalizedTokenSnapshot | undefined {
   const candidates = detail.thread.activities.filter(
-    (activity) =>
-      activity.kind === "context-window.updated" && activity.turnId === turnId,
+    (activity) => activity.kind === "context-window.updated" && activity.turnId === turnId,
   );
-  const latest = candidates.sort((left, right) =>
-    left.createdAt.localeCompare(right.createdAt),
-  )[candidates.length - 1];
+  const latest = candidates.sort((left, right) => left.createdAt.localeCompare(right.createdAt))[
+    candidates.length - 1
+  ];
   if (!latest) return undefined;
   return readUsageFromActivityPayload(latest.payload);
 }
@@ -942,7 +932,11 @@ async function captureSynaraManifest(
 /** Read and parse the artifact; null while it does not exist yet (keep polling). */
 function readCatalogArtifact(
   artifactPath: string,
-): CatalogArtifactOk | { status: "malformed" } | { status: "failed"; code: string; message: string } | null {
+):
+  | CatalogArtifactOk
+  | { status: "malformed" }
+  | { status: "failed"; code: string; message: string }
+  | null {
   try {
     const content = fs.readFileSync(artifactPath, "utf8");
     const parsed = parseCatalogArtifact(content);
@@ -970,4 +964,3 @@ function incompleteCatalogManifest(reason: string): CanonicalManifestSummary {
     catalogIncompleteReason: reason,
   };
 }
-

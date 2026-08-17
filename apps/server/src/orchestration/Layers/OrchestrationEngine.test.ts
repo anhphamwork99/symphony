@@ -327,11 +327,13 @@ describe("OrchestrationEngine", () => {
     const events = await system.run(
       Stream.runCollect(system.engine.readEvents(0)).pipe(Effect.map((chunk) => Array.from(chunk))),
     );
-    const activationEvents = events.filter((event) => event.type === "project.mcp-activation-updated");
-    expect(activationEvents).toHaveLength(1);
-    expect((await system.run(system.engine.getReadModel())).projects[0]?.synaraMcpActivationOperation).toEqual(
-      command.operation,
+    const activationEvents = events.filter(
+      (event) => event.type === "project.mcp-activation-updated",
     );
+    expect(activationEvents).toHaveLength(1);
+    expect(
+      (await system.run(system.engine.getReadModel())).projects[0]?.synaraMcpActivationOperation,
+    ).toEqual(command.operation);
 
     await system.dispose();
   });

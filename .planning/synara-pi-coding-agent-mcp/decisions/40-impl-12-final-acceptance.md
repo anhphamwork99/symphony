@@ -54,19 +54,19 @@ semantics at candidate `6912d542`, despite the independent reviewer's FAIL?
 
 ## Criterion verdict
 
-| Criterion | Verdict | Basis |
-|---|---|---|
-| Dormant default startup has no Synara catalog or MCP activity | pass | The integrated AC1 journey begins dormant, fails MCP admission closed, and observes no activation/catalog activity. |
-| Enable pending/terminal behavior, all-session success, and subject-bound MCP use | pass | Multi-session wait-set, durable pending/terminal activities, captured authority, generation binding, successful use, and mismatched/stale failure are covered. |
-| Disable cancellation preserves Pi-turn continuity and prevents replay | pass | Disable occurs during the same deferred turn; fence/settle/revoke/reload ordering, structured disabled settlement, no interrupt, normal turn completion, and no replay are covered. |
-| Reconnect/restart recovery and future-session waiting | pass | Future sessions remain outside the immutable wait-set, enabled recreation gets fresh authority, restart recovery is durable, and provider replay is absent. |
-| Failed sibling activation globally rolls back to disabled | pass | Sibling cleanup, disabled final state, bounded failure detail, and exactly-once terminal evidence are covered. |
-| Focused smoke and permitted full command | pass | Focused AC1/AC2 evidence and dependency-complete `bun run test` raw execution passed. |
-| AC1 integrated server/WebSocket/Pi boundary | pass | The approved public orchestration boundary covers lifecycle, authority, cancellation, recovery, and rollback. |
-| AC2 browser/work-log boundary | pass | The approved reducer/work-log boundary proves durable visibility, replay equivalence, dedupe, and no assistant/sidebar/pending-interaction contamination. |
-| Decision 20 testing governance | pass | Tests remain at the owner-approved seams and include representative authority/activation failure, rollback/recovery, and exactly-once terminal evidence. |
-| Decision 31 formatter semantics | pass | `bun fmt` exited 0; unrelated formatter drift was reversed and not committed. |
-| Scope, cleanliness, and attribution | pass | No production source changed; the clean candidate is executable-equivalent to the verified source. |
+| Criterion                                                                        | Verdict | Basis                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dormant default startup has no Synara catalog or MCP activity                    | pass    | The integrated AC1 journey begins dormant, fails MCP admission closed, and observes no activation/catalog activity.                                                                 |
+| Enable pending/terminal behavior, all-session success, and subject-bound MCP use | pass    | Multi-session wait-set, durable pending/terminal activities, captured authority, generation binding, successful use, and mismatched/stale failure are covered.                      |
+| Disable cancellation preserves Pi-turn continuity and prevents replay            | pass    | Disable occurs during the same deferred turn; fence/settle/revoke/reload ordering, structured disabled settlement, no interrupt, normal turn completion, and no replay are covered. |
+| Reconnect/restart recovery and future-session waiting                            | pass    | Future sessions remain outside the immutable wait-set, enabled recreation gets fresh authority, restart recovery is durable, and provider replay is absent.                         |
+| Failed sibling activation globally rolls back to disabled                        | pass    | Sibling cleanup, disabled final state, bounded failure detail, and exactly-once terminal evidence are covered.                                                                      |
+| Focused smoke and permitted full command                                         | pass    | Focused AC1/AC2 evidence and dependency-complete `bun run test` raw execution passed.                                                                                               |
+| AC1 integrated server/WebSocket/Pi boundary                                      | pass    | The approved public orchestration boundary covers lifecycle, authority, cancellation, recovery, and rollback.                                                                       |
+| AC2 browser/work-log boundary                                                    | pass    | The approved reducer/work-log boundary proves durable visibility, replay equivalence, dedupe, and no assistant/sidebar/pending-interaction contamination.                           |
+| Decision 20 testing governance                                                   | pass    | Tests remain at the owner-approved seams and include representative authority/activation failure, rollback/recovery, and exactly-once terminal evidence.                            |
+| Decision 31 formatter semantics                                                  | pass    | `bun fmt` exited 0; unrelated formatter drift was reversed and not committed.                                                                                                       |
+| Scope, cleanliness, and attribution                                              | pass    | No production source changed; the clean candidate is executable-equivalent to the verified source.                                                                                  |
 
 ## Reviewer-Fail reconciliation
 

@@ -136,10 +136,8 @@ function currentSessionWaitSet(readModel: OrchestrationReadModel, projectId: Pro
  * (live re-derivation), and the impl-09 session convergence (fresh exact
  * generation after recreation).
  */
-export const synaraMcpSessionGeneration = (
-  threadId: ThreadId,
-  sessionUpdatedAt: string,
-): string => `orchestration:${threadId}:${sessionUpdatedAt}`;
+export const synaraMcpSessionGeneration = (threadId: ThreadId, sessionUpdatedAt: string): string =>
+  `orchestration:${threadId}:${sessionUpdatedAt}`;
 
 /**
  * Wait-set for a new Synara MCP operation (impl-08): both enable and disable

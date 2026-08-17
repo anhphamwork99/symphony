@@ -31,7 +31,10 @@ export function validateProjectMcpActivationUpdate(input: {
 
   const operation = command.operation;
   if (operation.projectId !== command.projectId) {
-    return { ok: false, detail: "Activation operation project identity does not match the command." };
+    return {
+      ok: false,
+      detail: "Activation operation project identity does not match the command.",
+    };
   }
   if (operation.desiredState !== command.desiredState) {
     return { ok: false, detail: "Activation operation desired state does not match the command." };

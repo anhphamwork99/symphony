@@ -624,9 +624,7 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
           handlerCalls += 1;
           return Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(release)),
-            Effect.andThen(
-              Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] }),
-            ),
+            Effect.andThen(Effect.succeed({ content: [{ type: "text" as const, text: "ok" }] })),
           );
         },
       };
@@ -684,7 +682,10 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
         tool: makeProbeTool({ probeCalls }),
         mcpSessionAuthority: fixture.registry,
       });
-      const record = fixture.registry.mint({ subject: TEST_AUTHORITY_SUBJECT, kind: "local-owner" });
+      const record = fixture.registry.mint({
+        subject: TEST_AUTHORITY_SUBJECT,
+        kind: "local-owner",
+      });
       const binding = fixture.registry.bindingFor(record.authorityId, {
         threadId: "thread-admission",
         provider: "codex",
@@ -743,7 +744,10 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
         tool: makeProbeTool({ probeCalls }),
         mcpSessionAuthority: fixture.registry,
       });
-      const record = fixture.registry.mint({ subject: TEST_AUTHORITY_SUBJECT, kind: "local-owner" });
+      const record = fixture.registry.mint({
+        subject: TEST_AUTHORITY_SUBJECT,
+        kind: "local-owner",
+      });
       const binding = fixture.registry.bindingFor(record.authorityId, {
         threadId: "thread-admission",
         provider: "codex",
@@ -1024,31 +1028,38 @@ describe("makeAgentGatewayMcpTransport subject-bound authority admission", () =>
     }).pipe(Effect.timeout("2 seconds")),
   );
 
-  it.effect("denies with a deterministic status before any registration even for read-only tools", () =>
-    Effect.gen(function* () {
-      const probeCalls = { count: 0 };
-      const fixture = makeAuthorityFixture();
-      const transport = makeTransport({
-        threads: [makeThread("thread-admission")],
-        tool: makeProbeTool({ probeCalls }),
-        mcpSessionAuthority: fixture.registry,
-      });
-      const token = transport.issueCredential("thread-admission", null);
+  it.effect(
+    "denies with a deterministic status before any registration even for read-only tools",
+    () =>
+      Effect.gen(function* () {
+        const probeCalls = { count: 0 };
+        const fixture = makeAuthorityFixture();
+        const transport = makeTransport({
+          threads: [makeThread("thread-admission")],
+          tool: makeProbeTool({ probeCalls }),
+          mcpSessionAuthority: fixture.registry,
+        });
+        const token = transport.issueCredential("thread-admission", null);
 
-      // A batch keeps ping (read-only, non-turn) in the same request: the
-      // denial must short-circuit the whole request without dispatching ping.
-      const response = yield* post(transport, token, [
-        { jsonrpc: "2.0", id: "probe", method: "tools/call", params: { name: "probe", arguments: {} } },
-        { jsonrpc: "2.0", id: "ping", method: "ping" },
-      ]);
-      assert.equal(response.status, 401);
-      assert.include(
-        (response.body as { error?: { message?: string } }).error?.message ?? "",
-        "mcp_authority_denied:missing-binding",
-      );
-      assert.equal(probeCalls.count, 0);
-      const sessionKey = transport.sessionKeyForToken(token);
-      assert.equal(transport.inFlightCountFor(sessionKey!, "turn-thread-admission"), 0);
-    }).pipe(Effect.timeout("2 seconds")),
+        // A batch keeps ping (read-only, non-turn) in the same request: the
+        // denial must short-circuit the whole request without dispatching ping.
+        const response = yield* post(transport, token, [
+          {
+            jsonrpc: "2.0",
+            id: "probe",
+            method: "tools/call",
+            params: { name: "probe", arguments: {} },
+          },
+          { jsonrpc: "2.0", id: "ping", method: "ping" },
+        ]);
+        assert.equal(response.status, 401);
+        assert.include(
+          (response.body as { error?: { message?: string } }).error?.message ?? "",
+          "mcp_authority_denied:missing-binding",
+        );
+        assert.equal(probeCalls.count, 0);
+        const sessionKey = transport.sessionKeyForToken(token);
+        assert.equal(transport.inFlightCountFor(sessionKey!, "turn-thread-admission"), 0);
+      }).pipe(Effect.timeout("2 seconds")),
   );
 });

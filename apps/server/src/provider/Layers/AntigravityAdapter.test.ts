@@ -17,10 +17,7 @@ import {
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials";
 import { makeTestMcpSessionAuthorityFixture } from "../../agentGateway/mcpSessionAuthority.testUtils";
-import {
-  AntigravityAdapter,
-  type AntigravityAdapterShape,
-} from "../Services/AntigravityAdapter";
+import { AntigravityAdapter, type AntigravityAdapterShape } from "../Services/AntigravityAdapter";
 import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown";
 import {
   antigravityPromptCommandLineIssue,
@@ -983,10 +980,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
           const events = Array.from(
             yield* Fiber.join(settleFiber).pipe(Effect.timeout("2 seconds")),
           );
-          expect(events.map((event) => event.type)).toEqual([
-            "runtime.warning",
-            "turn.completed",
-          ]);
+          expect(events.map((event) => event.type)).toEqual(["runtime.warning", "turn.completed"]);
           const warning = events[0];
           if (warning?.type === "runtime.warning") {
             expect(warning.payload.message).toContain("timeout waiting for response");
@@ -1090,9 +1084,8 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
           );
           expect(session?.status).toBe("error");
           expect(
-            (yield* adapter.listSessions()).find(
-              (candidate) => candidate.threadId === threadId,
-            )?.lastError,
+            (yield* adapter.listSessions()).find((candidate) => candidate.threadId === threadId)
+              ?.lastError,
           ).toBe("Error: timeout waiting for response");
           yield* adapter.stopSession(threadId);
         }).pipe(
@@ -1175,9 +1168,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
               'pre-tool\t{"stepIdx":1,"toolCall":{"name":"run_command","args":{}}}\n',
             ),
           );
-          Array.from(
-            yield* Fiber.join(itemStartedFiber).pipe(Effect.timeout("2 seconds")),
-          );
+          Array.from(yield* Fiber.join(itemStartedFiber).pipe(Effect.timeout("2 seconds")));
 
           child!.stderr.end("Error: timeout waiting for response\n");
           yield* Effect.sleep("30 millis");
@@ -1186,10 +1177,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
           const events = Array.from(
             yield* Fiber.join(settleFiber).pipe(Effect.timeout("2 seconds")),
           );
-          expect(events.map((event) => event.type)).toEqual([
-            "runtime.warning",
-            "turn.completed",
-          ]);
+          expect(events.map((event) => event.type)).toEqual(["runtime.warning", "turn.completed"]);
           const completion = events[1];
           if (completion?.type === "turn.completed") {
             expect(completion.payload).toEqual({ state: "completed", stopReason: "model_stop" });
@@ -1237,11 +1225,7 @@ describe("Antigravity terminal-answer recovery", () => {
     await Promise.resolve();
   }
 
-  async function waitFor(
-    predicate: () => boolean,
-    message: string,
-    attempts = 200,
-  ): Promise<void> {
+  async function waitFor(predicate: () => boolean, message: string, attempts = 200): Promise<void> {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (predicate()) return;
       await flushTimers(5);
@@ -1367,8 +1351,7 @@ describe("Antigravity terminal-answer recovery", () => {
               ensurePlugin: async () => undefined,
               spawnProcess,
               teardownProcessTree:
-                input.teardown ??
-                (async () => ({ escalated: false, signalErrors: [] })),
+                input.teardown ?? (async () => ({ escalated: false, signalErrors: [] })),
               terminalRecoveryMode: input.mode ?? "enforce",
               terminalRecoveryGraceMs: input.graceMs ?? 100,
               now: () => Date.now(),
@@ -1433,12 +1416,16 @@ describe("Antigravity terminal-answer recovery", () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
     await runHarness({ teardown }, async (harness) => {
       await attachTranscript(harness);
-      await appendStep(harness, {
-        step_index: 1,
-        type: "PLANNER_RESPONSE",
-        content: "synthetic-final",
-        tool_calls: [],
-      }, true);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
       await flushTimers(100);
       await waitFor(() => teardown.mock.calls.length === 1, "recovery teardown did not run");
       await waitFor(
@@ -1462,9 +1449,10 @@ describe("Antigravity terminal-answer recovery", () => {
           .filter((event) => event.type === "runtime.warning" || event.type === "turn.completed")
           .map((event) => event.type),
       ).toEqual(["runtime.warning", "turn.completed"]);
-      expect(
-        runtimeEvents.find((event) => event.type === "turn.completed")?.payload,
-      ).toEqual({ state: "completed", stopReason: "model_stop" });
+      expect(runtimeEvents.find((event) => event.type === "turn.completed")?.payload).toEqual({
+        state: "completed",
+        stopReason: "model_stop",
+      });
       const diagnostics = JSON.stringify(
         runtimeEvents.filter(
           (event) => event.type === "runtime.warning" || event.type === "turn.completed",
@@ -1498,12 +1486,16 @@ describe("Antigravity terminal-answer recovery", () => {
       const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
       await runHarness({ teardown }, async (harness) => {
         await attachTranscript(harness);
-        await appendStep(harness, {
-          step_index: 1,
-          type: "PLANNER_RESPONSE",
-          content: "synthetic-final",
-          tool_calls: [],
-        }, true);
+        await appendStep(
+          harness,
+          {
+            step_index: 1,
+            type: "PLANNER_RESPONSE",
+            content: "synthetic-final",
+            tool_calls: [],
+          },
+          true,
+        );
         await flushTimers(activity === "transcript" || activity === "hook" ? 1 : 99);
         if (activity === "transcript") {
           await fs.appendFile(
@@ -1646,12 +1638,16 @@ describe("Antigravity terminal-answer recovery", () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
     await runHarness({ teardown }, async (harness) => {
       await attachTranscript(harness);
-      await appendStep(harness, {
-        step_index: 1,
-        type: "PLANNER_RESPONSE",
-        content: "synthetic-final",
-        tool_calls: [],
-      }, true);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
       await flushTimers(99);
       await fs.appendFile(
         harness.transcriptPath,
@@ -1698,16 +1694,17 @@ describe("Antigravity terminal-answer recovery", () => {
       await flushTimers(75);
       await flushTimers(100);
       await waitFor(() => teardown.mock.calls.length === 1, "current candidate did not recover");
-      const completedItems = (harness.events as Array<{
-        type: string;
-        payload?: { data?: { step_index?: number } };
-      }>).filter((event) => event.type === "item.completed");
+      const completedItems = (
+        harness.events as Array<{
+          type: string;
+          payload?: { data?: { step_index?: number } };
+        }>
+      ).filter((event) => event.type === "item.completed");
       expect(completedItems.map((event) => event.payload?.data?.step_index)).toEqual([11]);
       expect(
         harness.diagnostics.some(
           ({ name, fields }) =>
-            name === "antigravity.completion_candidate_started" &&
-            fields.candidateStepIndex === 5,
+            name === "antigravity.completion_candidate_started" && fields.candidateStepIndex === 5,
         ),
       ).toBe(false);
     });
@@ -1770,12 +1767,16 @@ describe("Antigravity terminal-answer recovery", () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
     await runHarness({ mode, teardown }, async (harness) => {
       await attachTranscript(harness);
-      await appendStep(harness, {
-        step_index: 1,
-        type: "PLANNER_RESPONSE",
-        content: "synthetic-final",
-        tool_calls: [],
-      }, mode !== "off");
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        mode !== "off",
+      );
       await flushTimers(100);
       if (detected) {
         await waitFor(
@@ -1825,12 +1826,16 @@ describe("Antigravity terminal-answer recovery", () => {
     });
     await runHarness({ teardown }, async (harness) => {
       await attachTranscript(harness);
-      await appendStep(harness, {
-        step_index: 1,
-        type: "PLANNER_RESPONSE",
-        content: "synthetic-final",
-        tool_calls: [],
-      }, true);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
       await flushTimers(100);
       await waitFor(
         () =>
@@ -1839,7 +1844,9 @@ describe("Antigravity terminal-answer recovery", () => {
           ),
         "quarantine state was not emitted",
       );
-      const ordered = (harness.events as Array<{ type: string; payload?: { state?: string } }>).filter(
+      const ordered = (
+        harness.events as Array<{ type: string; payload?: { state?: string } }>
+      ).filter(
         (event) => event.type === "turn.completed" || event.type === "session.state.changed",
       );
       expect(ordered.slice(0, 2).map((event) => [event.type, event.payload?.state])).toEqual([
@@ -1859,9 +1866,7 @@ describe("Antigravity terminal-answer recovery", () => {
       await waitFor(() => teardown.mock.calls.length === 2, "quarantine reap did not run");
       await waitFor(
         () =>
-          harness.diagnostics.some(
-            ({ name }) => name === "antigravity.quarantined_process_reaped",
-          ),
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantined_process_reaped"),
         "quarantine reap did not complete",
       );
       await flushTimers();
@@ -1871,9 +1876,7 @@ describe("Antigravity terminal-answer recovery", () => {
       );
       expect(session?.status).toBe("ready");
       expect(
-        harness.diagnostics.some(
-          ({ name }) => name === "antigravity.quarantined_process_reaped",
-        ),
+        harness.diagnostics.some(({ name }) => name === "antigravity.quarantined_process_reaped"),
       ).toBe(true);
     });
   });
@@ -1966,9 +1969,9 @@ describe("Antigravity terminal-answer recovery", () => {
     await runHarness({ teardown: watchdogTeardown }, async (harness) => {
       await attachTranscript(harness);
       const turn = await Effect.runPromise(
-        harness.adapter.readThread(harness.threadId).pipe(
-          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
-        ),
+        harness.adapter
+          .readThread(harness.threadId)
+          .pipe(Effect.map((snapshot) => snapshot.turns.at(-1)?.id)),
       );
       await appendStep(
         harness,
@@ -2081,8 +2084,7 @@ describe("Antigravity terminal-answer recovery", () => {
       );
       await flushTimers(100);
       await waitFor(
-        () =>
-          harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        () => harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
         "quarantine was not entered",
       );
     });
@@ -2231,31 +2233,28 @@ describe("Antigravity terminal-answer recovery", () => {
       child?.emit("close", 1, "SIGTERM");
       return { escalated: false, signalErrors: [] };
     });
-    await runHarness(
-      { teardown },
-      async (harness) => {
-        child = harness.child;
-        await attachTranscript(harness);
-        await appendStep(
-          harness,
-          { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
-          true,
-        );
-        await flushTimers(100);
-        await waitFor(
-          () =>
-            (harness.events as Array<{ type: string }>).some(
-              (event) => event.type === "turn.completed",
-            ),
-          "re-entrant watchdog close did not settle",
-        );
-        expect(
-          (harness.events as Array<{ type: string }>).filter(
+    await runHarness({ teardown }, async (harness) => {
+      child = harness.child;
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
             (event) => event.type === "turn.completed",
           ),
-        ).toHaveLength(1);
-      },
-    );
+        "re-entrant watchdog close did not settle",
+      );
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
   });
 
   it("settles Stop-hook teardown failure through quarantine", async () => {
@@ -2559,9 +2558,7 @@ describe("Antigravity terminal-answer recovery", () => {
       await flushTimers(1_000);
       await waitFor(
         () =>
-          harness.diagnostics.some(
-            ({ name }) => name === "antigravity.quarantined_process_reaped",
-          ),
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantined_process_reaped"),
         "quarantine reap diagnostic was not emitted",
       );
       for (const diagnostic of harness.diagnostics) {
@@ -2588,21 +2585,21 @@ describe("Antigravity terminal-answer recovery", () => {
   });
 
   it("preserves first claimant for Stop-hook/close in either order", async () => {
-      const normalTeardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
-      await runHarness({ teardown: normalTeardown }, async (harness) => {
-        await attachTranscript(harness);
-        // Queue a Stop record without advancing the poll timer, then let close
-        // claim the turn and remove the owned run directory first.
-        await fs.appendFile(harness.eventFile, "stop\t{}\n");
-        harness.child.emit("close", 0, null);
-        await waitFor(
+    const normalTeardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown: normalTeardown }, async (harness) => {
+      await attachTranscript(harness);
+      // Queue a Stop record without advancing the poll timer, then let close
+      // claim the turn and remove the owned run directory first.
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      harness.child.emit("close", 0, null);
+      await waitFor(
         () =>
           (harness.events as Array<{ type: string }>).some(
             (event) => event.type === "turn.completed",
           ),
-          "normal close did not settle",
-        );
-        await flushTimers(100);
+        "normal close did not settle",
+      );
+      await flushTimers(100);
       expect(normalTeardown).not.toHaveBeenCalled();
       expect(
         (harness.events as Array<{ type: string }>).filter(
@@ -2640,9 +2637,9 @@ describe("Antigravity terminal-answer recovery", () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
     await runHarness({ teardown }, async (harness) => {
       const turn = await Effect.runPromise(
-        harness.adapter.readThread(harness.threadId).pipe(
-          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
-        ),
+        harness.adapter
+          .readThread(harness.threadId)
+          .pipe(Effect.map((snapshot) => snapshot.turns.at(-1)?.id)),
       );
       await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turn));
       await flushTimers();
@@ -2704,7 +2701,9 @@ describe("Antigravity terminal-answer recovery", () => {
                 throw new Error("stale admission spawned a child");
               }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
             }).pipe(
-              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-admission-" })),
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-admission-" }),
+              ),
               Layer.provideMerge(NodeServices.layer),
             ),
           ),
@@ -2865,7 +2864,9 @@ describe("Antigravity terminal-answer recovery", () => {
               teardownProcessTree: teardown,
             }).pipe(
               Layer.provide(Layer.succeed(AgentGatewayCredentials, credentials)),
-              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-stop-reap-" })),
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-stop-reap-" }),
+              ),
               Layer.provideMerge(NodeServices.layer),
             ),
           ),
@@ -2881,33 +2882,45 @@ describe("Antigravity terminal-answer recovery", () => {
   });
 
   it.each([
-    ["watchdog", async (harness: RecoveryHarness) => {
-      await attachTranscript(harness);
-      await appendStep(
-        harness,
-        { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
-        true,
-      );
-      await flushTimers(100);
-    }],
-    ["Stop-hook", async (harness: RecoveryHarness) => {
-      await attachTranscript(harness);
-      await fs.appendFile(harness.eventFile, "stop\t{}\n");
-      await flushTimers(75);
-    }],
-    ["process-error", async (harness: RecoveryHarness) => {
-      await harness.child.emit("error", new Error("synthetic process error"));
-      await flushTimers();
-    }],
-    ["interrupt", async (harness: RecoveryHarness) => {
-      const turnId = await Effect.runPromise(
-        harness.adapter.readThread(harness.threadId).pipe(
-          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
-        ),
-      );
-      await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turnId));
-      await flushTimers();
-    }],
+    [
+      "watchdog",
+      async (harness: RecoveryHarness) => {
+        await attachTranscript(harness);
+        await appendStep(
+          harness,
+          { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+          true,
+        );
+        await flushTimers(100);
+      },
+    ],
+    [
+      "Stop-hook",
+      async (harness: RecoveryHarness) => {
+        await attachTranscript(harness);
+        await fs.appendFile(harness.eventFile, "stop\t{}\n");
+        await flushTimers(75);
+      },
+    ],
+    [
+      "process-error",
+      async (harness: RecoveryHarness) => {
+        await harness.child.emit("error", new Error("synthetic process error"));
+        await flushTimers();
+      },
+    ],
+    [
+      "interrupt",
+      async (harness: RecoveryHarness) => {
+        const turnId = await Effect.runPromise(
+          harness.adapter
+            .readThread(harness.threadId)
+            .pipe(Effect.map((snapshot) => snapshot.turns.at(-1)?.id)),
+        );
+        await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turnId));
+        await flushTimers();
+      },
+    ],
   ] as const)(
     "%s keeps admission fenced after terminal settlement while owned cleanup is unconfirmed",
     async (_claimant, trigger) => {
@@ -2944,9 +2957,7 @@ describe("Antigravity terminal-answer recovery", () => {
         expect(harness.spawnCount()).toBe(1);
         expect(harness.releasedLeaseCount()).toBe(0);
         expect(
-          harness.diagnostics.some(
-            ({ name }) => name === "antigravity.quarantine_entered",
-          ),
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
         ).toBe(true);
         await expect(fs.stat(ownedRunDir)).resolves.toBeDefined();
       });
@@ -3104,7 +3115,9 @@ describe("Antigravity terminal-answer recovery", () => {
               }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
               onRecoveryDiagnostic: (name) => diagnostics.push(name),
             }).pipe(
-              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-prep-stop-" })),
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-prep-stop-" }),
+              ),
               Layer.provideMerge(NodeServices.layer),
             ),
           ),

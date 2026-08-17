@@ -254,9 +254,7 @@ describe("MCP authority lease wiring (Decision 21)", () => {
           runtimeMode: "full-access",
         }),
       ).rejects.toThrow("lease-wiring-probe");
-      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(
-        asThreadId("thread-leased-fork-unbound"),
-      );
+      expect(acquireSessionLease.mock.calls[0]?.[0]).toBe(asThreadId("thread-leased-fork-unbound"));
       expect(acquireSessionLease.mock.calls[0]?.[1]).toBeUndefined();
     } finally {
       versionCheck.mockRestore();

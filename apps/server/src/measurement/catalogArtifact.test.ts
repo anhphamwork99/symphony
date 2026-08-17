@@ -61,9 +61,9 @@ describe("catalog artifact parsing (Decision 35)", () => {
     expect(parseCatalogArtifact("not json").status).toBe("malformed");
     expect(parseCatalogArtifact("[]").status).toBe("malformed");
     expect(parseCatalogArtifact(JSON.stringify({ schema: "other" })).status).toBe("malformed");
-    expect(
-      parseCatalogArtifact(JSON.stringify({ ...okArtifact(), schemaVersion: 2 })).status,
-    ).toBe("malformed");
+    expect(parseCatalogArtifact(JSON.stringify({ ...okArtifact(), schemaVersion: 2 })).status).toBe(
+      "malformed",
+    );
     expect(
       parseCatalogArtifact(
         JSON.stringify({ ...okArtifact(), entries: [{ name: 1, description: "x" }] }),
@@ -211,7 +211,11 @@ describe("catalog artifact validation (Decision 35)", () => {
     // its generation and is stale.
     expect(
       validateCatalogArtifact(
-        okArtifact({ mode: "synara-activated", phase: "activated-terminal", lifecycleGeneration: null }),
+        okArtifact({
+          mode: "synara-activated",
+          phase: "activated-terminal",
+          lifecycleGeneration: null,
+        }),
         {
           mode: "synara-activated",
           threadId: "thread-1",
@@ -221,7 +225,11 @@ describe("catalog artifact validation (Decision 35)", () => {
     ).toEqual({ ok: false, reason: "generation-unbound" });
     expect(
       validateCatalogArtifact(
-        okArtifact({ mode: "synara-activated", phase: "activated-terminal", lifecycleGeneration: "" }),
+        okArtifact({
+          mode: "synara-activated",
+          phase: "activated-terminal",
+          lifecycleGeneration: "",
+        }),
         {
           mode: "synara-activated",
           threadId: "thread-1",

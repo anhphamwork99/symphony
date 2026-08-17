@@ -104,7 +104,11 @@ describe("AgentGatewaySessionRegistry", () => {
       randomId: () => "authority-1",
       now: () => 1_780_000_000_000,
     });
-    const record = authority.mint({ subject: "user-1", kind: "authenticated", authExpiresAt: 1_780_000_000_000 + 3_600_000 });
+    const record = authority.mint({
+      subject: "user-1",
+      kind: "authenticated",
+      authExpiresAt: 1_780_000_000_000 + 3_600_000,
+    });
     const binding = authority.bindingFor(record.authorityId, {
       threadId: "thread-1",
       provider: "codex",

@@ -865,8 +865,8 @@ export function makeDroidAdapter(
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientCapabilities: { elicitation: { form: {} } },
             clientInfo: { name: "Synara", version: "0.0.0" },
-              ...(agentGatewayCredentials && gatewaySessionLease
-                ? {
+            ...(agentGatewayCredentials && gatewaySessionLease
+              ? {
                   buildMcpServers: (initializeResult: Acp.InitializeResponse) =>
                     buildAcpSynaraMcpServers({
                       connection: gatewaySessionLease.connection,

@@ -156,12 +156,14 @@ export const MCP_AUTHORITY_CREDENTIAL_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_MAX_DISPATCH_BINDINGS = 300;
 const DEFAULT_DISPATCH_BINDING_TTL_MS = 60 * 60 * 1_000;
 
-export function makeMcpSessionAuthorityRegistry(options: {
-  readonly now?: () => number;
-  readonly randomId?: () => string;
-  readonly maxDispatchBindings?: number;
-  readonly dispatchBindingTtlMs?: number;
-} = {}): McpSessionAuthorityRegistryShape {
+export function makeMcpSessionAuthorityRegistry(
+  options: {
+    readonly now?: () => number;
+    readonly randomId?: () => string;
+    readonly maxDispatchBindings?: number;
+    readonly dispatchBindingTtlMs?: number;
+  } = {},
+): McpSessionAuthorityRegistryShape {
   const now = options.now ?? Date.now;
   const randomId = options.randomId ?? randomUUID;
   const maxDispatchBindings = options.maxDispatchBindings ?? DEFAULT_MAX_DISPATCH_BINDINGS;
@@ -173,8 +175,7 @@ export function makeMcpSessionAuthorityRegistry(options: {
   const threadAuthority = new Map<string, { readonly authorityId: string; writtenAt: number }>();
 
   const recordIsAdmittable = (record: McpSessionAuthorityRecord, at: number): boolean =>
-    record.status === "active" &&
-    (record.authExpiresAt === null || record.authExpiresAt > at);
+    record.status === "active" && (record.authExpiresAt === null || record.authExpiresAt > at);
 
   const pruneIndex = (index: Map<string, { authorityId: string; writtenAt: number }>) => {
     const cutoff = now() - dispatchBindingTtlMs;
@@ -291,8 +292,7 @@ export function makeMcpSessionAuthorityRegistry(options: {
       } satisfies McpAuthorityBinding;
     },
     assertAdmittable,
-    bindDispatch: (commandId, authorityId) =>
-      writeIndex(commandAuthority, commandId, authorityId),
+    bindDispatch: (commandId, authorityId) => writeIndex(commandAuthority, commandId, authorityId),
     bindThread: (threadId, authorityId) => writeIndex(threadAuthority, threadId, authorityId),
     resolveForCommand: (commandId, threadId) => {
       const byCommand = commandAuthority.get(commandId);

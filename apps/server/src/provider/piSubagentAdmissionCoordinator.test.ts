@@ -82,12 +82,14 @@ const validCommand: PiSubagentSpawnCommand = {
 
 // ── Real Decision-21 authority registry (makeMcpSessionAuthorityRegistry) ──
 
-function makeAuthorityFixture(overrides: {
-  readonly subject?: string;
-  readonly authExpiresAt?: number | null;
-  readonly credentialTtlMs?: number;
-  readonly projectId?: string | null;
-} = {}) {
+function makeAuthorityFixture(
+  overrides: {
+    readonly subject?: string;
+    readonly authExpiresAt?: number | null;
+    readonly credentialTtlMs?: number;
+    readonly projectId?: string | null;
+  } = {},
+) {
   const registry = makeMcpSessionAuthorityRegistry();
   const record = registry.mint({
     subject: overrides.subject ?? "user_456",
@@ -1315,7 +1317,12 @@ describe("Pi subagent admission-driven recovery (Ticket 21: T21-AC5, T21-AC7)", 
     const program = Effect.gen(function* () {
       const liveRepo = yield* PiSubagentExecutionRepository;
       const controlHealth = yield* makePiSubagentControlHealth();
-      const transitions: Array<{ from: string; to: string; diagnosticCode?: string; threadId?: string }> = [];
+      const transitions: Array<{
+        from: string;
+        to: string;
+        diagnosticCode?: string;
+        threadId?: string;
+      }> = [];
       let storeFailing = true;
 
       const flakyRepo: typeof liveRepo = {
@@ -1516,9 +1523,11 @@ describe("Pi subagent admission-driven recovery (Ticket 21: T21-AC5, T21-AC7)", 
       const waiterRow = yield* liveRepo.getByCommandId("cmd_t21_waiter");
       expect(Option.isSome(leaderRow)).toBe(true);
       expect(Option.isSome(waiterRow)).toBe(true);
-      expect(Option.isSome(waiterRow) && Option.isSome(leaderRow)
-        ? waiterRow.value.executionId !== leaderRow.value.executionId
-        : false).toBe(true);
+      expect(
+        Option.isSome(waiterRow) && Option.isSome(leaderRow)
+          ? waiterRow.value.executionId !== leaderRow.value.executionId
+          : false,
+      ).toBe(true);
     });
 
     await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));

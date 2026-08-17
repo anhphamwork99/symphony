@@ -45,15 +45,15 @@ browser suites failing to dynamically import before tests, and (b)
 
 ## Criterion verdicts
 
-| Criterion | Verdict | Basis |
-|---|---|---|
-| Owner-approved 12-group scope integrated; non-goals excluded | pass | Union verification; local confirmation that migration-bearing non-goals' artifacts are absent. |
-| No migration changes | pass | Candidate registry ends at local 090; no upstream 090–096. |
-| Pi/MCP boundaries preserved (tool boundary, opt-in MCP, refusal close, lifecycle, authority) | pass | Boundary modules verified present; full server suite green with +40 tests vs impl-12 baseline. |
-| Completion gates (test/lint/typecheck; formatter per Decision 31) | pass | 8/8 tasks, 0 lint errors, 7/7 typecheck; formatter excluded under Decision 31. |
-| Reviewer evidence precondition | pass | Exactly one independent feature-level reviewer, ticket-level evidence, no blockers. |
-| Browser-runner suites (4 graph-heavy) | non-blocking gap | Pre-test dynamic-import failure, zero assertion failures, harness provably works (ChatMarkdown passes), node-level web coverage and typecheck compensate; no governing criterion breached. |
-| `migrations:check` | non-blocking gap | Pre-existing fork-level lineage divergence at id 90 exposed by fetched upstream v0.7.2 tag; zero migration entries in candidate; no DB-impacting change introduced. |
+| Criterion                                                                                    | Verdict          | Basis                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Owner-approved 12-group scope integrated; non-goals excluded                                 | pass             | Union verification; local confirmation that migration-bearing non-goals' artifacts are absent.                                                                                             |
+| No migration changes                                                                         | pass             | Candidate registry ends at local 090; no upstream 090–096.                                                                                                                                 |
+| Pi/MCP boundaries preserved (tool boundary, opt-in MCP, refusal close, lifecycle, authority) | pass             | Boundary modules verified present; full server suite green with +40 tests vs impl-12 baseline.                                                                                             |
+| Completion gates (test/lint/typecheck; formatter per Decision 31)                            | pass             | 8/8 tasks, 0 lint errors, 7/7 typecheck; formatter excluded under Decision 31.                                                                                                             |
+| Reviewer evidence precondition                                                               | pass             | Exactly one independent feature-level reviewer, ticket-level evidence, no blockers.                                                                                                        |
+| Browser-runner suites (4 graph-heavy)                                                        | non-blocking gap | Pre-test dynamic-import failure, zero assertion failures, harness provably works (ChatMarkdown passes), node-level web coverage and typecheck compensate; no governing criterion breached. |
+| `migrations:check`                                                                           | non-blocking gap | Pre-existing fork-level lineage divergence at id 90 exposed by fetched upstream v0.7.2 tag; zero migration entries in candidate; no DB-impacting change introduced.                        |
 
 ## Decision
 

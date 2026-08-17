@@ -76,8 +76,7 @@ function initFixtureGit(root: string): string | null {
       env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-    })
-      .trim();
+    }).trim();
     return head.length > 0 ? head : null;
   } catch {
     // A non-git fixture is acceptable when git is unavailable; the digest
@@ -101,7 +100,9 @@ export interface RepetitionWorkspace {
  * remove it with {@link removeRepetitionWorkspace}.
  */
 export function createRepetitionWorkspace(repetitionIndex: number): RepetitionWorkspace {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `synara-token-overhead-ws-${repetitionIndex}-`));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), `synara-token-overhead-ws-${repetitionIndex}-`),
+  );
   writeFixtureFiles(root);
   return {
     root,

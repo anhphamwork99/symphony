@@ -50,15 +50,15 @@ stable desktop app that can be opened, with Pi/MCP boundaries intact?
 
 ## Criterion verdicts
 
-| Criterion | Verdict | Basis |
-|---|---|---|
-| Dedicated fork repository | pass | Fork, remotes, `main`, tag, description, and public release verified. |
-| Reproducible source/artifact identity | pass with hygiene gap | Build pins source commit and lockfile hash; some package/runtime version constants remain `0.7.1`. |
-| macOS Apple Silicon packaging | pass | DMG/ZIP/manifest generated; DMG checksum and structure validated. |
-| Install and open as a normal app | pass | `/Applications/Synara.app` launches with one window and packaged backend. |
-| Update feed owned by the fork | pass | Packaged update config and latest manifest target `anhphamwork99/symphony`. |
-| Pi/MCP boundaries | pass | Packaging-only source delta; standing opt-in and authority boundaries unchanged. |
-| Apple signing/notarization | non-blocking for personal use | No signing identity exists; limitation is disclosed and local launch succeeds. |
+| Criterion                             | Verdict                       | Basis                                                                                              |
+| ------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| Dedicated fork repository             | pass                          | Fork, remotes, `main`, tag, description, and public release verified.                              |
+| Reproducible source/artifact identity | pass with hygiene gap         | Build pins source commit and lockfile hash; some package/runtime version constants remain `0.7.1`. |
+| macOS Apple Silicon packaging         | pass                          | DMG/ZIP/manifest generated; DMG checksum and structure validated.                                  |
+| Install and open as a normal app      | pass                          | `/Applications/Synara.app` launches with one window and packaged backend.                          |
+| Update feed owned by the fork         | pass                          | Packaged update config and latest manifest target `anhphamwork99/symphony`.                        |
+| Pi/MCP boundaries                     | pass                          | Packaging-only source delta; standing opt-in and authority boundaries unchanged.                   |
+| Apple signing/notarization            | non-blocking for personal use | No signing identity exists; limitation is disclosed and local launch succeeds.                     |
 
 ## Decision
 

@@ -41,7 +41,11 @@ export default Effect.gen(function* () {
     `;
   }
 
-  const hasDroppedCount = yield* columnExists(sql, "pi_subagent_executions", "dropped_progress_count");
+  const hasDroppedCount = yield* columnExists(
+    sql,
+    "pi_subagent_executions",
+    "dropped_progress_count",
+  );
   if (!hasDroppedCount) {
     yield* sql`
       ALTER TABLE pi_subagent_executions

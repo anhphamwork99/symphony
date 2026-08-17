@@ -145,10 +145,11 @@ describe("Pi Synara MCP staged-tool reload seam", () => {
   });
 
   async function makeSessionWithSynaraExtension(stagedTools: ToolDefinition[]) {
-    const { adapter, extension, stagedTools: registry } = makePiSynaraMcpDormantExtension(
-      undefined,
-      { stagedTools },
-    );
+    const {
+      adapter,
+      extension,
+      stagedTools: registry,
+    } = makePiSynaraMcpDormantExtension(undefined, { stagedTools });
     const cwd = "/tmp";
     const agentDir = "/tmp/synara-pi-staged-tools-test";
     const modelRuntime = await ModelRuntime.create({
@@ -175,9 +176,7 @@ describe("Pi Synara MCP staged-tool reload seam", () => {
 
     const before = session.getAllTools().map((tool) => tool.name);
     expect(before.some((name) => name.startsWith("synara_"))).toBe(false);
-    expect(before).toEqual(
-      expect.arrayContaining(["read", "bash", "edit", "write"]),
-    );
+    expect(before).toEqual(expect.arrayContaining(["read", "bash", "edit", "write"]));
 
     // Stage the complete catalog and reload: the factory re-runs and
     // registers exactly the staged set atomically.

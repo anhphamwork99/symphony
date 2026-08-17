@@ -957,11 +957,7 @@
         ],
         "components": {
           "input": {
-            "values": [
-              79,
-              79,
-              79
-            ],
+            "values": [79, 79, 79],
             "mean": 79,
             "min": 79,
             "max": 79,
@@ -970,11 +966,7 @@
             "sampleStdDev": 0
           },
           "output": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -983,11 +975,7 @@
             "sampleStdDev": 0
           },
           "cacheRead": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -996,11 +984,7 @@
             "sampleStdDev": 0
           },
           "cacheWrite": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -1009,11 +993,7 @@
             "sampleStdDev": 0
           },
           "total": {
-            "values": [
-              79,
-              79,
-              79
-            ],
+            "values": [79, 79, 79],
             "mean": 79,
             "min": 79,
             "max": 79,
@@ -1170,16 +1150,8 @@
             "write"
           ]
         ],
-        "toolCounts": [
-          44,
-          44,
-          44
-        ],
-        "canonicalByteCounts": [
-          54303,
-          54303,
-          54303
-        ],
+        "toolCounts": [44, 44, 44],
+        "canonicalByteCounts": [54303, 54303, 54303],
         "hashes": [
           "af2c83a0633f07b2fb4c40c5ec85156eb26ce60a71546a418fd26c403d2db68d",
           "af2c83a0633f07b2fb4c40c5ec85156eb26ce60a71546a418fd26c403d2db68d",
@@ -2294,11 +2266,7 @@
         ],
         "components": {
           "input": {
-            "values": [
-              79,
-              79,
-              79
-            ],
+            "values": [79, 79, 79],
             "mean": 79,
             "min": 79,
             "max": 79,
@@ -2307,11 +2275,7 @@
             "sampleStdDev": 0
           },
           "output": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -2320,11 +2284,7 @@
             "sampleStdDev": 0
           },
           "cacheRead": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -2333,11 +2293,7 @@
             "sampleStdDev": 0
           },
           "cacheWrite": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -2346,11 +2302,7 @@
             "sampleStdDev": 0
           },
           "total": {
-            "values": [
-              79,
-              79,
-              79
-            ],
+            "values": [79, 79, 79],
             "mean": 79,
             "min": 79,
             "max": 79,
@@ -2519,16 +2471,8 @@
             "write"
           ]
         ],
-        "toolCounts": [
-          48,
-          48,
-          48
-        ],
-        "canonicalByteCounts": [
-          63752,
-          63752,
-          63752
-        ],
+        "toolCounts": [48, 48, 48],
+        "canonicalByteCounts": [63752, 63752, 63752],
         "hashes": [
           "34753763384c7f83545d7171fdfb966a13efc65edf0caa4d4efaf5ef82cc201d",
           "34753763384c7f83545d7171fdfb966a13efc65edf0caa4d4efaf5ef82cc201d",
@@ -4009,11 +3953,7 @@
         ],
         "components": {
           "input": {
-            "values": [
-              -12209,
-              -12209,
-              -12209
-            ],
+            "values": [-12209, -12209, -12209],
             "mean": -12209,
             "min": -12209,
             "max": -12209,
@@ -4022,11 +3962,7 @@
             "sampleStdDev": 0
           },
           "output": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -4035,11 +3971,7 @@
             "sampleStdDev": 0
           },
           "cacheRead": {
-            "values": [
-              12288,
-              12288,
-              12288
-            ],
+            "values": [12288, 12288, 12288],
             "mean": 12288,
             "min": 12288,
             "max": 12288,
@@ -4048,11 +3980,7 @@
             "sampleStdDev": 0
           },
           "cacheWrite": {
-            "values": [
-              0,
-              0,
-              0
-            ],
+            "values": [0, 0, 0],
             "mean": 0,
             "min": 0,
             "max": 0,
@@ -4061,11 +3989,7 @@
             "sampleStdDev": 0
           },
           "total": {
-            "values": [
-              79,
-              79,
-              79
-            ],
+            "values": [79, 79, 79],
             "mean": 79,
             "min": 79,
             "max": 79,
@@ -4405,16 +4329,8 @@
             "write"
           ]
         ],
-        "toolCounts": [
-          105,
-          105,
-          105
-        ],
-        "canonicalByteCounts": [
-          170798,
-          170798,
-          170798
-        ],
+        "toolCounts": [105, 105, 105],
+        "canonicalByteCounts": [170798, 170798, 170798],
         "hashes": [
           "de322a3fa763c148841697a2dae0751ad8a42d5ac061772cc9317d0c1316d001",
           "de322a3fa763c148841697a2dae0751ad8a42d5ac061772cc9317d0c1316d001",

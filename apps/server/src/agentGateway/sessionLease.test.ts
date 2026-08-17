@@ -329,7 +329,12 @@ describe("AgentGatewaySessionLease", () => {
     const credentials = { connectionForThread, revokeSessionToken };
     const threadId = ThreadId.makeUnsafe("thread-1");
 
-    const previous = acquireAgentGatewaySessionLease(credentials, threadId, "grok", mintTestBinding());
+    const previous = acquireAgentGatewaySessionLease(
+      credentials,
+      threadId,
+      "grok",
+      mintTestBinding(),
+    );
     const replacement = acquireAgentGatewaySessionLease(
       credentials,
       threadId,
@@ -367,12 +372,7 @@ describe("AgentGatewaySessionLease", () => {
     ).toBeUndefined();
     // An explicitly null binding fails exactly the same way.
     expect(
-      acquireAgentGatewaySessionLease(
-        credentials,
-        ThreadId.makeUnsafe("thread-1"),
-        "droid",
-        null,
-      ),
+      acquireAgentGatewaySessionLease(credentials, ThreadId.makeUnsafe("thread-1"), "droid", null),
     ).toBeUndefined();
     // A missing binding is never inferred from thread/provider/session state.
     expect(connectionForThread).not.toHaveBeenCalled();

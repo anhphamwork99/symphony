@@ -345,7 +345,6 @@ layer("ProviderRuntimeEventRepository", (it) => {
     }),
   );
 
-
   it.effect("journals an oversized Pi item.completed by truncating payload string leaves", () =>
     Effect.gen(function* () {
       const repository = yield* ProviderRuntimeEventRepository;

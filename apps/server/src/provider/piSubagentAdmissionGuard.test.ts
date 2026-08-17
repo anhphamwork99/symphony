@@ -90,4 +90,3 @@ describe("Pi subagent admission guard (T01-AC6)", () => {
     expect(result.reason).toContain("Persistence unavailable");
   });
 });
-

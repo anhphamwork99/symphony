@@ -40,9 +40,9 @@ export const ProjectionProject = Schema.Struct({
   synaraMcpActivationVersion: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => 0),
   ),
-  synaraMcpActivationOperation: Schema.optional(
-    Schema.NullOr(ProjectMcpActivationOperation),
-  ).pipe(Schema.withDecodingDefault(() => null)),
+  synaraMcpActivationOperation: Schema.optional(Schema.NullOr(ProjectMcpActivationOperation)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type ProjectionProject = typeof ProjectionProject.Type;
 

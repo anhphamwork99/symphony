@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import type { PiSynaraMcpLifecycleAdapter, PiSynaraMcpLifecycleState } from "./piSynaraMcpExtension.ts";
+import type {
+  PiSynaraMcpLifecycleAdapter,
+  PiSynaraMcpLifecycleState,
+} from "./piSynaraMcpExtension.ts";
 
 /** Maximum diagnostics entries retained (newest win, oldest dropped). */
 export const PI_SYNARA_MCP_DIAGNOSTIC_LIMIT = 25;
@@ -456,11 +459,7 @@ export function makePiSynaraMcpLifecycleCoordinator(
     const cleanupProven = (await runCleanup(handoff.staged, handoff.generation)) === "dormant";
 
     let reloadProven = true;
-    if (
-      options.reload &&
-      handoff.exposed &&
-      deactivationSeams.reloadAtSafeBoundary !== undefined
-    ) {
+    if (options.reload && handoff.exposed && deactivationSeams.reloadAtSafeBoundary !== undefined) {
       if (options.awaitSafeBoundary) {
         await waitForSafeBoundary();
       }
@@ -555,7 +554,10 @@ export function makePiSynaraMcpLifecycleCoordinator(
         });
         return { ok: false, state: outcome, stage, reason };
       };
-      const step = async <T>(stage: PiSynaraMcpActivationStage, run: () => Promise<T>): Promise<T> => {
+      const step = async <T>(
+        stage: PiSynaraMcpActivationStage,
+        run: () => Promise<T>,
+      ): Promise<T> => {
         try {
           return await run();
         } catch (cause) {
@@ -585,7 +587,9 @@ export function makePiSynaraMcpLifecycleCoordinator(
         if (!fenced()) {
           return await rollback("superseded", SUPERSEDED_MESSAGE);
         }
-        const catalogValidation = await step("catalog", () => seams.validateCatalog(staged.catalog));
+        const catalogValidation = await step("catalog", () =>
+          seams.validateCatalog(staged.catalog),
+        );
         if (!fenced()) {
           return await rollback("superseded", SUPERSEDED_MESSAGE);
         }

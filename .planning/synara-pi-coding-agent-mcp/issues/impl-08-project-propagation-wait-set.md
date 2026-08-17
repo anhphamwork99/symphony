@@ -32,20 +32,20 @@ resolved.
    `piSynaraMcpEnable.ts` drives the existing per-session
    `coordinator.activate` machinery (impl-06) — the packet's "Pi enable
    machinery" — and applies the safe boundary immediately for idle sessions
-    by pumping `adapter.notifySafeBoundary()` (an idle Pi runtime never emits
-    `agent_end`), stopping the pump once a turn starts so the surface is never
-    applied mid-turn. Stale-generation protection requires equality with the
-    complete captured session-generation token, including the thread identity
-    and captured `session.updatedAt`; a thread-prefix match alone is
-    insufficient. Reconciliation also correlates request ID, operation
-    generation, and wait-set membership. A stale, recreated, or misrouted
-    session is refused before any staging; a missing live session,
-    mid-deactivation, or disposed coordinator is a bounded fail-closed
-    `unavailable`. The result is idempotent for already-active sessions and
-    re-enables sessions left `unavailable` by a failed activation. The command
-    boundary normalizes throws/timeouts through the shared
-    `runProviderSynaraMcpEnable` wrapper (bounded sanitized detail, never a real
-    120-second wait).
+   by pumping `adapter.notifySafeBoundary()` (an idle Pi runtime never emits
+   `agent_end`), stopping the pump once a turn starts so the surface is never
+   applied mid-turn. Stale-generation protection requires equality with the
+   complete captured session-generation token, including the thread identity
+   and captured `session.updatedAt`; a thread-prefix match alone is
+   insufficient. Reconciliation also correlates request ID, operation
+   generation, and wait-set membership. A stale, recreated, or misrouted
+   session is refused before any staging; a missing live session,
+   mid-deactivation, or disposed coordinator is a bounded fail-closed
+   `unavailable`. The result is idempotent for already-active sessions and
+   re-enables sessions left `unavailable` by a failed activation. The command
+   boundary normalizes throws/timeouts through the shared
+   `runProviderSynaraMcpEnable` wrapper (bounded sanitized detail, never a real
+   120-second wait).
 
 2. **All-current-session wait-set + per-member durable outcomes.** The
    planner (`synaraMcpCommand.ts`) now captures every current session
@@ -66,13 +66,13 @@ resolved.
    bounded provider enable/disable call with the remaining deadline, durable
    member outcome journaled with a fresh CAS read, then exactly one
    deterministic terminal. Any failure, timeout, or unsafe disappearance
-    journals the durable failed-disabled operation first (journal-first),
-    fans out disable cleanup to every captured member (successful siblings
-    included, best-effort and bounded), and emits exactly one failed terminal.
-    The 120-second absolute deadline remains the activation-success deadline.
-    If it has elapsed, rollback cleanup uses a separate bounded 30-second grace;
-    the grace never extends activation or converts a timeout into success. A
-    disable member whose session disappeared is dormant by construction.
+   journals the durable failed-disabled operation first (journal-first),
+   fans out disable cleanup to every captured member (successful siblings
+   included, best-effort and bounded), and emits exactly one failed terminal.
+   The 120-second absolute deadline remains the activation-success deadline.
+   If it has elapsed, rollback cleanup uses a separate bounded 30-second grace;
+   the grace never extends activation or converts a timeout into success. A
+   disable member whose session disappeared is dormant by construction.
    Stale work (settled/superseded operation) stops and journals nothing;
    replay produces no duplicate side effects or terminal. `wsRpc.ts` drives
    the module through seams (read model, dispatch, bounded

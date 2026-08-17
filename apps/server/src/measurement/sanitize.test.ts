@@ -46,8 +46,7 @@ function findRawAbsolutePathViolations(serialized: string): string[] {
   if (tmp.length > 1 && serialized.includes(tmp)) {
     violations.push(`raw temp path: ${tmp}`);
   }
-  const posixPattern =
-    /(?<![A-Za-z0-9_\-./~>])\/(?:[A-Za-z0-9_.~-]+\/)*[A-Za-z0-9_.~-]+/g;
+  const posixPattern = /(?<![A-Za-z0-9_\-./~>])\/(?:[A-Za-z0-9_.~-]+\/)*[A-Za-z0-9_.~-]+/g;
   for (const match of serialized.matchAll(posixPattern)) {
     violations.push(`POSIX absolute path: ${match[0]}`);
   }
@@ -166,9 +165,7 @@ describe("sanitizePathForReport", () => {
 
   it("projects temp-root paths to a stable <tmp> label without random suffixes", () => {
     const input = path.join(os.tmpdir(), "synara-token-overhead-ws-0-abc123");
-    expect(sanitizePathForReport(input)).toBe(
-      `<tmp>${path.sep}synara-token-overhead-ws-0`,
-    );
+    expect(sanitizePathForReport(input)).toBe(`<tmp>${path.sep}synara-token-overhead-ws-0`);
   });
 
   it("keeps nested subpaths under the temp placeholder", () => {
@@ -194,12 +191,8 @@ describe("sanitizePathForReport", () => {
   });
 
   it("projects Windows drive absolute paths to <abs> plus a safe basename", () => {
-    expect(sanitizePathForReport("D:\\repo\\config.yaml")).toBe(
-      `<abs>${path.sep}config.yaml`,
-    );
-    expect(sanitizePathForReport("D:/repo/config.yaml")).toBe(
-      `<abs>${path.sep}config.yaml`,
-    );
+    expect(sanitizePathForReport("D:\\repo\\config.yaml")).toBe(`<abs>${path.sep}config.yaml`);
+    expect(sanitizePathForReport("D:/repo/config.yaml")).toBe(`<abs>${path.sep}config.yaml`);
   });
 
   it("projects UNC absolute paths to <abs> plus a safe basename", () => {
@@ -305,7 +298,12 @@ describe("sanitizeFailureForReport", () => {
   });
 
   it("sanitizes embedded paths before length truncation", () => {
-    const tmpPath = path.join(os.tmpdir(), "synara-token-overhead-ws-2-z9y8x7", "deep", "artifact.bin");
+    const tmpPath = path.join(
+      os.tmpdir(),
+      "synara-token-overhead-ws-2-z9y8x7",
+      "deep",
+      "artifact.bin",
+    );
     const prefix = "x".repeat(400);
     const failure = sanitizeFailureForReport(new Error(`${prefix} ${tmpPath}`));
     expect(failure.length).toBeLessThanOrEqual(500);
@@ -338,7 +336,9 @@ describe("deep report-surface sanitization", () => {
     expect(serialized).toContain("b".repeat(40));
     expect(serialized).toContain(`<tmp>${path.sep}synara-token-overhead-ws-0`);
     expect(serialized).toContain(`~${path.sep}.pi${path.sep}agent`);
-    expect(serialized).toContain(`~${path.sep}.local${path.sep}share${path.sep}synara${path.sep}manifests`);
+    expect(serialized).toContain(
+      `~${path.sep}.local${path.sep}share${path.sep}synara${path.sep}manifests`,
+    );
     expect(serialized).not.toContain(os.tmpdir());
     expect(serialized).not.toContain(os.homedir());
     expect(serialized).not.toContain("abc123");

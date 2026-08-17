@@ -296,7 +296,8 @@ const runManagedAdmission = (
         generation: 1,
         state: "rejected",
         diagnosticCode: "pi_subagent_admission_unauthorized",
-        rejectionReason: "Server projection snapshot is unavailable; admission cannot be authorized",
+        rejectionReason:
+          "Server projection snapshot is unavailable; admission cannot be authorized",
       } satisfies PiSubagentSpawnResult;
     }
     const snapshot = snapshotResult.success;
@@ -353,8 +354,7 @@ const runManagedAdmission = (
     if (command.parentTurnId) {
       const hasActiveTurn =
         thread.session?.activeTurnId === command.parentTurnId ||
-        (thread.latestTurn?.id === command.parentTurnId &&
-          thread.latestTurn?.state === "running");
+        (thread.latestTurn?.id === command.parentTurnId && thread.latestTurn?.state === "running");
 
       if (!hasActiveTurn) {
         return yield* rejectedResult(
@@ -431,10 +431,10 @@ const runManagedAdmission = (
       );
     }
 
-    const authorityFailure = input.authorityRegistry.assertAdmittable(
-      trusted.mcpAuthority,
-      { projectId: thread.projectId, lifecycleGeneration: null },
-    );
+    const authorityFailure = input.authorityRegistry.assertAdmittable(trusted.mcpAuthority, {
+      projectId: thread.projectId,
+      lifecycleGeneration: null,
+    });
     if (authorityFailure !== null) {
       return yield* rejectedResult(
         input,

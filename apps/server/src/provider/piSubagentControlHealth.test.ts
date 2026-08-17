@@ -91,9 +91,7 @@ describe("PiSubagentControlHealth transitions (Ticket 21: T21-AC3, T21-AC5, T21-
 
       const stateAfterSecond = yield* health.getHealth();
       expect(stateAfterSecond.degradedAt).toBe(firstDegradedAt);
-      expect(stateAfterSecond.reason).toBe(
-        "Failed to persist execution lifecycle truth: disk I/O",
-      );
+      expect(stateAfterSecond.reason).toBe("Failed to persist execution lifecycle truth: disk I/O");
     });
 
     await Effect.runPromise(program);

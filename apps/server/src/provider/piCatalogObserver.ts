@@ -248,8 +248,7 @@ function makeCatalogObserver(options: {
     try {
       writeArtifactAtomically(destination, content);
     } catch (cause) {
-      const code =
-        cause instanceof CatalogObserverError ? cause.code : "temp-write-failed";
+      const code = cause instanceof CatalogObserverError ? cause.code : "temp-write-failed";
       try {
         writeArtifactAtomically(
           destination,
@@ -369,7 +368,9 @@ export function writeArtifactAtomically(destination: string, content: string): v
       fd = fs.openSync(temp, "wx", 0o600);
     } catch (cause) {
       const code = (cause as NodeJS.ErrnoException).code;
-      throw new CatalogObserverError(code === "ENOENT" || code === "ENOTDIR" ? "directory-failed" : "permission-failed");
+      throw new CatalogObserverError(
+        code === "ENOENT" || code === "ENOTDIR" ? "directory-failed" : "permission-failed",
+      );
     }
     try {
       fs.writeFileSync(fd, content, { encoding: "utf8" });

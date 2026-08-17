@@ -3,11 +3,7 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SchemaGetter from "effect/SchemaGetter";
 
-import {
-  ModelSelection,
-  ProjectMcpActivationOperation,
-  ProjectScript,
-} from "@synara/contracts";
+import { ModelSelection, ProjectMcpActivationOperation, ProjectScript } from "@synara/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   ClearProjectionProjectSpaceAssignmentsInput,

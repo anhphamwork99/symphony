@@ -742,11 +742,11 @@ export function makeCursorAdapter(
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "Synara", version: "0.0.0" },
             startupTimeouts: CURSOR_ACP_STARTUP_TIMEOUTS,
-              ...(agentGatewayCredentials && gatewaySessionLease
-                ? {
-                    buildMcpServers: (initializeResult) =>
-                      buildAcpSynaraMcpServers({
-                        connection: gatewaySessionLease.connection,
+            ...(agentGatewayCredentials && gatewaySessionLease
+              ? {
+                  buildMcpServers: (initializeResult) =>
+                    buildAcpSynaraMcpServers({
+                      connection: gatewaySessionLease.connection,
                       initializeResult,
                       stdioProxy: agentGatewayCredentials.stdioProxy,
                     }),

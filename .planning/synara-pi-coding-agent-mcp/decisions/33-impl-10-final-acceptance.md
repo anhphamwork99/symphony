@@ -61,17 +61,17 @@ without corrupting unrelated work-log state.
 
 ## Criterion-by-criterion assessment
 
-| Criterion | Verdict |
-| --- | --- |
-| Retain all MCP acknowledgement kinds even with `turnId: null` | Satisfied |
-| Live events and replayed snapshots render equivalently | Satisfied |
-| Safe failure detail renders as a system/work row, never assistant content | Satisfied |
-| MCP acknowledgements excluded from sidebar summaries and pending-interaction state | Satisfied |
-| Decision 12 activity-contract and Decision 20 testing-strategy seams | Satisfied |
-| Independent review | Satisfied (PASS with external blocker) |
-| Root test suite | Not satisfied — `apps/server` 27 failed at candidate and fixed point |
-| `bun fmt`, `bun lint`, `bun typecheck` | Not satisfied — no owner authorization and no passing evidence |
-| UI screenshots | Affect PR readiness only; required before PR handoff |
+| Criterion                                                                          | Verdict                                                              |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Retain all MCP acknowledgement kinds even with `turnId: null`                      | Satisfied                                                            |
+| Live events and replayed snapshots render equivalently                             | Satisfied                                                            |
+| Safe failure detail renders as a system/work row, never assistant content          | Satisfied                                                            |
+| MCP acknowledgements excluded from sidebar summaries and pending-interaction state | Satisfied                                                            |
+| Decision 12 activity-contract and Decision 20 testing-strategy seams               | Satisfied                                                            |
+| Independent review                                                                 | Satisfied (PASS with external blocker)                               |
+| Root test suite                                                                    | Not satisfied — `apps/server` 27 failed at candidate and fixed point |
+| `bun fmt`, `bun lint`, `bun typecheck`                                             | Not satisfied — no owner authorization and no passing evidence       |
+| UI screenshots                                                                     | Affect PR readiness only; required before PR handoff                 |
 
 ## Decision
 

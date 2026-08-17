@@ -17,7 +17,9 @@ import type { NormalizedTokenSnapshot, RawSessionStats } from "./types.ts";
 
 describe("reconcileSessionStats", () => {
   it("documents the Pi reconciliation equation", () => {
-    expect(PI_RECONCILIATION_RULE.equation).toBe("total == input + cacheRead + cacheWrite + output");
+    expect(PI_RECONCILIATION_RULE.equation).toBe(
+      "total == input + cacheRead + cacheWrite + output",
+    );
     expect(PI_RECONCILIATION_RULE.description.length).toBeGreaterThan(20);
   });
 

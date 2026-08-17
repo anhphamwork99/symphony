@@ -50,16 +50,16 @@ Antigravity recovery predicate?
 
 ## Criterion verdicts
 
-| Criterion | Verdict | Basis |
-|---|---|---|
-| Clean integration into remote `main` | pass | Three-commit fast-forward at `3605c636`; release branch and tag aligned. |
-| Antigravity late-failure recovery | pass with accepted residual risk | Non-zero exit after output becomes completed with a visible `runtime.warning`; silent failures remain failed. |
-| Partial-output genuine failure | non-blocking gap | Current predicate can classify truncated output or tool-start-only failures as completed; no focused test covers this middle case. |
-| `.bg-shell` hygiene | pass | Volatile PID/timestamp/path manifest is untracked and ignored. |
-| Release-version alignment | pass | Four release package manifests and lockfile workspace entries use `.2`. |
-| Provenance/build/install/update | pass | Preflight, full build, DMG validation, launch, uploaded assets, and updater manifest verified. |
-| Pi/MCP boundaries | pass | Boundary source is unchanged by the release delta. |
-| Signing/notarization | non-blocking for personal use | No Apple identity exists; unsigned scope remains explicitly disclosed and locally launchable. |
+| Criterion                            | Verdict                          | Basis                                                                                                                              |
+| ------------------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Clean integration into remote `main` | pass                             | Three-commit fast-forward at `3605c636`; release branch and tag aligned.                                                           |
+| Antigravity late-failure recovery    | pass with accepted residual risk | Non-zero exit after output becomes completed with a visible `runtime.warning`; silent failures remain failed.                      |
+| Partial-output genuine failure       | non-blocking gap                 | Current predicate can classify truncated output or tool-start-only failures as completed; no focused test covers this middle case. |
+| `.bg-shell` hygiene                  | pass                             | Volatile PID/timestamp/path manifest is untracked and ignored.                                                                     |
+| Release-version alignment            | pass                             | Four release package manifests and lockfile workspace entries use `.2`.                                                            |
+| Provenance/build/install/update      | pass                             | Preflight, full build, DMG validation, launch, uploaded assets, and updater manifest verified.                                     |
+| Pi/MCP boundaries                    | pass                             | Boundary source is unchanged by the release delta.                                                                                 |
+| Signing/notarization                 | non-blocking for personal use    | No Apple identity exists; unsigned scope remains explicitly disclosed and locally launchable.                                      |
 
 ## Decision
 

@@ -1075,10 +1075,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(
-        threadId,
-        input.mcpAuthority,
-      );
+      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId, input.mcpAuthority);
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -1863,10 +1860,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : {}),
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(
-        threadId,
-        input.mcpAuthority,
-      );
+      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId, input.mcpAuthority);
       const child = spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,

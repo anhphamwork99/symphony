@@ -45,8 +45,7 @@ export const SpaceOrderUpdatedPayload = ContractsSpaceOrderUpdatedPayloadSchema;
 export const SpaceDeletedPayload = ContractsSpaceDeletedPayloadSchema;
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
-export const ProjectMcpActivationUpdatedPayload =
-  ContractsProjectMcpActivationUpdatedPayloadSchema;
+export const ProjectMcpActivationUpdatedPayload = ContractsProjectMcpActivationUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;

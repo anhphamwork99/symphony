@@ -1119,10 +1119,7 @@ const make = Effect.gen(function* () {
     readonly projectId: ProjectId | null;
   }) {
     const mcpSessionAuthority = yield* McpSessionAuthority;
-    const record = mcpSessionAuthority.resolveForCommand(
-      input.commandId ?? "",
-      input.threadId,
-    );
+    const record = mcpSessionAuthority.resolveForCommand(input.commandId ?? "", input.threadId);
     if (record === undefined) return null;
     return mcpSessionAuthority.bindingFor(record.authorityId, {
       threadId: input.threadId,
@@ -1430,7 +1427,9 @@ const make = Effect.gen(function* () {
    * dormant and is retried at the next ensure. Best-effort and bounded: a
    * convergence failure must never break a session start.
    */
-  const convergeSynaraMcpAfterSessionEnsure = Effect.fnUntraced(function* (session: ProviderSession) {
+  const convergeSynaraMcpAfterSessionEnsure = Effect.fnUntraced(function* (
+    session: ProviderSession,
+  ) {
     const enable = providerService.enableSynaraMcp;
     if (enable === undefined) {
       // Fail closed: no provider enable boundary, no convergence.
@@ -1444,8 +1443,7 @@ const make = Effect.gen(function* () {
           // Fresh projection state (the engine's in-memory command snapshot
           // can lag the journal; convergence must decide from the current
           // durable projection).
-          getReadModel: () =>
-            Effect.runPromise(projectionSnapshotQuery.getCommandReadModel()),
+          getReadModel: () => Effect.runPromise(projectionSnapshotQuery.getCommandReadModel()),
           enable: async (input) => {
             const outcome = await Effect.runPromise(
               runProviderSynaraMcpEnable({
@@ -1460,8 +1458,7 @@ const make = Effect.gen(function* () {
             if (Option.isNone(outcome)) {
               return {
                 state: "unavailable" as const,
-                detail:
-                  "The Synara MCP activation did not complete within the convergence bound.",
+                detail: "The Synara MCP activation did not complete within the convergence bound.",
               };
             }
             return outcome.value;

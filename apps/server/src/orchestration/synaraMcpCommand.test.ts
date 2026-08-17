@@ -1604,9 +1604,7 @@ describe("Synara MCP command boundary and durable activity contract", () => {
       recoveryIdentity: undefined,
       issuingThreadId: undefined,
     };
-    expect(
-      planSynaraMcpRecovery({ project: plan.project, operation: legacyPending }),
-    ).toBeNull();
+    expect(planSynaraMcpRecovery({ project: plan.project, operation: legacyPending })).toBeNull();
   });
 
   it("mints the shared session-generation token from thread and session updatedAt (impl-08/09)", async () => {

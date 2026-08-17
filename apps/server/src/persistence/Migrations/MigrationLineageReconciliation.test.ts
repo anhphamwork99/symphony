@@ -185,9 +185,7 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
         FROM projection_threads
         WHERE thread_id = 'thread-symphony-1'
       `;
-      assert.deepStrictEqual(thread, [
-        { threadId: "thread-symphony-1", title: "Symphony Thread" },
-      ]);
+      assert.deepStrictEqual(thread, [{ threadId: "thread-symphony-1", title: "Symphony Thread" }]);
 
       // Verify upstream 091 backfill applied to the pre-existing automation definition
       const auto = yield* sql<{
@@ -329,9 +327,7 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
         FROM message_text_segments
         WHERE thread_id = 'thread-upstream-1'
       `;
-      assert.deepStrictEqual(segments, [
-        { messageId: "msg-1", text: "segment text" },
-      ]);
+      assert.deepStrictEqual(segments, [{ messageId: "msg-1", text: "segment text" }]);
 
       const auto = yield* sql<{
         readonly autoId: string;
@@ -377,37 +373,39 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
   );
 
-  it.effect("Schema across fresh, Symphony-lineage, and upstream-v0.7.2 is byte-for-byte equivalent", () =>
-    Effect.gen(function* () {
-      const getFreshSchema = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations();
-        return yield* schemaObjects(sql);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+  it.effect(
+    "Schema across fresh, Symphony-lineage, and upstream-v0.7.2 is byte-for-byte equivalent",
+    () =>
+      Effect.gen(function* () {
+        const getFreshSchema = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* runMigrations();
+          return yield* schemaObjects(sql);
+        }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
 
-      const getSymphonySchema = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: 89 });
-        yield* Migration0097;
-        yield* sql`
+        const getSymphonySchema = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* runMigrations({ toMigrationInclusive: 89 });
+          yield* Migration0097;
+          yield* sql`
           INSERT INTO effect_sql_migrations (migration_id, name)
           VALUES (90, 'ProjectMcpActivation')
         `;
-        yield* runMigrations();
-        return yield* schemaObjects(sql);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+          yield* runMigrations();
+          return yield* schemaObjects(sql);
+        }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
 
-      const getUpstreamSchema = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: 89 });
-        yield* Migration0090;
-        yield* Migration0091;
-        yield* Migration0092;
-        yield* Migration0093;
-        yield* Migration0094;
-        yield* Migration0095;
-        yield* Migration0096;
-        yield* sql`
+        const getUpstreamSchema = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* runMigrations({ toMigrationInclusive: 89 });
+          yield* Migration0090;
+          yield* Migration0091;
+          yield* Migration0092;
+          yield* Migration0093;
+          yield* Migration0094;
+          yield* Migration0095;
+          yield* Migration0096;
+          yield* sql`
           INSERT INTO effect_sql_migrations (migration_id, name)
           VALUES
             (90, 'ProjectionThreadMessageTextSegments'),
@@ -418,17 +416,17 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
             (95, 'ProjectionThreadsGoalTiming'),
             (96, 'ProjectionThreadsGoalAchievements')
         `;
-        yield* runMigrations();
-        return yield* schemaObjects(sql);
-      }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+          yield* runMigrations();
+          return yield* schemaObjects(sql);
+        }).pipe(Effect.provide(NodeSqliteClient.layerMemory()));
 
-      const freshSchema = yield* getFreshSchema;
-      const symphonySchema = yield* getSymphonySchema;
-      const upstreamSchema = yield* getUpstreamSchema;
+        const freshSchema = yield* getFreshSchema;
+        const symphonySchema = yield* getSymphonySchema;
+        const upstreamSchema = yield* getUpstreamSchema;
 
-      // Schema objects should match identically
-      assert.deepStrictEqual(symphonySchema, freshSchema);
-      assert.deepStrictEqual(upstreamSchema, freshSchema);
-    }),
+        // Schema objects should match identically
+        assert.deepStrictEqual(symphonySchema, freshSchema);
+        assert.deepStrictEqual(upstreamSchema, freshSchema);
+      }),
   );
 });

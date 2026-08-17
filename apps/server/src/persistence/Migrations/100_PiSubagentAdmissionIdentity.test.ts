@@ -15,16 +15,18 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
 layer("migration 100 — PiSubagentAdmissionIdentity", (it) => {
-  it.effect("preserves 098/099 data, backfills first attempt, and makes journal uniqueness attempt/generation-local", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
+  it.effect(
+    "preserves 098/099 data, backfills first attempt, and makes journal uniqueness attempt/generation-local",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
 
-      // 1. Apply the released lineage through 099.
-      const through99 = yield* runMigrations({ toMigrationInclusive: 99 });
-      assert.isTrue(through99.some(([id]) => id === 99));
+        // 1. Apply the released lineage through 099.
+        const through99 = yield* runMigrations({ toMigrationInclusive: 99 });
+        assert.isTrue(through99.some(([id]) => id === 99));
 
-      // 2. Seed legacy 098/099-shaped rows (no Issue-20 columns yet).
-      yield* sql`
+        // 2. Seed legacy 098/099-shaped rows (no Issue-20 columns yet).
+        yield* sql`
         INSERT INTO pi_subagent_executions (
           execution_id, attempt_id, generation, command_id, project_id,
           parent_thread_id, parent_turn_id, parent_tool_call_id, agent_type,
@@ -38,7 +40,7 @@ layer("migration 100 — PiSubagentAdmissionIdentity", (it) => {
           '2026-08-16T11:00:00.000Z'
         )
       `;
-      yield* sql`
+        yield* sql`
         INSERT INTO pi_subagent_lifecycle_journal (
           event_id, execution_id, attempt_id, generation, sequence, state,
           occurred_at, diagnostic_code, diagnostic_message, metadata_json
@@ -49,18 +51,18 @@ layer("migration 100 — PiSubagentAdmissionIdentity", (it) => {
            '2026-08-16T11:00:00.000Z', NULL, NULL, NULL)
       `;
 
-      // 3. Apply migration 100.
-      const through100 = yield* runMigrations({ toMigrationInclusive: 100 });
-      assert.isTrue(through100.some(([id]) => id === 100));
+        // 3. Apply migration 100.
+        const through100 = yield* runMigrations({ toMigrationInclusive: 100 });
+        assert.isTrue(through100.some(([id]) => id === 100));
 
-      // 4. Data preserved, new columns present, first attempt backfilled.
-      const legacy = yield* sql<{
-        readonly commandFingerprint: string;
-        readonly firstAttemptId: string | null;
-        readonly firstAttemptGeneration: number | null;
-        readonly clientCommandId: string | null;
-        readonly subject: string | null;
-      }>`
+        // 4. Data preserved, new columns present, first attempt backfilled.
+        const legacy = yield* sql<{
+          readonly commandFingerprint: string;
+          readonly firstAttemptId: string | null;
+          readonly firstAttemptGeneration: number | null;
+          readonly clientCommandId: string | null;
+          readonly subject: string | null;
+        }>`
         SELECT
           command_fingerprint AS "commandFingerprint",
           first_attempt_id AS "firstAttemptId",
@@ -70,26 +72,26 @@ layer("migration 100 — PiSubagentAdmissionIdentity", (it) => {
         FROM pi_subagent_executions
         WHERE execution_id = 'exec_legacy_1'
       `;
-      assert.equal(legacy.length, 1);
-      assert.equal(legacy[0]!.commandFingerprint, "");
-      assert.equal(legacy[0]!.firstAttemptId, "att_legacy_1");
-      assert.equal(legacy[0]!.firstAttemptGeneration, 1);
-      assert.isNull(legacy[0]!.clientCommandId);
-      assert.isNull(legacy[0]!.subject);
+        assert.equal(legacy.length, 1);
+        assert.equal(legacy[0]!.commandFingerprint, "");
+        assert.equal(legacy[0]!.firstAttemptId, "att_legacy_1");
+        assert.equal(legacy[0]!.firstAttemptGeneration, 1);
+        assert.isNull(legacy[0]!.clientCommandId);
+        assert.isNull(legacy[0]!.subject);
 
-      const journal = yield* sql<{ readonly eventId: string; readonly sequence: number }>`
+        const journal = yield* sql<{ readonly eventId: string; readonly sequence: number }>`
         SELECT event_id AS "eventId", sequence
         FROM pi_subagent_lifecycle_journal
         WHERE execution_id = 'exec_legacy_1'
         ORDER BY sequence ASC
       `;
-      assert.equal(journal.length, 2);
-      assert.equal(journal[0]!.eventId, "evt_legacy_1");
-      assert.equal(journal[1]!.eventId, "evt_legacy_2");
+        assert.equal(journal.length, 2);
+        assert.equal(journal[0]!.eventId, "evt_legacy_1");
+        assert.equal(journal[1]!.eventId, "evt_legacy_2");
 
-      // 5. Attempt/generation-local uniqueness: attempt 2 generation 2 may
-      //    restart its own sequence at 1 without colliding with attempt 1.
-      yield* sql`
+        // 5. Attempt/generation-local uniqueness: attempt 2 generation 2 may
+        //    restart its own sequence at 1 without colliding with attempt 1.
+        yield* sql`
         INSERT INTO pi_subagent_lifecycle_journal (
           event_id, execution_id, attempt_id, generation, sequence, state,
           occurred_at, diagnostic_code, diagnostic_message, metadata_json
@@ -99,9 +101,9 @@ layer("migration 100 — PiSubagentAdmissionIdentity", (it) => {
         )
       `;
 
-      // 6. Second pass is a no-op (idempotent migration).
-      const secondPass = yield* runMigrations({ toMigrationInclusive: 100 });
-      assert.equal(secondPass.length, 0);
-    }),
+        // 6. Second pass is a no-op (idempotent migration).
+        const secondPass = yield* runMigrations({ toMigrationInclusive: 100 });
+        assert.equal(secondPass.length, 0);
+      }),
   );
 });

@@ -2188,7 +2188,6 @@ describe("store event reducer", () => {
   });
 });
 
-
 describe("store event reducer Synara MCP command acknowledgements", () => {
   const threadId = ThreadId.makeUnsafe("thread-1");
 
@@ -2262,11 +2261,9 @@ describe("store event reducer Synara MCP command acknowledgements", () => {
     // Rendering equivalence: the work log derived from live-reduced state is
     // identical to the work log derived from the replayed snapshot state.
     const entryFacts = (state: AppState) =>
-      deriveWorkLogEntries(
-        threadsOf(state)[0]?.activities ?? [],
-        TurnId.makeUnsafe("turn-1"),
-        { visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]) },
-      ).map((entry) => ({
+      deriveWorkLogEntries(threadsOf(state)[0]?.activities ?? [], TurnId.makeUnsafe("turn-1"), {
+        visibleTurnIds: new Set([TurnId.makeUnsafe("turn-1")]),
+      }).map((entry) => ({
         id: entry.id,
         label: entry.label,
         tone: entry.tone,

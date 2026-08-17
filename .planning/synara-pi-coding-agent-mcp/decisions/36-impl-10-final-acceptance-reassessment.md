@@ -175,14 +175,14 @@ untouched and authoritative for impl-11.
 
 ## Reopening-condition reconciliation
 
-| Decision 33 reopening condition | Assessment | Evidence |
-| --- | --- | --- |
-| A fresh green root suite passes | Satisfied | At exact clean-worktree SHA `96f590a898350c73aebf0b1a21dc4b1634b6d308`, Turbo passed 8/8 tasks; the server/CLI package suite passed 342 files and 4015 tests |
-| Owner explicitly authorizes `bun fmt`, `bun lint`, and `bun typecheck`, and all pass together | Satisfied | Owner said “okay tiếp tục đi”; formatter exit 0 under Decision 31, lint 0 errors, typecheck 7/7 |
-| Candidate changes receive verification proportionate to their changed surface | Satisfied | Production commit remains `6b132f83`; later `96f590a8` is JSON-safe test-fixture typing only and passed focused 150/150 plus web typecheck |
-| UI screenshots are produced before PR handoff | Satisfied | Chromium before/after evidence at `782ee225`; after shows a system/work acknowledgement and DOM evidence shows zero matching assistant messages |
-| Governing evidence is not contradictory or inaccurate | Satisfied | No contradictory evidence was found; exact SHA and impl-10 surface have not changed since the challenged consultation |
-| Independent integrated impl-10 review remains current | Satisfied | Exactly-one independent impl-10 reviewer package remains current and reports `PASS`; later changes do not alter impl-10 production behavior |
+| Decision 33 reopening condition                                                               | Assessment | Evidence                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A fresh green root suite passes                                                               | Satisfied  | At exact clean-worktree SHA `96f590a898350c73aebf0b1a21dc4b1634b6d308`, Turbo passed 8/8 tasks; the server/CLI package suite passed 342 files and 4015 tests |
+| Owner explicitly authorizes `bun fmt`, `bun lint`, and `bun typecheck`, and all pass together | Satisfied  | Owner said “okay tiếp tục đi”; formatter exit 0 under Decision 31, lint 0 errors, typecheck 7/7                                                              |
+| Candidate changes receive verification proportionate to their changed surface                 | Satisfied  | Production commit remains `6b132f83`; later `96f590a8` is JSON-safe test-fixture typing only and passed focused 150/150 plus web typecheck                   |
+| UI screenshots are produced before PR handoff                                                 | Satisfied  | Chromium before/after evidence at `782ee225`; after shows a system/work acknowledgement and DOM evidence shows zero matching assistant messages              |
+| Governing evidence is not contradictory or inaccurate                                         | Satisfied  | No contradictory evidence was found; exact SHA and impl-10 surface have not changed since the challenged consultation                                        |
+| Independent integrated impl-10 review remains current                                         | Satisfied  | Exactly-one independent impl-10 reviewer package remains current and reports `PASS`; later changes do not alter impl-10 production behavior                  |
 
 Every material reopening condition is satisfied.
 
@@ -213,15 +213,15 @@ binding impl-11 observer Reassessment and is not amended by this record.
 
 ## Exact ownership and evidence attribution
 
-| Commit or evidence | Attribution | Included in impl-10 production ownership? |
-| --- | --- | --- |
-| `6b132f83` | Impl-10 production implementation | Yes |
-| `23df500b` | Maint-34 test-fixture-only repair for the external Decision 33 blocker | No |
+| Commit or evidence                                                    | Attribution                                                                    | Included in impl-10 production ownership?                      |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `6b132f83`                                                            | Impl-10 production implementation                                              | Yes                                                            |
+| `23df500b`                                                            | Maint-34 test-fixture-only repair for the external Decision 33 blocker         | No                                                             |
 | `96f590a8` / full gate SHA `96f590a898350c73aebf0b1a21dc4b1634b6d308` | JSON-safe test-fixture typing plus the exact clean-worktree verification point | No new impl-10 production behavior; verification evidence only |
-| `782ee225` | Chromium before/after and DOM evidence | No; evidence-only |
-| Existing independent impl-10 reviewer package | Feature-level independent review of impl-10 | Review evidence |
-| Independent maint-34 reviewer package | Review of the fixture-only blocker repair | Maintenance evidence only |
-| Impl-11 committed or uncommitted work | Separate impl-11 ownership | No |
+| `782ee225`                                                            | Chromium before/after and DOM evidence                                         | No; evidence-only                                              |
+| Existing independent impl-10 reviewer package                         | Feature-level independent review of impl-10                                    | Review evidence                                                |
+| Independent maint-34 reviewer package                                 | Review of the fixture-only blocker repair                                      | Maintenance evidence only                                      |
+| Impl-11 committed or uncommitted work                                 | Separate impl-11 ownership                                                     | No                                                             |
 
 Impl-11 committed or uncommitted work is unrelated and excluded from impl-10
 ownership, acceptance scope, and downstream status. Repository-wide gates may

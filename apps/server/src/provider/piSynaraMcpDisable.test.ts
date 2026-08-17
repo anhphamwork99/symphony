@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TurnId } from "@synara/contracts";
 
-import { PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL, disablePiSynaraMcpSession } from "./piSynaraMcpDisable.ts";
+import {
+  PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL,
+  disablePiSynaraMcpSession,
+} from "./piSynaraMcpDisable.ts";
 import {
   makePiSynaraMcpLifecycleCoordinator,
   type PiSynaraMcpActivationSeams,
@@ -24,7 +27,11 @@ import {
 } from "./piSynaraMcpToolExecution.ts";
 
 const ACTIVATION_INPUT = { subject: "subject-1", sessionId: "session-1" };
-const AUTHORITY = { subject: "subject-1", sessionId: "session-1", lifecycleGeneration: "authority-1" };
+const AUTHORITY = {
+  subject: "subject-1",
+  sessionId: "session-1",
+  lifecycleGeneration: "authority-1",
+};
 const CREDENTIAL = { credential: "credential-1" };
 const CONNECTION = { connection: "connection-1" };
 const CATALOG = { tools: [{ name: "synara_tool_1" }] };
@@ -60,7 +67,13 @@ function makeHarness(deactivation: PiSynaraMcpDeactivationSeams = {}): Harness {
       reloadAtSafeBoundary: deactivation.reloadAtSafeBoundary ?? reloads,
     },
   });
-  return { adapter, coordinator, executions: makePiSynaraMcpToolExecutionRegistry(), cleaned, reloads };
+  return {
+    adapter,
+    coordinator,
+    executions: makePiSynaraMcpToolExecutionRegistry(),
+    cleaned,
+    reloads,
+  };
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

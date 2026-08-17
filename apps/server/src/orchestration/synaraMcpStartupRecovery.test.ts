@@ -27,10 +27,7 @@ import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
-import {
-  planSynaraMcpCommand,
-  type SynaraMcpCommandPlan,
-} from "./synaraMcpCommand.ts";
+import { planSynaraMcpCommand, type SynaraMcpCommandPlan } from "./synaraMcpCommand.ts";
 import {
   recoverSynaraMcpPendingOperations,
   SYNARA_MCP_RECOVERY_ENABLE_ROLLBACK_DEADLINE_ELAPSED_DETAIL,
@@ -314,9 +311,9 @@ describe("impl-09 AC1: startup recovery of pending project activation operations
 
     // The durable model converged to failed-disabled.
     expect(harness.model().projects[0]?.synaraMcpDesiredState).toBe("disabled");
-    expect(
-      harness.model().projects[0]?.synaraMcpActivationOperation?.aggregateStatus,
-    ).toBe("failed");
+    expect(harness.model().projects[0]?.synaraMcpActivationOperation?.aggregateStatus).toBe(
+      "failed",
+    );
 
     // No provider/MCP replay: the module has no provider seam, and the
     // dispatched surface is exactly the operation + the terminal activity.
@@ -348,15 +345,15 @@ describe("impl-09 AC1: startup recovery of pending project activation operations
     expect(activityCommand.activity.payload).toMatchObject({
       status: "failed",
       finalState: "disabled",
-      detail: expect.stringContaining(
-        SYNARA_MCP_RECOVERY_ENABLE_ROLLBACK_DEADLINE_ELAPSED_DETAIL,
-      ),
+      detail: expect.stringContaining(SYNARA_MCP_RECOVERY_ENABLE_ROLLBACK_DEADLINE_ELAPSED_DETAIL),
     });
     // The deadline is not extended by the recovery.
-    const settled = (harness.dispatched[0] as Extract<
-      OrchestrationCommand,
-      { type: "project.mcp-activation.update" }
-    >).operation;
+    const settled = (
+      harness.dispatched[0] as Extract<
+        OrchestrationCommand,
+        { type: "project.mcp-activation.update" }
+      >
+    ).operation;
     expect(settled.absoluteDeadline).toBe(plan.operation.absoluteDeadline);
   });
 
@@ -464,27 +461,24 @@ describe("impl-09 AC1: startup recovery of pending project activation operations
     // Simulate a concurrent settlement between the recovery's first and second
     // read: the second read sees the operation terminal, so the recovery must
     // stop without journaling anything.
-    const settled = applyOperationUpdate(
-      restartModel,
-      {
-        type: "project.mcp-activation.update",
-        commandId: CommandId.makeUnsafe("external-settlement"),
-        projectId,
+    const settled = applyOperationUpdate(restartModel, {
+      type: "project.mcp-activation.update",
+      commandId: CommandId.makeUnsafe("external-settlement"),
+      projectId,
+      desiredState: "disabled",
+      expectedVersion: plan.operation.version,
+      operation: {
+        ...plan.operation,
         desiredState: "disabled",
-        expectedVersion: plan.operation.version,
-        operation: {
-          ...plan.operation,
-          desiredState: "disabled",
-          outcomes: plan.operation.outcomes.map((outcome) => ({
-            ...outcome,
-            status: "failed" as const,
-            detail: "external settlement",
-          })),
-          aggregateStatus: "failed",
-          version: plan.operation.version + 1,
-        },
+        outcomes: plan.operation.outcomes.map((outcome) => ({
+          ...outcome,
+          status: "failed" as const,
+          detail: "external settlement",
+        })),
+        aggregateStatus: "failed",
+        version: plan.operation.version + 1,
       },
-    );
+    });
     const harness = makeHarness({
       readModel: restartModel,
       afterFirstRead: () => settled,

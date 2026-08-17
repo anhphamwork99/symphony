@@ -42,16 +42,16 @@ Browser suites executed strictly sequentially, one file per invocation — never
 concurrent (known port-51100 module-server flake). All runs were clean on the
 first attempt.
 
-| # | Command | Date | Exit | Result |
-| - | ------- | ---- | ---: | ------ |
-| 1 | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test src/lib/rightDockSizing.test.ts` | 2026-08-16 | 0 | 1 file, 19/19 passed |
-| 2 | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test src/components/ui/sidebar.test.tsx` | 2026-08-16 | 0 | 1 file, 7/7 passed |
-| 3 | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test:browser:stable -- src/components/chat/rightDockSizing.browser.tsx` | 2026-08-16 | 0 | 1 file, 19/19 passed (AC-01..AC-12, TG-1..TG-5) |
-| 4 | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test:browser:stable -- src/lib/panelResize.browser.ts` | 2026-08-16 | 0 | 1 file, 2/2 passed (split-view probe, untouched) |
-| 5 | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web typecheck` | 2026-08-16 | 0 | PASS — scoped to apps/web only (`tsc --noEmit`) |
-| 6 | `bun fmt` (repo root) | 2026-08-16 | 0 | PASS (oxfmt; no diffs reported) |
-| 7 | `bun lint` (repo root) | 2026-08-16 | 0 | 496 warnings, 0 errors (oxlint `--report-unused-disable-directives`) |
-| 8 | `bun typecheck` (repo root) | 2026-08-16 | non-zero | FAIL — outside scope, see below |
+| #   | Command                                                                                                                   | Date       |     Exit | Result                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------- | ---------- | -------: | -------------------------------------------------------------------- |
+| 1   | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test src/lib/rightDockSizing.test.ts`                                   | 2026-08-16 |        0 | 1 file, 19/19 passed                                                 |
+| 2   | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test src/components/ui/sidebar.test.tsx`                                | 2026-08-16 |        0 | 1 file, 7/7 passed                                                   |
+| 3   | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test:browser:stable -- src/components/chat/rightDockSizing.browser.tsx` | 2026-08-16 |        0 | 1 file, 19/19 passed (AC-01..AC-12, TG-1..TG-5)                      |
+| 4   | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web test:browser:stable -- src/lib/panelResize.browser.ts`                  | 2026-08-16 |        0 | 1 file, 2/2 passed (split-view probe, untouched)                     |
+| 5   | `/Users/anhpham99/.bun/bin/bun run --cwd apps/web typecheck`                                                              | 2026-08-16 |        0 | PASS — scoped to apps/web only (`tsc --noEmit`)                      |
+| 6   | `bun fmt` (repo root)                                                                                                     | 2026-08-16 |        0 | PASS (oxfmt; no diffs reported)                                      |
+| 7   | `bun lint` (repo root)                                                                                                    | 2026-08-16 |        0 | 496 warnings, 0 errors (oxlint `--report-unused-disable-directives`) |
+| 8   | `bun typecheck` (repo root)                                                                                               | 2026-08-16 | non-zero | FAIL — outside scope, see below                                      |
 
 Focused suites (rows 1–4): 47/47 PASS (19 + 7 + 19 + 2), all exit 0.
 

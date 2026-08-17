@@ -87,12 +87,7 @@ export type TestSynaraMcpDisableControl = "succeed" | "defer" | "fail";
  * admissions synchronously, settle in-flight executions exactly once, cancel
  * gateway requests, revoke/clear credentials, reload at the safe boundary.
  */
-export type TestSynaraMcpDisableStage =
-  | "fence"
-  | "settle"
-  | "cancel"
-  | "revoke"
-  | "reload";
+export type TestSynaraMcpDisableStage = "fence" | "settle" | "cancel" | "revoke" | "reload";
 
 /** Outcome a test can release a deferred enable/disable with. */
 export type TestSynaraMcpReleaseOutcome = "succeed" | "fail";
@@ -789,7 +784,10 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
               detail: PI_SYNARA_MCP_DISABLE_UNAVAILABLE_DETAIL,
             } satisfies ProviderDisableSynaraMcpResult;
           }
-          return { state: "dormant", alreadyDisabled: true } satisfies ProviderDisableSynaraMcpResult;
+          return {
+            state: "dormant",
+            alreadyDisabled: true,
+          } satisfies ProviderDisableSynaraMcpResult;
         }
         const completeDisable = (
           outcome: ProviderDisableSynaraMcpResult,
@@ -889,9 +887,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       return result;
     };
 
-    const completeDeferredTurn = (
-      threadId: ThreadId,
-    ): Effect.Effect<void, ProviderAdapterError> =>
+    const completeDeferredTurn = (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
       Effect.sync(() => sessions.get(threadId)).pipe(
         Effect.flatMap((state): Effect.Effect<void, ProviderAdapterError> => {
           if (!state) {
@@ -1033,9 +1029,8 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       return [...responses];
     };
 
-    const getMcpAuthority = (
-      threadId: ThreadId,
-    ): ProviderSessionStartInput["mcpAuthority"] => sessions.get(threadId)?.mcpAuthority;
+    const getMcpAuthority = (threadId: ThreadId): ProviderSessionStartInput["mcpAuthority"] =>
+      sessions.get(threadId)?.mcpAuthority;
 
     const configureEnableOutcome = (
       threadId: ThreadId,

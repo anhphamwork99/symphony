@@ -13,11 +13,7 @@ import { PI_THINKING_LEVEL_OPTIONS } from "@synara/contracts";
 import { HARNESS_VERSION, printReportSummary, runMeasurement } from "./orchestrator.ts";
 import { resolveConfiguredModelId } from "./piSession.ts";
 import { prepareLocalManifestDir } from "./standaloneDriver.ts";
-import {
-  computeFixtureDigest,
-  isolateHarnessCwd,
-  probeFixtureGitCommit,
-} from "./workspace.ts";
+import { computeFixtureDigest, isolateHarnessCwd, probeFixtureGitCommit } from "./workspace.ts";
 import { MEASUREMENT_MODES, type MeasurementMode } from "./types.ts";
 
 const DEFAULT_REPETITIONS = 3;
@@ -72,7 +68,10 @@ function parseOptions(): CliOptions {
   if (modesRaw === undefined) {
     modes = MEASUREMENT_MODES;
   } else {
-    const requested = modesRaw.split(",").map((value) => value.trim()).filter(Boolean);
+    const requested = modesRaw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
     const unknown = requested.filter(
       (value) => !(MEASUREMENT_MODES as readonly string[]).includes(value),
     );
@@ -112,9 +111,7 @@ async function defaultAgentDir(): Promise<string> {
   }
 }
 
-let cachedPiSdkConfig:
-  | { readonly getAgentDir: () => string; readonly VERSION: string }
-  | undefined;
+let cachedPiSdkConfig: { readonly getAgentDir: () => string; readonly VERSION: string } | undefined;
 async function importPiSdkConfig(): Promise<{
   readonly getAgentDir: () => string;
   readonly VERSION: string;

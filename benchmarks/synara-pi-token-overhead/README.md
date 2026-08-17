@@ -26,11 +26,11 @@ filesystem paths.
 
 ## Results
 
-| Mode | Effective tools | Canonical schema bytes | Cold turn total tokens | Turn-2 incremental total |
-| --- | ---: | ---: | --- | ---: |
-| Pi standalone | 44 | 54,303 | 22,206 / 22,205 / 22,205 | 79 / 79 / 79 |
-| Synara default | 48 | 63,752 | 24,021 / 24,022 / 24,020 | 79 / 79 / 79 |
-| Synara MCP activated | 105 | 170,798 | 65,111 / 65,111 / 65,109 | 79 / 79 / 79 |
+| Mode                 | Effective tools | Canonical schema bytes | Cold turn total tokens   | Turn-2 incremental total |
+| -------------------- | --------------: | ---------------------: | ------------------------ | -----------------------: |
+| Pi standalone        |              44 |                 54,303 | 22,206 / 22,205 / 22,205 |             79 / 79 / 79 |
+| Synara default       |              48 |                 63,752 | 24,021 / 24,022 / 24,020 |             79 / 79 / 79 |
+| Synara MCP activated |             105 |                170,798 | 65,111 / 65,111 / 65,109 |             79 / 79 / 79 |
 
 Against the paired standalone runs:
 

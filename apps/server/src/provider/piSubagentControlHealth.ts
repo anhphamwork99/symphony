@@ -55,9 +55,7 @@ export interface PiSubagentControlHealthShape {
    * health and perform their own normal admission or probe. There is no timer
    * and no automatic replay: only a fresh authorized command probes.
    */
-  readonly withRecoveryProbe: <A, E, R>(
-    probe: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E, R>;
+  readonly withRecoveryProbe: <A, E, R>(probe: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
 export class PiSubagentControlHealth extends ServiceMap.Service<
@@ -76,9 +74,7 @@ export function makePiSubagentControlHealth(
             ? { diagnosticCode: initialState.diagnosticCode }
             : {}),
           ...(initialState.reason !== undefined ? { reason: initialState.reason } : {}),
-          ...(initialState.degradedAt !== undefined
-            ? { degradedAt: initialState.degradedAt }
-            : {}),
+          ...(initialState.degradedAt !== undefined ? { degradedAt: initialState.degradedAt } : {}),
         }
       : { status: "available" };
 
@@ -132,9 +128,7 @@ export function makePiSubagentControlHealth(
             from: "degraded",
             to: "available",
             occurredAt,
-            ...(state.diagnosticCode !== undefined
-              ? { diagnosticCode: state.diagnosticCode }
-              : {}),
+            ...(state.diagnosticCode !== undefined ? { diagnosticCode: state.diagnosticCode } : {}),
             ...(context?.threadId !== undefined ? { threadId: context.threadId } : {}),
           };
           return [reported, next] as const;

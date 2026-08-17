@@ -13,7 +13,7 @@ event persistence failures.
 - [terms.md](terms.md) — project-scoped domain vocabulary.
 - [spec.md](spec.md) — the normative buildable feature specification.
 - [issues/](issues/) — child decision tickets; each ticket owns its resolution.
-- [issues/impl-*.md](issues/) — approved implementation tickets derived from
+- [issues/impl-\*.md](issues/) — approved implementation tickets derived from
   the spec. The `impl-` prefix preserves the earlier decision-ticket files.
 - [decisions/](decisions/) — consequential decisions recorded while working
   through the map.

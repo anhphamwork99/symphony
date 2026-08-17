@@ -445,7 +445,7 @@ agentGatewayRetentionLegacyLayer(
           [97, "ProjectMcpActivation"],
           [98, "PiSubagentExecutions"],
           [99, "PiSubagentLeasesAndProgress"],
-        [100, "PiSubagentAdmissionIdentity"],
+          [100, "PiSubagentAdmissionIdentity"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -577,7 +577,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [97, "ProjectMcpActivation"],
           [98, "PiSubagentExecutions"],
           [99, "PiSubagentLeasesAndProgress"],
-        [100, "PiSubagentAdmissionIdentity"],
+          [100, "PiSubagentAdmissionIdentity"],
         ],
       );
 
@@ -700,7 +700,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [97, "ProjectMcpActivation"],
           [98, "PiSubagentExecutions"],
           [99, "PiSubagentLeasesAndProgress"],
-        [100, "PiSubagentAdmissionIdentity"],
+          [100, "PiSubagentAdmissionIdentity"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

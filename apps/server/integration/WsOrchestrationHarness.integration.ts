@@ -69,10 +69,7 @@ import {
   makeTestProviderAdapterHarness,
   type TestProviderAdapterHarness,
 } from "./TestProviderAdapter.integration.ts";
-import {
-  connectSynaraWsClient,
-  type SynaraWsClient,
-} from "./synaraWsClient.integration.ts";
+import { connectSynaraWsClient, type SynaraWsClient } from "./synaraWsClient.integration.ts";
 
 export interface MakeWsOrchestrationHarnessOptions {
   /** Provider identity the test adapter harness stands in for. Defaults to "codex". */
@@ -145,14 +142,20 @@ export interface WsOrchestrationHarness {
 }
 
 export class WsOrchestrationHarnessError extends Error {
-  constructor(message: string, readonly operation: string) {
+  constructor(
+    message: string,
+    readonly operation: string,
+  ) {
     super(message);
     this.name = "WsOrchestrationHarnessError";
   }
 }
 
 export class WsOrchestrationWaitTimeoutError extends Error {
-  constructor(description: string, readonly timeoutMs: number) {
+  constructor(
+    description: string,
+    readonly timeoutMs: number,
+  ) {
     super(`Timed out after ${timeoutMs}ms waiting for ${description}.`);
     this.name = "WsOrchestrationWaitTimeoutError";
   }
@@ -354,9 +357,7 @@ export async function makeWsOrchestrationHarness(
     );
     await runtime.runPromise(runtimeStartup.markCommandReady);
   } catch (cause) {
-    await runtime
-      .runPromise(Scope.close(reactorScope, Exit.void))
-      .catch(() => undefined);
+    await runtime.runPromise(Scope.close(reactorScope, Exit.void)).catch(() => undefined);
     await runtime.dispose().catch(() => undefined);
     if (ownsRootDir) fs.rmSync(rootDir, { recursive: true, force: true });
     throw new WsOrchestrationHarnessError(
@@ -378,10 +379,10 @@ export async function makeWsOrchestrationHarness(
     await runtime.runPromise(
       Scope.provide(
         Effect.gen(function* () {
-          const httpServer = yield* makeBoundedNodeHttpServer(
-            () => http.createServer(),
-            { port: 0, host: "127.0.0.1" },
-          );
+          const httpServer = yield* makeBoundedNodeHttpServer(() => http.createServer(), {
+            port: 0,
+            host: "127.0.0.1",
+          });
           boundAddress.current = httpServer.address;
           const httpApp = yield* HttpRouter.toHttpEffect(websocketRpcRouteLayer);
           yield* httpServer.serve(httpApp);
@@ -390,12 +391,8 @@ export async function makeWsOrchestrationHarness(
       ),
     );
   } catch (cause) {
-    await runtime
-      .runPromise(Scope.close(serverScope, Exit.void))
-      .catch(() => undefined);
-    await runtime
-      .runPromise(Scope.close(reactorScope, Exit.void))
-      .catch(() => undefined);
+    await runtime.runPromise(Scope.close(serverScope, Exit.void)).catch(() => undefined);
+    await runtime.runPromise(Scope.close(reactorScope, Exit.void)).catch(() => undefined);
     await runtime.dispose().catch(() => undefined);
     if (ownsRootDir) fs.rmSync(rootDir, { recursive: true, force: true });
     throw new WsOrchestrationHarnessError(
@@ -404,11 +401,7 @@ export async function makeWsOrchestrationHarness(
     );
   }
   const address = boundAddress.current;
-  if (
-    address === null ||
-    address._tag !== "TcpAddress" ||
-    !Number.isInteger(address.port)
-  ) {
+  if (address === null || address._tag !== "TcpAddress" || !Number.isInteger(address.port)) {
     await runtime.runPromise(Scope.close(serverScope, Exit.void)).catch(() => undefined);
     await runtime.runPromise(Scope.close(reactorScope, Exit.void)).catch(() => undefined);
     await runtime.dispose().catch(() => undefined);
@@ -454,13 +447,10 @@ export async function makeWsOrchestrationHarness(
     predicate,
     timeoutMs,
   ) => {
-    const snapshot = await waitForSnapshot(
-      (current) => {
-        const project = current.projects.find((entry) => entry.id === projectId) ?? null;
-        return project !== null && (predicate === undefined || predicate(project));
-      },
-      timeoutMs,
-    );
+    const snapshot = await waitForSnapshot((current) => {
+      const project = current.projects.find((entry) => entry.id === projectId) ?? null;
+      return project !== null && (predicate === undefined || predicate(project));
+    }, timeoutMs);
     const project = snapshot.projects.find((entry) => entry.id === projectId)!;
     return project;
   };
@@ -470,13 +460,10 @@ export async function makeWsOrchestrationHarness(
     predicate,
     timeoutMs,
   ) => {
-    const snapshot = await waitForSnapshot(
-      (current) => {
-        const thread = current.threads.find((entry) => entry.id === threadId) ?? null;
-        return thread !== null && (predicate === undefined || predicate(thread));
-      },
-      timeoutMs,
-    );
+    const snapshot = await waitForSnapshot((current) => {
+      const thread = current.threads.find((entry) => entry.id === threadId) ?? null;
+      return thread !== null && (predicate === undefined || predicate(thread));
+    }, timeoutMs);
     const thread = snapshot.threads.find((entry) => entry.id === threadId)!;
     return thread;
   };
@@ -517,7 +504,9 @@ export async function makeWsOrchestrationHarness(
     }
     if (failures.length > 0) {
       throw new WsOrchestrationHarnessError(
-        failures.map((cause) => (cause instanceof Error ? cause.message : String(cause))).join("; "),
+        failures
+          .map((cause) => (cause instanceof Error ? cause.message : String(cause)))
+          .join("; "),
         "dispose",
       );
     }

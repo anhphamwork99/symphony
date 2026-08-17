@@ -61,8 +61,20 @@ const config = {
 
 describe("computeTurnDelta", () => {
   it("computes per-component deltas (after - before)", () => {
-    const before: RawSessionStats = { input: 10, output: 5, cacheRead: 20, cacheWrite: 0, total: 35 };
-    const after: RawSessionStats = { input: 60, output: 20, cacheRead: 90, cacheWrite: 30, total: 200 };
+    const before: RawSessionStats = {
+      input: 10,
+      output: 5,
+      cacheRead: 20,
+      cacheWrite: 0,
+      total: 35,
+    };
+    const after: RawSessionStats = {
+      input: 60,
+      output: 20,
+      cacheRead: 90,
+      cacheWrite: 30,
+      total: 200,
+    };
     const delta = computeTurnDelta(before, after);
     expect(delta).toEqual({ input: 50, output: 15, cacheRead: 70, cacheWrite: 30, total: 165 });
   });
@@ -81,12 +93,24 @@ describe("makeTurnMeasurement", () => {
       turnIndex: 1,
       before: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
       after: raw(),
-      normalized: { usedTokens: 380, totalProcessedTokens: 380, inputTokens: 100, cachedInputTokens: 200, outputTokens: 30 },
+      normalized: {
+        usedTokens: 380,
+        totalProcessedTokens: 380,
+        inputTokens: 100,
+        cachedInputTokens: 200,
+        outputTokens: 30,
+      },
     });
     expect(measurement.invalid).toBe(false);
     expect(measurement.reconcileOk).toBe(true);
     expect(measurement.crossCheckOk).toBe(true);
-    expect(measurement.delta).toEqual({ input: 100, output: 30, cacheRead: 200, cacheWrite: 50, total: 380 });
+    expect(measurement.delta).toEqual({
+      input: 100,
+      output: 30,
+      cacheRead: 200,
+      cacheWrite: 50,
+      total: 380,
+    });
   });
 
   it("marks the turn invalid on reconciliation failure with explicit reasons", () => {
@@ -340,16 +364,19 @@ describe("buildRunSetSummary", () => {
 
 describe("evaluateEvidence", () => {
   it("declares insufficient evidence when required repetitions are missing", () => {
-    const verdict = evaluateEvidence({
-      mode: "standalone",
-      repetitions: 3,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, []);
+    const verdict = evaluateEvidence(
+      {
+        mode: "standalone",
+        repetitions: 3,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [],
+    );
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("incomplete-repetitions");
   });
@@ -364,7 +391,13 @@ describe("evaluateEvidence", () => {
         makeTurnMeasurement({
           turnIndex: 1,
           before: raw({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }),
-          after: raw({ input: 100 + index, output: 30, cacheRead: 200, cacheWrite: 50, total: 380 + index }),
+          after: raw({
+            input: 100 + index,
+            output: 30,
+            cacheRead: 200,
+            cacheWrite: 50,
+            total: 380 + index,
+          }),
           normalized: {
             usedTokens: 380 + index,
             totalProcessedTokens: 380 + index,
@@ -375,8 +408,20 @@ describe("evaluateEvidence", () => {
         }),
         makeTurnMeasurement({
           turnIndex: 2,
-          before: raw({ input: 100 + index, output: 30, cacheRead: 200, cacheWrite: 50, total: 380 + index }),
-          after: raw({ input: 140 + index, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 + index }),
+          before: raw({
+            input: 100 + index,
+            output: 30,
+            cacheRead: 200,
+            cacheWrite: 50,
+            total: 380 + index,
+          }),
+          after: raw({
+            input: 140 + index,
+            output: 40,
+            cacheRead: 200,
+            cacheWrite: 50,
+            total: 430 + index,
+          }),
           normalized: {
             usedTokens: 430 + index,
             totalProcessedTokens: 430 + index,
@@ -390,16 +435,19 @@ describe("evaluateEvidence", () => {
       exposureEvidence: exposure,
       config,
     });
-    const verdict = evaluateEvidence({
-      mode: "standalone",
-      repetitions: 3,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, [valid(0), valid(1), valid(2)]);
+    const verdict = evaluateEvidence(
+      {
+        mode: "standalone",
+        repetitions: 3,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [valid(0), valid(1), valid(2)],
+    );
     expect(verdict.insufficientEvidence).toBe(false);
     expect(verdict.reasons).toEqual([]);
     expect(verdict.validPairCount).toBe(3);
@@ -427,16 +475,19 @@ describe("evaluateEvidence", () => {
       exposureEvidence: { ...exposure, mode: "synara-activated" },
       config,
     };
-    const verdict = evaluateEvidence({
-      mode: "synara-activated",
-      repetitions: 1,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, [record]);
+    const verdict = evaluateEvidence(
+      {
+        mode: "synara-activated",
+        repetitions: 1,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [record],
+    );
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("incomplete-catalog");
   });
@@ -518,16 +569,19 @@ describe("evaluateEvidence", () => {
       expect(delta.cacheWrite).toBe(54);
       expect(delta.consistentDirection).toBe(false);
     }
-    const verdict = evaluateEvidence({
-      mode: "synara-default",
-      repetitions: 3,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, records);
+    const verdict = evaluateEvidence(
+      {
+        mode: "synara-default",
+        repetitions: 3,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      records,
+    );
     expect(verdict.insufficientEvidence).toBe(false);
     expect(verdict.reasons).toEqual([]);
     expect(verdict.validPairCount).toBe(3);
@@ -558,16 +612,19 @@ describe("evaluateEvidence", () => {
       exposureEvidence: exposure,
       config,
     };
-    const verdict = evaluateEvidence({
-      mode: "standalone",
-      repetitions: 1,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, [record]);
+    const verdict = evaluateEvidence(
+      {
+        mode: "standalone",
+        repetitions: 1,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [record],
+    );
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("reconciliation-failure");
   });
@@ -597,16 +654,19 @@ describe("evaluateEvidence", () => {
       exposureEvidence: exposure,
       config,
     };
-    const verdict = evaluateEvidence({
-      mode: "standalone",
-      repetitions: 1,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, [record]);
+    const verdict = evaluateEvidence(
+      {
+        mode: "standalone",
+        repetitions: 1,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [record],
+    );
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("missing-accounting-component");
   });
@@ -633,16 +693,19 @@ describe("evaluateEvidence", () => {
       exposureEvidence: exposure,
       config: index === 0 ? config : { ...config, thinkingLevel: "high" },
     });
-    const verdict = evaluateEvidence({
-      mode: "standalone",
-      repetitions: 2,
-      turnsPerRepetition: 2,
-      model: "m",
-      thinkingLevel: "medium",
-      promptHash: "h",
-      promptBytes: 10,
-      harnessVersion: "test",
-    }, [record(0), record(1)]);
+    const verdict = evaluateEvidence(
+      {
+        mode: "standalone",
+        repetitions: 2,
+        turnsPerRepetition: 2,
+        model: "m",
+        thinkingLevel: "medium",
+        promptHash: "h",
+        promptBytes: 10,
+        harnessVersion: "test",
+      },
+      [record(0), record(1)],
+    );
     expect(verdict.insufficientEvidence).toBe(true);
     expect(verdict.reasons).toContain("config-inequivalence");
   });

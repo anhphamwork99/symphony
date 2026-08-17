@@ -21,7 +21,10 @@ import WebSocket, { type RawData } from "ws";
 
 import { ServerAuth, AuthError, type ServerAuthShape } from "./auth/Services/ServerAuth";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore";
-import { McpSessionAuthority, type McpSessionAuthorityShape } from "./agentGateway/Services/McpSessionAuthority";
+import {
+  McpSessionAuthority,
+  type McpSessionAuthorityShape,
+} from "./agentGateway/Services/McpSessionAuthority";
 import { McpSessionAuthorityLive } from "./agentGateway/Layers/McpSessionAuthority";
 import {
   MAX_AUTHENTICATED_CONNECTIONS_PER_SESSION,
@@ -187,7 +190,9 @@ function ping(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-async function startTestServer(options: { readonly host?: string } = {}): Promise<RunningTestServer> {
+async function startTestServer(
+  options: { readonly host?: string } = {},
+): Promise<RunningTestServer> {
   const baseConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "synara-ws-lifecycle-test-",
   }).pipe(Layer.provide(NodeServices.layer));
@@ -976,9 +981,7 @@ describe("websocketRpcRouteLayer connection lifecycle", () => {
       expect(server.minted.count).toBe(0);
 
       // A rejected authenticated attempt mints no authority either.
-      await expect(connect(featureSocketUrl(server, "not-a-real-ticket"))).rejects.toThrow(
-        "401",
-      );
+      await expect(connect(featureSocketUrl(server, "not-a-real-ticket"))).rejects.toThrow("401");
       expect(server.observedConnectionSessionKeys).toHaveLength(0);
       expect(server.minted.count).toBe(0);
 

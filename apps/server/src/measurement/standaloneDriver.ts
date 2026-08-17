@@ -43,7 +43,15 @@ export interface StandaloneModeResult {
   readonly diagnostics: readonly string[];
 }
 
-function toRaw(stats: { readonly tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } }): RawSessionStats {
+function toRaw(stats: {
+  readonly tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}): RawSessionStats {
   return {
     input: stats.tokens.input,
     output: stats.tokens.output,

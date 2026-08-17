@@ -9,11 +9,26 @@
 // the real RPC API.
 import { describe, expect, it } from "vitest";
 
-import { reconcileSessionStats, PI_RECONCILIATION_RULE } from "../src/measurement/reconciliation.ts";
+import {
+  reconcileSessionStats,
+  PI_RECONCILIATION_RULE,
+} from "../src/measurement/reconciliation.ts";
 import { extractTurnCompletedUsage } from "../src/measurement/reconciliation.ts";
-import { canonicalizeManifest, summarizeManifest, sha256 } from "../src/measurement/canonicalize.ts";
-import { evaluateEvidence, buildRunSetSummary, computePairedDeltas, makeTurnMeasurement } from "../src/measurement/records.ts";
-import { parseCanonicalTurnCompletedEvents, parseCanonicalToolCallEvents } from "../src/measurement/synaraDriver.ts";
+import {
+  canonicalizeManifest,
+  summarizeManifest,
+  sha256,
+} from "../src/measurement/canonicalize.ts";
+import {
+  evaluateEvidence,
+  buildRunSetSummary,
+  computePairedDeltas,
+  makeTurnMeasurement,
+} from "../src/measurement/records.ts";
+import {
+  parseCanonicalTurnCompletedEvents,
+  parseCanonicalToolCallEvents,
+} from "../src/measurement/synaraDriver.ts";
 import { startIsolatedServer, removeIsolatedHomeDir } from "../src/measurement/serverProcess.ts";
 import { connectSynaraClient } from "../src/measurement/synaraClient.ts";
 import {
@@ -28,10 +43,24 @@ const REAL_RUNS = process.env.SYNARA_TOKEN_OVERHEAD_REAL_RUNS === "1";
 
 describe("token overhead reconciliation kernel (non-gated)", () => {
   it("documents and validates the Pi SessionStats equation", () => {
-    expect(PI_RECONCILIATION_RULE.equation).toBe("total == input + cacheRead + cacheWrite + output");
-    const ok = reconcileSessionStats({ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 });
+    expect(PI_RECONCILIATION_RULE.equation).toBe(
+      "total == input + cacheRead + cacheWrite + output",
+    );
+    const ok = reconcileSessionStats({
+      input: 1,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 4,
+      total: 10,
+    });
     expect(ok.ok).toBe(true);
-    const bad = reconcileSessionStats({ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 11 });
+    const bad = reconcileSessionStats({
+      input: 1,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 4,
+      total: 11,
+    });
     expect(bad.ok).toBe(false);
     expect(bad.failures[0]).toContain("inconsistent total");
   });
@@ -126,7 +155,13 @@ describe("token overhead records/report kernel (non-gated)", () => {
     total: 380,
     ...overrides,
   });
-  const zero = (): RawSessionStats => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+  const zero = (): RawSessionStats => ({
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 0,
+  });
 
   it("keeps invalid repetitions visible and excluded from paired analysis", () => {
     const valid: RepetitionRecord = {
@@ -395,8 +430,12 @@ describe("token overhead per-repetition workspaces (non-gated)", () => {
       expect(new Set(roots).size).toBe(3);
       for (const workspace of workspaces) {
         expect(workspace.fixtureDigest).toBe(computeFixtureDigest());
-        expect(fs.readFileSync(`${workspace.root}/README.md`, "utf8")).toBe("Token overhead measurement fixture v1\n");
-        expect(fs.readFileSync(`${workspace.root}/fixture.txt`, "utf8")).toBe("deterministic fixture content\n");
+        expect(fs.readFileSync(`${workspace.root}/README.md`, "utf8")).toBe(
+          "Token overhead measurement fixture v1\n",
+        );
+        expect(fs.readFileSync(`${workspace.root}/fixture.txt`, "utf8")).toBe(
+          "deterministic fixture content\n",
+        );
       }
       // Identical git state when git is available.
       if (workspaces[0]!.fixtureGitCommit !== null) {
@@ -528,9 +567,11 @@ describe("token overhead real paired runs (credential-gated)", () => {
   it.skipIf(!runAll())(
     "runs the real three-mode matrix and writes a report artifact",
     async () => {
-      const { runMeasurement, HARNESS_VERSION } = await import("../src/measurement/orchestrator.ts");
+      const { runMeasurement, HARNESS_VERSION } =
+        await import("../src/measurement/orchestrator.ts");
       const { resolveConfiguredModelId } = await import("../src/measurement/piSession.ts");
-      const { computeFixtureDigest, probeFixtureGitCommit } = await import("../src/measurement/workspace.ts");
+      const { computeFixtureDigest, probeFixtureGitCommit } =
+        await import("../src/measurement/workspace.ts");
       const fs = await import("node:fs");
       const os = await import("node:os");
       const path = await import("node:path");
@@ -585,8 +626,8 @@ describe("token overhead real paired runs (credential-gated)", () => {
         const activatedNames = activated.repetitions.flatMap((r) => r.manifest.toolNames);
         expect(activatedNames.some((name) => name.startsWith("synara_"))).toBe(true);
         // Default mode must stay dormant: no Synara tools in the manifest.
-        const defaultNames = report.runSets["synara-default"]!.repetitions.flatMap((r) =>
-          r.manifest.toolNames,
+        const defaultNames = report.runSets["synara-default"]!.repetitions.flatMap(
+          (r) => r.manifest.toolNames,
         );
         expect(defaultNames.some((name) => name.startsWith("synara_"))).toBe(false);
         fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
