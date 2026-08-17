@@ -9,7 +9,7 @@ available but is never represented as managed.
 
 **Blocked by:** 20 — Atomic authorized production admission.
 
-**Status:** completed
+**Status:** completed — final acceptance recorded in Decision 0005.
 
 - [x] **T21-AC1:** A persistence failure at requested or accepted lifecycle
       commit prevents actual child start and returns a stable persistence
@@ -433,3 +433,9 @@ bun run --cwd apps/server test src/provider/piSubagentAdmissionCoordinator.test.
 bun run --cwd apps/server test
 bun run test -- --env-mode=loose
 ```
+
+### Final acceptance
+
+Decision 0005 accepted integrated candidate `9f6ce23a` (fixed point
+`991bd616`) on 2026-08-17: T21-AC1 through T21-AC7 accepted with recorded
+nonblocking risks. Integration is local only; nothing pushed.

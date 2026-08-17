@@ -19,6 +19,9 @@
 - [decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md](decisions/0004-t20-atomic-authorized-production-admission-final-acceptance.md) —
   accepted atomic authorized production-admission baseline and recorded
   nonblocking risks.
+- [decisions/0005-t21-production-fail-closed-control-health-final-acceptance.md](decisions/0005-t21-production-fail-closed-control-health-final-acceptance.md) —
+  accepted production fail-closed control-health baseline and recorded
+  nonblocking risks.
 - [issues/](issues/) — normative implementation tickets in dependency order;
   work the blocker-free frontier one ticket at a time.
 
@@ -29,8 +32,8 @@
   production wiring, migration compatibility, persistence correctness,
   authorization, and real-Pi/restart evidence did not.
 - **Remediation track:** tickets 18–24.
-- **Accepted remediation tickets:** tickets 18, 19, and 20.
-- **Blocker-free frontier:** ticket 21 — Production fail-closed control health.
+- **Accepted remediation tickets:** tickets 18, 19, 20, and 21.
+- **Blocker-free frontier:** ticket 22 — Real bounded foreground attachment.
 - **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
 - Every remediation ticket owns an `Implementation Report`; an implementer must
   complete that report with exact evidence before requesting review.
