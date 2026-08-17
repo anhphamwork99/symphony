@@ -13,9 +13,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
+  resolvePiSubagentForegroundWaitMs,
   resolveStaticDir,
 } from "./config";
 
@@ -182,3 +186,98 @@ describe("resolveCanonicalWorkspaceRoots", () => {
     expect(fs.realpathSync(result.studioWorkspaceRoot)).toBe(result.studioWorkspaceRoot);
   });
 });
+
+describe("resolvePiSubagentForegroundWaitMs (Issue 22 / WP-02)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS).toBe(10000);
+    expect(MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS).toBe(100);
+    expect(MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS).toBe(60000);
+  });
+
+  describe("valid inputs (endpoints, interior values, trimming, signs)", () => {
+    const validCases: Array<{ label: string; input: unknown; expected: number }> = [
+      { label: "exact min endpoint (number)", input: 100, expected: 100 },
+      { label: "exact min endpoint (string)", input: "100", expected: 100 },
+      { label: "exact max endpoint (number)", input: 60000, expected: 60000 },
+      { label: "exact max endpoint (string)", input: "60000", expected: 60000 },
+      { label: "interior near min (number)", input: 101, expected: 101 },
+      { label: "interior near min (string)", input: "101", expected: 101 },
+      { label: "interior near max (number)", input: 59999, expected: 59999 },
+      { label: "interior near max (string)", input: "59999", expected: 59999 },
+      { label: "default value (number)", input: 10000, expected: 10000 },
+      { label: "default value (string)", input: "10000", expected: 10000 },
+      { label: "arbitrary interior 5000 (number)", input: 5000, expected: 5000 },
+      { label: "arbitrary interior 5000 (string)", input: "5000", expected: 5000 },
+      { label: "arbitrary interior 30000 (number)", input: 30000, expected: 30000 },
+      { label: "arbitrary interior 30000 (string)", input: "30000", expected: 30000 },
+      { label: "string with leading/trailing whitespace", input: "  15000  ", expected: 15000 },
+      { label: "string with explicit positive sign", input: "+10000", expected: 10000 },
+    ];
+
+    for (const { label, input, expected } of validCases) {
+      it(`resolves ${label}`, () => {
+        expect(resolvePiSubagentForegroundWaitMs(input)).toBe(expected);
+      });
+    }
+  });
+
+  describe("invalid inputs (fallback to 10000 without clamping)", () => {
+    const invalidCases: Array<{ label: string; input: unknown }> = [
+      // Unset and empty
+      { label: "undefined input", input: undefined },
+      { label: "null input", input: null },
+      { label: "empty string", input: "" },
+      { label: "whitespace-only string", input: "   " },
+
+      // Non-numeric strings and types
+      { label: "alphanumeric string 'abc'", input: "abc" },
+      { label: "unit-suffixed string '100ms'", input: "100ms" },
+      { label: "underscore-separated string '10_000'", input: "10_000" },
+      { label: "boolean string 'true'", input: "true" },
+      { label: "boolean string 'false'", input: "false" },
+      { label: "json object string '{}'", input: "{}" },
+      { label: "boolean true", input: true },
+      { label: "boolean false", input: false },
+      { label: "plain object", input: {} },
+      { label: "array", input: [10000] },
+
+      // Non-finite values
+      { label: "Infinity (number)", input: Infinity },
+      { label: "-Infinity (number)", input: -Infinity },
+      { label: "NaN (number)", input: NaN },
+      { label: "'Infinity' (string)", input: "Infinity" },
+      { label: "'-Infinity' (string)", input: "-Infinity" },
+      { label: "'NaN' (string)", input: "NaN" },
+
+      // Fractional values
+      { label: "fractional 100.5 (number)", input: 100.5 },
+      { label: "fractional 10000.1 (number)", input: 10000.1 },
+      { label: "fractional '100.5' (string)", input: "100.5" },
+      { label: "fractional '10000.1' (string)", input: "10000.1" },
+      { label: "fractional '100.0' (string)", input: "100.0" },
+
+      // Under-range values (must NOT clamp to 100)
+      { label: "under-range 99 (number)", input: 99 },
+      { label: "under-range '99' (string)", input: "99" },
+      { label: "under-range 0 (number)", input: 0 },
+      { label: "under-range '0' (string)", input: "0" },
+      { label: "negative -1 (number)", input: -1 },
+      { label: "negative '-1' (string)", input: "-1" },
+      { label: "negative -100 (number)", input: -100 },
+      { label: "negative '-100' (string)", input: "-100" },
+
+      // Over-range values (must NOT clamp to 60000)
+      { label: "over-range 60001 (number)", input: 60001 },
+      { label: "over-range '60001' (string)", input: "60001" },
+      { label: "over-range 100000 (number)", input: 100000 },
+      { label: "over-range '100000' (string)", input: "100000" },
+    ];
+
+    for (const { label, input } of invalidCases) {
+      it(`falls back to default 10000 for ${label}`, () => {
+        expect(resolvePiSubagentForegroundWaitMs(input)).toBe(DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS);
+      });
+    }
+  });
+});
+

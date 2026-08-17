@@ -7,12 +7,19 @@ import {
 } from "@synara/contracts";
 
 import {
+  attachPiSubagentManagedForegroundBinding,
+  createDefaultHandshakeRequest,
+  getPiSubagentManagedForegroundBinding,
+  isPiSubagentManagedForegroundBinding,
   makeCompatiblePiSubagentExtension,
   makeFailingPiSubagentExtension,
   makeLegacyPiSubagentExtension,
   makeUnsupportedPiSubagentExtension,
   negotiatePiSubagentCapability,
   PI_SUBAGENT_BRIDGE_KEY,
+  PI_SUBAGENT_MANAGED_FOREGROUND_KEY,
+  type PiSubagentManagedForegroundBinding,
+  type PiSubagentObservationInput,
   probePiSubagentBridge,
 } from "./piSubagentBridge.ts";
 
@@ -146,4 +153,249 @@ describe("Pi subagent extension bridge & versioned handshake (Issue 19)", () => 
     expect(first).toEqual(second);
     expect(handshakeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("default handshake request remains unchanged and requires only managed-spawn and abort-propagation (WP-02)", () => {
+    const defaultRequest = createDefaultHandshakeRequest();
+    expect(defaultRequest.protocolVersion).toBe(PI_SUBAGENTS_PROTOCOL_VERSION);
+    expect(defaultRequest.requiredCapabilities).toEqual(["managed-spawn", "abort-propagation"]);
+    expect(defaultRequest.optionalCapabilities).toContain("coalesced-progress");
+  });
 });
+
+describe("Pi subagent managed foreground binding (Issue 22 / WP-02)", () => {
+  const createValidBinding = (
+    overrides?: Partial<PiSubagentManagedForegroundBinding>,
+  ): PiSubagentManagedForegroundBinding => ({
+    executionId: "exec_test_001",
+    attemptId: "att_test_001",
+    generation: 1,
+    cancellationScope: "parent_turn",
+    foregroundWaitMs: 10000,
+    reportObservation: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  });
+
+  it("exports the canonical managed foreground private symbol key", () => {
+    expect(PI_SUBAGENT_MANAGED_FOREGROUND_KEY).toBe(
+      Symbol.for("synara.pi.subagents.managed_foreground.v1"),
+    );
+  });
+
+  describe("isPiSubagentManagedForegroundBinding", () => {
+    it("accepts a complete, valid binding object", () => {
+      const binding = createValidBinding();
+      expect(isPiSubagentManagedForegroundBinding(binding)).toBe(true);
+    });
+
+    it("rejects non-object and nullish values", () => {
+      expect(isPiSubagentManagedForegroundBinding(null)).toBe(false);
+      expect(isPiSubagentManagedForegroundBinding(undefined)).toBe(false);
+      expect(isPiSubagentManagedForegroundBinding("string")).toBe(false);
+      expect(isPiSubagentManagedForegroundBinding(123)).toBe(false);
+      expect(isPiSubagentManagedForegroundBinding(true)).toBe(false);
+    });
+
+    it("rejects missing, empty, or whitespace-only executionId", () => {
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ executionId: "" }))).toBe(
+        false,
+      );
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ executionId: "   " }))).toBe(
+        false,
+      );
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ executionId: undefined as any })),
+      ).toBe(false);
+    });
+
+    it("rejects missing, empty, or whitespace-only attemptId", () => {
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ attemptId: "" }))).toBe(
+        false,
+      );
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ attemptId: "   " }))).toBe(
+        false,
+      );
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ attemptId: undefined as any })),
+      ).toBe(false);
+    });
+
+    it("rejects non-positive, non-integer, or non-finite generation", () => {
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ generation: 0 }))).toBe(
+        false,
+      );
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ generation: -1 }))).toBe(
+        false,
+      );
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ generation: 1.5 }))).toBe(
+        false,
+      );
+      expect(isPiSubagentManagedForegroundBinding(createValidBinding({ generation: NaN }))).toBe(
+        false,
+      );
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ generation: Infinity })),
+      ).toBe(false);
+    });
+
+    it("rejects scope other than parent_turn", () => {
+      expect(
+        isPiSubagentManagedForegroundBinding(
+          createValidBinding({ cancellationScope: "session" as any }),
+        ),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(
+          createValidBinding({ cancellationScope: "independent" as any }),
+        ),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ cancellationScope: "" as any })),
+      ).toBe(false);
+    });
+
+    it("rejects out-of-range, non-integer, or non-finite foregroundWaitMs", () => {
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: 99 })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: 60001 })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: 0 })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: -500 })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: 1000.5 })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: NaN })),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(createValidBinding({ foregroundWaitMs: Infinity })),
+      ).toBe(false);
+    });
+
+    it("rejects missing or non-function reportObservation", () => {
+      expect(
+        isPiSubagentManagedForegroundBinding(
+          createValidBinding({ reportObservation: "not-a-fn" as any }),
+        ),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(
+          createValidBinding({ reportObservation: null as any }),
+        ),
+      ).toBe(false);
+      expect(
+        isPiSubagentManagedForegroundBinding(
+          createValidBinding({ reportObservation: undefined as any }),
+        ),
+      ).toBe(false);
+    });
+  });
+
+  describe("getPiSubagentManagedForegroundBinding and attachPiSubagentManagedForegroundBinding", () => {
+    it("extracts binding when present on object under the private symbol", () => {
+      const binding = createValidBinding();
+      const ctx = { [PI_SUBAGENT_MANAGED_FOREGROUND_KEY]: binding };
+      expect(getPiSubagentManagedForegroundBinding(ctx)).toBe(binding);
+    });
+
+    it("returns undefined when private symbol is missing or binding is malformed", () => {
+      expect(getPiSubagentManagedForegroundBinding({})).toBeUndefined();
+      expect(getPiSubagentManagedForegroundBinding(null)).toBeUndefined();
+      expect(getPiSubagentManagedForegroundBinding(undefined)).toBeUndefined();
+      expect(getPiSubagentManagedForegroundBinding("not-an-object")).toBeUndefined();
+      expect(
+        getPiSubagentManagedForegroundBinding({
+          [PI_SUBAGENT_MANAGED_FOREGROUND_KEY]: { invalid: true },
+        }),
+      ).toBeUndefined();
+    });
+
+    it("attaches immutable binding to a copied context without mutating the source context", () => {
+      const originalCtx = { toolCallId: "call_abc", extra: 42 };
+      const binding = createValidBinding();
+
+      const boundCtx = attachPiSubagentManagedForegroundBinding(originalCtx, binding);
+
+      expect(boundCtx).not.toBe(originalCtx);
+      expect(PI_SUBAGENT_MANAGED_FOREGROUND_KEY in originalCtx).toBe(false);
+      expect(getPiSubagentManagedForegroundBinding(boundCtx)).toEqual(binding);
+      expect(boundCtx.toolCallId).toBe("call_abc");
+      expect(boundCtx.extra).toBe(42);
+      expect(Object.isFrozen(boundCtx)).toBe(true);
+    });
+
+    it("throws TypeError if trying to attach an invalid binding", () => {
+      const originalCtx = { toolCallId: "call_abc" };
+      expect(() =>
+        attachPiSubagentManagedForegroundBinding(originalCtx, { invalid: true } as any),
+      ).toThrow(TypeError);
+    });
+  });
+
+  describe("context isolation across concurrent invocations", () => {
+    it("two copied contexts hold distinct bindings with no cross-observation", async () => {
+      const observations1: PiSubagentObservationInput[] = [];
+      const observations2: PiSubagentObservationInput[] = [];
+
+      const binding1 = createValidBinding({
+        executionId: "exec_111",
+        attemptId: "att_111",
+        generation: 1,
+        foregroundWaitMs: 5000,
+        reportObservation: async (obs) => {
+          observations1.push(obs);
+        },
+      });
+
+      const binding2 = createValidBinding({
+        executionId: "exec_222",
+        attemptId: "att_222",
+        generation: 2,
+        foregroundWaitMs: 15000,
+        reportObservation: async (obs) => {
+          observations2.push(obs);
+        },
+      });
+
+      const baseCtx = { sessionToken: "shared-token" };
+      const ctx1 = attachPiSubagentManagedForegroundBinding(baseCtx, binding1);
+      const ctx2 = attachPiSubagentManagedForegroundBinding(baseCtx, binding2);
+
+      const resolved1 = getPiSubagentManagedForegroundBinding(ctx1);
+      const resolved2 = getPiSubagentManagedForegroundBinding(ctx2);
+
+      expect(resolved1?.executionId).toBe("exec_111");
+      expect(resolved2?.executionId).toBe("exec_222");
+      expect(resolved1?.foregroundWaitMs).toBe(5000);
+      expect(resolved2?.foregroundWaitMs).toBe(15000);
+
+      // Perform observation on context 1
+      await resolved1?.reportObservation({
+        kind: "started",
+        occurredAt: "2026-08-17T12:00:00.000Z",
+      });
+
+      expect(observations1).toEqual([
+        { kind: "started", occurredAt: "2026-08-17T12:00:00.000Z" },
+      ]);
+      expect(observations2).toEqual([]);
+
+      // Perform observation on context 2
+      await resolved2?.reportObservation({
+        kind: "detached",
+        occurredAt: "2026-08-17T12:00:15.000Z",
+      });
+
+      expect(observations1).toHaveLength(1);
+      expect(observations2).toEqual([
+        { kind: "detached", occurredAt: "2026-08-17T12:00:15.000Z" },
+      ]);
+    });
+  });
+});
+

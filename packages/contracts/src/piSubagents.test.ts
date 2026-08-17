@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
+  PiSubagentCapability,
   PiSubagentDiagnosticCode,
   PiSubagentExecutionRecord,
   PiSubagentHandshakeFailureResponse,
@@ -229,4 +230,12 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
     expect(decodedRecord.desiredState).toBe("running");
     expect(decodedRecord.observedState).toBe("running");
   });
+
+  it("decodes bounded-foreground-attachment capability as a first-class additive capability (T22)", () => {
+    expect(PI_SUBAGENT_CAPABILITIES).toContain("bounded-foreground-attachment");
+    const decoded = Schema.decodeSync(PiSubagentCapability)("bounded-foreground-attachment");
+    expect(decoded).toBe("bounded-foreground-attachment");
+    expect(() => Schema.decodeSync(PiSubagentCapability)("unsupported-capability")).toThrow();
+  });
 });
+

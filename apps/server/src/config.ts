@@ -24,7 +24,48 @@ import { isLoopbackHost } from "./startupAccess";
 export const DEFAULT_PORT = 3773;
 export const PRIVATE_STATE_REPAIR_MARKER = ".permissions-v1";
 
+export const DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS = 10000;
+export const MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS = 100;
+export const MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS = 60000;
+
+export function resolvePiSubagentForegroundWaitMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS ||
+      rawInput > MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS ||
+      parsed > MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+}
+
 export type RuntimeMode = "web" | "desktop";
+export type AntigravityTerminalRecoveryMode = "off" | "shadow" | "enforce";
 
 export function normalizeHttpsPublicOrigin(publicUrl: URL): URL | null {
   if (
@@ -108,6 +149,9 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly autoBootstrapProjectFromCwd: boolean;
   readonly logProviderEvents: boolean;
   readonly logWebSocketEvents: boolean;
+  readonly antigravityTerminalRecoveryMode?: AntigravityTerminalRecoveryMode;
+  readonly antigravityTerminalRecoveryGraceMs?: number;
+  readonly piSubagentForegroundWaitMs?: number;
 }
 
 export function preparePrivateServerPaths(
@@ -266,6 +310,9 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           publicUrl: undefined,
           allowInsecureRemote: false,
           noBrowser: false,
+          piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
+            process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+          ),
         } satisfies ServerConfigShape;
       }),
     );

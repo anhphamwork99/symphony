@@ -16,6 +16,7 @@ export const PI_SUBAGENTS_MAX_PROTOCOL_VERSION = 1;
 export const PI_SUBAGENT_CAPABILITIES = [
   "managed-spawn",
   "abort-propagation",
+  "bounded-foreground-attachment",
   "coalesced-progress",
   "terminal-outbox",
   "restart-reconciliation",

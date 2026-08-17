@@ -16,8 +16,105 @@ import {
   type PiSubagentSpawnResult,
 } from "@synara/contracts";
 
+import {
+  MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+} from "../config.ts";
+
 export const PI_SUBAGENT_BRIDGE_KEY = Symbol.for("synara.pi.subagents.bridge");
+export const PI_SUBAGENT_MANAGED_FOREGROUND_KEY = Symbol.for(
+  "synara.pi.subagents.managed_foreground.v1",
+);
 const PI_SUBAGENT_PROBE_CACHE_KEY = Symbol.for("synara.pi.subagents.probe_cache");
+
+export type PiSubagentObservationKind = "started" | "detached";
+
+export interface PiSubagentObservationInput {
+  readonly kind: PiSubagentObservationKind;
+  readonly occurredAt: string;
+}
+
+export interface PiSubagentManagedForegroundBinding {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly cancellationScope: "parent_turn";
+  readonly foregroundWaitMs: number;
+  readonly reportObservation: (input: PiSubagentObservationInput) => Promise<void>;
+}
+
+export function isPiSubagentManagedForegroundBinding(
+  value: unknown,
+): value is PiSubagentManagedForegroundBinding {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string | symbol, unknown>;
+  if (
+    typeof record.executionId !== "string" ||
+    record.executionId.trim().length === 0
+  ) {
+    return false;
+  }
+  if (
+    typeof record.attemptId !== "string" ||
+    record.attemptId.trim().length === 0
+  ) {
+    return false;
+  }
+  if (
+    typeof record.generation !== "number" ||
+    !Number.isInteger(record.generation) ||
+    record.generation <= 0
+  ) {
+    return false;
+  }
+  if (record.cancellationScope !== "parent_turn") {
+    return false;
+  }
+  if (
+    typeof record.foregroundWaitMs !== "number" ||
+    !Number.isInteger(record.foregroundWaitMs) ||
+    record.foregroundWaitMs < MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS ||
+    record.foregroundWaitMs > MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS
+  ) {
+    return false;
+  }
+  if (typeof record.reportObservation !== "function") {
+    return false;
+  }
+  return true;
+}
+
+export function getPiSubagentManagedForegroundBinding(
+  target: unknown,
+): PiSubagentManagedForegroundBinding | undefined {
+  if (!target || typeof target !== "object") {
+    return undefined;
+  }
+  const record = target as Record<string | symbol, unknown>;
+  const binding = record[PI_SUBAGENT_MANAGED_FOREGROUND_KEY];
+  if (isPiSubagentManagedForegroundBinding(binding)) {
+    return binding;
+  }
+  return undefined;
+}
+
+export function attachPiSubagentManagedForegroundBinding<
+  T extends Record<string | symbol, unknown>,
+>(
+  ctx: T,
+  binding: PiSubagentManagedForegroundBinding,
+): T & { readonly [PI_SUBAGENT_MANAGED_FOREGROUND_KEY]: PiSubagentManagedForegroundBinding } {
+  if (!isPiSubagentManagedForegroundBinding(binding)) {
+    throw new TypeError("Invalid Pi subagent managed foreground binding");
+  }
+  const immutableBinding = Object.isFrozen(binding) ? binding : Object.freeze({ ...binding });
+  return Object.freeze({
+    ...ctx,
+    [PI_SUBAGENT_MANAGED_FOREGROUND_KEY]: immutableBinding,
+  });
+}
 
 export interface PiSubagentActiveChild {
   readonly executionId: string;
