@@ -161,6 +161,13 @@ meets the envelope in the strong majority of runs), (b) change the verification 
 wall-clock-sensitive files in separate processes, or (c) reopen Decision 0006 §5's envelope value.
 WP-07 does not have authority for (c) and deliberately did not widen any assertion.
 
+**Owner adjudication (2026-08-17): option (b).** The timing-envelope challenge is resolved by
+test-harness process isolation, not by relaxing the envelope. Decision 0006 §5 keeps
+`budget + 500 ms` unchanged; the flakiness is attributed to shared-worker scheduling during
+adjacent real-Pi teardown, not to the production chain. Harness isolation is delivered as WP-08
+(`plans/22-real-bounded-foreground-attachment/WP-08-test-harness-isolation.md`); acceptance for the
+envelope requires the multi-file and full-suite invocations to pass with the isolation in place.
+
 ### Acceptance evidence matrix (remediation)
 
 | Criterion | Source evidence | Verification evidence | Result |
