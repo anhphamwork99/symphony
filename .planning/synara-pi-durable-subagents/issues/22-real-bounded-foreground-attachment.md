@@ -9,9 +9,47 @@ cleans up every timer and in-memory registry entry.
 
 **Blocked by:** 21 — Production fail-closed control health.
 
-**Status:** completed — final acceptance recorded in Decision 0007.
+**Status:** reopened — post-acceptance independent review found contrary evidence.
 
-- [x] **T22-AC1:** An actual Pi child completing inside the budget returns the
+**Review disposition (2026-08-17):** Decision 0007 acceptance reopened. A
+post-acceptance independent review reproduced the focused suites (Alfie 464,
+contracts 215, Symphony acceptance/reopen/real-extension 29 passing) and the
+provenance pins, but found contrary evidence meeting Decision 0007's reopening
+conditions:
+
+- **T22-AC5 fails:** `SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS` is resolved only in
+  `ServerConfig.layerTest` (`apps/server/src/config.ts:313`); the production
+  `ServerConfigLive` in `apps/server/src/main.ts:313-335` never populates
+  `piSubagentForegroundWaitMs`, so PiAdapter's `?? DEFAULT` fallback always
+  wins in production. The "configured bounds and invalid-value fallback remain
+  effective on the production path" claim is not delivered; every T22 test
+  injects `ServerConfigShape` directly, which is why suites pass regardless.
+- **T22-AC7 fails:** the managed detached foreground child never receives
+  post-detachment settlement cleanup. `AgentManager` fires `onComplete` only for
+  `isBackground` runs (`agent-manager.ts:477/536/605`), while the managed child
+  stays foreground, so the `agentActivity.delete` / `widget.markFinished`
+  cleanup that runs for inline settlement (`index.ts:1459-1463`) has no
+  post-detach continuation. After a detached child settles, its
+  `agentActivity` entry persists and the widget's 80 ms interval can keep
+  running (bounded only by the manager's ~10-minute record cleanup), without
+  stopping unrelated children. `getResourceSnapshot()` counts only
+  `liveAttachments`, so AC7 tests report 0/0 while these resources leak.
+
+Nonblocking evidence gaps recorded for the same remediation: integrated timing
+assertions use `budget + 2000 ms`/`3500 ms` instead of Decision 0006's
+`budget + 500 ms` envelope; AC6's "adjacent legacy session" leg only probes a
+fixture bridge and never executes an actual legacy Agent session; lifecycle
+persistence-failure results are success-shaped (no `isError`) and still carry
+server identities via the PiAdapter success path; the report's measured-time
+narrative cites `15000 ms` while the committed test uses `30000 ms`.
+
+The remediation work packages live in
+[`plans/22-real-bounded-foreground-attachment/`](../plans/22-real-bounded-foreground-attachment/)
+(WP-06 Alfie cleanup + failure shape, WP-07 Symphony production config +
+evidence hardening). Decisions 0001–0006 remain authoritative and are not
+reopened.
+
+- [ ] **T22-AC1:** An actual Pi child completing inside the budget returns the
       normal inline result and creates no unnecessary follow-up delivery.
 - [x] **T22-AC2:** An actual child exceeding the budget returns one execution
       handle within budget plus bounded scheduling tolerance, without spawning a
@@ -21,11 +59,11 @@ cleans up every timer and in-memory registry entry.
       unchanged.
 - [x] **T22-AC4:** Started and detached-running observations commit durably and
       database reopen recovers the same non-terminal execution aggregate.
-- [x] **T22-AC5:** Default foreground budget is 10 seconds; configured bounds
+- [ ] **T22-AC5:** Default foreground budget is 10 seconds; configured bounds
       and invalid-value fallback remain effective on the production path.
-- [x] **T22-AC6:** Concurrent managed executions and an adjacent legacy session
+- [ ] **T22-AC6:** Concurrent managed executions and an adjacent legacy session
       retain independent results, timeouts, identities, and behavior.
-- [x] **T22-AC7:** Child settlement, session disposal, startup failure, and
+- [ ] **T22-AC7:** Child settlement, session disposal, startup failure, and
       explicit cleanup remove heartbeat/progress timers and live registry entries
       without stopping unrelated children.
 - [x] **T22-AC8:** Synthetic replacement Agent tools cannot satisfy the

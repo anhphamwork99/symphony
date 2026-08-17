@@ -169,4 +169,17 @@ mismatched checkout from satisfying acceptance. No schema rollback is needed.
 - [ ] WP-02 — Symphony contract/config/binding foundation
 - [ ] WP-03 — Symphony production integration and Alfie re-pin
 - [ ] WP-04 — Integrated acceptance evidence and Implementation Report
-- [ ] WP-05 — Independent review and Supervisor final acceptance
+- [x] WP-05 — Independent review and Supervisor final acceptance (acceptance since reopened; see below)
+- [ ] WP-06 — Alfie post-detach settlement cleanup and failure-result shape (reopened AC7 + shape fix)
+- [ ] WP-07 — Symphony production config wiring and acceptance-evidence hardening (reopened AC5 + AC1/AC2/AC6 evidence)
+
+## Post-acceptance reopening (2026-08-17)
+
+An independent post-acceptance review (evidence reproduced: Alfie 464, contracts
+215, Symphony focused 29 passing; provenance hashes verified) reopened Decision
+0007 under its own reopening conditions. Ticket 22 status returned to
+remediation; see the disposition block in
+[the ticket](../../issues/22-real-bounded-foreground-attachment.md). WP-06 and
+WP-07 are the remediation packages; they are parallel-safe across repositories,
+but WP-07's provenance re-pin must wait for the WP-06 Alfie commit. Ticket 23
+must not start until ticket 22 is re-accepted.
