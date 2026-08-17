@@ -1,6 +1,6 @@
 # WP-07 — Symphony production config wiring and acceptance-evidence hardening
 
-**State:** pending (provenance re-pin step blocked until WP-06 commits; all other work is startable immediately)
+**State:** completed (commits `e2239c6e`..`40016836`); accepted in Decision 0008
 
 **Owner role:** worker
 

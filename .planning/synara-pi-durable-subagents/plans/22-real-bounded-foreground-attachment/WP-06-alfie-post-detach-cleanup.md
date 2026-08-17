@@ -1,6 +1,6 @@
 # WP-06 — Alfie post-detach settlement cleanup and failure-result shape
 
-**State:** pending
+**State:** completed (commit `82406bd8`); accepted in Decision 0008
 
 **Owner role:** worker
 

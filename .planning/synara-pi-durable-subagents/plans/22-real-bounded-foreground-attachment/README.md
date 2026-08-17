@@ -170,8 +170,8 @@ mismatched checkout from satisfying acceptance. No schema rollback is needed.
 - [ ] WP-03 — Symphony production integration and Alfie re-pin
 - [ ] WP-04 — Integrated acceptance evidence and Implementation Report
 - [x] WP-05 — Independent review and Supervisor final acceptance (acceptance since reopened; see below)
-- [ ] WP-06 — Alfie post-detach settlement cleanup and failure-result shape (reopened AC7 + shape fix)
-- [ ] WP-07 — Symphony production config wiring and acceptance-evidence hardening (reopened AC5 + AC1/AC2/AC6 evidence) — **landed** `e2239c6e`..`40016836`; challenge adjudicated to WP-08
+- [x] WP-06 — Alfie post-detach settlement cleanup and failure-result shape (reopened AC7 + shape fix) — **accepted** in Decision 0008
+- [x] WP-07 — Symphony production config wiring and acceptance-evidence hardening (reopened AC5 + AC1/AC2/AC6 evidence) — landed `e2239c6e`..`40016836`; challenge adjudicated to WP-08 — **accepted** in Decision 0008
 - [x] WP-08 — Test-harness process isolation for wall-clock-sensitive suites (owner option (b)) — **challenge**: attribution disproven; config kept per owner option (A), envelope acceptance = per-file standalone. Evidence: `WP-08-challenge-evidence.md`
 
 ## Post-acceptance reopening (2026-08-17)

@@ -26,9 +26,12 @@
   accepted cross-repository technical direction for Ticket 22 bounded
   foreground attachment.
 - [decisions/0007-t22-real-bounded-foreground-attachment-final-acceptance.md](decisions/0007-t22-real-bounded-foreground-attachment-final-acceptance.md) —
-  accepted then **reopened**: post-acceptance review found production-path
-  config wiring (T22-AC5) and post-detach settlement cleanup (T22-AC7)
-  contrary evidence; remediation re-enters through the plan directory.
+  accepted then reopened; historical reopening evidence, superseded by
+  Decision 0008 for this ticket.
+- [decisions/0008-t22-real-bounded-foreground-attachment-final-acceptance-remediation.md](decisions/0008-t22-real-bounded-foreground-attachment-final-acceptance-remediation.md) —
+  accepted remediation baseline: Ticket 22 final acceptance at Symphony
+  `8a5e8dac` + Alfie `82406bd8`; M2 nonblocking risk recorded; per-file
+  standalone invocations are the binding envelope acceptance method.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -41,15 +44,10 @@
   production wiring, migration compatibility, persistence correctness,
   authorization, and real-Pi/restart evidence did not.
 - **Remediation track:** tickets 18–24.
-- **Accepted remediation tickets:** tickets 18, 19, 20, and 21.
-- **Reopened remediation ticket:** ticket 22 — post-acceptance review reopened
-  Decision 0007 (T22-AC5 production config wiring, T22-AC7 post-detach
-  settlement cleanup, plus evidence-strength gaps for AC1/AC2/AC6); remediation
-  packages are WP-06/WP-07 in the ticket-22 plan directory.
-- **Blocker-free frontier:** ticket 22 remediation (WP-06 Alfie, WP-07
-  Symphony; parallel-safe across repositories, WP-07 provenance re-pin
-  serialized after WP-06 lands). Ticket 23 must not begin before ticket 22 is
-  re-accepted.
+- **Accepted remediation tickets:** tickets 18, 19, 20, 21, and 22
+  (re-accepted via Decision 0008 after the Decision 0007 reopening).
+- **Blocker-free frontier:** ticket 23 — Production coalesced progress and
+  heartbeat delivery.
 - **Downstream gate:** ticket 06 remains blocked until ticket 24 is accepted.
 - Every remediation ticket owns an `Implementation Report`; an implementer must
   complete that report with exact evidence before requesting review.

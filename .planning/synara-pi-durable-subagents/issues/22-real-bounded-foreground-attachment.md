@@ -9,7 +9,14 @@ cleans up every timer and in-memory registry entry.
 
 **Blocked by:** 21 — Production fail-closed control health.
 
-**Status:** reopened — post-acceptance independent review found contrary evidence.
+**Status:** completed — remediation accepted in Decision 0008 (supersedes Decision 0007 for this ticket).
+
+**Final acceptance (2026-08-17):** Project Supervisor ACCEPT at Symphony
+`8a5e8dacff7dadb18aded418bf63f0b035da6ebd` + Alfie
+`82406bd834c5f52785fe8f3b65d316d3f8b3fd62`; AC1–AC8 all pass; M2 recorded as
+nonblocking risk; envelope acceptance method is per-file standalone
+invocations per owner option A. Record:
+[Decision 0008](../decisions/0008-t22-real-bounded-foreground-attachment-final-acceptance-remediation.md).
 
 **Review disposition (2026-08-17):** Decision 0007 acceptance reopened. A
 post-acceptance independent review reproduced the focused suites (Alfie 464,
@@ -49,7 +56,7 @@ The remediation work packages live in
 evidence hardening). Decisions 0001–0006 remain authoritative and are not
 reopened.
 
-- [ ] **T22-AC1:** An actual Pi child completing inside the budget returns the
+- [x] **T22-AC1:** An actual Pi child completing inside the budget returns the
       normal inline result and creates no unnecessary follow-up delivery.
 - [x] **T22-AC2:** An actual child exceeding the budget returns one execution
       handle within budget plus bounded scheduling tolerance, without spawning a
@@ -59,11 +66,11 @@ reopened.
       unchanged.
 - [x] **T22-AC4:** Started and detached-running observations commit durably and
       database reopen recovers the same non-terminal execution aggregate.
-- [ ] **T22-AC5:** Default foreground budget is 10 seconds; configured bounds
+- [x] **T22-AC5:** Default foreground budget is 10 seconds; configured bounds
       and invalid-value fallback remain effective on the production path.
-- [ ] **T22-AC6:** Concurrent managed executions and an adjacent legacy session
+- [x] **T22-AC6:** Concurrent managed executions and an adjacent legacy session
       retain independent results, timeouts, identities, and behavior.
-- [ ] **T22-AC7:** Child settlement, session disposal, startup failure, and
+- [x] **T22-AC7:** Child settlement, session disposal, startup failure, and
       explicit cleanup remove heartbeat/progress timers and live registry entries
       without stopping unrelated children.
 - [x] **T22-AC8:** Synthetic replacement Agent tools cannot satisfy the
@@ -84,7 +91,7 @@ known seams on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** remediation in progress (WP-07 complete; timing-envelope verification returned as a challenge — see "Challenge" below). This report reflects the 2026-08-17 remediation of the reopened defects and does not claim acceptance. Acceptance belongs to the re-review / final-acceptance lifecycle.
+**Implementation state:** completed — remediation accepted in Decision 0008 at Symphony `8a5e8dac` + Alfie `82406bd8`; AC1–AC8 pass; see the re-review disposition and acceptance blocks below.
 
 ### Remediation scope delivered by WP-07 (Symphony side)
 
