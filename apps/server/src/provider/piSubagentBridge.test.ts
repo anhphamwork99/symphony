@@ -154,11 +154,32 @@ describe("Pi subagent extension bridge & versioned handshake (Issue 19)", () => 
     expect(handshakeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("default handshake request remains unchanged and requires only managed-spawn and abort-propagation (WP-02)", () => {
+  it("default handshake request requires managed-spawn, abort-propagation, and bounded-foreground-attachment (WP-03)", () => {
     const defaultRequest = createDefaultHandshakeRequest();
     expect(defaultRequest.protocolVersion).toBe(PI_SUBAGENTS_PROTOCOL_VERSION);
-    expect(defaultRequest.requiredCapabilities).toEqual(["managed-spawn", "abort-propagation"]);
+    expect(defaultRequest.requiredCapabilities).toEqual([
+      "managed-spawn",
+      "abort-propagation",
+      "bounded-foreground-attachment",
+    ]);
     expect(defaultRequest.optionalCapabilities).toContain("coalesced-progress");
+  });
+
+  it("sends older extension without bounded-foreground-attachment to capability mismatch and unmanaged fallback", async () => {
+    const { bridge } = makeCompatiblePiSubagentExtension({
+      protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
+      capabilities: ["managed-spawn", "abort-propagation"], // Older extension without bounded-foreground-attachment
+      extensionVersion: "0.1.0",
+    });
+
+    const result = await negotiatePiSubagentCapability(bridge);
+
+    expect(result.isManaged).toBe(false);
+    expect(result.status).toBe("capability_mismatch");
+    expect(result.diagnosticCode).toBe("pi_subagent_capability_mismatch");
+    expect(result.missingCapabilities).toEqual(["bounded-foreground-attachment"]);
+    expect(result.capabilities).toEqual(["managed-spawn", "abort-propagation"]);
+    expect(result.diagnosticMessage).toContain("bounded-foreground-attachment");
   });
 });
 

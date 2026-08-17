@@ -454,7 +454,11 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(capability.protocolVersion).toBe(PI_SUBAGENTS_PROTOCOL_VERSION);
     expect(capability.extensionVersion).toBe("0.10.0-alfie.1");
-    expect(capability.capabilities).toEqual(["managed-spawn", "abort-propagation"]);
+    expect(capability.capabilities).toEqual([
+      "managed-spawn",
+      "abort-propagation",
+      "bounded-foreground-attachment",
+    ]);
 
     session.dispose();
   });
@@ -700,7 +704,11 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
                         ok: true,
                         protocolVersion: 1,
                         extensionVersion: "0.10.0-alfie.1",
-                        capabilities: ["managed-spawn", "abort-propagation"],
+                        capabilities: [
+                          "managed-spawn",
+                          "abort-propagation",
+                          "bounded-foreground-attachment",
+                        ],
                       }),
                     }),
                   ],
@@ -815,7 +823,11 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(observedEvent!.capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(observedEvent!.capability.protocolVersion).toBe(1);
     expect(observedEvent!.capability.extensionVersion).toBe("0.10.0-alfie.1");
-    expect(observedEvent!.capability.capabilities).toEqual(["managed-spawn", "abort-propagation"]);
+    expect(observedEvent!.capability.capabilities).toEqual([
+      "managed-spawn",
+      "abort-propagation",
+      "bounded-foreground-attachment",
+    ]);
 
     // 2. Verify stored in session context
     expect(observedEvent!.context.subagentCapability).toEqual(observedEvent!.capability);
@@ -1788,5 +1800,253 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
     });
 
     await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+  });
+
+  describe("Real Pi Subagent Extension bounded foreground attachment (Issue 22)", () => {
+    it("T22-AC1..AC8: real extension executes foreground child, reports started (seq2), detaches on timeout (seq3), and updates repository journal", async () => {
+      const versionedDir = resolveVersionedExtensionDir();
+      const tempAgentDir = `/tmp/synara-t22-real-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      createdDirs.push(tempAgentDir);
+
+      const extensionsDir = join(tempAgentDir, "extensions");
+      mkdirSync(extensionsDir, { recursive: true });
+      symlinkSync(versionedDir, join(extensionsDir, "pi-subagents"), "dir");
+      const sharedDir = join(versionedDir, "..", "shared");
+      if (existsSync(sharedDir)) {
+        symlinkSync(sharedDir, join(extensionsDir, "shared"), "dir");
+      }
+
+      const serverConfig: ServerConfigShape = {
+        mode: "web",
+        port: 3778,
+        host: "127.0.0.1",
+        cwd: tempAgentDir,
+        homeDir: tempAgentDir,
+        chatWorkspaceRoot: tempAgentDir,
+        studioWorkspaceRoot: tempAgentDir,
+        baseDir: tempAgentDir,
+        stateDir: tempAgentDir,
+        secretsDir: tempAgentDir,
+        dbPath: join(tempAgentDir, "state.sqlite"),
+        settingsPath: join(tempAgentDir, "settings.json"),
+        keybindingsConfigPath: join(tempAgentDir, "keybindings.json"),
+        worktreesDir: tempAgentDir,
+        attachmentsDir: tempAgentDir,
+        logsDir: tempAgentDir,
+        serverLogPath: join(tempAgentDir, "server.log"),
+        serverRuntimeStatePath: join(tempAgentDir, "runtime.json"),
+        providerLogsDir: tempAgentDir,
+        providerEventLogPath: join(tempAgentDir, "provider.ndjson"),
+        terminalLogsDir: tempAgentDir,
+        environmentIdPath: join(tempAgentDir, "env-id"),
+        staticDir: undefined,
+        devUrl: undefined,
+        publicUrl: undefined,
+        allowInsecureRemote: false,
+        noBrowser: true,
+        authToken: undefined,
+        autoBootstrapProjectFromCwd: false,
+        logProviderEvents: false,
+        logWebSocketEvents: false,
+        piSubagentForegroundWaitMs: 300, // 300ms bounded foreground timeout for testing detach
+      };
+
+      const registry = makeMcpSessionAuthorityRegistry();
+      const authorityService: McpSessionAuthorityShape = {
+        ...registry,
+        mintForLocalOwner: () =>
+          registry.mint({ subject: "local-owner:test", kind: "local-owner" }),
+        mintForAuthenticated: (session) =>
+          registry.mint({
+            subject: session.subject,
+            kind: "authenticated",
+            authSessionId: session.sessionId,
+            authExpiresAt:
+              session.expiresAt === undefined || session.expiresAt === null
+                ? null
+                : DateTime.toEpochMillis(session.expiresAt),
+          }),
+        bindingFor: (authorityId, options) => registry.bindingFor(authorityId, options),
+      };
+      const authorityRecord = registry.mint({
+        subject: "user_t22_test",
+        kind: "authenticated",
+        authSessionId: "auth-session-t22",
+        authExpiresAt: null,
+      });
+      const binding = registry.bindingFor(authorityRecord.authorityId, {
+        threadId: "th_t22_fg",
+        provider: "pi",
+        projectId: "proj_default",
+        lifecycleGeneration: null,
+        credentialTtlMs: 60 * 60 * 1_000,
+      })!;
+
+      let observedSession: any;
+      const admittedEvents: Array<{
+        threadId: ThreadId;
+        command: PiSubagentSpawnCommand;
+        result: PiSubagentSpawnResult;
+      }> = [];
+
+      const piAdapterLayer = makePiAdapterLive({
+        onSubagentCapability: (event) => {
+          observedSession = event.session;
+        },
+        onSubagentAdmission: (event) => {
+          admittedEvents.push(event);
+        },
+      }).pipe(
+        Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
+        Layer.provide(NodeFileSystem.layer),
+        Layer.provide(PiSubagentExecutionRepositoryLive),
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(Layer.succeed(McpSessionAuthority, authorityService)),
+        Layer.provide(SqlitePersistenceMemory),
+      );
+
+      const testLayer = Layer.mergeAll(
+        piAdapterLayer,
+        PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        SqlitePersistenceMemory,
+      );
+
+      const testProgram = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const repo = yield* PiSubagentExecutionRepository;
+        const adapter = yield* PiAdapter;
+
+        yield* sql`
+          INSERT OR IGNORE INTO projection_projects (
+            project_id, kind, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at
+          ) VALUES (
+            'proj_default', 'project', 'Default', ${tempAgentDir}, '{"provider":"pi","model":"pi"}',
+            '[]', '2026-08-16T12:00:00.000Z', '2026-08-16T12:00:00.000Z'
+          )
+        `;
+        yield* sql`
+          INSERT OR IGNORE INTO projection_threads (
+            thread_id, project_id, title, model_selection_json,
+            runtime_mode, interaction_mode, env_mode, created_at, updated_at, deleted_at
+          ) VALUES (
+            'th_t22_fg', 'proj_default', 'Admission thread',
+            '{"provider":"pi","model":"pi"}',
+            'full-access', 'default', 'local',
+            '2026-08-16T12:00:00.000Z', '2026-08-16T12:00:00.000Z', NULL
+          )
+        `;
+
+        yield* adapter.startSession({
+          threadId: "th_t22_fg" as ThreadId,
+          cwd: tempAgentDir,
+          runtimeMode: "full-access",
+          providerOptions: {
+            pi: {
+              agentDir: tempAgentDir,
+            },
+          },
+          mcpAuthority: binding,
+        });
+
+        expect(observedSession).toBeDefined();
+
+        const loadedExt = observedSession.resourceLoader.getExtensions().extensions.find(
+          (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
+        ) as any;
+        expect(loadedExt).toBeDefined();
+
+        const agentEntry = loadedExt.tools.get("Agent");
+        const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
+        expect(executeFn).toBeDefined();
+
+        // Run foreground tool call with real Alfie extension:
+        // Real Alfie extension will start the child, call reportObservation({ kind: "started" }),
+        // wait up to 300ms, timeout, call reportObservation({ kind: "detached" }), and return detached text result.
+        const parentCtx = {
+          ui: {
+            notify: () => {},
+            setStatus: () => {},
+            setWidget: () => {},
+            select: async () => undefined,
+            confirm: async () => true,
+            input: async () => undefined,
+          },
+          cwd: tempAgentDir,
+          model: undefined,
+          modelRegistry: {
+            find: () => undefined,
+            getAll: () => [],
+            getAvailable: () => [],
+          },
+          sessionManager: observedSession.sessionManager,
+          getSystemPrompt: () => "",
+        };
+
+        const startTime = Date.now();
+        const result = yield* Effect.promise(() =>
+          executeFn(
+            "call_t22_fg_1",
+            {
+              commandId: "cmd_t22_fg_1",
+              subagent_type: "researcher",
+              task: "Real Alfie foreground execution test",
+              context: "Bounded foreground test context.",
+              link_references: "None",
+              expected_outcome: "Foreground child execution report.",
+              run_in_background: false, // foreground execution
+            },
+            undefined,
+            undefined,
+            parentCtx,
+          ),
+        );
+        const elapsed = Date.now() - startTime;
+
+        // Real extension returned detached result within timeout + tolerance (under 3000ms)
+        expect(elapsed).toBeLessThan(3500);
+        expect(result).toBeDefined();
+        expect((result as any).isError).toBeUndefined();
+        expect((result as any).executionId).toMatch(/^exec_/);
+        expect((result as any).attemptId).toMatch(/^att_/);
+        expect((result as any).generation).toBe(1);
+
+        const executionId = (result as any).executionId;
+
+        // Yield a brief moment for persistence
+        yield* Effect.sleep(100);
+
+        // Verify journal events in SQLite:
+        // Seq 1: accepted
+        // Seq 2: running (started)
+        // Seq 3: running (detached)
+        const journal = yield* repo.listJournalEvents(executionId);
+        expect(journal.length).toBeGreaterThanOrEqual(2);
+        expect(journal[0]!.sequence).toBe(1);
+        expect(journal[0]!.state).toBe("accepted");
+
+        expect(journal[1]!.sequence).toBe(2);
+        expect(journal[1]!.state).toBe("running");
+        expect(journal[1]!.metadata).toMatchObject({
+          phase: "started",
+          attachmentMode: "foreground",
+          foregroundWaitMs: 300,
+        });
+
+        if (journal.length >= 3) {
+          expect(journal[2]!.sequence).toBe(3);
+          expect(journal[2]!.state).toBe("running");
+          expect(journal[2]!.metadata).toMatchObject({
+            phase: "detached",
+            attachmentMode: "foreground",
+            foregroundWaitMs: 300,
+          });
+        }
+
+        yield* adapter.stopSession("th_t22_fg" as ThreadId);
+      });
+
+      await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+    });
   });
 });

@@ -145,7 +145,11 @@ export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
     protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
     supportedProtocolVersions: [PI_SUBAGENTS_PROTOCOL_VERSION],
     clientVersion: "0.7.2",
-    requiredCapabilities: ["managed-spawn", "abort-propagation"],
+    requiredCapabilities: [
+      "managed-spawn",
+      "abort-propagation",
+      "bounded-foreground-attachment",
+    ],
     optionalCapabilities: [
       "coalesced-progress",
       "terminal-outbox",

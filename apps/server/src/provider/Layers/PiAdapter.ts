@@ -55,7 +55,10 @@ import {
   type AgentGatewayMcpConnection,
 } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
-import { ServerConfig } from "../../config.ts";
+import {
+  DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS,
+  ServerConfig,
+} from "../../config.ts";
 import { lazyModule } from "../../lazyModule.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
@@ -113,7 +116,12 @@ import type {
   PiSubagentSpawnCommand,
   PiSubagentSpawnResult,
 } from "@synara/contracts";
-import { probePiSubagentBridge } from "../piSubagentBridge.ts";
+import {
+  attachPiSubagentManagedForegroundBinding,
+  probePiSubagentBridge,
+  type PiSubagentManagedForegroundBinding,
+  type PiSubagentObservationInput,
+} from "../piSubagentBridge.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -3045,10 +3053,142 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 generation: admissionResult.generation,
               };
 
-              const effectiveCtx = ctx ?? {
+              const baseCtx = ctx ?? {
                 ui: makePiExtensionUIContext(context),
                 cwd: context.session.cwd,
               };
+
+              const foregroundWaitMs =
+                serverConfig.piSubagentForegroundWaitMs ??
+                DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+
+              let startedPromise: Promise<void> | undefined;
+              let detachedPromise: Promise<void> | undefined;
+
+              const reportObservation = async (
+                obsInput: PiSubagentObservationInput,
+              ): Promise<void> => {
+                if (
+                  !obsInput ||
+                  (obsInput.kind !== "started" && obsInput.kind !== "detached")
+                ) {
+                  throw new Error("Invalid observation kind: expected 'started' or 'detached'");
+                }
+
+                const occurredAt =
+                  typeof obsInput.occurredAt === "string" && obsInput.occurredAt.trim().length > 0
+                    ? obsInput.occurredAt.trim()
+                    : new Date().toISOString();
+
+                if (obsInput.kind === "started") {
+                  if (startedPromise) {
+                    return startedPromise;
+                  }
+                  startedPromise = (async () => {
+                    const eventId = `evt_${admissionResult.executionId}_${admissionResult.attemptId}_gen${admissionResult.generation}_seq2_started`;
+                    const metadata = {
+                      phase: "started",
+                      occurredAt,
+                      attachmentMode: "foreground",
+                      foregroundWaitMs,
+                    };
+                    const recordEffect = piSubagentRepository.recordLifecycleEvent({
+                      eventId,
+                      executionId: admissionResult.executionId,
+                      attemptId: admissionResult.attemptId,
+                      generation: admissionResult.generation,
+                      sequence: 2,
+                      state: "running",
+                      occurredAt,
+                      metadataJson: JSON.stringify(metadata),
+                    });
+                    const result = await Effect.runPromise(Effect.result(recordEffect));
+                    if (result._tag === "Failure") {
+                      const error = result.error;
+                      const errorMessage =
+                        error instanceof Error ? error.message : String(error);
+                      if (adapterControlHealth) {
+                        const transition = await Effect.runPromise(
+                          adapterControlHealth.markDegraded(
+                            `Failed to persist execution lifecycle truth: ${errorMessage}`,
+                            "pi_subagent_lifecycle_persistence_failed",
+                            { threadId: input.threadId },
+                          ),
+                        );
+                        if (transition) {
+                          offerSubagentControlHealthWarning(transition);
+                        }
+                      }
+                      const err = new Error("pi_subagent_lifecycle_persistence_failed");
+                      (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
+                      throw err;
+                    }
+                  })();
+                  return startedPromise;
+                }
+
+                // detached observation
+                if (detachedPromise) {
+                  return detachedPromise;
+                }
+                if (!startedPromise) {
+                  throw new Error("Cannot record detached before started observation");
+                }
+                detachedPromise = (async () => {
+                  // Sequence 2 must settle before sequence 3
+                  await startedPromise;
+                  const eventId = `evt_${admissionResult.executionId}_${admissionResult.attemptId}_gen${admissionResult.generation}_seq3_detached`;
+                  const metadata = {
+                    phase: "detached",
+                    occurredAt,
+                    attachmentMode: "foreground",
+                    foregroundWaitMs,
+                  };
+                  const recordEffect = piSubagentRepository.recordLifecycleEvent({
+                    eventId,
+                    executionId: admissionResult.executionId,
+                    attemptId: admissionResult.attemptId,
+                    generation: admissionResult.generation,
+                    sequence: 3,
+                    state: "running",
+                    occurredAt,
+                    metadataJson: JSON.stringify(metadata),
+                  });
+                  const result = await Effect.runPromise(Effect.result(recordEffect));
+                  if (result._tag === "Failure") {
+                    const error = result.error;
+                    const errorMessage =
+                      error instanceof Error ? error.message : String(error);
+                    if (adapterControlHealth) {
+                      const transition = await Effect.runPromise(
+                        adapterControlHealth.markDegraded(
+                          `Failed to persist execution lifecycle truth: ${errorMessage}`,
+                          "pi_subagent_lifecycle_persistence_failed",
+                          { threadId: input.threadId },
+                        ),
+                      );
+                      if (transition) {
+                        offerSubagentControlHealthWarning(transition);
+                      }
+                    }
+                    const err = new Error("pi_subagent_lifecycle_persistence_failed");
+                    (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
+                    throw err;
+                  }
+                })();
+                return detachedPromise;
+              };
+
+              const binding: PiSubagentManagedForegroundBinding = Object.freeze({
+                executionId: admissionResult.executionId,
+                attemptId: admissionResult.attemptId,
+                generation: admissionResult.generation,
+                cancellationScope: "parent_turn" as const,
+                foregroundWaitMs,
+                reportObservation,
+              });
+
+              const effectiveCtx = attachPiSubagentManagedForegroundBinding(baseCtx, binding);
 
               const res = await originalExecute(toolCallId, childParams, signal, onUpdate, effectiveCtx);
               if (res && typeof res === "object" && !res.isError) {
