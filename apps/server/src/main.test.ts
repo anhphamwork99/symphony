@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Command from "effect/unstable/cli/Command";
 import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -26,6 +27,36 @@ vi.mock("./threadRetention", async () => {
   const Effect = await import("effect/Effect");
   return {
     startThreadRetentionJob: () => Effect.void,
+  };
+});
+
+const antigravityAdapterConfigObservations = vi.hoisted(
+  () => [] as Array<{ mode: unknown; graceMs: unknown }>,
+);
+
+vi.mock("./provider/Layers/AntigravityAdapter", async () => {
+  const actual = await vi.importActual<typeof import("./provider/Layers/AntigravityAdapter")>(
+    "./provider/Layers/AntigravityAdapter",
+  );
+  const Effect = await import("effect/Effect");
+  const Layer = await import("effect/Layer");
+  const { ServerConfig } = await import("./config");
+
+  return {
+    ...actual,
+    makeAntigravityAdapterLive: (...args: Parameters<typeof actual.makeAntigravityAdapterLive>) =>
+      Layer.merge(
+        actual.makeAntigravityAdapterLive(...args),
+        Layer.effectDiscard(
+          Effect.gen(function* () {
+            const config = yield* ServerConfig;
+            antigravityAdapterConfigObservations.push({
+              mode: config.antigravityTerminalRecoveryMode,
+              graceMs: config.antigravityTerminalRecoveryGraceMs,
+            });
+          }),
+        ),
+      ),
   };
 });
 
@@ -123,6 +154,7 @@ beforeEach(() => {
   serverStopSignal = Effect.void;
   retainedSqlClient = null;
   releaseServerRuntime = () => Effect.void;
+  antigravityAdapterConfigObservations.length = 0;
   start.mockImplementation(() => undefined);
   stop.mockImplementation(() => undefined);
   findAvailablePort.mockImplementation((preferred: number) => Effect.succeed(preferred));
@@ -170,6 +202,8 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
       assert.equal(resolvedConfig?.logProviderEvents, false);
       assert.equal(resolvedConfig?.logWebSocketEvents, false);
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryMode, "enforce");
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryGraceMs, 15_000);
       assert.equal(stop.mock.calls.length, 1);
     }),
   );
@@ -268,6 +302,74 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.logProviderEvents, false);
       assert.equal(resolvedConfig?.logWebSocketEvents, false);
       assert.equal(findAvailablePort.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("parses Antigravity terminal recovery mode and grace", () =>
+    Effect.gen(function* () {
+      yield* runCli([], {
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE: "shadow",
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS: "3210",
+      });
+
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryMode, "shadow");
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryGraceMs, 3210);
+    }),
+  );
+
+  it.effect("wires parsed Antigravity recovery config into the live adapter layer", () =>
+    Effect.gen(function* () {
+      yield* runCli([], {
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE: "shadow",
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS: "3210",
+      });
+
+      assert.deepInclude(antigravityAdapterConfigObservations, {
+        mode: "shadow",
+        graceMs: 3210,
+      });
+
+      yield* runCli([], {
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE: "invalid",
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS: "3000000000",
+      });
+      assert.deepInclude(antigravityAdapterConfigObservations, {
+        mode: "enforce",
+        graceMs: 15_000,
+      });
+    }),
+  );
+
+  it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>
+    Effect.gen(function* () {
+      const messages: string[] = [];
+      const logger = Logger.make(({ message }) => messages.push(String(message)));
+
+      yield* runCli([], {
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE: "invalid",
+        SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS: "3000000000",
+      }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryMode, "enforce");
+      assert.equal(resolvedConfig?.antigravityTerminalRecoveryGraceMs, 15_000);
+      assert.equal(
+        messages.filter((message) =>
+          message.includes("Invalid Antigravity terminal recovery configuration"),
+        ).length,
+        1,
+      );
+    }),
+  );
+
+  it.effect("rejects non-positive and fractional Antigravity recovery grace values", () =>
+    Effect.gen(function* () {
+      for (const value of ["0", "-1", "1.5"]) {
+        resolvedConfig = null;
+        yield* runCli([], {
+          SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS: value,
+        });
+        assert.equal(getResolvedConfig()?.antigravityTerminalRecoveryGraceMs, 15_000);
+      }
     }),
   );
 

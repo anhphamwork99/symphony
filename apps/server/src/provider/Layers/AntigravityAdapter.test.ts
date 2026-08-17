@@ -1,4 +1,5 @@
 import { spawnSync, type ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -8,7 +9,7 @@ import { PassThrough } from "node:stream";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ThreadId } from "@synara/contracts";
 import { Effect, Fiber, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerConfig } from "../../config";
 import {
@@ -16,7 +17,11 @@ import {
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials";
 import { makeTestMcpSessionAuthorityFixture } from "../../agentGateway/mcpSessionAuthority.testUtils";
-import { AntigravityAdapter } from "../Services/AntigravityAdapter";
+import {
+  AntigravityAdapter,
+  type AntigravityAdapterShape,
+} from "../Services/AntigravityAdapter";
+import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown";
 import {
   antigravityPromptCommandLineIssue,
   type AntigravityAdapterDependencies,
@@ -657,14 +662,17 @@ describe("Antigravity CLI integration helpers", () => {
   it("streams hook tool names and terminal states without arguments", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-tool-events-"));
     let eventFile: string | undefined;
-    let child: ChildProcess | undefined;
+    let child: (ChildProcess & { stdout: PassThrough; stderr: PassThrough }) | undefined;
     const spawnProcess = ((
       _command: string,
       _args: readonly string[],
       options: { readonly env?: NodeJS.ProcessEnv },
     ) => {
       eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS;
-      const spawned = new EventEmitter() as ChildProcess;
+      const spawned = new EventEmitter() as ChildProcess & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       Object.assign(spawned, {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
@@ -845,7 +853,7 @@ describe("Antigravity turn settle on cancel (#465)", () => {
     throw new Error("process exit could not be proven");
   };
 
-  it("unlocks Cancel without letting a late close settle the follow-up", async () => {
+  it("unlocks Cancel but fences a child whose exit cannot be proven", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-interrupt-hung-"));
     const children: ChildProcess[] = [];
     const spawnProcess = makeSpawnProcess(children);
@@ -874,23 +882,31 @@ describe("Antigravity turn settle on cancel (#465)", () => {
           yield* adapter.interruptTurn(threadId, turn.turnId);
 
           const after = (yield* adapter.listSessions()).find((s) => s.threadId === threadId);
-          expect(after?.status).toBe("ready");
+          expect(after?.status).toBe("error");
           expect(after?.activeTurnId).toBeUndefined();
 
-          const followUp = yield* adapter.sendTurn({
-            threadId,
-            input: "follow-up",
-            attachments: [],
-          });
+          const followUp = yield* Effect.exit(
+            adapter.sendTurn({
+              threadId,
+              input: "synthetic-follow-up",
+              attachments: [],
+            }),
+          );
+          expect(followUp._tag).toBe("Failure");
           children[0]?.emit("close", 0, null);
           yield* Effect.sleep("25 millis");
 
           const afterLateClose = (yield* adapter.listSessions()).find(
             (session) => session.threadId === threadId,
           );
-          expect(afterLateClose?.status).toBe("running");
-          expect(afterLateClose?.activeTurnId).toBe(followUp.turnId);
-
+          expect(afterLateClose?.status).toBe("ready");
+          expect(afterLateClose?.activeTurnId).toBeUndefined();
+          const admitted = yield* adapter.sendTurn({
+            threadId,
+            input: "synthetic-follow-up-after-reap",
+            attachments: [],
+          });
+          expect(admitted.turnId).toBeDefined();
           children[1]?.emit("close", 0, null);
           yield* Effect.sleep("25 millis");
           yield* adapter.stopSession(threadId);
@@ -918,9 +934,12 @@ describe("Antigravity turn settle on cancel (#465)", () => {
 describe("Antigravity turn settle on non-zero CLI exit with output", () => {
   it("settles a completed turn with a warning when the CLI fails late but output was produced", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-late-fail-"));
-    let child: ChildProcess | undefined;
+    let child: (ChildProcess & { stdout: PassThrough; stderr: PassThrough }) | undefined;
     const spawnProcess = ((_command: string, _args: readonly string[]) => {
-      const spawned = new EventEmitter() as ChildProcess;
+      const spawned = new EventEmitter() as ChildProcess & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       Object.assign(spawned, {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
@@ -969,11 +988,11 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
             "turn.completed",
           ]);
           const warning = events[0];
-          if (warning.type === "runtime.warning") {
+          if (warning?.type === "runtime.warning") {
             expect(warning.payload.message).toContain("timeout waiting for response");
           }
           const completion = events[1];
-          if (completion.type === "turn.completed") {
+          if (completion?.type === "turn.completed") {
             expect(completion.payload).toEqual({ state: "completed", stopReason: "model_stop" });
           }
           const session = (yield* adapter.listSessions()).find(
@@ -1002,9 +1021,12 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
 
   it("still fails the turn when the CLI exits non-zero without any output", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-silent-fail-"));
-    let child: ChildProcess | undefined;
+    let child: (ChildProcess & { stdout: PassThrough; stderr: PassThrough }) | undefined;
     const spawnProcess = ((_command: string, _args: readonly string[]) => {
-      const spawned = new EventEmitter() as ChildProcess;
+      const spawned = new EventEmitter() as ChildProcess & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       Object.assign(spawned, {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
@@ -1049,14 +1071,14 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
           );
           expect(events.map((event) => event.type)).toEqual(["runtime.error", "turn.completed"]);
           const failure = events[0];
-          if (failure.type === "runtime.error") {
+          if (failure?.type === "runtime.error") {
             expect(failure.payload).toEqual({
               message: "Error: timeout waiting for response",
               class: "provider_error",
             });
           }
           const completion = events[1];
-          if (completion.type === "turn.completed") {
+          if (completion?.type === "turn.completed") {
             expect(completion.payload).toEqual({
               state: "failed",
               stopReason: "error",
@@ -1095,14 +1117,17 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
   it("counts hook tool activity as output for the late-failure recovery", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-tool-output-"));
     let eventFile: string | undefined;
-    let child: ChildProcess | undefined;
+    let child: (ChildProcess & { stdout: PassThrough; stderr: PassThrough }) | undefined;
     const spawnProcess = ((
       _command: string,
       _args: readonly string[],
       options: { readonly env?: NodeJS.ProcessEnv },
     ) => {
       eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS;
-      const spawned = new EventEmitter() as ChildProcess;
+      const spawned = new EventEmitter() as ChildProcess & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       Object.assign(spawned, {
         stdout: new PassThrough(),
         stderr: new PassThrough(),
@@ -1166,7 +1191,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
             "turn.completed",
           ]);
           const completion = events[1];
-          if (completion.type === "turn.completed") {
+          if (completion?.type === "turn.completed") {
             expect(completion.payload).toEqual({ state: "completed", stopReason: "model_stop" });
           }
           yield* adapter.stopSession(threadId);
@@ -1187,5 +1212,1953 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Antigravity terminal-answer recovery", () => {
+  type RecoveryHarness = {
+    readonly adapter: AntigravityAdapterShape;
+    readonly child: ChildProcess & { stdout: PassThrough; stderr: PassThrough };
+    readonly releasedLeaseCount: () => number;
+    readonly spawnCount: () => number;
+    readonly diagnostics: Array<{ name: string; fields: Readonly<Record<string, unknown>> }>;
+    readonly events: Array<unknown>;
+    readonly eventFile: string;
+    readonly transcriptPath: string;
+    readonly threadId: ThreadId;
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  async function flushTimers(milliseconds = 0): Promise<void> {
+    await vi.advanceTimersByTimeAsync(milliseconds);
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  async function waitFor(
+    predicate: () => boolean,
+    message: string,
+    attempts = 200,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (predicate()) return;
+      await flushTimers(5);
+    }
+    throw new Error(message);
+  }
+
+  async function runHarness(
+    input: {
+      readonly mode?: "off" | "shadow" | "enforce";
+      readonly graceMs?: number;
+      readonly trackLease?: boolean;
+      readonly teardown?: AntigravityAdapterDependencies["teardownProcessTree"];
+    },
+    run: (harness: RecoveryHarness) => Promise<void>,
+  ): Promise<void> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-recovery-"));
+    const transcriptPath = path.join(root, "transcript.jsonl");
+    await fs.writeFile(transcriptPath, "");
+    let eventFile = "";
+    let child!: RecoveryHarness["child"];
+    let releasedLeaseCount = 0;
+    let spawnCount = 0;
+    let leaseSequence = 0;
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
+    const credentials: AgentGatewayCredentialsShape = {
+      mcpEndpointUrl: "http://127.0.0.1:3773/mcp",
+      setListeningPort: () => undefined,
+      issueSessionToken: () => `unused-session-${++leaseSequence}`,
+      verifySessionToken: () => null,
+      verifySession: () => null,
+      issueStdioBootstrapToken: (token) => `bootstrap-${token}`,
+      exchangeStdioBootstrapToken: () => null,
+      bindWriteAuthority: () => null,
+      verifyWriteAuthority: () => false,
+      registerInFlightRequest: () => () => undefined,
+      cancelInFlightRequests: () => ({ count: 0, settled: Promise.resolve() }),
+      cancelSessionTurnRequests: () => Promise.resolve(),
+      retireSessionTurn: () => Promise.resolve(),
+      revokeSessionToken: () => {
+        releasedLeaseCount += 1;
+      },
+      connectionForThread: () => ({
+        url: "http://127.0.0.1:3773/mcp",
+        bearerToken: `owned-lease-${++leaseSequence}`,
+      }),
+      stdioProxy: { command: process.execPath, args: ["proxy.mjs"] },
+    };
+    const diagnostics: RecoveryHarness["diagnostics"] = [];
+    const events: RecoveryHarness["events"] = [];
+    const spawnProcess = ((
+      _command: string,
+      _args: readonly string[],
+      options: { readonly env?: NodeJS.ProcessEnv },
+    ) => {
+      spawnCount += 1;
+      eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS ?? "";
+      const spawned = new EventEmitter() as RecoveryHarness["child"];
+      Object.assign(spawned, {
+        pid: 41001,
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        killed: false,
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: () => true,
+      });
+      child = spawned;
+      return spawned;
+    }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          yield* adapter.streamEvents.pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                events.push(event);
+              }),
+            ),
+            Effect.forkChild,
+          );
+          const threadId = ThreadId.makeUnsafe(`thread-recovery-${crypto.randomUUID()}`);
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+            lifecycleGeneration: "generation-recovery",
+            ...(input.trackLease
+              ? {
+                  mcpAuthority: authorityFixture.bindingForThread({
+                    threadId,
+                    provider: "antigravity",
+                  }),
+                }
+              : {}),
+          });
+          yield* adapter.sendTurn({
+            threadId,
+            input: "synthetic-input",
+            attachments: [],
+          });
+          yield* Effect.promise(() =>
+            run({
+              adapter,
+              child,
+              releasedLeaseCount: () => releasedLeaseCount,
+              spawnCount: () => spawnCount,
+              diagnostics,
+              events,
+              eventFile,
+              transcriptPath,
+              threadId,
+            }),
+          );
+          if (yield* adapter.hasSession(threadId)) yield* adapter.stopSession(threadId);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              spawnProcess,
+              teardownProcessTree:
+                input.teardown ??
+                (async () => ({ escalated: false, signalErrors: [] })),
+              terminalRecoveryMode: input.mode ?? "enforce",
+              terminalRecoveryGraceMs: input.graceMs ?? 100,
+              now: () => Date.now(),
+              onRecoveryDiagnostic: (name, fields) => diagnostics.push({ name, fields }),
+            }).pipe(
+              // A lease is acquired only when startSession receives an MCP
+              // authority binding, so the shared harness can provide these
+              // inert credentials unconditionally without changing non-lease
+              // scenarios.
+              Layer.provide(Layer.succeed(AgentGatewayCredentials, credentials)),
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-recovery-config-" }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+
+  async function attachTranscript(harness: RecoveryHarness): Promise<void> {
+    await fs.appendFile(
+      harness.eventFile,
+      `pre-invocation\t${JSON.stringify({ transcriptPath: harness.transcriptPath })}\n`,
+    );
+    await flushTimers(75);
+    await fs.appendFile(
+      harness.transcriptPath,
+      `${JSON.stringify({ step_index: 0, type: "USER_INPUT" })}\n`,
+    );
+    await flushTimers(75);
+  }
+
+  async function appendStep(
+    harness: RecoveryHarness,
+    step: Readonly<Record<string, unknown>> | string,
+    expectCandidate = false,
+  ): Promise<void> {
+    await fs.appendFile(
+      harness.transcriptPath,
+      typeof step === "string" ? `${step}\n` : `${JSON.stringify(step)}\n`,
+    );
+    await flushTimers(75);
+    if (expectCandidate) {
+      const expectedStepIndex = typeof step === "string" ? undefined : step.step_index;
+      await waitFor(
+        () =>
+          harness.diagnostics.some(
+            ({ name, fields }) =>
+              name === "antigravity.completion_candidate_started" &&
+              fields.candidateStepIndex === expectedStepIndex,
+          ),
+        "completion candidate was not observed",
+      );
+    }
+  }
+
+  it("recovers one completed turn after final drain with content-free diagnostics", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-final",
+        tool_calls: [],
+      }, true);
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "recovery teardown did not run");
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "recovered terminal event was not emitted",
+      );
+
+      expect(teardown).toHaveBeenCalledTimes(1);
+      const runtimeEvents = harness.events as Array<{
+        type: string;
+        payload?: unknown;
+        raw?: unknown;
+      }>;
+      expect(runtimeEvents.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(runtimeEvents.filter((event) => event.type === "runtime.warning")).toHaveLength(1);
+      expect(
+        runtimeEvents
+          .filter((event) => event.type === "runtime.warning" || event.type === "turn.completed")
+          .map((event) => event.type),
+      ).toEqual(["runtime.warning", "turn.completed"]);
+      expect(
+        runtimeEvents.find((event) => event.type === "turn.completed")?.payload,
+      ).toEqual({ state: "completed", stopReason: "model_stop" });
+      const diagnostics = JSON.stringify(
+        runtimeEvents.filter(
+          (event) => event.type === "runtime.warning" || event.type === "turn.completed",
+        ),
+      );
+      expect(diagnostics).not.toContain("synthetic-final");
+      expect(diagnostics).not.toContain("synthetic-input");
+      expect(harness.diagnostics.map(({ name }) => name)).toEqual(
+        expect.arrayContaining([
+          "antigravity.completion_candidate_started",
+          "antigravity.missing_terminal_recovery_started",
+          "antigravity.missing_terminal_recovery_completed",
+        ]),
+      );
+      expect(
+        harness.diagnostics.find(
+          ({ name }) => name === "antigravity.missing_terminal_recovery_completed",
+        )?.fields.teardownStage,
+      ).toBe("graceful");
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("ready");
+      expect(session?.activeTurnId).toBeUndefined();
+    });
+  });
+
+  it.each(["transcript", "hook", "stdout", "stderr"] as const)(
+    "resets the full grace window on %s activity",
+    async (activity) => {
+      const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+      await runHarness({ teardown }, async (harness) => {
+        await attachTranscript(harness);
+        await appendStep(harness, {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        }, true);
+        await flushTimers(activity === "transcript" || activity === "hook" ? 1 : 99);
+        if (activity === "transcript") {
+          await fs.appendFile(
+            harness.transcriptPath,
+            `${JSON.stringify({ step_index: 2, type: "PLANNER_RESPONSE", content: "synthetic-next", tool_calls: [] })}\n`,
+          );
+          await flushTimers(75);
+        } else if (activity === "hook") {
+          await fs.appendFile(harness.eventFile, "post-invocation\t{}\n");
+          await flushTimers(75);
+        } else {
+          harness.child[activity].emit("data", Buffer.alloc(0));
+          await flushTimers();
+        }
+        await flushTimers(99);
+        expect(teardown).not.toHaveBeenCalled();
+        await flushTimers(1);
+        await waitFor(() => teardown.mock.calls.length === 1, "reset recovery did not run");
+        expect(teardown).toHaveBeenCalledTimes(1);
+      });
+    },
+  );
+
+  it.each([
+    ["malformed", "{"],
+    ["empty", { step_index: 1, type: "PLANNER_RESPONSE", content: " ", tool_calls: [] }],
+    [
+      "tool-bearing",
+      {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-reasoning",
+        tool_calls: [{ name: "synthetic_tool", args: {} }],
+      },
+    ],
+  ] as const)("does not recover a %s transcript record", async (_label, step) => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, step);
+      await flushTimers(500);
+      expect(teardown).not.toHaveBeenCalled();
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.missing_terminal_recovery_started",
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it("does not recover while a tool is pending", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await fs.appendFile(
+        harness.eventFile,
+        'pre-tool\t{"stepIdx":1,"toolCall":{"name":"synthetic_tool"}}\n',
+      );
+      await flushTimers(75);
+      await appendStep(harness, {
+        step_index: 2,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-final",
+        tool_calls: [],
+      });
+      await flushTimers(500);
+      expect(teardown).not.toHaveBeenCalled();
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("running");
+      expect(session?.activeTurnId).toBeDefined();
+    });
+  });
+
+  it("keeps tool start/finish authoritative during grace and only recovers a later answer", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "first", tool_calls: [] },
+        true,
+      );
+      await fs.appendFile(
+        harness.eventFile,
+        'pre-tool\t{"stepIdx":2,"toolCall":{"name":"synthetic_tool"}}\npost-tool\t{"stepIdx":2}\n',
+      );
+      await flushTimers(75);
+      await flushTimers(200);
+      expect(teardown).not.toHaveBeenCalled();
+      const running = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(running?.status).toBe("running");
+      await appendStep(
+        harness,
+        { step_index: 3, type: "PLANNER_RESPONSE", content: "final", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "post-tool answer did not recover");
+      expect(teardown).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("lets a healthy Stop hook during grace win without watchdog recovery", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown, graceMs: 500 }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+        true,
+      );
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      await flushTimers(75);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "healthy Stop did not settle",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.missing_terminal_recovery_started",
+        ),
+      ).toBe(false);
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "runtime.warning",
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  it("lets activity at grace expiry win the final-drain race", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-final",
+        tool_calls: [],
+      }, true);
+      await flushTimers(99);
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 2, type: "PLANNER_RESPONSE", content: "synthetic-late", tool_calls: [] })}\n`,
+      );
+      await flushTimers(1);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).filter(
+            (event) => event.type === "item.completed",
+          ).length === 2,
+        "final drain did not consume late transcript activity",
+      );
+      expect(teardown).not.toHaveBeenCalled();
+      const completedItems = (harness.events as Array<{ type: string }>).filter(
+        (event) => event.type === "item.completed",
+      );
+      expect(completedItems).toHaveLength(2);
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "re-armed recovery did not run");
+      expect(teardown).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("never promotes a delayed planner record from before the latest user boundary", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, { step_index: 10, type: "USER_INPUT" });
+      await appendStep(
+        harness,
+        {
+          step_index: 11,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-current-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 5, type: "PLANNER_RESPONSE", content: "synthetic-stale-final", tool_calls: [] })}\n`,
+      );
+      await flushTimers(75);
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "current candidate did not recover");
+      const completedItems = (harness.events as Array<{
+        type: string;
+        payload?: { data?: { step_index?: number } };
+      }>).filter((event) => event.type === "item.completed");
+      expect(completedItems.map((event) => event.payload?.data?.step_index)).toEqual([11]);
+      expect(
+        harness.diagnostics.some(
+          ({ name, fields }) =>
+            name === "antigravity.completion_candidate_started" &&
+            fields.candidateStepIndex === 5,
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it("shares watchdog teardown with session stop and quarantines unproven exit", async () => {
+    let rejectWatchdog!: (cause: unknown) => void;
+    let calls = 0;
+    const teardown = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<never>((_resolve, reject) => {
+          rejectWatchdog = reject;
+        });
+      }
+      return Promise.resolve({ escalated: true, signalErrors: [] });
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "watchdog teardown did not start");
+      const stop = Effect.runPromise(harness.adapter.stopSession(harness.threadId));
+      await flushTimers();
+      expect(teardown).toHaveBeenCalledTimes(1);
+      rejectWatchdog(
+        new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: null,
+          captureComplete: false,
+        }),
+      );
+      await stop;
+      expect(teardown).toHaveBeenCalledTimes(1);
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("error");
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+      ).toBe(true);
+    });
+  });
+
+  it.each([
+    ["off", 0, false],
+    ["shadow", 0, true],
+    ["enforce", 1, true],
+  ] as const)("implements %s recovery mode", async (mode, teardownCount, detected) => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ mode, teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-final",
+        tool_calls: [],
+      }, mode !== "off");
+      await flushTimers(100);
+      if (detected) {
+        await waitFor(
+          () =>
+            harness.diagnostics.some(
+              ({ name }) => name === "antigravity.missing_terminal_recovery_started",
+            ),
+          "mode did not reach recovery detection",
+        );
+      }
+      if (mode === "enforce") {
+        await waitFor(() => teardown.mock.calls.length === 1, "enforce teardown did not run");
+        await waitFor(
+          () =>
+            (harness.events as Array<{ type: string }>).some(
+              (event) => event.type === "turn.completed",
+            ),
+          "enforce terminal event was not emitted",
+        );
+      }
+      expect(teardown).toHaveBeenCalledTimes(teardownCount);
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.missing_terminal_recovery_started",
+        ),
+      ).toBe(detected);
+      const terminalCount = (harness.events as Array<{ type: string }>).filter(
+        (event) => event.type === "turn.completed",
+      ).length;
+      expect(terminalCount).toBe(mode === "enforce" ? 1 : 0);
+    });
+  });
+
+  it("quarantines unproven death, blocks admission, and reaps to ready", async () => {
+    let attempts = 0;
+    const teardown = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: [],
+          captureComplete: true,
+        });
+      }
+      return { escalated: true, signalErrors: [] };
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(harness, {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "synthetic-final",
+        tool_calls: [],
+      }, true);
+      await flushTimers(100);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "session.state.changed",
+          ),
+        "quarantine state was not emitted",
+      );
+      const ordered = (harness.events as Array<{ type: string; payload?: { state?: string } }>).filter(
+        (event) => event.type === "turn.completed" || event.type === "session.state.changed",
+      );
+      expect(ordered.slice(0, 2).map((event) => [event.type, event.payload?.state])).toEqual([
+        ["turn.completed", "completed"],
+        ["session.state.changed", "error"],
+      ]);
+      await expect(
+        Effect.runPromise(
+          harness.adapter.sendTurn({
+            threadId: harness.threadId,
+            input: "synthetic-follow-up",
+            attachments: [],
+          }),
+        ),
+      ).rejects.toThrow("cleanup is still in progress");
+      await flushTimers(1_000);
+      await waitFor(() => teardown.mock.calls.length === 2, "quarantine reap did not run");
+      await waitFor(
+        () =>
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.quarantined_process_reaped",
+          ),
+        "quarantine reap did not complete",
+      );
+      await flushTimers();
+      expect(teardown).toHaveBeenCalledTimes(2);
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("ready");
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.quarantined_process_reaped",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("keeps recovered completion authoritative when teardown causes signal close", async () => {
+    let resolveTeardown!: (value: { escalated: boolean; signalErrors: Error[] }) => void;
+    const teardown = vi.fn(
+      () =>
+        new Promise<{ escalated: boolean; signalErrors: Error[] }>((resolve) => {
+          resolveTeardown = resolve;
+        }),
+    );
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "watchdog did not claim teardown");
+      Object.assign(harness.child, { signalCode: "SIGTERM", exitCode: 1 });
+      harness.child.emit("close", 1, "SIGTERM");
+      await flushTimers();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(0);
+      resolveTeardown({ escalated: false, signalErrors: [] });
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "recovery did not settle after teardown proof",
+      );
+      const terminals = (harness.events as Array<{ type: string; payload?: unknown }>).filter(
+        (event) => event.type === "turn.completed",
+      );
+      expect(terminals).toHaveLength(1);
+      expect(terminals[0]?.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+    });
+  });
+
+  it("preserves first-writer-wins before and after watchdog intent", async () => {
+    const normalTeardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown: normalTeardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      Object.assign(harness.child, { exitCode: 0 });
+      harness.child.emit("close", 0, null);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "normal close did not settle",
+      );
+      await flushTimers(500);
+      expect(normalTeardown).not.toHaveBeenCalled();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "runtime.warning",
+        ),
+      ).toHaveLength(0);
+    });
+
+    let resolveWatchdog!: (value: { escalated: boolean; signalErrors: Error[] }) => void;
+    const watchdogTeardown = vi.fn(
+      () =>
+        new Promise<{ escalated: boolean; signalErrors: Error[] }>((resolve) => {
+          resolveWatchdog = resolve;
+        }),
+    );
+    await runHarness({ teardown: watchdogTeardown }, async (harness) => {
+      await attachTranscript(harness);
+      const turn = await Effect.runPromise(
+        harness.adapter.readThread(harness.threadId).pipe(
+          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
+        ),
+      );
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () => watchdogTeardown.mock.calls.length === 1,
+        "watchdog did not claim settlement",
+      );
+      await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turn));
+      resolveWatchdog({ escalated: false, signalErrors: [] });
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "watchdog claimant did not settle",
+      );
+      const terminals = (harness.events as Array<{ type: string; payload?: unknown }>).filter(
+        (event) => event.type === "turn.completed",
+      );
+      expect(terminals).toHaveLength(1);
+      expect(terminals[0]?.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+    });
+  });
+
+  it("makes a stale watchdog harmless after session stop and generation replacement", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await flushTimers(99);
+      await Effect.runPromise(harness.adapter.stopSession(harness.threadId));
+      await Effect.runPromise(
+        harness.adapter.startSession({
+          provider: "antigravity",
+          threadId: harness.threadId,
+          runtimeMode: "full-access",
+          providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          lifecycleGeneration: "generation-replacement",
+        }),
+      );
+      await flushTimers(500);
+      const replacement = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(replacement?.status).toBe("ready");
+      expect(replacement?.activeTurnId).toBeUndefined();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  it("cancels recovery timers on stop and adapter disposal", async () => {
+    const baselineTimers = vi.getTimerCount();
+    await runHarness({ mode: "shadow" }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+    });
+    await flushTimers(1_000);
+    expect(vi.getTimerCount()).toBe(baselineTimers);
+
+    const neverProvesDeath = vi.fn(async () => {
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 41001,
+        rootExited: false,
+        remainingDescendantPids: null,
+        captureComplete: false,
+      });
+    });
+    await runHarness({ teardown: neverProvesDeath }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          content: "synthetic-final",
+          tool_calls: [],
+        },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () =>
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        "quarantine was not entered",
+      );
+    });
+    await flushTimers(1_000);
+    expect(vi.getTimerCount()).toBe(baselineTimers);
+  });
+
+  it("settles process error without close by the existing output policy", async () => {
+    await runHarness({}, async (harness) => {
+      harness.child.emit("error", new Error("synthetic-error"));
+      await flushTimers();
+      const terminal = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "turn.completed",
+      );
+      const runtimeError = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "runtime.error",
+      );
+      expect(runtimeError?.payload).toEqual({
+        message: "Antigravity process failed before emitting a close event.",
+        class: "transport_error",
+      });
+      expect(terminal?.payload).toEqual({
+        state: "failed",
+        stopReason: "error",
+        errorMessage: "Antigravity process failed before emitting a close event.",
+      });
+    });
+
+    await runHarness({}, async (harness) => {
+      await fs.appendFile(
+        harness.eventFile,
+        'pre-tool\t{"stepIdx":1,"toolCall":{"name":"synthetic_tool"}}\n',
+      );
+      await flushTimers(75);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "item.started",
+          ),
+        "tool activity was not consumed",
+      );
+      harness.child.emit("error", new Error("synthetic-error"));
+      await flushTimers();
+      const terminal = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "turn.completed",
+      );
+      const warning = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "runtime.warning",
+      );
+      expect(warning?.payload).toEqual({
+        message:
+          "Antigravity process errored after delivering usable output; Synara completed the turn.",
+      });
+      expect(terminal?.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+      harness.child.emit("close", 1, null);
+      await flushTimers();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("fences a settled turn until failed runDir cleanup retries successfully", async () => {
+    const originalRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, "rm");
+    let ownedRunDir = "";
+    let ownedAttempts = 0;
+    rm.mockImplementation(async (target, options) => {
+      if (String(target) === ownedRunDir && ownedAttempts++ === 0) {
+        throw Object.assign(new Error("synthetic cleanup busy"), { code: "EBUSY" });
+      }
+      return originalRm(target, options);
+    });
+    try {
+      await runHarness({}, async (harness) => {
+        ownedRunDir = path.dirname(harness.eventFile);
+        harness.child.emit("close", 0, null);
+        await flushTimers();
+        await waitFor(
+          () =>
+            harness.diagnostics.some(
+              ({ name, fields }) =>
+                name === "antigravity.quarantine_entered" &&
+                fields.cancellationReason === "run-dir-cleanup-failed",
+            ),
+          "cleanup failure did not fence the session",
+        );
+        const fenced = (await Effect.runPromise(harness.adapter.listSessions())).find(
+          (candidate) => candidate.threadId === harness.threadId,
+        );
+        expect(fenced?.status).toBe("error");
+        await expect(fs.stat(ownedRunDir)).resolves.toBeDefined();
+        await expect(
+          Effect.runPromise(
+            harness.adapter.sendTurn({
+              threadId: harness.threadId,
+              input: "blocked while cleanup is owned",
+              attachments: [],
+            }),
+          ),
+        ).rejects.toThrow("cleanup is still in progress");
+        await flushTimers(1_000);
+        await waitFor(
+          () =>
+            harness.diagnostics.some(
+              ({ name }) => name === "antigravity.quarantined_process_reaped",
+            ),
+          "cleanup retry did not complete",
+        );
+        const ready = (await Effect.runPromise(harness.adapter.listSessions())).find(
+          (candidate) => candidate.threadId === harness.threadId,
+        );
+        expect(ready?.status).toBe("ready");
+        await expect(fs.stat(ownedRunDir)).rejects.toMatchObject({ code: "ENOENT" });
+        expect(ownedAttempts).toBe(2);
+      });
+    } finally {
+      rm.mockRestore();
+    }
+  });
+
+  it("ignores malformed structured transcript fields and incomplete records", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 1, type: "PLANNER_RESPONSE", content: {}, tool_calls: [] })}\n`,
+      );
+      await flushTimers(500);
+      expect(teardown).not.toHaveBeenCalled();
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 2, type: "PLANNER_RESPONSE", content: "valid", tool_calls: {} })}\n`,
+      );
+      await flushTimers(500);
+      expect(teardown).not.toHaveBeenCalled();
+    });
+  });
+
+  it("latches watchdog claimant before a synchronous re-entrant close", async () => {
+    let child: ChildProcess | undefined;
+    const teardown = vi.fn(async () => {
+      child?.emit("close", 1, "SIGTERM");
+      return { escalated: false, signalErrors: [] };
+    });
+    await runHarness(
+      { teardown },
+      async (harness) => {
+        child = harness.child;
+        await attachTranscript(harness);
+        await appendStep(
+          harness,
+          { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+          true,
+        );
+        await flushTimers(100);
+        await waitFor(
+          () =>
+            (harness.events as Array<{ type: string }>).some(
+              (event) => event.type === "turn.completed",
+            ),
+          "re-entrant watchdog close did not settle",
+        );
+        expect(
+          (harness.events as Array<{ type: string }>).filter(
+            (event) => event.type === "turn.completed",
+          ),
+        ).toHaveLength(1);
+      },
+    );
+  });
+
+  it("settles Stop-hook teardown failure through quarantine", async () => {
+    const teardown = vi.fn(async () => {
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 41001,
+        rootExited: false,
+        remainingDescendantPids: [],
+        captureComplete: true,
+      });
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      await flushTimers(75);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "Stop-hook failure did not settle",
+      );
+      const terminal = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "turn.completed",
+      );
+      expect(terminal?.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+      ).toBe(true);
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.stop_cleanup_unconfirmed"),
+      ).toBe(true);
+      expect(
+        harness.diagnostics.some(({ name }) => name.startsWith("antigravity.missing_terminal")),
+      ).toBe(false);
+      const warning = (
+        harness.events as Array<{
+          type: string;
+          payload?: { message?: string };
+          raw?: { messageType?: string };
+        }>
+      ).find((event) => event.type === "runtime.warning");
+      expect(warning?.payload?.message).toContain("Stop");
+      expect(warning?.raw?.messageType).toBe("stop-cleanup-unconfirmed");
+      const diagnosticText = JSON.stringify(harness.diagnostics);
+      expect(diagnosticText).not.toMatch(
+        /synthetic-input|synthetic-final|stdout|stderr|credential|account[_ -]?id/i,
+      );
+    });
+  });
+
+  it("invalidates an existing candidate when a new USER_INPUT boundary arrives", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown, graceMs: 500 }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "old", tool_calls: [] },
+        true,
+      );
+      await appendStep(harness, { step_index: 2, type: "USER_INPUT" });
+      await flushTimers(500);
+      expect(teardown).not.toHaveBeenCalled();
+      expect(
+        harness.diagnostics.filter(
+          ({ name, fields }) =>
+            name === "antigravity.completion_candidate_cancelled" &&
+            fields.cancellationReason === "user-input-boundary",
+        ),
+      ).not.toHaveLength(0);
+    });
+  });
+
+  it("ignores ownership loss during final-drain and teardown", async () => {
+    let resolveTeardown!: (value: { escalated: boolean; signalErrors: Error[] }) => void;
+    const teardown = vi.fn(
+      () =>
+        new Promise<{ escalated: boolean; signalErrors: Error[] }>((resolve) => {
+          resolveTeardown = resolve;
+        }),
+    );
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "old", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "teardown did not start");
+      const stop = Effect.runPromise(harness.adapter.stopSession(harness.threadId));
+      await flushTimers();
+      resolveTeardown({ escalated: false, signalErrors: [] });
+      await stop;
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  it("classifies process-error re-entrant close by output policy", async () => {
+    let child: ChildProcess | undefined;
+    const teardown = vi.fn(async () => {
+      child?.emit("close", 1, "SIGTERM");
+      return { escalated: false, signalErrors: [] };
+    });
+    await runHarness({ teardown }, async (harness) => {
+      child = harness.child;
+      harness.child.emit("error", new Error("synthetic-error"));
+      await flushTimers();
+      const terminal = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "turn.completed",
+      );
+      expect(terminal?.payload).toEqual({
+        state: "failed",
+        stopReason: "error",
+        errorMessage: "Antigravity process failed before emitting a close event.",
+      });
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
+
+    child = undefined;
+    await runHarness({ teardown }, async (harness) => {
+      child = harness.child;
+      await fs.appendFile(
+        harness.eventFile,
+        'pre-tool\t{"stepIdx":1,"toolCall":{"name":"synthetic_tool"}}\n',
+      );
+      await flushTimers(75);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "item.started",
+          ),
+        "process-error output evidence was not consumed",
+      );
+      harness.child.emit("error", new Error("synthetic-error"));
+      await flushTimers();
+      const terminal = (harness.events as Array<{ type: string; payload?: unknown }>).find(
+        (event) => event.type === "turn.completed",
+      );
+      expect(terminal?.payload).toEqual({ state: "completed", stopReason: "model_stop" });
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("keeps quarantine cleanup single-flight and does not retry after Stop", async () => {
+    let attempts = 0;
+    const teardown = vi.fn(async () => {
+      attempts += 1;
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 41001,
+        rootExited: false,
+        remainingDescendantPids: [],
+        captureComplete: true,
+      });
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "old", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () => harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        "watchdog quarantine did not start",
+      );
+      const stop = Effect.runPromise(harness.adapter.stopSession(harness.threadId));
+      await stop;
+      const attemptsAfterStop = attempts;
+      await flushTimers(5_000);
+      expect(attempts).toBe(attemptsAfterStop);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  it("does not invoke teardown again when a quarantined child closes late", async () => {
+    let attempts = 0;
+    const teardown = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: [],
+          captureComplete: true,
+        });
+      }
+      return { escalated: false, signalErrors: [] };
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "old", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () => harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        "watchdog quarantine did not start",
+      );
+      harness.child.emit("close", 0, null);
+      await flushTimers();
+      expect(attempts).toBe(1);
+      expect(harness.child.listenerCount("close")).toBe(0);
+    });
+  });
+
+  it("removes supervised exit watchers after every unproven quarantine retry", async () => {
+    let child: ChildProcess | undefined;
+    let attempts = 0;
+    const teardown = vi.fn(async () => {
+      attempts += 1;
+      const leakedWatcher = () => undefined;
+      child?.once("exit", leakedWatcher);
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 41001,
+        rootExited: false,
+        remainingDescendantPids: [],
+        captureComplete: true,
+      });
+    });
+    await runHarness({ teardown }, async (harness) => {
+      child = harness.child;
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "old", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () => harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        "watchdog quarantine did not start",
+      );
+      await flushTimers(3_000);
+      expect(attempts).toBeGreaterThanOrEqual(2);
+      expect(harness.child.listenerCount("exit")).toBe(0);
+    });
+  });
+
+  it("keeps recovery metadata content-free and within the AC-18 allowlist", async () => {
+    const allowed = new Set([
+      "provider",
+      "cliVersion",
+      "threadId",
+      "turnId",
+      "lifecycleGeneration",
+      "candidateStepIndex",
+      "quietDurationMs",
+      "pendingToolCount",
+      "teardownStage",
+      "exitCode",
+      "signal",
+      "remainingDescendantCount",
+      "captureComplete",
+      "settlementSource",
+      "cancellationReason",
+    ]);
+    let teardownAttempts = 0;
+    const teardown = vi.fn(async () => {
+      teardownAttempts += 1;
+      if (teardownAttempts === 1) {
+        throw new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: [],
+          captureComplete: true,
+        });
+      }
+      return { escalated: false, signalErrors: [] };
+    });
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "secret-answer", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "recovery terminal was not emitted",
+      );
+      await flushTimers(1_000);
+      await waitFor(
+        () =>
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.quarantined_process_reaped",
+          ),
+        "quarantine reap diagnostic was not emitted",
+      );
+      for (const diagnostic of harness.diagnostics) {
+        expect(Object.keys(diagnostic.fields).every((key) => allowed.has(key))).toBe(true);
+        expect(JSON.stringify(diagnostic)).not.toContain("secret-answer");
+      }
+      const recoveryEvents = (
+        harness.events as Array<{ type: string; raw?: { payload?: unknown } }>
+      ).filter((event) =>
+        ["runtime.warning", "turn.completed", "session.state.changed", "session.exited"].includes(
+          event.type,
+        ),
+      );
+      expect(recoveryEvents.length).toBeGreaterThanOrEqual(2);
+      for (const event of recoveryEvents) {
+        const payload = event.raw?.payload;
+        if (payload === undefined) continue;
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          expect(Object.keys(payload).every((key) => allowed.has(key))).toBe(true);
+        }
+        expect(JSON.stringify(event)).not.toContain("secret-answer");
+      }
+    });
+  });
+
+  it("preserves first claimant for Stop-hook/close in either order", async () => {
+      const normalTeardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+      await runHarness({ teardown: normalTeardown }, async (harness) => {
+        await attachTranscript(harness);
+        // Queue a Stop record without advancing the poll timer, then let close
+        // claim the turn and remove the owned run directory first.
+        await fs.appendFile(harness.eventFile, "stop\t{}\n");
+        harness.child.emit("close", 0, null);
+        await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+          "normal close did not settle",
+        );
+        await flushTimers(100);
+      expect(normalTeardown).not.toHaveBeenCalled();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
+
+    let child: ChildProcess | undefined;
+    const stopFirstTeardown = vi.fn(async () => {
+      child?.emit("close", 0, null);
+      return { escalated: false, signalErrors: [] };
+    });
+    await runHarness({ teardown: stopFirstTeardown }, async (harness) => {
+      child = harness.child;
+      await attachTranscript(harness);
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "Stop-hook claimant did not settle",
+      );
+      expect(stopFirstTeardown).toHaveBeenCalledTimes(1);
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("preserves first claimant for interrupt and late close", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      const turn = await Effect.runPromise(
+        harness.adapter.readThread(harness.threadId).pipe(
+          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
+        ),
+      );
+      await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turn));
+      await flushTimers();
+      harness.child.emit("close", 130, "SIGINT");
+      await flushTimers();
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+      expect(teardown).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("fences sendTurn when ownership is lost during async preparation", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-admission-"));
+    const threadId = ThreadId.makeUnsafe("thread-antigravity-admission-race");
+    const gate = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    let createdRunDir = "";
+    let spawned = 0;
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          });
+          const send = yield* Effect.forkChild(
+            adapter.sendTurn({ threadId, input: "stale preparation", attachments: [] }),
+          );
+          yield* Effect.yieldNow;
+          yield* Effect.promise(() => entered.promise);
+          yield* adapter.stopSession(threadId);
+          gate.resolve();
+          yield* Effect.yieldNow;
+          yield* Fiber.join(send).pipe(Effect.exit);
+          expect(spawned).toBe(0);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              createRunDir: async () => {
+                entered.resolve();
+                await gate.promise;
+                createdRunDir = await fs.mkdtemp(path.join(root, "run-"));
+                return createdRunDir;
+              },
+              spawnProcess: (() => {
+                spawned += 1;
+                throw new Error("stale admission spawned a child");
+              }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
+            }).pipe(
+              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-admission-" })),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+      await expect(fs.stat(createdRunDir)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      gate.resolve();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reaps a pending Stop quarantine exactly once for lease, runDir, timer, and listeners", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-stop-reap-"));
+    const threadId = ThreadId.makeUnsafe("thread-antigravity-stop-reap");
+    const authorityFixture = makeTestMcpSessionAuthorityFixture();
+    const liveTokens = new Set<string>();
+    let tokenSequence = 0;
+    let revoked = 0;
+    const credentials: AgentGatewayCredentialsShape = {
+      mcpEndpointUrl: "http://127.0.0.1:3773/mcp",
+      setListeningPort: () => undefined,
+      issueSessionToken: () => {
+        const token = `stop-reap-${++tokenSequence}`;
+        liveTokens.add(token);
+        return token;
+      },
+      verifySessionToken: (token) => (liveTokens.has(token) ? threadId : null),
+      verifySession: () => null,
+      issueStdioBootstrapToken: (token) => (liveTokens.has(token) ? `bootstrap-${token}` : null),
+      exchangeStdioBootstrapToken: () => null,
+      bindWriteAuthority: () => null,
+      verifyWriteAuthority: () => false,
+      registerInFlightRequest: () => () => undefined,
+      cancelInFlightRequests: () => ({ count: 0, settled: Promise.resolve() }),
+      cancelSessionTurnRequests: () => Promise.resolve(),
+      retireSessionTurn: () => Promise.resolve(),
+      revokeSessionToken: (token) => {
+        if (liveTokens.delete(token)) revoked += 1;
+      },
+      connectionForThread: () => {
+        const token = `connection-${++tokenSequence}`;
+        liveTokens.add(token);
+        return { url: "http://127.0.0.1:3773/mcp", bearerToken: token };
+      },
+      stdioProxy: { command: process.execPath, args: ["proxy.mjs"] },
+    };
+    let runDir = "";
+    let eventFile = "";
+    const diagnostics: string[] = [];
+    let child!: ChildProcess & { stdout: PassThrough; stderr: PassThrough };
+    const unprovenExit = new ProviderProcessExitUnprovenError({
+      rootPid: 41001,
+      rootExited: false,
+      remainingDescendantPids: [],
+      captureComplete: true,
+    });
+    let requestStop = () => undefined;
+    let stop: Promise<void> | undefined;
+    const teardown = vi.fn(async () => {
+      requestStop();
+      throw unprovenExit;
+    });
+    const rm = vi.spyOn(fs, "rm");
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          yield* Effect.promise(async () => {
+            requestStop = () => {
+              stop ??= Effect.runPromise(adapter.stopSession(threadId));
+            };
+            await Effect.runPromise(
+              adapter.startSession({
+                provider: "antigravity",
+                threadId,
+                runtimeMode: "full-access",
+                cwd: root,
+                providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+                mcpAuthority: authorityFixture.bindingForThread({
+                  threadId: "thread-antigravity-stop-reap",
+                  provider: "antigravity",
+                }),
+              }),
+            );
+            await Effect.runPromise(
+              adapter.sendTurn({ threadId, input: "recover me", attachments: [] }),
+            );
+            const transcriptPath = path.join(root, "transcript.jsonl");
+            await fs.writeFile(transcriptPath, "");
+            await fs.appendFile(
+              eventFile,
+              `pre-invocation\t${JSON.stringify({ transcriptPath })}\n`,
+            );
+            await fs.appendFile(
+              transcriptPath,
+              `${JSON.stringify({ step_index: 0, type: "USER_INPUT" })}\n${JSON.stringify({ step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] })}\n`,
+            );
+            for (
+              let attempt = 0;
+              attempt < 100 && !diagnostics.includes("antigravity.completion_candidate_started");
+              attempt += 1
+            ) {
+              vi.advanceTimersByTime(75);
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            expect(diagnostics).toContain("antigravity.completion_candidate_started");
+            vi.advanceTimersByTime(25);
+            for (let attempt = 0; attempt < 100 && teardown.mock.calls.length === 0; attempt += 1) {
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            expect(teardown).toHaveBeenCalledTimes(1);
+            for (let attempt = 0; attempt < 10; attempt += 1) {
+              const session = (await Effect.runPromise(adapter.listSessions())).find(
+                (candidate) => candidate.threadId === threadId,
+              );
+              if (session?.status === "error") break;
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            expect(revoked).toBe(0);
+            await expect(fs.stat(runDir)).resolves.toBeDefined();
+            child.emit("close", 0, null);
+            await stop;
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              if (!(await Effect.runPromise(adapter.hasSession(threadId)))) break;
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            expect(await Effect.runPromise(adapter.hasSession(threadId))).toBe(false);
+            expect(revoked).toBe(1);
+          });
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              terminalRecoveryGraceMs: 25,
+              now: () => Date.now(),
+              onRecoveryDiagnostic: (name) => diagnostics.push(name),
+              createRunDir: async () => {
+                runDir = await fs.mkdtemp(path.join(root, "turn-"));
+                return runDir;
+              },
+              spawnProcess: ((_command, _args, options) => {
+                eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS ?? "";
+                child = new EventEmitter() as typeof child;
+                Object.assign(child, {
+                  pid: 41001,
+                  stdout: new PassThrough(),
+                  stderr: new PassThrough(),
+                  killed: false,
+                  kill: () => true,
+                });
+                return child;
+              }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
+              teardownProcessTree: teardown,
+            }).pipe(
+              Layer.provide(Layer.succeed(AgentGatewayCredentials, credentials)),
+              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-stop-reap-" })),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+      expect(eventFile).toContain(runDir);
+      expect(rm.mock.calls.filter(([target]) => target === runDir)).toHaveLength(1);
+      expect(child.listenerCount("exit")).toBe(0);
+    } finally {
+      rm.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["watchdog", async (harness: RecoveryHarness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+    }],
+    ["Stop-hook", async (harness: RecoveryHarness) => {
+      await attachTranscript(harness);
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      await flushTimers(75);
+    }],
+    ["process-error", async (harness: RecoveryHarness) => {
+      await harness.child.emit("error", new Error("synthetic process error"));
+      await flushTimers();
+    }],
+    ["interrupt", async (harness: RecoveryHarness) => {
+      const turnId = await Effect.runPromise(
+        harness.adapter.readThread(harness.threadId).pipe(
+          Effect.map((snapshot) => snapshot.turns.at(-1)?.id),
+        ),
+      );
+      await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId, turnId));
+      await flushTimers();
+    }],
+  ] as const)(
+    "%s keeps admission fenced after terminal settlement while owned cleanup is unconfirmed",
+    async (_claimant, trigger) => {
+      const teardown = vi.fn(async () => {
+        throw new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: [],
+          captureComplete: true,
+        });
+      });
+      await runHarness({ teardown, trackLease: true }, async (harness) => {
+        await trigger(harness);
+        await waitFor(
+          () =>
+            (harness.events as Array<{ type: string }>).some(
+              (event) => event.type === "turn.completed",
+            ),
+          "claimant did not settle a terminal turn",
+        );
+
+        const ownedRunDir = path.dirname(harness.eventFile);
+        await expect(fs.stat(ownedRunDir)).resolves.toBeDefined();
+        await expect(
+          Effect.runPromise(
+            harness.adapter.sendTurn({
+              threadId: harness.threadId,
+              input: "follow-up must remain fenced",
+              attachments: [],
+            }),
+          ),
+        ).rejects.toThrow("cleanup is still in progress");
+        expect(teardown).toHaveBeenCalledTimes(1);
+        expect(harness.spawnCount()).toBe(1);
+        expect(harness.releasedLeaseCount()).toBe(0);
+        expect(
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.quarantine_entered",
+          ),
+        ).toBe(true);
+        await expect(fs.stat(ownedRunDir)).resolves.toBeDefined();
+      });
+    },
+  );
+
+  it("lets Stop join a watchdog claim without a second teardown, then close reaps and exits", async () => {
+    let rejectTeardown!: (cause: unknown) => void;
+    const teardown = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectTeardown = reject;
+        }),
+    );
+    await runHarness({ teardown, trackLease: true }, async (harness) => {
+      await attachTranscript(harness);
+      await appendStep(
+        harness,
+        { step_index: 1, type: "PLANNER_RESPONSE", content: "answer", tool_calls: [] },
+        true,
+      );
+      await flushTimers(100);
+      await waitFor(() => teardown.mock.calls.length === 1, "watchdog did not claim teardown");
+
+      const stop = Effect.runPromise(harness.adapter.stopSession(harness.threadId));
+      await flushTimers();
+      expect(teardown).toHaveBeenCalledTimes(1);
+      rejectTeardown(
+        new ProviderProcessExitUnprovenError({
+          rootPid: 41001,
+          rootExited: false,
+          remainingDescendantPids: [],
+          captureComplete: true,
+        }),
+      );
+      await stop;
+      expect(teardown).toHaveBeenCalledTimes(1);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "watchdog claimant did not emit its terminal",
+      );
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "turn.completed",
+        ),
+      ).toHaveLength(1);
+      expect(
+        (harness.events as Array<{ type: string }>).filter(
+          (event) => event.type === "session.exited",
+        ),
+      ).toHaveLength(0);
+      const ownedRunDir = path.dirname(harness.eventFile);
+      await expect(fs.stat(ownedRunDir)).resolves.toBeDefined();
+      expect(harness.releasedLeaseCount()).toBe(0);
+
+      harness.child.emit("close", 0, null);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "session.exited",
+          ),
+        "close did not reap the stopped session",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      await expect(fs.stat(ownedRunDir)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(harness.releasedLeaseCount()).toBe(1);
+      expect(await Effect.runPromise(harness.adapter.hasSession(harness.threadId))).toBe(false);
+    });
+  });
+
+  it("drains a final planner response before the single Stop-hook terminal", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 1, type: "PLANNER_RESPONSE", content: "final", tool_calls: [] })}\n`,
+      );
+      await fs.appendFile(harness.eventFile, "stop\t{}\n");
+      await flushTimers(75);
+      await waitFor(
+        () =>
+          (harness.events as Array<{ type: string }>).some(
+            (event) => event.type === "turn.completed",
+          ),
+        "Stop-hook did not settle",
+      );
+      const events = harness.events as Array<{ type: string }>;
+      const finalItemIndex = events.findIndex((event) => event.type === "item.completed");
+      const terminalIndex = events.findIndex((event) => event.type === "turn.completed");
+      expect(finalItemIndex).toBeGreaterThanOrEqual(0);
+      expect(finalItemIndex).toBeLessThan(terminalIndex);
+      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    });
+  });
+
+  it("makes one bounded preparation cleanup attempt during Stop and never rearms its timer", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-preparation-stop-"));
+    const threadId = ThreadId.makeUnsafe("thread-antigravity-preparation-stop");
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let runDir = "";
+    let cleanupAttempts = 0;
+    const diagnostics: string[] = [];
+    const originalRm = fs.rm.bind(fs);
+    const rm = vi.spyOn(fs, "rm");
+    rm.mockImplementation(async (target, options) => {
+      if (String(target) === runDir) {
+        cleanupAttempts += 1;
+        throw Object.assign(new Error("synthetic preparation cleanup busy"), { code: "EBUSY" });
+      }
+      return originalRm(target, options);
+    });
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+          });
+          const send = yield* Effect.forkChild(
+            adapter.sendTurn({ threadId, input: "preparation race", attachments: [] }),
+          );
+          yield* Effect.promise(() => entered.promise);
+          yield* adapter.stopSession(threadId);
+          release.resolve();
+          const result = yield* Fiber.join(send).pipe(Effect.exit);
+          expect(result._tag).toBe("Failure");
+          expect(cleanupAttempts).toBe(1);
+          expect(diagnostics).toContain("antigravity.quarantine_entered");
+          expect(vi.getTimerCount()).toBe(0);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              createRunDir: async () => {
+                entered.resolve();
+                await release.promise;
+                runDir = await fs.mkdtemp(path.join(root, "turn-"));
+                return runDir;
+              },
+              spawnProcess: (() => {
+                throw new Error("stale preparation must not spawn");
+              }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
+              onRecoveryDiagnostic: (name) => diagnostics.push(name),
+            }).pipe(
+              Layer.provideMerge(ServerConfig.layerTest(root, { prefix: "antigravity-prep-stop-" })),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      release.resolve();
+      rm.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("quarantines an unproven replacement teardown and does not admit a replacement turn", async () => {
+    const teardown = vi.fn(async () => {
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 41001,
+        rootExited: false,
+        remainingDescendantPids: [],
+        captureComplete: true,
+      });
+    });
+    await runHarness({ teardown }, async (harness) => {
+      const oldRunDir = path.dirname(harness.eventFile);
+      try {
+        await expect(
+          Effect.runPromise(
+            harness.adapter.startSession({
+              provider: "antigravity",
+              threadId: harness.threadId,
+              runtimeMode: "full-access",
+              providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+              lifecycleGeneration: "replacement-generation",
+            }),
+          ),
+        ).rejects.toThrow();
+        expect(teardown).toHaveBeenCalledTimes(1);
+        expect(harness.spawnCount()).toBe(1);
+        await expect(fs.stat(oldRunDir)).resolves.toBeDefined();
+        expect(
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        ).toBe(true);
+        await expect(
+          Effect.runPromise(
+            harness.adapter.sendTurn({
+              threadId: harness.threadId,
+              input: "replacement must remain blocked",
+              attachments: [],
+            }),
+          ),
+        ).rejects.toThrow("cleanup is still in progress");
+      } finally {
+        harness.child.emit("close", 0, null);
+        await flushTimers();
+      }
+    });
   });
 });

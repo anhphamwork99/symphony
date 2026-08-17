@@ -58,6 +58,10 @@ export class StartupError extends Data.TaggedError("StartupError")<{
 }> {}
 
 const DESKTOP_SHUTDOWN_TOKEN_ENV_KEY = "SYNARA_DESKTOP_SHUTDOWN_TOKEN";
+const DEFAULT_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS = 15_000;
+// Node clamps larger delays to 1ms (TimeoutOverflowWarning), which would turn
+// an intended long grace period into an almost immediate recovery.
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
 
 function consumeDesktopShutdownTokenFromProcessEnvironment(): string | undefined {
   const matchingKeys =
@@ -164,6 +168,12 @@ const CliEnvConfig = Config.all({
   ),
   logProviderEvents: optionalBooleanEnvironmentConfig("SYNARA_LOG_PROVIDER_EVENTS"),
   logWebSocketEvents: optionalBooleanEnvironmentConfig("SYNARA_LOG_WS_EVENTS"),
+  antigravityTerminalRecoveryMode: Config.string(
+    "SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_MODE",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityTerminalRecoveryGraceMs: Config.string(
+    "SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
 });
 
 const ServerConfigLive = (input: CliInput) =>
@@ -244,6 +254,41 @@ const ServerConfigLive = (input: CliInput) =>
         env.logWebSocketEvents,
         false,
       );
+      const recoveryModeInput = env.antigravityTerminalRecoveryMode?.trim().toLowerCase();
+      const antigravityTerminalRecoveryMode =
+        recoveryModeInput === undefined ||
+        recoveryModeInput === "off" ||
+        recoveryModeInput === "shadow" ||
+        recoveryModeInput === "enforce"
+          ? (recoveryModeInput ?? "enforce")
+          : "enforce";
+      const recoveryGraceInput =
+        env.antigravityTerminalRecoveryGraceMs === undefined
+          ? undefined
+          : Number(env.antigravityTerminalRecoveryGraceMs.trim());
+      const antigravityTerminalRecoveryGraceMs =
+        recoveryGraceInput !== undefined &&
+        Number.isInteger(recoveryGraceInput) &&
+        recoveryGraceInput > 0 &&
+        recoveryGraceInput <= MAX_NODE_TIMER_DELAY_MS
+          ? recoveryGraceInput
+          : DEFAULT_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS;
+      const invalidRecoveryMode =
+        recoveryModeInput !== undefined &&
+        recoveryModeInput !== "off" &&
+        recoveryModeInput !== "shadow" &&
+        recoveryModeInput !== "enforce";
+      const invalidRecoveryGrace =
+        recoveryGraceInput !== undefined &&
+        (!Number.isInteger(recoveryGraceInput) ||
+          recoveryGraceInput <= 0 ||
+          recoveryGraceInput > MAX_NODE_TIMER_DELAY_MS);
+      if (invalidRecoveryMode || invalidRecoveryGrace) {
+        yield* Effect.logWarning(
+          "Invalid Antigravity terminal recovery configuration; safe defaults were applied.",
+          { invalidRecoveryMode, invalidRecoveryGrace },
+        );
+      }
       const staticDir = devUrl ? undefined : yield* cliConfig.resolveStaticDir;
       // Omitting Node's host listens on an unspecified address, which exposes
       // the server beyond the local machine on common platforms. Keep every
@@ -285,6 +330,8 @@ const ServerConfigLive = (input: CliInput) =>
         autoBootstrapProjectFromCwd,
         logProviderEvents,
         logWebSocketEvents,
+        antigravityTerminalRecoveryMode,
+        antigravityTerminalRecoveryGraceMs,
       } satisfies ServerConfigShape;
 
       return config;
