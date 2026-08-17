@@ -117,7 +117,7 @@ offerSubagentControlHealthWarning (transition only)
 | T21-AC4 | Degraded admission performs only its own atomic write; it never rewrites existing aggregates or journals | Coordinator test (durable snapshot seam via repository reads): running + orphaned + succeeded aggregates and journals captured before are `toEqual` after two degraded admissions (field-equivalent), zero rows for the degraded commands | Passed |
 | T21-AC5 | `withRecoveryProbe` single-flight gate + `markAvailable` on probe success admits the same fresh command; waiters re-read health; nothing replays rejected commandIds | Real-extension test: after the store recovers, session B's fresh command is admitted (`exec_*`/`att_*`/generation 1), exactly one child transcript file, one recovery transition scoped to thread B, rejected commands have no rows, post-recovery admission adds no transition; coordinator tests: probe admits + marks available once, no rejected row created; concurrent waiter re-reads available health, gets its own execution, no second recovery transition | Passed |
 | T21-AC6 | `offerSubagentControlHealthWarning` emits a bounded `runtime.warning` only on transitions with `detail = {from,to,diagnosticCode,occurredAt}`; adapter passes `onHealthTransition` to admissions | Real-extension test: exactly one degraded warning and one recovery warning on the operator event stream, scoped to the driving thread, message/detail assertions; serialized payload contains neither the prompt marker, `SQLITE`, the injected outage message, nor the rejection-reason prefix | Passed |
-| T21-AC7 | Capability gate runs before any health handling; the wrapper is installed only for managed sessions | Real-extension test: legacy session (no extension) on the degraded adapter starts and probes `bridge_absent`/`isManaged === false` with zero admission events and zero durable rows; coordinator test: `bridge_absent` and `capability_mismatch` sessions rejected as unmanaged with zero durable writes while degraded, health untouched | Passed |
+| T21-AC7 | Capability gate runs before any health handling; the wrapper is installed only for managed sessions | Real-extension test: legacy session (no extension) on the degraded adapter starts and probes `bridge_absent`/`isManaged === false` with zero admission events and zero durable rows; the ACTUAL legacy Agent tool is then executed at the approved managed-capability seam during the same degraded window (real production extension loaded from disk, provenance-asserted, no Synara admission wrapper installed) — it answers normally (`started in background` + extension-minted `Agent ID`, one child transcript file) with **no** `executionId`/`attemptId`/`generation` on the result, **no** `managedExecution` on the child transcript, no `exec_`/`att_` identity anywhere in the result or transcript, no restart/durable claim, zero admission events, zero repository writes, and no control-health transition; coordinator test: `bridge_absent` and `capability_mismatch` sessions rejected as unmanaged with zero durable writes while degraded, health untouched | Passed |
 
 ### Failure and diagnostic evidence
 
@@ -129,7 +129,8 @@ offerSubagentControlHealthWarning (transition only)
 | 4 concurrent fresh commands during outage (coordinator) | stays degraded (1 transition total) | 0 | no rows | `pi_subagent_lifecycle_persistence_failed` per caller | probes serialized (`maxInFlight === 1`) |
 | Store recovers; fresh command on session B | available (1 recovery transition) | 1 (exactly one child transcript) | exactly one `accepted` execution + sequence-1 journal for that command | `pi_subagent_managed_enabled` | admitted; rejected commandIds never replayed |
 | Provider mismatch while degraded (coordinator) | stays degraded | 0 | no row | `pi_subagent_admission_provider_mismatch` (degraded health does not mask authorization) | — |
-| Legacy/unhandshaked capability while degraded | stays degraded | n/a (legacy path) | zero durable writes | `pi_subagent_bridge_absent` / `pi_subagent_capability_mismatch` | — |
+| Legacy/unhandshaked capability while degraded (adapter session without the extension) | stays degraded | n/a (legacy path) | zero durable writes | `pi_subagent_bridge_absent` / `pi_subagent_capability_mismatch` | — |
+| Actual legacy Agent executed during the same outage (real extension, no Synara wrapper) | stays degraded (no transition) | 1 (extension-minted legacy child, one transcript file, no `managedExecution`) | zero repository writes, zero admission events | none (normal legacy `started in background` response) | — |
 
 Operator warnings: exactly two `runtime.warning` events for the whole
 degrade→recover arc (`raw.method = "subagents/control-health-transition"`), each
@@ -144,7 +145,12 @@ All commands run in the isolated worktree `/private/tmp/t21-symphony`
 (branch `t21-production-fail-closed-control-health`, parent `991bd616`) with
 `PATH="$HOME/.bun/bin:$PATH"` and `ALFIE_REPO_DIR=/Users/anhpham99/alfie`
 (Alfie pinned commit `2a3f69bd6`, clean; provenance verified by the
-real-extension suite).
+real-extension suite). The conformance-review follow-up (F2/F3) re-ran the
+focused ticket-21 suites on current main (`93cac45c` + the follow-up commit)
+in the canonical Symphony checkout with the same environment: the 7-file
+focused suite above passes (7 files, 81 tests), and the full real-extension
+file passes (10 tests) with the legacy Agent leg executing during the
+degraded window.
 
 ```
 # Focused ticket suites (red demonstrated before each minimal green slice)
@@ -161,7 +167,9 @@ bun run --cwd apps/server test \
 - Result: **7 files, 81 tests passed** (per file:
   `piSubagentControlHealth.test.ts` 6 — baseline 3, +3 new;
   `piSubagentAdmissionCoordinator.test.ts` 33 — baseline 26, +7 new;
-  `piSubagentRealExtension.test.ts` 10 — baseline 9, +1 new;
+  `piSubagentRealExtension.test.ts` 10 — baseline 9, +1 new (the ticket-21
+  scenario test additionally executes the actual legacy Agent during the
+  degraded window per review F2);
   `piSubagentSession.test.ts` 10; `piSubagentBridge.test.ts` 8;
   `piSubagentAdmissionGuard.test.ts` 6;
   `persistence/Layers/PiSubagentExecutionRepository.test.ts` 8 — unmodified).
@@ -234,11 +242,30 @@ the suite's provenance checks):
   driving thread, with safe metadata only.
 - **Legacy usability (AC7):** a session started in an agent dir without the
   extension remained fully usable on the degraded adapter, negotiated
-  `bridge_absent` (never managed), and created no managed truth.
+  `bridge_absent` (never managed), and created no managed truth. During that
+  same degraded window the ACTUAL legacy Agent tool was executed directly at
+  the approved managed-capability seam: a real Pi session loading the same
+  proven production extension from disk (Git origin, pinned `2a3f69bd6`,
+  package identity and SHA-256 manifest asserted), with **no Synara admission
+  wrapper installed** (`__synaraAdmissionWrapped` absent on the tool entry and
+  its definition), drove the extension's own legacy spawn path. It returned a
+  normal legacy response (`started in background` with an extension-minted
+  `Agent ID`), started exactly one child whose transcript was written without
+  any `managedExecution` label, carried no `executionId`/`attemptId`/
+  `generation` on the tool result, no `exec_`/`att_` identity and no restart or
+  durable-recovery claim in either the result or the child transcript, fired
+  zero admission events, attempted zero `recordAdmission` writes, left all
+  durable execution tables empty, and produced no control-health transition.
+  Legacy execution is therefore proven usable and unlabeled while managed
+  health is degraded, not merely negotiated as unmanaged.
 
 A coordinator-only test is insufficient for this ticket; the real-extension
-test above is the primary AC1/AC2/AC3/AC5/AC6/AC7 evidence, complemented by the
-coordinator seam for deterministic waiter/single-flight/concurrency mechanics.
+test above is the primary AC1/AC2/AC3/AC5/AC6/AC7 evidence — including an
+actual legacy Agent execution during the degraded window (AC7) — complemented
+by the coordinator seam for deterministic waiter/single-flight/concurrency
+mechanics and the control-health unit seam for deterministic transition
+idempotency/single-flight mechanics (both permitted lower seams; see
+Deviations).
 
 ### Deviations and remaining risks
 
@@ -253,6 +280,25 @@ coordinator seam for deterministic waiter/single-flight/concurrency mechanics.
   induced deterministically at the real Agent boundary; per Decision 0001 these
   are covered at the admission-coordinator seam while the real boundary keeps
   the end-to-end degrade/reject/recover arc.
+- **Control-health unit tests are deterministic lower-seam support, not primary
+  evidence (permitted boundary substitution, review F3):** the
+  `piSubagentControlHealth.test.ts` unit tests exercise the shared health
+  controller's transition idempotency (one `available → degraded` and one
+  `degraded → available` transition per arc, no duplicate or back-transition)
+  and the `withRecoveryProbe` single-flight gate's mutual exclusion under
+  concurrent entrants. Both invariants are timing/interleaving properties: a
+  real Agent tool call admits at most one probe per command, the public
+  boundary serializes admission per session, and the degrade/recover windows
+  depend on an injected durable-write fault that the public boundary cannot
+  observe or schedule — so the interleavings cannot be induced reliably at the
+  public boundary. Per Decision 0001's permitted boundary substitutions, these
+  unit tests document that insufficiency, retain the nearest useful
+  public-boundary test (the real-extension degrade/reject/recover arc and the
+  coordinator concurrency tests), and add only the smallest lower-level test
+  required. The real-Pi real-extension test and the operator runtime-event
+  surface remain the PRIMARY evidence for AC1/AC2/AC3/AC5/AC6/AC7; the unit
+  tests only pin the deterministic mechanics underneath them and would pass or
+  fail independently of that boundary evidence.
 - **`PiSubagentExecutionRepository.test.ts` not modified:** AC4 is covered at
   its approved durable-snapshot seam inside the coordinator test, which reads
   the same repository snapshot API (`getById`/`listJournalEvents`/
@@ -278,6 +324,24 @@ coordinator seam for deterministic waiter/single-flight/concurrency mechanics.
   authorized fixing unrelated files in this ticket.
 - Not exercised: tickets 22–24 scope (bounded foreground detach, progress/
   heartbeat/saturation, integrated acceptance) — untouched by this change.
+- **Conformance-review follow-up (F2/F3), current main `93cac45c`:** the
+  independent conformance review accepted production behavior and returned two
+  evidence gaps, both closed on main without production changes:
+  - **F2 (legacy leg executed):** the real-extension legacy leg previously
+    proved only `bridge_absent`/`isManaged === false` negotiation. It now
+    directly executes the ACTUAL legacy Agent at the approved managed-capability
+    seam while managed health is degraded (real production extension, no Synara
+    admission wrapper) and asserts normal legacy usability, no
+    `executionId`/`attemptId`/`generation`/`managedExecution` labeling, no
+    managed admission or repository write, and no durable/restart-recoverable
+    claim — see the AC7 row and the Real-Pi evidence above.
+  - **F3 (lower-seam rationale):** the report now states explicitly that the
+    control-health unit tests are deterministic lower-seam support for
+    transition idempotency and single-flight concurrency, which cannot reliably
+    be induced at the public boundary, while the real-Pi/operator tests remain
+    primary — satisfying Decision 0001's permitted boundary substitutions (see
+    Deviations above). Decision 0004's accepted lack of a separate
+    `requested`-phase write is unchanged.
 
 ### Commits
 
@@ -285,9 +349,13 @@ coordinator seam for deterministic waiter/single-flight/concurrency mechanics.
   `t21-production-fail-closed-control-health`, parent `991bd616`:
   - `25437ecb` — "fix(pi): enforce fail-closed shared control health with
     admission-driven recovery (issue 21)" (production + tests).
-  - this report commit — "docs(planning): complete issue 21 implementation
-    report".
+  - report commit — "docs(planning): complete issue 21 implementation
+    report" (integrated on main as `93cac45c`, candidate `a029687a`).
   - Final working-tree status: clean (`git status` empty). Not pushed.
+- Conformance-review follow-up on main (parent `93cac45c`): one commit adding
+  the F2 legacy-Agent execution leg to
+  `apps/server/src/provider/piSubagentRealExtension.test.ts` and the F2/F3
+  report updates to this file. No production change; not pushed.
 - The canonical `/Users/anhpham99/symphony` checkout was never modified,
   staged, committed, or reset. Alfie source (`2a3f69bd6`) is unchanged and
   clean.
@@ -295,11 +363,15 @@ coordinator seam for deterministic waiter/single-flight/concurrency mechanics.
 ### Reviewer handoff
 
 ```bash
-cd /private/tmp/t21-symphony
+# Original candidate: /private/tmp/t21-symphony (branch
+# t21-production-fail-closed-control-health, parent 991bd616).
+# Conformance-review follow-up (F2/F3): verified on current main after
+# 93cac45c in the Symphony checkout itself.
 export PATH="$HOME/.bun/bin:$PATH"
 export ALFIE_REPO_DIR=/Users/anhpham99/alfie   # pinned 2a3f69bd, clean
 
-# 1. Degrade → child never starts → one safe warning (real Agent boundary)
+# 1. Degrade → child never starts → one safe warning; legacy Agent usable,
+#    unlabeled, no managed truth (real Agent boundary)
 bun run --cwd apps/server test src/provider/piSubagentRealExtension.test.ts -t "T21-AC1..AC7"
 
 # 2. Repeated + concurrent fail-closed rejection, one degraded transition

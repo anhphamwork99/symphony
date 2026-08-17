@@ -1212,6 +1212,19 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
     const legacyAgentDir = `${tempAgentDir}-legacy`;
     createdDirs.push(legacyAgentDir);
     mkdirSync(legacyAgentDir, { recursive: true });
+    // Second legacy agent dir WITH the real extension for the un-managed host
+    // leg (T21-AC7 review F2): the extension is present, but no Synara
+    // admission wrapper is ever installed for this session, so the real
+    // Agent tool runs its complete legacy path.
+    const legacyExtAgentDir = `${tempAgentDir}-legacy-ext`;
+    createdDirs.push(legacyExtAgentDir);
+    const legacyExtExtensionsDir = join(legacyExtAgentDir, "extensions");
+    mkdirSync(legacyExtExtensionsDir, { recursive: true });
+    symlinkSync(versionedDir, join(legacyExtExtensionsDir, "pi-subagents"), "dir");
+    const legacySharedDir = join(versionedDir, "..", "shared");
+    if (existsSync(legacySharedDir)) {
+      symlinkSync(legacySharedDir, join(legacyExtExtensionsDir, "shared"), "dir");
+    }
 
     const extensionsDir = join(tempAgentDir, "extensions");
     mkdirSync(extensionsDir, { recursive: true });
@@ -1392,7 +1405,7 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
         `;
       }
 
-      const executeCtxFor = (session: any) => ({
+      const executeCtxFor = (session: any, cwd: string = tempAgentDir) => ({
         ui: {
           notify: () => {},
           status: () => {},
@@ -1402,7 +1415,7 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
           confirm: async () => true,
           input: async () => undefined,
         },
-        cwd: tempAgentDir,
+        cwd,
         model: undefined,
         modelRegistry: {
           find: () => undefined,
@@ -1574,6 +1587,139 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
       expect(rows).toHaveLength(0);
       expect(controlHealthWarnings()).toHaveLength(1);
       expect(recordAdmissionAttempts).toBe(3);
+
+      // T21-AC7 (review F2): execute the ACTUAL legacy Agent tool at the
+      // approved managed-capability seam while managed health is still
+      // degraded. The legacy configuration is the real extension's own
+      // un-managed host path (the complete legacy behavior of T19-AC6): a
+      // real Pi session with the same proven production extension loaded from
+      // disk, but with no Synara admission wrapper installed, so the
+      // extension runs its legacy spawn path and mints its own record id.
+      const legacyPiModelRuntime = yield* Effect.promise(() =>
+        ModelRuntime.create({
+          authPath: join(legacyExtAgentDir, "auth.json"),
+          modelsPath: null,
+        }),
+      );
+      const legacyPiServices = yield* Effect.promise(() =>
+        createAgentSessionServices({
+          cwd: legacyExtAgentDir,
+          agentDir: legacyExtAgentDir,
+          modelRuntime: legacyPiModelRuntime,
+        }),
+      );
+      const legacyPiSession = (
+        yield* Effect.promise(() =>
+          createAgentSessionFromServices({
+            services: legacyPiServices,
+            sessionManager: SessionManager.inMemory(legacyExtAgentDir),
+          }),
+        )
+      ).session;
+      yield* Effect.promise(() => legacyPiSession.bindExtensions({}));
+      // Provenance: this is the same production extension, loaded from disk —
+      // the legacy leg exercises the real Agent tool, not a fixture.
+      const legacyProvenance = assertProductionExtensionProvenance(legacyPiSession);
+      expect(legacyProvenance.isProduction).toBe(true);
+      expect(legacyProvenance.toolNames).toContain("Agent");
+
+      const legacyLoadedExt = legacyPiSession.resourceLoader
+        .getExtensions()
+        .extensions.find(
+          (e: any) => e.tools instanceof Map && e.tools.has("Agent"),
+        ) as any;
+      expect(legacyLoadedExt).toBeDefined();
+      const legacyAgentEntry = legacyLoadedExt.tools.get("Agent");
+      const legacyExecute =
+        legacyAgentEntry.execute ?? legacyAgentEntry.definition?.execute;
+      expect(typeof legacyExecute).toBe("function");
+      // No Synara admission wrapper is installed on the legacy tool: the
+      // extension's own execute is the production legacy Agent.
+      expect(legacyAgentEntry.__synaraAdmissionWrapped).toBeUndefined();
+      expect(legacyAgentEntry.definition?.__synaraAdmissionWrapped).toBeUndefined();
+
+      const legacySessionId = legacyPiSession.sessionManager.getSessionId();
+      const legacyOutputDir = join(
+        tmpdir(),
+        `pi-subagents-${process.getuid?.() ?? 0}`,
+        legacyExtAgentDir.replace(/[/\\]/g, "-").replace(/^-+/, ""),
+        legacySessionId,
+        "tasks",
+      );
+      const legacyOutputFiles = () => {
+        try {
+          return readdirSync(legacyOutputDir).filter((f) => f.endsWith(".output"));
+        } catch {
+          return [];
+        }
+      };
+
+      const legacyResult: any = yield* Effect.promise(() =>
+        legacyExecute(
+          "call_t21_legacy_agent",
+          {
+            task: "Legacy unmanaged usability probe during managed degradation",
+            context: "T21 legacy Agent execution evidence.",
+            link_references: "None",
+            expected_outcome: "Legacy Agent runs normally with no managed truth.",
+            subagent_type: "researcher",
+            run_in_background: true,
+          },
+          undefined,
+          undefined,
+          executeCtxFor(legacyPiSession, legacyExtAgentDir),
+        ),
+      );
+
+      // Normal legacy response/usability: the real extension answered with
+      // its own background-start message and an extension-minted agent id.
+      expect(legacyResult.isError).toBeUndefined();
+      expect(legacyResult.content[0].text).toContain("started in background");
+      expect(legacyResult.content[0].text).toContain("Agent ID:");
+      const legacyAgentId = legacyResult.details?.agentId;
+      expect(typeof legacyAgentId).toBe("string");
+      expect(legacyAgentId.length).toBeGreaterThan(0);
+      // Never labeled managed: no server-minted identity leaks into the
+      // legacy result, and the extension-minted id is not a managed identity.
+      expect(legacyResult.executionId).toBeUndefined();
+      expect(legacyResult.attemptId).toBeUndefined();
+      expect(legacyResult.generation).toBeUndefined();
+      expect(legacyAgentId).not.toMatch(/^exec_/);
+      expect(legacyAgentId).not.toMatch(/^att_/);
+      const legacyResultJson = JSON.stringify(legacyResult);
+      expect(legacyResultJson).not.toContain("managedExecution");
+      expect(legacyResultJson).not.toMatch(/"exec_[^"]*"/);
+      expect(legacyResultJson).not.toMatch(/"att_[^"]*"/);
+
+      // The real legacy child started exactly once and its transcript is
+      // never labeled managed or restart-recoverable.
+      yield* Effect.sleep(120);
+      expect(legacyOutputFiles()).toHaveLength(1);
+      const legacyEntry = JSON.parse(
+        readFileSync(join(legacyOutputDir, legacyOutputFiles()[0]!), "utf-8").trim(),
+      );
+      expect(legacyEntry.agentId).toBe(legacyAgentId);
+      expect(legacyEntry.managedExecution).toBeUndefined();
+      expect(legacyEntry.isSidechain).toBe(true);
+      const legacyEntryJson = JSON.stringify(legacyEntry);
+      expect(legacyEntryJson).not.toContain("managedExecution");
+      expect(legacyEntryJson).not.toContain("exec_");
+      expect(legacyEntryJson).not.toContain("att_");
+      expect(legacyEntryJson).not.toContain("restart");
+
+      // No managed admission, no repository write, and no managed-health
+      // effect from the legacy execution while degraded.
+      expect(admittedEvents).toHaveLength(3);
+      expect(recordAdmissionAttempts).toBe(3);
+      expect(controlHealthWarnings()).toHaveLength(1);
+      rows = yield* repo.listByThreadId("th_t21_legacy");
+      expect(rows).toHaveLength(0);
+      const legacyThreadARows = yield* repo.listByThreadId("th_t21_a");
+      expect(legacyThreadARows).toHaveLength(0);
+      const legacyThreadBRows = yield* repo.listByThreadId("th_t21_b");
+      expect(legacyThreadBRows).toHaveLength(0);
+
+      legacyPiSession.dispose();
 
       // ── T21-AC5: admission-driven recovery from session B ────────────────
       failAdmissionWrites = false;
