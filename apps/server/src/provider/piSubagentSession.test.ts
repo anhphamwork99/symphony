@@ -123,7 +123,7 @@ describe("Pi provider session subagent admission and legacy bypass (T02-AC2, T02
     let spawnCount = 0;
     const { extension, bridge, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
-      capabilities: ["managed-spawn", "abort-propagation"],
+      capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async (cmd) => {
         spawnCount++;
         if (cmd.agentType === "denied_agent") {
@@ -210,7 +210,7 @@ describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC
   it("T03-AC1, T03-AC2: tool execution fails closed and emits no child running event when admission persistence fails", async () => {
     const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
-      capabilities: ["managed-spawn", "abort-propagation"],
+      capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async () => ({
         status: "rejected",
         executionId: "exec_rejected_pers",
@@ -246,7 +246,7 @@ describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC
   it("T03-AC3: tool execution fails closed with degraded diagnostic when control health is degraded", async () => {
     const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
-      capabilities: ["managed-spawn", "abort-propagation"],
+      capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async () => ({
         status: "rejected",
         executionId: "exec_rejected_degraded",
@@ -284,7 +284,7 @@ describe("Pi subagent admission and legacy bypass (Issue 20: T20-AC6, T20-AC7)",
     let spawnCalled = false;
     const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
-      capabilities: ["managed-spawn", "abort-propagation"],
+      capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async (cmd) => {
         spawnCalled = true;
         if (cmd.agentType === "denied_type") {

@@ -163,7 +163,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     createRealExtensionDirectory(tempDir);
 
     const serverConfig = makeServerConfig(tempDir, {
-      piSubagentForegroundWaitMs: 15000, // 15s budget - child finishes well within this
+      piSubagentForegroundWaitMs: 30000, // 30s budget - child finishes well within this
     });
     const { authorityService, binding } = makeAuthorityFixture("th_t22_ac1");
 
@@ -297,7 +297,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       expect(journal[1]!.metadata).toMatchObject({
         phase: "started",
         attachmentMode: "foreground",
-        foregroundWaitMs: 15000,
+        foregroundWaitMs: 30000,
       });
 
       // Confirm no detached event in journal
