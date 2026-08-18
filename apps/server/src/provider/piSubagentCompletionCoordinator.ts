@@ -390,6 +390,10 @@ export const makePiSubagentCompletionCoordinator = (
     ).finally(() => {
       inFlight -= 1;
       settleIdleWaiters();
+    }).catch(() => {
+      // Framing-level containment (see notifyFollowUpSettled): internal
+      // failures are reported through Effect.result + diagnostics — never
+      // an unhandled rejection from the coordinator.
     });
   };
 
@@ -473,6 +477,11 @@ export const makePiSubagentCompletionCoordinator = (
           deliverThread(event.parentThreadId);
         }
       });
+    }).catch(() => {
+      // Framing-level containment: internal failures are already reported
+      // through Effect.result + diagnostics; a coordinator must never leak an
+      // unhandled rejection into the host process (e.g. a scheduled retry
+      // firing after the owning scope was torn down).
     });
   };
 
