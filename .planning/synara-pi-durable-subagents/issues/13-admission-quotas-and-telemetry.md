@@ -42,9 +42,21 @@ writing the first metrics-surface test.
 
 - **T13-AC1, T13-AC2, T13-AC3, T13-AC7:** Server admission integration boundary
   with concurrency, queue, wall-time, and invalid-configuration fixtures.
-- **T13-AC4:** Existing operator metrics surface — concrete seam pending
-  repository exploration; do not create a new public endpoint without proving
-  existing surfaces are insufficient.
+- **T13-AC4:** Existing operator metrics surface — concrete mapping below
+  (proposed by /matt-implement after repository exploration on 2026-08-18,
+  **pending owner approval**; no metrics-surface test is written until the
+  owner approves this mapping): no metrics registry, `/metrics` endpoint, or
+  Prometheus-style exporter exists in the repository. The highest existing
+  stable operator surface is the versioned contract RPC `serverGetDiagnostics`
+  → `ServerDiagnosticsResult` (contract schema
+  `packages/contracts/src/server.ts`, handler `apps/server/src/wsRpc.ts`,
+  client binding `apps/web/src/wsNativeApi.ts`, additive `projection` counts
+  block precedent). Proposal: extend `ServerDiagnosticsResult` with an optional
+  `piSubagents` block (executionCounts: active/queued/cancelling/orphaned/
+  terminal; leaseExpiryCount; detachLatencyMs p50/p95/max; cancelLatencyMs
+  p50/p95/max; progress coalesced/dropped; completionRetries) derived from the
+  durable repository plus in-adapter timing seams. Existing surfaces are
+  sufficient; no new public endpoint is created.
 - **T13-AC5:** Telemetry emission boundary — inspect emitted dimensions and
   default logs for safe correlation and forbidden content.
 - **T13-AC6:** Saturation/load harness extending ticket 05's deterministic

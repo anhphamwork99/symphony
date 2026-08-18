@@ -11,8 +11,7 @@
 
 - [spec.md](spec.md) — normative feature specification.
 - [decisions/0001-testing-strategy-governance.md](decisions/0001-testing-strategy-governance.md) —
-  accepted project-scoped testing strategy.
-- [decisions/0002-t18-migration-lineage-final-acceptance.md](decisions/0002-t18-migration-lineage-final-acceptance.md) —
+  accepted project-scoped testing strategy.- [decisions/0002-t18-migration-lineage-final-acceptance.md](decisions/0002-t18-migration-lineage-final-acceptance.md) —
   accepted migration-lineage baseline for downstream persistence work.
 - [decisions/0003-t19-real-pi-capability-final-acceptance.md](decisions/0003-t19-real-pi-capability-final-acceptance.md) —
   accepted real-Pi handshake and capability baseline.
@@ -65,6 +64,10 @@
   replay-free, and derives lease authority server-side. Ticket 10 is
   complete; Ticket 09 remains awaiting its separate acceptance, after
   which Ticket 11 becomes blocker-free.
+- [decisions/0014-t13-ac4-metrics-surface-approval-authority.md](decisions/0014-t13-ac4-metrics-surface-approval-authority.md) —
+  binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
+  is an ordinary ticket-level seam but still requires fresh human-owner
+  approval before the first metrics-surface test.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
