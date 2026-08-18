@@ -62,6 +62,50 @@ export const DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 2000;
 export const MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 64;
 export const MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 32768;
 
+// Ticket 08: completion-delivery retry budget knob (T08-AC5) — the number of
+// delivery attempts the outbox pump may make for one completion entry before
+// it stops auto-recovering (the entry and its evidence stay readable). Same
+// resolver contract: nullish → default, range check, invalid → default.
+export const DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 5;
+export const MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 0;
+export const MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 100;
+
+export function resolvePiSubagentCompletionRetryLimit(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT ||
+      rawInput > MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT ||
+      parsed > MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+}
+
 export function resolvePiSubagentTerminalSummaryMaxChars(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -406,6 +450,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentCancelAckTimeoutMs?: number;
   readonly piSubagentCancelRetryLimit?: number;
   readonly piSubagentTerminalSummaryMaxChars?: number;
+  readonly piSubagentCompletionRetryLimit?: number;
 }
 
 export function preparePrivateServerPaths(

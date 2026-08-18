@@ -32,7 +32,11 @@ import {
   MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
   MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
   DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
+  MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
   MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
+  resolvePiSubagentCompletionRetryLimit,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveCanonicalWorkspaceRoots,
@@ -545,6 +549,30 @@ describe("resolvePiSubagentCancelRetryLimit (Issue 06)", () => {
   it("falls back to the default without clamping for invalid inputs", () => {
     for (const input of [null, "", "abc", "2x", true, {}, Infinity, NaN, 2.5, -1, 6]) {
       expect(resolvePiSubagentCancelRetryLimit(input)).toBe(DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT);
+    }
+  });
+});
+
+describe("resolvePiSubagentCompletionRetryLimit (Issue 08)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT).toBe(5);
+    expect(MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT).toBe(0);
+    expect(MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT).toBe(100);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentCompletionRetryLimit(undefined)).toBe(5);
+    expect(resolvePiSubagentCompletionRetryLimit(0)).toBe(0);
+    expect(resolvePiSubagentCompletionRetryLimit("0")).toBe(0);
+    expect(resolvePiSubagentCompletionRetryLimit(100)).toBe(100);
+    expect(resolvePiSubagentCompletionRetryLimit("7")).toBe(7);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [null, "", "abc", "3x", true, {}, Infinity, NaN, 2.5, -1, 101]) {
+      expect(resolvePiSubagentCompletionRetryLimit(input)).toBe(
+        DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
+      );
     }
   });
 });

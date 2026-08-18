@@ -246,6 +246,84 @@ export interface PiSubagentSequenceContinuity {
   readonly priorMaxSequence: number | null;
 }
 
+/**
+ * Ticket 08 completion-outbox creation input (T08-AC1). The summary and
+ * transcript reference are the SAME bounded terminal evidence persisted by
+ * `recordTerminalEvent` — the outbox never expands bounded terminal evidence
+ * into unbounded delivery payloads (Decision 0012 F2 obligation).
+ */
+export interface RecordPiSubagentCompletionOutboxInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  /** Journal event id of the applicable terminal this entry delivers. */
+  readonly terminalEventId: string;
+  readonly parentThreadId: string;
+  readonly terminalState: "succeeded" | "failed";
+  readonly summary: string;
+  readonly transcriptRef?: string | null;
+  readonly now: string;
+}
+
+export type PiSubagentCompletionOutboxRecordResult =
+  | {
+      readonly kind: "created";
+      readonly entry: PiSubagentCompletionOutboxEntry;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly entry: PiSubagentCompletionOutboxEntry;
+    };
+
+/** Ticket 08 durable outbox entry (delivery state machine, T08-AC2). */
+export type PiSubagentCompletionOutboxEntry = {
+  readonly outboxId: string;
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly terminalEventId: string;
+  readonly parentThreadId: string;
+  readonly deliveryState:
+    | "pending"
+    | "delivered"
+    | "acknowledged"
+    | "failed_retryable"
+    | "superseded";
+  readonly terminalState: "succeeded" | "failed";
+  readonly summary: string;
+  readonly transcriptRef: string | null;
+  readonly attemptCount: number;
+  readonly lastError: string | null;
+  readonly supersededByGeneration: number | null;
+  readonly deliveredAt: string | null;
+  readonly acknowledgedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+/**
+ * Ticket 08 delivery-transition outcomes (T08-AC2/AC5/AC6). Every transition
+ * is guarded: an invalid transition is reported, never silently applied, and
+ * NO transition mutates the execution aggregate's outcome.
+ */
+export type PiSubagentCompletionDeliveryTransitionResult =
+  | {
+      readonly kind: "transitioned";
+      readonly entry: PiSubagentCompletionOutboxEntry;
+    }
+  | {
+      readonly kind: "invalid_transition";
+      readonly reason: "already_terminal_delivery_state";
+      readonly entry: PiSubagentCompletionOutboxEntry;
+    }
+  | {
+      readonly kind: "not_found";
+    }
+  | {
+      readonly kind: "superseded_instead";
+      readonly entry: PiSubagentCompletionOutboxEntry;
+    };
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
@@ -337,6 +415,101 @@ export interface PiSubagentExecutionRepositoryShape {
       readonly terminalTranscriptRef: string | null;
       readonly staleTerminalEvents: number;
     }>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 idempotent outbox-entry creation (T08-AC3). Used directly by
+   * the journal-first recovery scan and safe to replay: the deterministic
+   * outbox identity makes a duplicate create return already_applied.
+   */
+  readonly recordCompletionOutboxEntry: (
+    input: RecordPiSubagentCompletionOutboxInput,
+  ) => Effect.Effect<PiSubagentCompletionOutboxRecordResult, PiSubagentExecutionRepositoryError>;
+  /** Ticket 08 outbox reader by deterministic identity. */
+  readonly getCompletionOutboxEntry: (
+    outboxId: string,
+  ) => Effect.Effect<
+    Option.Option<PiSubagentCompletionOutboxEntry>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 recoverable-pending scan (T08-AC4): every entry that may still
+   * produce a delivery effect — `pending`, plus `failed_retryable` entries
+   * within the retry budget — oldest first.
+   */
+  readonly listRecoverableCompletionOutbox: (options: {
+    readonly retryLimit: number;
+  }) => Effect.Effect<
+    ReadonlyArray<PiSubagentCompletionOutboxEntry>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 terminal journal rows with NO outbox entry (T08-AC1
+   * journal-first recovery): pre-102 databases and any crash window between
+   * journal commit and outbox creation.
+   */
+  readonly listTerminalEventsWithoutOutbox: () => Effect.Effect<
+    ReadonlyArray<{
+      readonly eventId: string;
+      readonly executionId: string;
+      readonly attemptId: string;
+      readonly generation: number;
+      readonly state: "succeeded" | "failed";
+      readonly occurredAt: string;
+      readonly summary: string | null;
+      readonly transcriptRef: string | null;
+      readonly parentThreadId: string;
+    }>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 delivery transition: pending|failed_retryable → delivered
+   * (T08-AC2/AC5). Fenced by the CURRENT execution attempt/generation: an
+   * entry whose generation is no longer current is superseded instead and
+   * produces no delivery effect (T08-AC6).
+   */
+  readonly markCompletionDelivered: (input: {
+    readonly outboxId: string;
+    readonly now: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDeliveryTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 delivery acknowledgement: delivered → acknowledged (T08-AC5).
+   * Acknowledged entries are complete and can no longer produce effects.
+   */
+  readonly markCompletionAcknowledged: (input: {
+    readonly outboxId: string;
+    readonly now: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDeliveryTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 retryable delivery failure: pending|delivered|failed_retryable
+   * → failed_retryable with attempt_count + 1 (T08-AC2/AC5). The execution
+   * outcome is NEVER mutated — delivery failure is not execution failure.
+   */
+  readonly markCompletionDeliveryFailed: (input: {
+    readonly outboxId: string;
+    readonly now: string;
+    readonly error: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDeliveryTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 08 supersede (T08-AC6): a newer attempt/generation owns the
+   * execution; this entry must never produce a delivery effect while its
+   * original execution evidence remains readable.
+   */
+  readonly markCompletionSuperseded: (input: {
+    readonly outboxId: string;
+    readonly supersededByGeneration: number;
+    readonly now: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDeliveryTransitionResult,
     PiSubagentExecutionRepositoryError
   >;
 }

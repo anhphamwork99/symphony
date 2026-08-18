@@ -3,6 +3,7 @@ import { Effect } from "effect";
 
 import {
   DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
 } from "../config.ts";
 import type {
@@ -119,10 +120,15 @@ export const ingestPiSubagentTerminal = (
   input: IngestPiSubagentTerminalInput,
 ): Effect.Effect<IngestPiSubagentTerminalResult, unknown> =>
   Effect.gen(function* () {
+    // Decision 0012 F3 follow-up (symmetric defensive guard): the seam is
+    // externally constructible, so the direct guard must check BOTH bounds —
+    // a caller-supplied cap above the configuration maximum falls back to
+    // the default, exactly like an out-of-range configuration value.
     const summaryMaxChars =
       input.summaryMaxChars !== undefined &&
       Number.isInteger(input.summaryMaxChars) &&
-      input.summaryMaxChars >= MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS
+      input.summaryMaxChars >= MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS &&
+      input.summaryMaxChars <= MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS
         ? input.summaryMaxChars
         : DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
 

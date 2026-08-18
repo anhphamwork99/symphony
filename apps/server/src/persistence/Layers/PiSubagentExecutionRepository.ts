@@ -12,13 +12,17 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
-  type PiSubagentAdmissionRecordResult,
+  type PersistenceSqlError,
+  toPersistenceDecodeError,
+  toPersistenceSqlError,
+} from "../Errors.ts";
+import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
   type PiSubagentExecutionObservation,
-  type PiSubagentLifecycleRecordResult,
+  type PiSubagentCompletionOutboxEntry,
+  type RecordPiSubagentCompletionOutboxInput,
   type RecordPiSubagentAdmissionInput,
   type RecordPiSubagentHeartbeatObservationInput,
   type RecordPiSubagentLifecycleEventInput,
@@ -125,6 +129,27 @@ interface TerminalEvidenceRow {
   readonly terminalSummary: string | null;
   readonly terminalTranscriptRef: string | null;
   readonly staleTerminalEvents: number;
+}
+
+/** Ticket 08 completion-outbox row (delivery state machine, T08-AC2). */
+interface OutboxRow {
+  readonly outboxId: string;
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly terminalEventId: string;
+  readonly parentThreadId: string;
+  readonly deliveryState: PiSubagentCompletionOutboxEntry["deliveryState"];
+  readonly terminalState: "succeeded" | "failed";
+  readonly summary: string;
+  readonly transcriptRef: string | null;
+  readonly attemptCount: number;
+  readonly lastError: string | null;
+  readonly supersededByGeneration: number | null;
+  readonly deliveredAt: string | null;
+  readonly acknowledgedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
@@ -1189,6 +1214,47 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 AND observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
             `;
 
+          // Ticket 08 durable completion outbox (T08-AC1): the outbox entry
+          // is created in the SAME transaction as the terminal journal row
+          // and aggregate settlement — terminal persistence and outbox
+          // creation are atomic, so a crash can never leave a terminal
+          // without its recoverably-pending completion entry, and an outbox
+          // write failure fails the whole transaction (no terminal, no
+          // notification). The payload reuses the SAME bounded terminal
+          // evidence (Decision 0012 F2 obligation) — never unbounded.
+          yield* sql`
+              INSERT INTO pi_subagent_completion_outbox (
+                outbox_id,
+                execution_id,
+                attempt_id,
+                generation,
+                terminal_event_id,
+                parent_thread_id,
+                delivery_state,
+                terminal_state,
+                summary,
+                transcript_ref,
+                attempt_count,
+                created_at,
+                updated_at
+              ) VALUES (
+                ${`outbox_${input.executionId}_${input.attemptId}_gen${input.generation}`},
+                ${input.executionId},
+                ${input.attemptId},
+                ${input.generation},
+                ${eventId},
+                ${execution.parentThreadId},
+                'pending',
+                ${input.state},
+                ${input.summary},
+                ${input.transcriptRef ?? null},
+                0,
+                ${input.occurredAt},
+                ${input.occurredAt}
+              )
+              ON CONFLICT (execution_id, attempt_id, generation) DO NOTHING
+            `;
+
           const refreshedRows = yield* getByIdInternal(input.executionId);
           const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
           return {
@@ -1300,6 +1366,411 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       }));
     });
 
+  // ---------------------------------------------------------------------
+  // Ticket 08 durable completion outbox. Delivery state is a SEPARATE state
+  // machine from the execution outcome: no method below ever touches the
+  // pi_subagent_executions aggregate (T08-AC2).
+  // ---------------------------------------------------------------------
+
+  const outboxColumns = sql`
+    outbox_id AS "outboxId",
+    execution_id AS "executionId",
+    attempt_id AS "attemptId",
+    generation,
+    terminal_event_id AS "terminalEventId",
+    parent_thread_id AS "parentThreadId",
+    delivery_state AS "deliveryState",
+    terminal_state AS "terminalState",
+    summary,
+    transcript_ref AS "transcriptRef",
+    attempt_count AS "attemptCount",
+    last_error AS "lastError",
+    superseded_by_generation AS "supersededByGeneration",
+    delivered_at AS "deliveredAt",
+    acknowledged_at AS "acknowledgedAt",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt"
+  `;
+
+  const getOutboxByIdInternal = (outboxId: string) =>
+    sql<OutboxRow>`
+      SELECT ${outboxColumns}
+      FROM pi_subagent_completion_outbox
+      WHERE outbox_id = ${outboxId}
+      LIMIT 1
+    `;
+
+  const recordCompletionOutboxEntry: PiSubagentExecutionRepositoryShape["recordCompletionOutboxEntry"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const outboxId = `outbox_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+            const existing = yield* sql<OutboxRow>`
+              SELECT ${outboxColumns}
+              FROM pi_subagent_completion_outbox
+              WHERE execution_id = ${input.executionId}
+                AND attempt_id = ${input.attemptId}
+                AND generation = ${input.generation}
+              LIMIT 1
+            `;
+            if (existing.length > 0) {
+              return { kind: "already_applied" as const, entry: existing[0]! };
+            }
+            yield* sql`
+              INSERT INTO pi_subagent_completion_outbox (
+                outbox_id,
+                execution_id,
+                attempt_id,
+                generation,
+                terminal_event_id,
+                parent_thread_id,
+                delivery_state,
+                terminal_state,
+                summary,
+                transcript_ref,
+                attempt_count,
+                created_at,
+                updated_at
+              ) VALUES (
+                ${outboxId},
+                ${input.executionId},
+                ${input.attemptId},
+                ${input.generation},
+                ${input.terminalEventId},
+                ${input.parentThreadId},
+                'pending',
+                ${input.terminalState},
+                ${input.summary},
+                ${input.transcriptRef ?? null},
+                0,
+                ${input.now},
+                ${input.now}
+              )
+            `;
+            const created = yield* getOutboxByIdInternal(outboxId);
+            return { kind: "created" as const, entry: created[0]! };
+          }),
+        )
+        .pipe(
+          Effect.catch((err) =>
+            Effect.gen(function* () {
+              // Concurrent create on the unique identity: replay-safe.
+              const outboxId = `outbox_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+              const existing = yield* getOutboxByIdInternal(outboxId).pipe(
+                Effect.mapError(
+                  toPersistenceSqlError(
+                    "PiSubagentExecutionRepository.recordCompletionOutboxEntry:dedup-recheck",
+                  ),
+                ),
+              );
+              if (existing.length > 0) {
+                return { kind: "already_applied" as const, entry: existing[0]! };
+              }
+              return yield* Effect.fail(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordCompletionOutboxEntry:insert",
+                )(err),
+              );
+            }),
+          ),
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.recordCompletionOutboxEntry:insert",
+            ),
+          ),
+        );
+
+  const getCompletionOutboxEntry: PiSubagentExecutionRepositoryShape["getCompletionOutboxEntry"] = (
+    outboxId,
+  ) =>
+    Effect.gen(function* () {
+      const rows = yield* getOutboxByIdInternal(outboxId).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getCompletionOutboxEntry:query"),
+        ),
+      );
+      return rows.length > 0 ? Option.some(rows[0]!) : Option.none();
+    });
+
+  const listRecoverableCompletionOutbox: PiSubagentExecutionRepositoryShape["listRecoverableCompletionOutbox"] =
+    (options) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<OutboxRow>`
+          SELECT ${outboxColumns}
+          FROM pi_subagent_completion_outbox
+          WHERE delivery_state = 'pending'
+             OR (
+               delivery_state = 'failed_retryable'
+               AND attempt_count < ${options.retryLimit}
+             )
+          ORDER BY created_at ASC, outbox_id ASC
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.listRecoverableCompletionOutbox:query",
+            ),
+          ),
+        );
+        return rows;
+      });
+
+  const listTerminalEventsWithoutOutbox: PiSubagentExecutionRepositoryShape["listTerminalEventsWithoutOutbox"] =
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly eventId: string;
+          readonly executionId: string;
+          readonly attemptId: string;
+          readonly generation: number;
+          readonly state: "succeeded" | "failed";
+          readonly occurredAt: string;
+          readonly summary: string | null;
+          readonly transcriptRef: string | null;
+          readonly parentThreadId: string;
+        }>`
+          SELECT
+            j.event_id AS "eventId",
+            j.execution_id AS "executionId",
+            j.attempt_id AS "attemptId",
+            j.generation,
+            j.state,
+            j.occurred_at AS "occurredAt",
+            j.metadata_json ->> 'summary' AS "summary",
+            j.metadata_json ->> 'transcriptRef' AS "transcriptRef",
+            e.parent_thread_id AS "parentThreadId"
+          FROM pi_subagent_lifecycle_journal j
+          JOIN pi_subagent_executions e ON j.execution_id = e.execution_id
+          WHERE j.state IN ('succeeded', 'failed')
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pi_subagent_completion_outbox o
+              WHERE o.execution_id = j.execution_id
+                AND o.attempt_id = j.attempt_id
+                AND o.generation = j.generation
+            )
+          ORDER BY j.occurred_at ASC, j.event_id ASC
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.listTerminalEventsWithoutOutbox:query",
+            ),
+          ),
+        );
+        return rows;
+      });
+
+  /**
+   * Generation fence for delivery transitions (T08-AC6): an entry whose
+   * attempt/generation no longer matches the CURRENT aggregate is superseded
+   * — its completion must never produce a delivery effect.
+   */
+  const fenceOrSupersede = (
+    entry: OutboxRow,
+    now: string,
+  ): Effect.Effect<
+    { kind: "current" } | { kind: "superseded_instead"; entry: OutboxRow },
+    PersistenceSqlError
+  > =>
+    Effect.gen(function* () {
+      const executionRows = yield* getByIdInternal(entry.executionId).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.fenceOrSupersede:execution-lookup"),
+        ),
+      );
+      const execution = executionRows[0];
+      if (
+        execution === undefined ||
+        (execution.attemptId === entry.attemptId && execution.generation === entry.generation)
+      ) {
+        return { kind: "current" as const };
+      }
+      const superseded = yield* sql<OutboxRow>`
+          UPDATE pi_subagent_completion_outbox
+          SET
+            delivery_state = 'superseded',
+            superseded_by_generation = ${execution.generation},
+            updated_at = ${now}
+          WHERE outbox_id = ${entry.outboxId}
+            AND delivery_state IN ('pending', 'failed_retryable')
+          RETURNING ${outboxColumns}
+        `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.fenceOrSupersede:update"),
+        ),
+      );
+      const after = superseded[0] ?? entry;
+      return { kind: "superseded_instead" as const, entry: after };
+    });
+
+  const markCompletionDelivered: PiSubagentExecutionRepositoryShape["markCompletionDelivered"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const rows = yield* getOutboxByIdInternal(input.outboxId);
+          if (rows.length === 0) {
+            return { kind: "not_found" as const };
+          }
+          const entry = rows[0]!;
+          if (entry.deliveryState !== "pending" && entry.deliveryState !== "failed_retryable") {
+            return {
+              kind: "invalid_transition" as const,
+              reason: "already_terminal_delivery_state" as const,
+              entry,
+            };
+          }
+          const fence = yield* fenceOrSupersede(entry, input.now);
+          if (fence.kind === "superseded_instead") {
+            return { kind: "superseded_instead" as const, entry: fence.entry };
+          }
+          const updated = yield* sql<OutboxRow>`
+              UPDATE pi_subagent_completion_outbox
+              SET
+                delivery_state = 'delivered',
+                delivered_at = ${input.now},
+                last_error = NULL,
+                updated_at = ${input.now}
+              WHERE outbox_id = ${input.outboxId}
+                AND delivery_state IN ('pending', 'failed_retryable')
+              RETURNING ${outboxColumns}
+            `;
+          const after = updated[0] ?? entry;
+          return { kind: "transitioned" as const, entry: after };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionDelivered:update"),
+        ),
+      );
+
+  const markCompletionAcknowledged: PiSubagentExecutionRepositoryShape["markCompletionAcknowledged"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getOutboxByIdInternal(input.outboxId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const entry = rows[0]!;
+            if (entry.deliveryState === "acknowledged") {
+              // Idempotent ack replay: exactly-once effect already applied.
+              return { kind: "transitioned" as const, entry };
+            }
+            if (entry.deliveryState !== "delivered") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal_delivery_state" as const,
+                entry,
+              };
+            }
+            const updated = yield* sql<OutboxRow>`
+                UPDATE pi_subagent_completion_outbox
+                SET
+                  delivery_state = 'acknowledged',
+                  acknowledged_at = ${input.now},
+                  updated_at = ${input.now}
+                WHERE outbox_id = ${input.outboxId}
+                  AND delivery_state = 'delivered'
+                RETURNING ${outboxColumns}
+              `;
+            const after = updated[0] ?? entry;
+            return { kind: "transitioned" as const, entry: after };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.markCompletionAcknowledged:update",
+            ),
+          ),
+        );
+
+  const markCompletionDeliveryFailed: PiSubagentExecutionRepositoryShape["markCompletionDeliveryFailed"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getOutboxByIdInternal(input.outboxId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const entry = rows[0]!;
+            if (entry.deliveryState === "acknowledged" || entry.deliveryState === "superseded") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal_delivery_state" as const,
+                entry,
+              };
+            }
+            const fence = yield* fenceOrSupersede(entry, input.now);
+            if (fence.kind === "superseded_instead") {
+              return { kind: "superseded_instead" as const, entry: fence.entry };
+            }
+            const updated = yield* sql<OutboxRow>`
+                UPDATE pi_subagent_completion_outbox
+                SET
+                  delivery_state = 'failed_retryable',
+                  attempt_count = attempt_count + 1,
+                  last_error = ${input.error},
+                  updated_at = ${input.now}
+                WHERE outbox_id = ${input.outboxId}
+                  AND delivery_state IN ('pending', 'delivered', 'failed_retryable')
+                RETURNING ${outboxColumns}
+              `;
+            const after = updated[0] ?? entry;
+            return { kind: "transitioned" as const, entry: after };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.markCompletionDeliveryFailed:update",
+            ),
+          ),
+        );
+
+  const markCompletionSuperseded: PiSubagentExecutionRepositoryShape["markCompletionSuperseded"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const rows = yield* getOutboxByIdInternal(input.outboxId);
+          if (rows.length === 0) {
+            return { kind: "not_found" as const };
+          }
+          const entry = rows[0]!;
+          if (entry.deliveryState === "acknowledged") {
+            return {
+              kind: "invalid_transition" as const,
+              reason: "already_terminal_delivery_state" as const,
+              entry,
+            };
+          }
+          const updated = yield* sql<OutboxRow>`
+                UPDATE pi_subagent_completion_outbox
+                SET
+                  delivery_state = 'superseded',
+                  superseded_by_generation = ${input.supersededByGeneration},
+                  updated_at = ${input.now}
+                WHERE outbox_id = ${input.outboxId}
+                  AND delivery_state IN ('pending', 'delivered', 'failed_retryable')
+                RETURNING ${outboxColumns}
+              `;
+          const after = updated[0] ?? entry;
+          return { kind: "transitioned" as const, entry: after };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionSuperseded:update"),
+        ),
+      );
+
   return {
     recordAdmission,
     recordLifecycleEvent,
@@ -1315,6 +1786,14 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     recordCancelledAck,
     recordTerminalEvent,
     getTerminalEvidence,
+    recordCompletionOutboxEntry,
+    getCompletionOutboxEntry,
+    listRecoverableCompletionOutbox,
+    listTerminalEventsWithoutOutbox,
+    markCompletionDelivered,
+    markCompletionAcknowledged,
+    markCompletionDeliveryFailed,
+    markCompletionSuperseded,
   } satisfies PiSubagentExecutionRepositoryShape;
 });
 

@@ -3291,8 +3291,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                         },
                         onTerminalPersisted: (event) => {
                           // T07-AC1: completion delivery may begin only now
-                          // (journal + aggregate are committed). Ticket 08
-                          // attaches its outbox creation here.
+                          // (journal + aggregate are committed). Ticket 08:
+                          // the durable completion-outbox entry was created
+                          // in the SAME transaction — announce the pending
+                          // completion on the operator runtime-event surface
+                          // (bounded payload only). Ticket 09 owns the
+                          // parent follow-up-turn consumer.
                           offerRuntimeEvent({
                             ...makeEventBase(context),
                             type: "runtime.warning",
@@ -3314,6 +3318,32 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                               },
                             },
                           } satisfies ProviderRuntimeEvent);
+                          if (event.result.kind === "recorded") {
+                            offerRuntimeEvent({
+                              ...makeEventBase(context),
+                              type: "runtime.warning",
+                              payload: {
+                                message: `Pi subagent completion outbox pending [${event.result.execution.executionId}]`,
+                                detail: {
+                                  executionId: event.result.execution.executionId,
+                                  attemptId: event.result.execution.attemptId,
+                                  generation: event.result.execution.generation,
+                                  deliveryState: "pending",
+                                },
+                              },
+                              raw: {
+                                source: "pi.sdk.event",
+                                method: "subagents/completion-outbox-pending",
+                                payload: {
+                                  executionId: event.result.execution.executionId,
+                                  attemptId: event.result.execution.attemptId,
+                                  generation: event.result.execution.generation,
+                                  outboxId: `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`,
+                                  terminalState: event.result.execution.observedState,
+                                },
+                              },
+                            } satisfies ProviderRuntimeEvent);
+                          }
                         },
                         onDiagnostic: (event) => {
                           offerRuntimeEvent({

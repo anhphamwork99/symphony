@@ -2,6 +2,7 @@ import { Schema } from "effect";
 
 import {
   EventId,
+  NonNegativeInt,
   PositiveInt,
   ProjectId,
   ThreadId,
@@ -53,6 +54,9 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_event_sequence_gap",
   "pi_subagent_terminal_stale_ignored",
   "pi_subagent_terminal_persistence_failed",
+  "pi_subagent_completion_outbox_persistence_failed",
+  "pi_subagent_completion_delivery_failed",
+  "pi_subagent_completion_superseded",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -281,3 +285,61 @@ export const PiSubagentTerminalEvidence = Schema.Struct({
   diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentTerminalEvidence = typeof PiSubagentTerminalEvidence.Type;
+
+/**
+ * Ticket 08 completion-delivery states (T08-AC2). These are DELIVERY states,
+ * entirely separate from the execution outcome: a `failed_retryable` or
+ * `superseded` delivery never rewrites a `succeeded` execution as failed.
+ *
+ * - `pending` — created atomically with the applicable terminal; not yet
+ *   delivered to the parent notification boundary.
+ * - `delivered` — the parent notification boundary accepted the completion
+ *   payload (dedupe identity carried); acknowledgement has not arrived yet.
+ * - `acknowledged` — the parent durably acknowledged the completion; the
+ *   entry is complete and can no longer produce follow-up effects.
+ * - `failed_retryable` — a delivery attempt failed; retry is idempotent and
+ *   bounded by the configured retry limit. Execution outcome is untouched.
+ * - `superseded` — a newer attempt/generation owns the execution now; this
+ *   entry must never produce a delivery effect (T08-AC6).
+ */
+export const PiSubagentCompletionDeliveryState = Schema.Literals([
+  "pending",
+  "delivered",
+  "acknowledged",
+  "failed_retryable",
+  "superseded",
+]);
+export type PiSubagentCompletionDeliveryState = typeof PiSubagentCompletionDeliveryState.Type;
+
+/**
+ * Ticket 08 durable completion-outbox entry (T08-AC2/AC3/AC5). One entry per
+ * applicable terminal (succeeded|failed) for an attempt/generation. The
+ * stable dedupe identity (`outboxId`) is deterministic so at-least-once
+ * delivery retries can never create duplicate parent content.
+ */
+export const PiSubagentCompletionOutboxEntry = Schema.Struct({
+  /** Deterministic: `outbox_<executionId>_<attemptId>_gen<generation>`. */
+  outboxId: TrimmedNonEmptyString,
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  /** Journal event id of the applicable terminal this entry delivers. */
+  terminalEventId: TrimmedNonEmptyString,
+  parentThreadId: ThreadId,
+  deliveryState: PiSubagentCompletionDeliveryState,
+  /** Bounded terminal-state label (succeeded|failed) — outcome reference. */
+  terminalState: PiSubagentTerminalState,
+  /** Bounded result summary excerpt carried to the parent boundary. */
+  summary: TrimmedNonEmptyString,
+  /** Opaque authorized transcript reference (bounded, T07-AC5 inheritance). */
+  transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  attemptCount: NonNegativeInt,
+  lastError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Generation that superseded this entry, when `superseded`. */
+  supersededByGeneration: Schema.optional(Schema.NullOr(PositiveInt)),
+  createdAt: TrimmedNonEmptyString,
+  updatedAt: TrimmedNonEmptyString,
+  deliveredAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  acknowledgedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+export type PiSubagentCompletionOutboxEntry = typeof PiSubagentCompletionOutboxEntry.Type;

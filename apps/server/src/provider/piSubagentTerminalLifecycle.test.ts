@@ -550,6 +550,31 @@ describe("Pi Subagent journal-first terminal lifecycle (Issue 07)", () => {
     );
   });
 
+  it("Decision 0012 F3: a caller-supplied summaryMaxChars above the configuration maximum falls back to the default", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+
+        // The direct seam is externally constructible: an oversized cap must
+        // NOT be honored — the default (2000) applies instead, symmetric with
+        // the configuration resolver's range check.
+        const result = yield* ingestPiSubagentTerminal({
+          repository,
+          observation: makeObservation({ summary: "z".repeat(9_999) }),
+          summaryMaxChars: 1_000_000,
+        });
+        expect(result.outcome).toBe("persisted");
+
+        const evidence = yield* repository.getTerminalEvidence("exec_t07_1");
+        expect(Option.isSome(evidence)).toBe(true);
+        if (Option.isSome(evidence)) {
+          expect(evidence.value.terminalSummary?.length).toBeLessThanOrEqual(2000);
+        }
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
   it("T07-AC6 (saturation harness): terminal persists while the real progress coalescer is under a flood", async () => {
     // Shared provider-ingress saturation harness (ticket 05 / T23-AC6
     // harness): drive the EXACT server coalescer on a virtual clock, flood

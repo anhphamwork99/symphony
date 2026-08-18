@@ -5,6 +5,8 @@ import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
   PiSubagentCapability,
+  PiSubagentCompletionDeliveryState,
+  PiSubagentCompletionOutboxEntry,
   PiSubagentDiagnosticCode,
   PiSubagentExecutionRecord,
   PiSubagentHandshakeFailureResponse,
@@ -237,6 +239,103 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
     expect(decoded).toBe("bounded-foreground-attachment");
     expect(() =>
       Schema.decodeSync(PiSubagentCapability)("unsupported-capability" as never),
+    ).toThrow();
+  });
+});
+
+describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
+  it("decodes every completion delivery state (T08-AC2)", () => {
+    for (const state of [
+      "pending",
+      "delivered",
+      "acknowledged",
+      "failed_retryable",
+      "superseded",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentCompletionDeliveryState)(state)).toBe(state);
+    }
+    expect(() => Schema.decodeSync(PiSubagentCompletionDeliveryState)("failed" as never)).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCompletionDeliveryState)("terminal" as never),
+    ).toThrow();
+  });
+
+  it("decodes a valid completion-outbox entry with bounded evidence payloads (T08-AC2/AC5)", () => {
+    const entry = {
+      outboxId: "outbox_exec_1_att_1_gen1",
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+      terminalEventId: "terminal_exec_123456_att_001_gen1_succeeded",
+      parentThreadId: "thread_main",
+      deliveryState: "pending" as const,
+      terminalState: "succeeded" as const,
+      summary: "Agent completed: 3 tool uses. Outcome: done.",
+      transcriptRef: "/tmp/agents/exec_1/output.md",
+      attemptCount: 0,
+      lastError: null,
+      supersededByGeneration: null,
+      createdAt: "2026-08-18T00:01:00.000Z",
+      updatedAt: "2026-08-18T00:01:00.000Z",
+      deliveredAt: null,
+      acknowledgedAt: null,
+    };
+
+    const decoded = Schema.decodeSync(PiSubagentCompletionOutboxEntry)(entry);
+    expect(decoded.outboxId).toBe("outbox_exec_1_att_1_gen1");
+    expect(decoded.deliveryState).toBe("pending");
+    expect(decoded.terminalState).toBe("succeeded");
+    expect(decoded.attemptCount).toBe(0);
+  });
+
+  it("rejects outbox entries with invalid delivery state, negative attempts, or empty identity", () => {
+    const base = {
+      outboxId: "outbox_exec_1_att_1_gen1",
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+      terminalEventId: "terminal_exec_123456_att_001_gen1_succeeded",
+      parentThreadId: "thread_main",
+      deliveryState: "pending" as const,
+      terminalState: "succeeded" as const,
+      summary: "done",
+      transcriptRef: null,
+      attemptCount: 0,
+      lastError: null,
+      supersededByGeneration: null,
+      createdAt: "2026-08-18T00:01:00.000Z",
+      updatedAt: "2026-08-18T00:01:00.000Z",
+      deliveredAt: null,
+      acknowledgedAt: null,
+    };
+
+    expect(() =>
+      Schema.decodeSync(PiSubagentCompletionOutboxEntry)({
+        ...base,
+        deliveryState: "delivered-and-failed" as never,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCompletionOutboxEntry)({ ...base, attemptCount: -1 }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCompletionOutboxEntry)({ ...base, outboxId: "   " }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCompletionOutboxEntry)({ ...base, generation: 0 }),
+    ).toThrow();
+  });
+
+  it("exposes the Ticket 08 diagnostic codes as first-class literals", () => {
+    for (const code of [
+      "pi_subagent_completion_outbox_persistence_failed",
+      "pi_subagent_completion_delivery_failed",
+      "pi_subagent_completion_superseded",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_completion_unknown" as never),
     ).toThrow();
   });
 });
