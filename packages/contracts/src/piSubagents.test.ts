@@ -347,4 +347,18 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
       Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_completion_unknown" as never),
     ).toThrow();
   });
+
+  it("exposes the Decision 0016 batch diagnostic codes as first-class literals", () => {
+    for (const code of [
+      "pi_subagent_completion_batch_persistence_failed",
+      "pi_subagent_completion_batch_rejected",
+      "pi_subagent_completion_batch_collision",
+      "pi_subagent_completion_batch_recovery_failed",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_completion_batch_unknown" as never),
+    ).toThrow();
+  });
 });
