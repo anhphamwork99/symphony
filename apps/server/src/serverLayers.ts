@@ -56,9 +56,11 @@ import { ManagedAttachmentCleanupLive } from "./managedAttachmentCleanup";
 import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService";
 import { PiSubagentExecutionRepositoryLive } from "./persistence/Layers/PiSubagentExecutionRepository";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
+import { makePiSubagentParentEffectDispatcher } from "./provider/piSubagentParentEffectDispatcher";
 import { makeServerProviderLayer } from "./provider/runtimeLayer";
 
 export { makeServerProviderLayer } from "./provider/runtimeLayer";
+export { makePiSubagentParentEffectDispatcher } from "./provider/piSubagentParentEffectDispatcher";
 
 export function provideThreadDeletionReactorDeviceService<
   ReactorServices,
@@ -263,10 +265,19 @@ export function makeServerRuntimeServicesLayer(
  */
 export function makeServerApplicationLayers() {
   const agentGatewayCredentialsLayer = AgentGatewayCredentialsWithSecretsLive;
+  // Decision 0016 §9: the parent-effect dispatcher is composition-owned and
+  // constructed BEFORE the provider layer (avoids the OrchestrationEngine →
+  // ProviderCommandReactor → ProviderService/PiAdapter construction cycle).
+  // It is bound exactly once in main.ts when the engine is live.
+  const completionDispatchBridge = makePiSubagentParentEffectDispatcher();
   return {
     runtimeServicesLayer: makeServerRuntimeServicesLayer({
       agentGatewayCredentialsLayer,
     }),
-    providerLayer: makeServerProviderLayer({ agentGatewayCredentialsLayer }),
+    providerLayer: makeServerProviderLayer({
+      agentGatewayCredentialsLayer,
+      completionDispatchBridge,
+    }),
+    completionDispatchBridge,
   } as const;
 }

@@ -386,8 +386,11 @@ const ServerConfigLive = (input: CliInput) =>
     }),
   );
 
-const LayerLive = (input: CliInput) => {
-  const { runtimeServicesLayer, providerLayer } = makeServerApplicationLayers();
+const LayerLive = (
+  input: CliInput,
+  serverLayers: ReturnType<typeof makeServerApplicationLayers> = makeServerApplicationLayers(),
+) => {
+  const { runtimeServicesLayer, providerLayer } = serverLayers;
   const providerSessionReaperLayer = ProviderSessionReaperLive.pipe(
     // The reaper coordinates orchestration state with live provider sessions,
     // so it belongs at the top level where both layers are available.
@@ -424,8 +427,11 @@ export function makeServerStartupLogData(config: ServerConfigShape): Record<stri
   };
 }
 
-const makeServerProgram = (input: CliInput) =>
-  Effect.gen(function* () {
+const makeServerProgram = (input: CliInput) => {
+  // Composition-owned parent-effect dispatcher: created before the provider
+  // layer and bound exactly once when the engine is live (Decision 0016 §9).
+  const serverLayers = makeServerApplicationLayers();
+  return Effect.gen(function* () {
     const cliConfig = yield* CliConfig;
     const { start, stopSignal } = yield* Server;
     const openDeps = yield* Open;
@@ -467,6 +473,9 @@ const makeServerProgram = (input: CliInput) =>
         : undefined;
 
     const orchestrationEngine = yield* OrchestrationEngineService;
+    // Decision 0016: bind the completion parent-effect dispatcher exactly once
+    // when the engine is live (firing the adapter's recovery-trigger callback).
+    serverLayers.completionDispatchBridge.bindOnce(orchestrationEngine);
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     // Start the retention loop after the server is live so startup can serve
     // existing history first, then hide inactive threads from the app in the background.
@@ -560,7 +569,7 @@ const makeServerProgram = (input: CliInput) =>
     }
 
     return yield* stopSignal;
-  }).pipe(Effect.scoped, Effect.provide(LayerLive(input)));
+  }).pipe(Effect.scoped, Effect.provide(LayerLive(input, serverLayers)));
 
 /**
  * These flags mirrors the environment variables and the config shape.

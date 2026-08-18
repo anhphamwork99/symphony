@@ -232,6 +232,17 @@ export const makePiSubagentParentEffectDispatcher =
       bindOnce,
       isBound: () => engine !== undefined,
       onBound: (callback) => {
+        if (engine !== undefined) {
+          // Already bound: fire immediately (composition may construct the
+          // provider layer after the engine is bound).
+          try {
+            callback();
+          } catch (cause) {
+            // Advisory; contained.
+            // eslint-disable-next-line no-console
+            console.error("completion dispatcher onBound callback failed", cause);
+          }
+        }
         boundCallbacks.add(callback);
         return () => boundCallbacks.delete(callback);
       },
