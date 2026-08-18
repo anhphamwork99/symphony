@@ -36,6 +36,9 @@ authoritative gate for starting this ticket.
 
 **Approval status:** Approved — owner approval in the ticket-breakdown review
 on 2026-08-16, including the termination-evidence rule recorded in T06-AC4.
+**Final acceptance:** Accepted — Decision 0011 (2026-08-18), Symphony
+`df38bfcb` + `f92ad194`, Alfie `53f84bb56`; nonblocking risks F1/F3/F4
+recorded with follow-up owners (tickets 10/15/13).
 
 - **T06-AC1, T06-AC3, T06-AC4:** Cancel command and execution state-machine
   contracts — desired/observed transitions, generation fencing, and evidence
