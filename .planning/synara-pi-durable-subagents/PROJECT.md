@@ -53,6 +53,11 @@
   `journal-terminal-lifecycle`, host-gated terminal reporting); review F1/F2
   remediated, F3–F5 recorded with follow-up owners (tickets 08/10); frontier
   advances to ticket 08 — durable completion outbox.
+- [decisions/0013-t08-durable-completion-outbox-final-acceptance.md](decisions/0013-t08-durable-completion-outbox-final-acceptance.md) —
+  accepted Ticket 08: Symphony `78e58a6d`, Alfie unchanged at `608c1c57d` /
+  `0.13.0-alfie.1` (no extension change); review F1/F2 (LOW) accepted as
+  Ticket 10 follow-ups, F3/F4 (INFO) recorded with Ticket 09/10 ownership;
+  frontier advances to ticket 09 — per-thread completion coordinator.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -66,17 +71,30 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–07 complete (Decision 0012 accepted ticket 07
-  — journal-first terminal lifecycle at Symphony `fe4d1fa3`+`d44f624f`,
-  Alfie `bcfe6edda`+`608c1c57d`, `0.13.0-alfie.1`). Recorded nonblocking
-  risks: F3 summaryMaxChars MAX-guard symmetry (owner: ticket 08), F4
-  cancelled-background reporter-entry retention (owner: ticket 10).
-- **Blocker-free frontier:** ticket 08 — Durable completion outbox (sole
-  blocker, ticket 07, satisfied). Ticket 08 inherits: journal-first ordering
-  at the `onTerminalPersisted` seam, the bounded-terminal-evidence
-  preservation obligation (Decision 0012 F2), and the F3 defensive-guard
-  consideration. Standing obligation from Decisions 0009/0010/0011 remains:
-  any lease-based control must validate/re-derive lease authority server-side
+- **Frontier track:** tickets 01–08 complete. Ticket 07 (journal-first
+  terminal lifecycle, Symphony `fe4d1fa3`+`d44f624f`, Alfie
+  `bcfe6edda`+`608c1c57d`, `0.13.0-alfie.1`) was accepted by Decision 0012
+  with recorded nonblocking risks F3 summaryMaxChars MAX-guard symmetry
+  (remediated in Ticket 08) and F4 cancelled-background reporter-entry
+  retention (owner: ticket 10). Ticket 08 (durable completion outbox) was
+  accepted by Decision 0013 at Symphony `78e58a6d`, Alfie unchanged at
+  `608c1c57d`, `0.13.0-alfie.1`. Recorded nonblocking risks: F1
+  recovery-scan clamping of journal-extracted metadata (owner: ticket 10),
+  F2 stale-terminal transient recovery entries (owner: ticket 10), F3 absent
+  production pump/recovery drivers (owners: tickets 09/10), F4 fence
+  fail-open + at-least-once race note for the Ticket 09 consumer.
+- **Blocker-free frontier:** ticket 09 — Per-thread completion coordinator
+  (sole blocker, ticket 08, satisfied). Ticket 09 must wire the production
+  completion pump over the accepted outbox (consuming the
+  `SYNARA_PI_SUBAGENT_COMPLETION_RETRY_LIMIT` policy), implement per-thread
+  batching, at-most-one outstanding follow-up per thread, and
+  safe-parent-boundary delivery, and use the stable outbox identity as the
+  parent-effect dedupe key (Decision 0013 invariants + F4). Ticket 09 cannot
+  be accepted leaving live-process pending completions without a production
+  pump. Ticket 10 must additionally invoke journal-first outbox recovery at
+  startup and disposition Decision-0013 F1/F2 before that recovery ships.
+  Standing obligation from Decisions 0009–0013 remains: any lease-based
+  control must validate/re-derive lease authority server-side
   (producer-supplied occurredAt is not trusted); `session.abort()`
   resolution, timeouts, or temporary absence are never termination evidence.
 - Every implementation ticket owns an `Implementation Report`; an implementer

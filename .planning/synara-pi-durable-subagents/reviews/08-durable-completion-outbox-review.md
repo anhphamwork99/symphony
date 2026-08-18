@@ -1,0 +1,115 @@
+# Independent Review — Ticket 08: Durable Completion Outbox
+
+**Reviewer:** independent feature-level reviewer (reviewer subagent, 2026-08-18)
+**Candidate:** Symphony `78e58a6d` (`feat(server)+contracts: durable completion outbox for pi subagents (issue 08)`), Alfie unchanged at pinned `608c1c57d` / `0.13.0-alfie.1`
+**Verdict:** **PASS** — T08-AC1..AC6 all pass; findings F1–F2 (LOW), F3–F4 (INFO); confidence **HIGH**.
+
+---
+
+## 1. Verdict
+
+**PASS.** All six acceptance criteria are supported by evidence I independently reproduced (every verification claim in the Implementation Report re-executed and matched exactly) and by direct source reading of the changed production surfaces. No material failure. Two LOW findings (hardening/observation, no current production exposure) and two informational notes are listed in §5. Nothing reopens Decision 0012's Ticket-08 reopening conditions: delivery begins only from committed terminal journal truth, bounded terminal evidence is not expanded into unbounded outbox content on any production path, and no delivery failure rewrites execution outcome.
+
+## 2. Confidence
+
+**High.** Basis:
+
+- (a) Every verification claim in the Implementation Report §"Verification runs" was re-executed: all counts matched exactly (outbox 11/11; terminal lifecycle 13/13; all 8 wallclock suites per-file standalone with the Decision 0008 `env -i` prefix; migrations 21/21 + 4/4 + 3/3; repository 12/12; contracts 19 files / 219 tests; config 174/174; full unit project 4,529 passed / 7 failed — the 7 being exactly the documented pre-existing `CursorTextGeneration.test.ts` environment failures; `tsc --noEmit` in apps/server exit 0).
+- (b) I read the full changed production source: the outbox INSERT is verifiably inside `recordTerminalEvent`'s single `sql.withTransaction`; every outbox method's SQL touches only `pi_subagent_completion_outbox` (plus read-only joins); guard clauses, generation fencing, and the CHECK constraints were verified in source, not just via green tests.
+- (c) Provenance re-verified: `shasum -a 256` on all three pinned Alfie artifacts matches the manifest; alfie HEAD = `608c1c57d`; working trees clean at both review commits.
+
+Limitations: workspace-wide `bun run typecheck` (7 packages) not re-run — only the apps/server `tsc --noEmit` (exit 0), which covers every changed server surface; `bun run lint` / `oxfmt` not re-run (packet says already recorded; hygiene claims only).
+
+## 3. Baseline (normalized)
+
+- **Objective:** every applicable terminal creates a durable completion outbox entry before parent notification; execution outcome and completion delivery are separate state machines; delivery failure never rewrites a successful child as failed; delivery retries idempotently with a stable dedupe identity; superseded entries produce no follow-up effect while original evidence stays readable.
+- **Deliverables (per ticket):** T08-AC1..T08-AC6 against the owner-approved Testing Seams — orchestration integration boundary with crash/replay/retry/ack fault injection (AC1/AC3/AC4/AC5), delivery state-machine contract (AC2/AC6), parent completion-injection boundary (AC5).
+- **Binding scope boundary (packet + report disclosure):** the production parent follow-up-turn consumer — batching, one-outstanding-per-thread, safe-boundary deferral — is **Ticket 09**; startup invocation of recovery is **Ticket 10**. Ticket 08's deliverable is the durable outbox state machine driven through an injectable parent completion-injection boundary.
+- **Inherited obligations (Decision 0012):** journal-first ordering at the `onTerminalPersisted` seam; F2 — never expand bounded terminal evidence into unbounded delivery payloads; F3 — align the coordinator's `summaryMaxChars` guard with the configuration maximum.
+- **Governing method:** Decision 0001 (failure/diagnostic pairing; forbidden success-equivalences — notably "completion notification delivery as proof of execution success, or execution success as proof of completion delivery"); Decision 0008 (per-file standalone wallclock, `env -i PATH HOME` prefix).
+- **Pre-existing environment failures:** 7 `CursorTextGeneration.test.ts` failures (Cursor ACP unavailable) — documented, not judged.
+- **Non-goals:** absence of the Ticket 09/10 consumer wiring is not a defect; it is the approved seam boundary.
+
+## 4. Evidence Matrix (every verification personally reproduced; source citations verified)
+
+| Criterion | Expected outcome | Observed evidence | Status |
+|---|---|---|---|
+| **T08-AC1** | Terminal persistence and outbox creation atomic (or journal-first recoverable) before notification | **Source (Direct):** outbox INSERT at `Layers/PiSubagentExecutionRepository.ts:1217–1255` sits INSIDE `recordTerminalEvent`'s `sql.withTransaction`, after the guarded aggregate UPDATE, before the `recorded` return — an outbox write failure fails the Effect and rolls back journal + aggregate + outbox together; `ON CONFLICT (execution_id, attempt_id, generation) DO NOTHING`. **Test (Reproduced):** `piSubagentCompletionOutbox.test.ts` 11/11 — AC1 test asserts at `onTerminalPersisted` time the entry already exists `pending` with the same bounded summary/transcriptRef; failure-direction test (missing execution) leaves no journal row / aggregate / outbox row and never notifies. `ingestPiSubagentTerminal` notifies only after the transaction returns (`piSubagentTerminalCoordinator.ts:186`). | **PASS** |
+| **T08-AC2** | Delivery state independently represented (pending/delivered/acknowledged/failed_retryable/superseded) without mutating execution outcome | **Source (Direct):** migration 102 CHECK-constrains all five states + `terminal_state IN ('succeeded','failed')`; every outbox method (lines ~1405–1800) issues UPDATE/INSERT only on `pi_subagent_completion_outbox` — the sole reference to `pi_subagent_executions` in the outbox block is a read-only JOIN in `listTerminalEventsWithoutOutbox`; every transition re-reads the entry and guards (`invalid_transition`, `not_found`, `superseded_instead`), never silently applied. **Tests (Reproduced):** full pending→delivered→acknowledged walk with timestamps; failed_retryable records attempt_count + last_error and stays recoverable; acknowledged re-deliver → `invalid_transition`; execution observed/desired/updatedAt UNCHANGED through every transition (AC2 test asserts `updatedAt === "…00:01:00"` — the terminal write's timestamp, untouched by delivery writes). | **PASS** |
+| **T08-AC3** | Replayed terminal or outbox processing creates no duplicate entry or follow-up effect | **Source (Direct):** deterministic `outbox_<exec>_<attempt>_gen<gen>` identity + `UNIQUE (execution_id, attempt_id, generation)`; `recordCompletionOutboxEntry` pre-checks then inserts with a concurrent-create catch that re-reads and returns `already_applied`; terminal replay dedup is Ticket 07's `(execution_id, attempt_id, generation, sequence)` key. **Tests (Reproduced):** terminal replay → `already_applied`; direct duplicate create → `already_applied` with the ORIGINAL summary preserved; recovery replay recovers 0; second pump after acknowledgement issues no parent request (`requestCount() === 1` after two pumps). | **PASS** |
+| **T08-AC4** | Crash/failure between terminal persistence and delivery leaves execution terminal and outbox recoverably pending | **Tests (Reproduced):** crash-before-delivery (terminal ingested, no pump ever runs) → execution `succeeded` + entry in `listRecoverableCompletionOutbox` → next pump delivers AND acknowledges. Journal-first recovery test: generic-path terminal journal row without outbox row → scan creates exactly ONE pending entry (bounded summary recovered from journal metadata) → replay recovers 0. **Source (Direct):** `listRecoverableCompletionOutbox` = `pending` OR (`failed_retryable` AND `attempt_count < retryLimit`), ordered oldest-first; `listTerminalEventsWithoutOutbox` is a NOT EXISTS anti-join on the unique identity. | **PASS** |
+| **T08-AC5** | Retry uses a stable dedupe identity and reaches acknowledgement without duplicate parent content | **Tests (Reproduced):** pump 1 boundary rejects → `failed_retryable` attempt 1 + `pi_subagent_completion_delivery_failed` diagnostic; pump 2 accepts+acknowledges → `delivered`+`acknowledged` with `requestCount() === 2` but `distinctEffectCount() === 1` (at-least-once delivery, exactly-once parent effect — the dedupe key in the test harness is the request's `dedupeId`, exactly the production contract). Retry-budget test: exhausted entry (`retryLimit = 1`) leaves the recoverable set while entry, lastError, bounded summary, and the `succeeded` outcome stay readable. **Source (Direct):** `markCompletionDeliveryFailed` increments `attempt_count`; config knob `resolvePiSubagentCompletionRetryLimit` (default 5, 0–100, standard resolver contract) resolved in `main.ts:365`; pump carries `dedupeId = entry.outboxId` on every request. | **PASS** |
+| **T08-AC6** | A completion superseded by a newer generation produces no delivery effect while original execution evidence remains readable | **Tests (Reproduced):** attempt-1 terminal → resume to attempt/generation 2 → pump supersedes (1 superseded, 0 delivered, `parent.requestCount() === 0`) + `pi_subagent_completion_superseded` diagnostic; superseded entry keeps terminalState/summary/transcriptRef readable with `supersededByGeneration = 2`; `getTerminalEvidence` + journal row still readable; attempt-2 terminal creates its OWN entry and delivers normally (`requests()[0].summary === "Agent completed (retry run)."`); supersede-guard test: acknowledged cannot regress to superseded, superseded cannot be delivered. **Source (Direct):** coordinator `fenceEntry` runs BEFORE any `deliver()` call (`piSubagentCompletionOutbox.ts:216–247`); repository `fenceOrSupersede` re-checks inside each transition transaction as the durable second line; `markCompletionSuperseded` guards on acknowledged and writes `superseded_by_generation`. | **PASS** |
+
+**Reproduced verification inventory** (wallclock per Decision 0008: `env -i PATH="$PATH" HOME="$HOME" npx vitest run <file>`):
+
+- `piSubagentCompletionOutbox.test.ts` → **11/11** · `piSubagentTerminalLifecycle.test.ts` → **13/13**
+- Wallclock per-file standalone: TerminalAcceptance **2/2** (live adapter, pinned extension), CancellationAcceptance **2/2**, ProgressAcceptance **1/1**, ForegroundAcceptance **6/6**, ForegroundReopen **1/1**, ForegroundLifecycle **5/5**, RealExtension **11/11**, IntegratedAcceptance **7/7**
+- `Migrations.test.ts` **21/21** · `MigrationLineageReconciliation` **4/4** · `MigrationReplay` **3/3** · `persistence/Layers/PiSubagentExecutionRepository.test.ts` **12/12** · `config.test.ts` **174/174**
+- Contracts package full run: **19 files / 219 tests**
+- Full server unit project (`--project unit`): **4,529 passed / 7 failed / 17 skipped** — all 7 failures confirmed in `src/git/Layers/CursorTextGeneration.test.ts` (Cursor ACP unavailable), the documented pre-existing set
+- `./node_modules/.bin/tsc --noEmit` in apps/server → **exit 0**
+- Provenance: alfie `git rev-parse HEAD` = `608c1c57d…` = pin; `shasum -a 256` on package.json / src/index.ts / src/agent-manager.ts → **all three match the manifest**
+
+## 5. Prioritized Findings
+
+**F1 — LOW · Recovery scan does not re-apply summary/transcriptRef bounds to journal-extracted metadata.**
+`Layers/PiSubagentExecutionRepository.ts` `listTerminalEventsWithoutOutbox` extracts `metadata_json ->> 'summary'` and `->> 'transcriptRef'` from journal rows, and `recoverCompletionOutbox` (`piSubagentCompletionOutbox.ts:69–107`) inserts them into the outbox without clamping. Every PRODUCTION writer of succeeded|failed journal metadata bounds these values (`ingestPiSubagentTerminal`: summary ≤ 32768 via the config-capped seam, transcriptRef ≤ 1024 — verified the only production `recordLifecycleEvent` callers, `PiAdapter.ts:3427/3478`, write `state: "running"` at seq 2/3, never terminal states; `recordCancelledAck` writes `cancelled`, excluded from the scan). So no current path can push unbounded content — the Decision 0012 F2 obligation is met on production paths. But a future non-adapter producer writing a terminal through the generic lifecycle seam would flow unbounded metadata through recovery into outbox `summary`. Next action: clamp `summary`/`transcriptRef` in `recoverCompletionOutbox` (same constants as the terminal coordinator) when Ticket 09/10 wires the startup invocation — one-line hardening at the natural touchpoint.
+
+**F2 — LOW (observational) · Recovery scan can create outbox entries for journaled-STALE terminals that were deliberately never given one.**
+`recordTerminalEvent`'s stale paths (`superseded_attempt` / `superseded_generation` / `already_terminal_other_event`, lines ~1148–1194) return BEFORE the outbox insert — no entry for stale terminals by design. But `listTerminalEventsWithoutOutbox` selects ALL succeeded|failed journal rows lacking an outbox row, without checking applicability against the current aggregate. A journaled-stale terminal therefore gets a `pending` recovery entry, which the first pump's `fenceEntry` supersedes with no delivery effect (T08-AC6 fence holds). Consequence: recovery on a database containing stale journaled terminals creates transient pending entries that settle to `superseded` at first pump — no parent effect, no outcome mutation, evidence stays readable; the accounting is eventual, not wrong. Next action: optionally add an applicability predicate to the recovery scan (e.g. journal row is the max-sequence applicable terminal for its attempt) when the scan is next touched; not required for any AC.
+
+**F3 — INFO · No production call site drives the pump or recovery; the retry-limit knob is resolved but unconsumed.**
+Repo-wide grep confirms `processPendingCompletions` / `recoverCompletionOutbox` have zero production call sites (tests + the coordinator module only), and `piSubagentCompletionRetryLimit` is resolved in `main.ts` but never read by production code. This matches the packet's binding scope boundary and the report's disclosure (consumer = Ticket 09, startup invocation = Ticket 10), so it is not scope drift — but the operational consequence should be explicit for the Supervisor: in the current tree, every terminal's completion entry stays `pending` forever (the `subagents/completion-outbox-pending` runtime event is accurate and bounded). Tickets 09/10 must wire both, or pending entries accumulate unboundedly as entries (each bounded in size, but unbounded in count over server lifetime). Ownership: Ticket 09 (pump consumer), Ticket 10 (startup recovery invocation).
+
+**F4 — INFO · `fenceEntry` read-failure fail-open; narrow race window remains inherent to at-least-once delivery.**
+(a) Coordinator `fenceEntry` treats an aggregate read failure (or missing execution) as `current` and proceeds to deliver; the durable transition's `fenceOrSupersede` re-checks inside its own transaction, so state remains consistent, and the parent dedupes by `dedupeId` — fail-open is defensible for at-least-once delivery. (b) A resume landing between the coordinator fence and `deliver()` can let an attempt-1 request reach the parent boundary while the entry still ends `superseded` (`markCompletionDelivered` returns `superseded_instead`, no `delivered` state). The AC6-tested semantics (resume before pump → zero parent requests) hold; the race window is inherent to the design and is exactly why every request carries the stable dedupe identity. No action required; noted for Ticket 09's consumer design (it must treat dedupe identity, not delivery state, as the effect key).
+
+## 6. Report-Accuracy Audit
+
+| Report claim | My reproduction | Judgment |
+|---|---|---|
+| Outbox suite 11/11 | 11/11 | ✔ |
+| Terminal lifecycle 13/13 (12 pre-existing + new F3 MAX-guard test) | 13/13; diff confirms exactly one new test (`summaryMaxChars: 1_000_000` → falls back to default 2000) | ✔ |
+| All 8 wallclock suites per-file: 6/6, 1/1, 5/5, 11/11, 1/1, 7/7, 2/2, 2/2 | identical, under `env -i PATH HOME` | ✔ |
+| Migration suites 21/21, 4/4, 3/3; repository 12/12 | identical | ✔ |
+| Contracts 19 files / 219 tests (4 new outbox tests) | identical; diff confirms 4 new tests in the outbox describe block | ✔ |
+| Config 174/174 (3 new knob tests) | 174/174; diff confirms 3 new tests (bounds/default, valid values both types, invalid fallback incl. -1/101/NaN/Infinity/2.5) | ✔ |
+| Full unit 4,529 passed / 7 failed (pre-existing Cursor set) | identical; all 7 in `CursorTextGeneration.test.ts` | ✔ |
+| `bun run typecheck` workspace pass | apps/server `tsc --noEmit` exit 0; workspace turbo run not re-executed | ◐ partially reproduced (server surface covered) |
+| Lint 0 errors / 525 < 527 baseline; oxfmt | not re-run per packet (hygiene claims, previously recorded) | — |
+| "No Alfie change required; `terminal-outbox` already in negotiated optional-capability list" | `piSubagentBridge.ts:262` lists `terminal-outbox` in `optionalCapabilities` (pre-existing, not added by this commit); alfie at pinned commit with clean tree and matching hashes | ✔ |
+| Outbox INSERT inside the same `sql.withTransaction` | verified in source at `Layers/PiSubagentExecutionRepository.ts:1217–1255` | ✔ |
+| "NO outbox method touches the execution aggregate" | verified: outbox block's only `pi_subagent_executions` reference is a read-only JOIN (recovery scan); `fenceOrSupersede`/`markCompletion*` UPDATE only the outbox table; the aggregate read is SELECT-only | ✔ |
+| Disclosure "cancelled executions create no outbox entry" | verified: `recordTerminalEvent` accepts only succeeded|failed; `recordCancelledAck` (line ~974) journals `cancelled` and never inserts an outbox row; recovery scan excludes `cancelled` (`state IN ('succeeded','failed')`) | ✔ |
+| Decision 0012 F3 follow-up (MAX-guard symmetry) | verified in `piSubagentTerminalCoordinator.ts:123–131` (MIN..MAX both bounds → default fallback) + regression test | ✔ |
+| IntegratedAcceptance migration expectations updated for 102 | diff confirms 101→102 tracker/exercise updates; suite 7/7 | ✔ |
+
+No overclaims detected. The acceptance-matrix rows are conservative and match what the tests actually assert. The disclosures are accurate and complete on every point I could check (parent-consumer/Ticket 09, startup/Ticket 10, cancelled-no-entry, retry-budget exhaustion semantics).
+
+## 7. Verification & Scope Audit
+
+- **Failure/diagnostic surfaces (Decision 0001 pairing) — all reproduced or source-verified:**
+  - *Outbox-creation rollback:* terminal transaction failure → no journal/aggregate/outbox, `pi_subagent_terminal_persistence_failed` fires, adapter degrades control health and throws the producer-rejection error (`PiAdapter.ts:3369–3391`); never notifies. Recovery-write failure emits `pi_subagent_completion_outbox_persistence_failed` (coordinator lines 90–99).
+  - *Delivery failure:* boundary rejection and boundary throw both → `failed_retryable` + attempt_count + `pi_subagent_completion_delivery_failed` with bounded message; durable-transition failure after parent acceptance also reports the diagnostic (redelivery is harmless by dedupe identity); execution outcome untouched.
+  - *Supersede-no-effect:* fence before delivery + diagnostic; `parent.requestCount() === 0` asserted.
+  - *Invalid transitions:* acknowledged re-deliver, supersede-after-ack, deliver-after-supersede → `invalid_transition`, never silently applied.
+  - *Forbidden success-equivalences:* the tests never treat execution success as delivery success or vice versa — AC2/AC5 explicitly assert the execution aggregate (observed/desired/updatedAt) is byte-identical through every delivery transition and failure.
+- **Scope drift:** none. No Ticket 09 consumer (batching, one-outstanding-per-thread, safe-boundary deferral, legacy-nudge suppression) and no Ticket 10 restart wiring leaked in; the adapter's addition is exactly the bounded `subagents/completion-outbox-pending` runtime event (identities + deliveryState only — no summary/transcriptRef in the runtime payload, so the F2 obligation holds on the operator surface too).
+- **Unrelated work preserved:** migration-test count adjustments for 102 (`slice(-48)`→`slice(-49)`, executed-id arrays) are the standard additive-migration updates, consistent with how 100/101 were integrated; `piSubagentIntegratedAcceptance.test.ts` changes are the same class. The `recordTerminalEvent` signature and semantics are otherwise unchanged from Ticket 07's accepted shape.
+- **Stale artifacts:** none; both working trees clean at the review commits; provenance manifest unchanged and verified.
+
+## 8. Unreviewable Items / Limitations
+
+- Workspace-wide `bun run typecheck` (7 packages) not re-executed; apps/server `tsc --noEmit` (exit 0) covers every server file changed by this ticket, and the contracts package is exercised by its full 219-test run. Residual risk: a type error in an untouched package that depends on changed contracts — low, and the full unit project (which compiles/transpiles the server app) is green apart from the pre-existing 7.
+- `bun run lint` / `oxfmt` claims not re-run (packet records them; hygiene only).
+- Alfie extension suite (31 files / 492 tests) not re-run — no Alfie change is claimed by this ticket and the provenance pin verified byte-exact, so the Ticket 07 acceptance evidence carries over.
+- Long-run accumulation behavior (unbounded count of terminal-delivery-state rows over server lifetime, F3) is a forward-looking operational concern for Tickets 09/10, not verifiable within this ticket's scope.
+
+---
+
+**State:** completed
+
+**Result:** Full criterion-level review of Ticket 08 delivered above and persisted to `.planning/synara-pi-durable-subagents/reviews/08-durable-completion-outbox-review.md`. All T08-AC1..AC6 judged **PASS** on independently reproduced evidence (every Implementation Report verification command re-run; all counts matched exactly; structural claims verified in source). Report audited accurate — no overclaims; all four pre-review disclosures verified accurate. Findings: F1–F2 LOW (recovery-scan bound hardening and stale-terminal recovery accounting; both with no current production exposure), F3–F4 INFO (no production pump/recovery wiring — correct per the binding Ticket 09/10 scope boundary but operationally consequential; fence fail-open semantics). None block acceptance. No project file modified; sole write was the review report.
+
+**Needs:** None for this review's completion. For the Supervisor final-acceptance consultation: (1) confirm F1 (bound clamping in `recoverCompletionOutbox`) and F2 (applicability predicate in the recovery scan) are acceptable as Ticket 09/10 touchpoint follow-ups rather than Ticket 08 remediation — no AC is contradicted and no production path is exposed today; (2) record F3's operational dependency explicitly when advancing the frontier: Ticket 09 must wire the delivery pump (and Ticket 10 the startup recovery invocation), or pending outbox entries accumulate without a driver.

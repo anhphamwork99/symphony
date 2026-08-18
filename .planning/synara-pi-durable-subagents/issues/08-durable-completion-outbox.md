@@ -8,7 +8,12 @@ entries cannot create follow-up effects.
 
 **Blocked by:** 07 — Journal-first terminal lifecycle.
 
-**Status:** ready-for-agent → implemented (awaiting review)
+**Status:** ready-for-agent → implemented → **complete (accepted)**
+
+**Final acceptance:** Accepted — Decision 0013 (2026-08-18), Symphony
+`78e58a6d`, Alfie unchanged at `608c1c57d` (`0.13.0-alfie.1`); review F1/F2
+LOW accepted as Ticket 10 follow-ups, F3/F4 INFO recorded with Ticket 09/10
+ownership.
 
 - [x] **T08-AC1:** Terminal persistence and outbox creation are atomic or
       equivalently journal-first recoverable before notification.
@@ -39,7 +44,28 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** implemented — review requested (2026-08-18)
+**Implementation state:** accepted — Decision 0013 (2026-08-18)
+
+### Independent review outcome (2026-08-18)
+
+**Verdict:** PASS — T08-AC1..AC6 all pass, confidence HIGH (reviewer
+independently reproduced every verification claim: outbox 11/11, terminal
+lifecycle 13/13, all eight wallclock suites per-file standalone, migration
+suites, repository 12/12, contracts 219/219, config 174/174, full unit 4,529
+passed with only the 7 pre-existing CursorTextGeneration environment
+failures, tsc exit 0, provenance hashes byte-exact at the unchanged Alfie
+pin). Full report:
+[reviews/08-durable-completion-outbox-review.md](../reviews/08-durable-completion-outbox-review.md).
+
+Findings F1–F2 (LOW), F3–F4 (INFO) — none blocking.
+
+**Supervisor final acceptance (2026-08-18):** ACCEPT — Decision 0013.
+F1/F2 accepted as Ticket 10 follow-ups (recovery-bound clamping and stale-
+terminal applicability predicate, to be dispositioned before startup recovery
+ships); F3 recorded as the explicit frontier dependency (Ticket 09 must wire
+the production pump and consume the retry-limit policy; Ticket 10 must invoke
+startup recovery — pending entries otherwise accumulate); F4 constrains
+Ticket 09's consumer to stable-dedupe, at-least-once parent effects.
 
 ### Delivered scope
 
