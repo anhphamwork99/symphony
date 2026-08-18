@@ -10,7 +10,8 @@ background execution activity never hijacks transcript auto-follow.
 **Blocked by:** 06 — Durable parent-turn cancellation; 09 — Per-thread
 completion coordinator; 10 — Restart reconciliation to terminal or orphaned.
 
-**Status:** ready-for-agent
+**Status:** complete — accepted by Decision 0019 (Symphony `95b9e169` +
+`339fcc04` + `c3bdbc78`)
 
 - [ ] **T11-AC1:** The snapshot exposes execution identity, desired and observed
       state, latest progress, lease state, terminal summary, delivery state, and
@@ -52,7 +53,7 @@ on 2026-08-16.
 ## Implementation Report
 
 **Status:** implemented; review remediated (re-review PASS); R4-N1 follow-up
-closed — awaiting Supervisor final acceptance.
+closed — ACCEPTED by Supervisor Decision 0019 on 2026-08-19.
 **Date:** 2026-08-19 (implementation `95b9e169`; remediation `339fcc04`;
 R4-N1 `c3bdbc78`; re-review PASS appended to the review file).
 

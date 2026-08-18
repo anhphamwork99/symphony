@@ -79,6 +79,10 @@
     binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
     is an ordinary ticket-level seam but still requires fresh human-owner
     approval before the first metrics-surface test.
+  - [decisions/0019-t11-reconnectable-execution-card-final-acceptance.md](decisions/0019-t11-reconnectable-execution-card-final-acceptance.md) —
+    accepted Ticket 11: Symphony `95b9e169` + remediation `339fcc04` +
+    R4-N1 `c3bdbc78`; Alfie unchanged at `489acd626` / `0.14.0-alfie.1`;
+    Decision 0018 F1 delivered; Ticket 12 unblocked.
   - [decisions/0017-t13-admission-quotas-and-safe-telemetry-final-acceptance.md](decisions/0017-t13-admission-quotas-and-safe-telemetry-final-acceptance.md) —
     accepted Ticket 13: finite provider-session/server/project admission
     budgets, journal-only wall-time escalation trigger, owner-approved safe
@@ -97,7 +101,7 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–10, 13 are complete. Ticket 09 (per-thread
+- **Frontier track:** tickets 01–11, 13 are complete. Ticket 09 (per-thread
   completion coordinator) was rejected by Decision 0015 (crash window:
   durable `delivered` before the parent effect), remediated under Decision
   0016's crash-safe direction (immutable dispatch batch ledger migration 103,
