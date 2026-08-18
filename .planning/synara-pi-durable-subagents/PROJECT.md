@@ -111,9 +111,9 @@
   accepted the remediated Ticket 09: Decision 0015 superseded, T09-AC1..AC6
   all pass with both T09-AC4 crash positions closed.
 - **Next dependency unlock:** Ticket 11 is implemented at Symphony `95b9e169`
-  with review remediation at `339fcc04` (R1 blocking + R2/R3/R4 closed;
-  review persisted under reviews/). Re-review + Supervisor final acceptance
-  pending. Ticket 12 remains
+  with remediation `339fcc04` + R4-N1 follow-up `c3bdbc78`; the remediation
+  re-review returned PASS (appended to the review file). Supervisor final
+  acceptance pending. Ticket 12 remains
   blocked by Ticket 11 and owns production transcript/result reading.
   Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
   Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.

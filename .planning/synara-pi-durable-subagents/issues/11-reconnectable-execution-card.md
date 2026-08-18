@@ -51,9 +51,10 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Status:** implemented + review remediation applied — awaiting re-review.
-**Date:** 2026-08-19 (implementation `95b9e169`; remediation of review findings
-R1/R2/R3/R4 follows).
+**Status:** implemented; review remediated (re-review PASS); R4-N1 follow-up
+closed — awaiting Supervisor final acceptance.
+**Date:** 2026-08-19 (implementation `95b9e169`; remediation `339fcc04`;
+R4-N1 `c3bdbc78`; re-review PASS appended to the review file).
 
 ### Review remediation (independent review 2026-08-19: NEEDS REMEDIATION)
 
@@ -84,8 +85,11 @@ findings. All four remediated:
   capability signal would be the honest long-term source.
 - **R4 (INFO)** — outbox delivery transitions never published card updates.
   Fix: `markCompletionDelivered/Acknowledged/DeliveryFailed/Superseded` now
-  notify post-commit (delivery-only band, journalSequence 0, states re-read
-  from the committed aggregate), so live clients see `deliveryState` changes.
+  notify post-commit (delivery-only band, states re-read from the committed
+  aggregate). Re-review found R4-N1 (same seq-0 identity collided on the
+  second delivery change) — closed at `c3bdbc78` by folding the committed
+  delivery state into the delivery-band command id; regression test proves
+  terminal → delivered → acknowledged all publish.
 
 ### Solution shape
 
