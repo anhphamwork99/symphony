@@ -11,7 +11,8 @@
 
 - [spec.md](spec.md) — normative feature specification.
 - [decisions/0001-testing-strategy-governance.md](decisions/0001-testing-strategy-governance.md) —
-  accepted project-scoped testing strategy.- [decisions/0002-t18-migration-lineage-final-acceptance.md](decisions/0002-t18-migration-lineage-final-acceptance.md) —
+  accepted project-scoped testing strategy.
+- [decisions/0002-t18-migration-lineage-final-acceptance.md](decisions/0002-t18-migration-lineage-final-acceptance.md) —
   accepted migration-lineage baseline for downstream persistence work.
 - [decisions/0003-t19-real-pi-capability-final-acceptance.md](decisions/0003-t19-real-pi-capability-final-acceptance.md) —
   accepted real-Pi handshake and capability baseline.
