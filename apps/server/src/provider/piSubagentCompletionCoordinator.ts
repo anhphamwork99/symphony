@@ -91,12 +91,12 @@ export interface PiSubagentCompletionCoordinatorInput {
   /** Batching window in milliseconds; 0 flushes immediately (T09-AC1). */
   readonly batchWindowMs?: number;
   /** Ticket 08 retry policy — consumed from the resolved server config. */
-  readonly retryLimit?: number;
+  readonly retryLimit?: number | undefined;
   /** Per-follow-up bounded entry cap; overflow joins the NEXT batch. */
-  readonly maxBatchEntries?: number;
-  readonly scheduler?: CompletionCoordinatorScheduler;
-  readonly now?: () => number;
-  readonly schedule?: CompletionCoordinatorScheduler["schedule"];
+  readonly maxBatchEntries?: number | undefined;
+  readonly scheduler?: CompletionCoordinatorScheduler | undefined;
+  readonly now?: (() => number) | undefined;
+  readonly schedule?: CompletionCoordinatorScheduler["schedule"] | undefined;
   /**
    * T09-AC3 parent-turn boundary: `true` while the parent thread has an
    * active turn. The ONLY delivery gate — user-read state is never an

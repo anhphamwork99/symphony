@@ -61,6 +61,7 @@ import {
   DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
   DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS,
   DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ,
+  DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
   ServerConfig,
 } from "../../config.ts";
 import { lazyModule } from "../../lazyModule.ts";
@@ -132,6 +133,11 @@ import {
   type PiSubagentProgressCoalescer,
 } from "../piSubagentProgressCoalescer.ts";
 import { ingestPiSubagentTerminal } from "../piSubagentTerminalCoordinator.ts";
+import {
+  makePiSubagentCompletionCoordinator,
+  type PiSubagentCompletionCoordinator,
+  type PiSubagentCompletionCoordinatorFollowUpEntry,
+} from "../piSubagentCompletionCoordinator.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -1182,6 +1188,30 @@ function extractResumeSessionFile(resumeCursor: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Ticket 09: bounded follow-up turn text for a completion batch. Each entry
+ * carries the stable dedupe identity (the parent-effect key, Decision 0013
+ * F4), the execution identity, the terminal state, and a bounded summary
+ * excerpt — never unbounded raw output. The parent is told where full
+ * results live (transcript reference / result tool).
+ */
+function formatPiSubagentCompletionFollowUp(
+  parentThreadId: string,
+  entries: readonly PiSubagentCompletionCoordinatorFollowUpEntry[],
+): string {
+  const lines = entries.map((entry, index) => {
+    const label = entries.length > 1 ? `Subagent ${index + 1}` : "Subagent";
+    const reference =
+      entry.transcriptRef !== null ? `\nFull transcript: ${entry.transcriptRef}` : "";
+    return `${label} finished (${entry.terminalState}) — execution ${entry.executionId}:\n${entry.summary}${reference}`;
+  });
+  const header =
+    entries.length > 1
+      ? `${entries.length} background subagents finished:`
+      : "A background subagent finished:";
+  return `${header}\n\n${lines.join("\n\n")}\n\nThe results above are bounded excerpts; full outputs remain retrievable by execution id.`;
+}
+
 function getSessionFile(session: PiAgentSession): string | undefined {
   return session.sessionFile ?? session.sessionManager.getSessionFile();
 }
@@ -1853,6 +1883,89 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
     const sessions = new Map<ThreadId, PiSessionContext>();
+    // Ticket 09: adapter-lifetime per-thread completion coordinator — the
+    // production consumer of the Ticket 08 durable outbox (Decision 0013
+    // F3). One coordinator spans every managed Pi session of this adapter;
+    // per-thread state is keyed by parentThreadId. The follow-up boundary
+    // dispatches a bounded follow-up turn on the parent session (safe
+    // boundary checked per thread). The coordinator is created only when a
+    // repository exists (same condition as the managed terminal path).
+    const piSubagentCompletionCoordinator: PiSubagentCompletionCoordinator | undefined =
+      piSubagentRepository === undefined
+        ? undefined
+        : makePiSubagentCompletionCoordinator({
+            get repository() {
+              // The repository is adapter-lifetime and was present at
+              // construction; the getter keeps the lazy test-binding seam.
+              if (piSubagentRepository === undefined) {
+                throw new Error("piSubagentCompletionCoordinator: repository unavailable");
+              }
+              return piSubagentRepository;
+            },
+            batchWindowMs:
+              serverConfig.piSubagentCompletionBatchWindowMs ??
+              DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+            retryLimit: serverConfig.piSubagentCompletionRetryLimit,
+            isParentBusy: (parentThreadId) => {
+              const context = sessions.get(parentThreadId as ThreadId);
+              return context?.activeTurnId !== undefined;
+            },
+            sendFollowUp: async (parentThreadId, entries) => {
+              const context = sessions.get(parentThreadId as ThreadId);
+              if (context === undefined || context.stopped) {
+                return {
+                  accepted: false,
+                  error: `parent session for thread '${parentThreadId}' is unavailable`,
+                };
+              }
+              try {
+                const harnessPolicy = takeSynaraHarnessPolicyForProviderSession(context, {
+                  provider: PROVIDER,
+                  scopedGatewayConnectionAvailable: context.gatewayControlAvailable,
+                });
+                const text = [
+                  harnessPolicy,
+                  formatPiSubagentCompletionFollowUp(parentThreadId, entries),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n");
+                await context.runtime.session.prompt(text);
+                return { accepted: true };
+              } catch (cause) {
+                const message = toMessage(cause, "Failed to dispatch completion follow-up.");
+                return { accepted: false, error: message };
+              }
+            },
+            onDiagnostic: (event) => {
+              const context = sessions.get(event.parentThreadId as ThreadId);
+              if (context === undefined) {
+                return;
+              }
+              offerRuntimeEvent({
+                ...makeEventBase(context),
+                type: "runtime.warning",
+                payload: {
+                  message: `Pi subagent completion delivery [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                  detail: {
+                    diagnosticCode: event.diagnosticCode,
+                    ...(event.executionId !== undefined
+                      ? { executionId: event.executionId }
+                      : {}),
+                  },
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/completion-delivery-diagnostic",
+                  payload: {
+                    diagnosticCode: event.diagnosticCode,
+                    ...(event.executionId !== undefined
+                      ? { executionId: event.executionId }
+                      : {}),
+                  },
+                },
+              } satisfies ProviderRuntimeEvent);
+            },
+          });
     const ownsNativeEventLogger = options?.nativeEventLogger === undefined;
     const nativeEventLogger =
       options?.nativeEventLogger ??
@@ -2237,6 +2350,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       if (failure.state === "failed") {
         offerRuntimeError(context, { message, method: "prompt", cause });
       }
+      // Ticket 09: the turn was rejected BEFORE running — no parent content
+      // was shown, so an outstanding completion follow-up must return to
+      // retryable delivery rather than acknowledge (T09-AC4).
+      if (piSubagentCompletionCoordinator) {
+        piSubagentCompletionCoordinator.notifyFollowUpSettled({
+          parentThreadId: String(context.session.threadId),
+          outcome: "failed",
+        });
+        piSubagentCompletionCoordinator.onParentTurnSettled(String(context.session.threadId));
+      }
       context.activeTurnId = undefined;
       context.activeAssistantItemId = undefined;
       context.activeReasoningItemId = undefined;
@@ -2595,6 +2718,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           context.activeReasoningItemId = undefined;
           context.activeToolItems.clear();
           context.session = makeSessionSnapshot(context);
+          // Ticket 09: the parent turn reached a terminal boundary. Release
+          // deferred completion batches parked on the busy boundary
+          // (T09-AC3 busy-then-idle) and settle any outstanding follow-up
+          // turn: a turn that RAN (completed or failed mid-run) shows its
+          // content — acknowledge; only a turn that was REJECTED BEFORE
+          // running produces no parent content. `message_end` means the
+          // turn ran, so the batch acknowledges (the prompt-rejection path
+          // below handles the never-ran case).
+          if (piSubagentCompletionCoordinator) {
+            const settledThreadId = String(context.session.threadId);
+            piSubagentCompletionCoordinator.onParentTurnSettled(settledThreadId);
+            piSubagentCompletionCoordinator.notifyFollowUpSettled({
+              parentThreadId: settledThreadId,
+              outcome: "completed",
+            });
+          }
           offerRuntimeEvent({
             ...completionBase,
             type: "turn.completed",
@@ -3319,6 +3458,64 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                             },
                           } satisfies ProviderRuntimeEvent);
                           if (event.result.kind === "recorded") {
+                            // Ticket 09: the durable pending entry now has a
+                            // production consumer. When the session's
+                            // extension acknowledged completion-delivery
+                            // ownership (capability handshake), drive the
+                            // per-thread coordinator (batching + safe
+                            // boundary + follow-up). Otherwise the legacy
+                            // extension nudge owns delivery: disposition the
+                            // entry as legacy-delivered so it never
+                            // accumulates and Synara never double-notifies
+                            // (T09-AC5 mixed-version boundary).
+                            const ownsDelivery =
+                              subagentCapability.capabilities?.includes(
+                                "completion-delivery-ownership",
+                              ) === true;
+                            if (ownsDelivery && piSubagentCompletionCoordinator) {
+                              piSubagentCompletionCoordinator.onCompletionPending({
+                                parentThreadId: String(input.threadId),
+                              });
+                            } else {
+                              const outboxId = `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`;
+                              const now = new Date().toISOString();
+                              void Effect.runPromise(
+                                Effect.gen(function* () {
+                                  yield* piSubagentRepository.markCompletionDelivered({
+                                    outboxId,
+                                    now,
+                                  });
+                                  yield* piSubagentRepository.markCompletionAcknowledged({
+                                    outboxId,
+                                    now,
+                                  });
+                                }),
+                              ).catch(() => {
+                                // The entry stays recoverable-pending; Ticket
+                                // 10 startup recovery re-dispositions it.
+                              });
+                              offerRuntimeEvent({
+                                ...makeEventBase(context),
+                                type: "runtime.warning",
+                                payload: {
+                                  message: `Pi subagent completion delivery owned by legacy extension [${event.result.execution.executionId}]`,
+                                  detail: {
+                                    executionId: event.result.execution.executionId,
+                                    ownership: "legacy",
+                                  },
+                                },
+                                raw: {
+                                  source: "pi.sdk.event",
+                                  method: "subagents/completion-legacy-owned",
+                                  payload: {
+                                    executionId: event.result.execution.executionId,
+                                    attemptId: event.result.execution.attemptId,
+                                    generation: event.result.execution.generation,
+                                    outboxId,
+                                  },
+                                },
+                              } satisfies ProviderRuntimeEvent);
+                            }
                             offerRuntimeEvent({
                               ...makeEventBase(context),
                               type: "runtime.warning",

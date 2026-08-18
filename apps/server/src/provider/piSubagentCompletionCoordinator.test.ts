@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 
 import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import {
+  PiSubagentExecutionRepository,
+  type PiSubagentExecutionRepositoryShape,
+} from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import {
   ingestPiSubagentTerminal,
   type PiSubagentTerminalObservation,
