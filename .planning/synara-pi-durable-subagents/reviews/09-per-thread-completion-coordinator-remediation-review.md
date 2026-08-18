@@ -1,0 +1,153 @@
+# Ticket 09 Independent Review — Decision 0016 Remediation (Crash-Safe Parent Effect)
+
+> Persisted by the orchestrator from the reviewer's returned message
+> (verbatim body). Review type: exactly-one independent feature-level review
+> of the remediated candidate after Decision 0015's NEEDS REMEDIATION.
+
+- **Review date:** 2026-08-18
+- **Candidate (Symphony):** merge `ebf224a6` (branch `impl/t09-crash-safe-parent-effect`, WP commits `0f298eb8` → `cf641ba7`); Ticket 13 commits `8465b0fa`/`2de776a8` interleave in history and are excluded per packet.
+- **Candidate (Alfie):** `489acd6264eeedbb1a84e2ba2295af8d1b766b3b` (`@alfie/pi-subagents@0.14.0-alfie.1`) — verified HEAD, working tree clean, unchanged by this remediation.
+- **Review type:** exactly-one independent feature-level review of the Decision 0016 remediation candidate (post-Decision 0015 rejection).
+- **Verdict:** **PASS** (Decision 0015 binding remediation requirement satisfied; T09-AC1..AC6 all PASS; Decision 0016 §10 evidence bullets all mapped), confidence **HIGH**.
+
+---
+
+## 1. Verdict table
+
+### 1.1 Decision 0015 "Required remediation evidence" (deterministic fault-injection bullets)
+
+| # | Required evidence | Mapped test (all reproduced green) | Verdict |
+|---|---|---|---|
+| R1 | Owner loss after durable claim/state change but before dispatch → recovery finds the batch; exactly one effect eventually accepted | `piSubagentCompletionCoordinator.test.ts` "F1: loss after batch/member commit but before command submission → same batch recovers, one message" + "F1-alt/restart" | **PASS** |
+| R2 | Owner loss after parent acceptance but before local finalization → same identity, no duplicate content, settles | Coordinator "F2: batch durably `accepted` at restart → finalize once with zero re-dispatch"; engine-backed "post-acceptance crash replay returns the SAME receipt and appends NO second message/turn/receipt" | **PASS** |
+| R3 | Later same-thread completions remain parked until recovered work settles | Coordinator "later same-thread completions stay outside the active batch and join the NEXT batch after settle" | **PASS** |
+| R4 | Another thread remains independently deliverable | Coordinator "cross-thread isolation: one thread's failing batch never blocks another thread" | **PASS** |
+| R5 | Busy parent deferral consumes no retry budget | Coordinator "T09-AC3/busy: busy parent defers with zero durable state or retry, recovers on settle" | **PASS** |
+| R6 | Stale generations supersede with zero parent effect | Coordinator "stale-before-creation" + "stale-before-submission" | **PASS** |
+| R7 | Child outcomes unchanged through claim, retry, recovery, acknowledgement, supersession | Coordinator "execution/terminal evidence stays byte-stable through retry exhaustion"; repository suite asserts no batch transition mutates the execution aggregate | **PASS** |
+| R8 | Retry exhaustion preserves evidence | Coordinator evidence-byte-stability test (member summary/evidence readable after `exhausted`); repository "transient failure … exhausts at the ceiling" | **PASS** |
+| R9 | Production startup/recovery invokes the remediated behavior | `main.ts:494` `bindOnce(orchestrationEngine)`; adapter `onBound` → recovery scan (`PiAdapter.ts:2055-2058`); hydration trigger `PiAdapter.ts:3198-3202`; 10 s bounded scan `PiAdapter.ts:2062-2067`; real-engine binding exercised end-to-end in `piSubagentCompletionOwnershipAcceptance.test.ts` (`createOwnershipEngine` → `bridged.bindOnce(port)`, lines 389-426, 559) | **PASS** (composition-level wiring verified by source + typecheck; see F3) |
+| R10 | Coordinator, outbox, mixed-version real-Pi, Decision 0008 standalone regressions green | Reproduced: coordinator 19/19, outbox 11/11, ownership acceptance 2/2 (real-Pi, per-file standalone, clean env), RealExtension 11/11, Integrated 7/7, Restart 1/1, Terminal 2/2 | **PASS** |
+
+**Decision 0015 remediation requirement: satisfied.** The original F1 window (`delivered` before effect, stranded outside all scans) is closed structurally: `delivered` is now only batch-membership evidence written inside the create transaction, and the immutable batch ledger — not the outbox scan — is the recovery authority for unfinished work.
+
+### 1.2 Decision 0016 §10 evidence bullets
+
+| §10 bullet | Evidence | Verdict |
+|---|---|---|
+| loss after batch/member commit before submission → same batch recovers, one message | Coordinator F1, F1-alt | PASS |
+| loss after accepted receipt before finalization → receipt replays, no second message/turn, finalization once | Coordinator F2; engine-backed replay test (same `resultSequence`, 1 message-sent, 1 turn request, 1 receipt row) | PASS |
+| timeout/no receipt → byte-identical retry | Coordinator F3 (`dispatched[0] === dispatched[1]`, attemptCount 1 → retryable) | PASS |
+| accepted despite caller timeout → receipt recovery, no duplicate | Coordinator F4; dispatcher "maps timeout-without-receipt to transient" | PASS |
+| altered payload under same ID → fail-closed collision, no rotated identity | Coordinator F5/F5b (zero dispatch, `exhausted`, same batchId); identity "fails closed on payload drift"/"malformed"/"version mismatch"; repository create step-4 identity guard (`batch_already_present` only for byte-identical content) | PASS |
+| persisted rejection → one genuine failure, no repeated increments, terminal exhaustion | Coordinator F6; repository "immutable rejection: one genuine attempt, no repeated increments" (exhausted-state replay returns `transitioned` without incrementing, `PiSubagentExecutionRepository.ts:2444-2449`) | PASS |
+| concurrent recovery → one batch/effect | Repository "second active batch for the same thread is rejected (one-outstanding authority)" (partial unique index, migration-verified); coordinator `active_batch_exists` → drives the durable winner; deterministic identity means two coordinators derive the same batch id → `batch_already_present`; engine receipt dedupe is single-row unique | PASS (composed from directly-tested primitives; no literal two-process race test — acceptable given the durable unique-index authority) |
+| later same-thread completions outside active batch | Coordinator later-burst test (parked member stays `pending`, second batch only after settle) | PASS |
+| another thread independent | Cross-thread isolation test | PASS |
+| busy/lazy parent consumes no retry, recovers on exact trigger | Busy + lazy-session tests (0 dispatch, no active batch, no retry; hydration/settle recovers) | PASS |
+| restart without new terminal recovers after dispatcher/session availability | F1-alt/restart, F1 restart-#2 | PASS |
+| queued acceptance creates one message, uses existing promotion recovery | Engine-backed "queued busy-root path" (dispatchMode `queue`, busy root → 1 message + 1 queue/turn intent); promotion machinery untouched (`ProviderCommandReactor.ts:2590-2640` unchanged by this remediation) | PASS |
+| unrelated parent/provider events cannot settle the batch | Coordinator "unrelated settle/provider events cannot settle the batch; exact receipt correlation finalizes" | PASS |
+| stale-before-creation and stale-before-submission → zero command | Both coordinator stale tests | PASS |
+| execution/terminal evidence byte-stable through batch states | Coordinator evidence test + repository suite | PASS |
+| transaction failure → no partial batch / stranded delivered rows | Repository "member_collision rolls the transaction back (no partial batch, no stranded delivered rows)" | PASS |
+| malformed/oversized/duplicate/cross-thread/noncanonical membership fails closed | Repository "noncanonical / duplicate / cross-thread / oversized builder output fails closed"; coordinator "content builder failure → no partial batch" | PASS |
+| rollback leaves evidence inert; new code recovers without duplicate | Coordinator "rollback inertness: pre-batch delivered row never redrives; new pending entries still deliver"; repository "rollback leaves pre-batch delivered evidence inert" (engine-backed rollback test is thin — see F2) | PASS |
+| mixed managed/legacy unchanged | Ownership acceptance 2/2 (managed pin `0.14.0-alfie.1` + legacy disposition, no double notification) | PASS |
+| regressions pass | All reproduced suites green (§3); `tsc --noEmit` exit 0 | PASS |
+| Implementation Report records the actual sequence | Ticket 09 remediation report records "immutable batch commit → exact command/receipt acceptance → receipt-correlated finalization" — matches source; corrects Decision 0015 F2's inverted ordering | PASS |
+
+### 1.3 T09-AC1..AC6
+
+| Criterion | Basis | Verdict |
+|---|---|---|
+| **T09-AC1** | One immutable batch per window with bounded frozen parent message carrying summaries + execution ids + transcript refs; cap 1–64 (default 8) with overflow joining the next batch (repository cap test; coordinator AC1 test: two in-window terminals → 1 dispatch, both ids in text). | **PASS** |
+| **T09-AC2** | Durable one-active-batch authority = partial unique index over nonterminal states (`awaiting_acceptance`,`retryable`,`accepted`), migration-verified incl. terminal-slot release; later bursts stay `pending` outside the active batch and join the next batch after settle. | **PASS** |
+| **T09-AC3** | `isParentBusy` (live `activeTurnId`) is the sole delivery gate, checked before any durable write and re-checked at dispatch time; busy/lazy park with zero durable state and zero retry; settle/hydration re-flush. No user-read input anywhere in the gate. | **PASS** |
+| **T09-AC4** | **The remediated criterion.** Both crash positions closed: (a) pre-submission loss — batch is the durable recovery authority, driven by binding/hydration/settle/new-completion/bounded-scan triggers without a new terminal; (b) post-acceptance loss — same frozen command replays, engine returns the same accepted receipt with zero duplicate message/turn/receipt, finalization idempotent. Transient failures retry byte-identically under the same identity; rejection/collision settle exhausted with one genuine attempt; execution outcomes never touched; evidence readable after exhaustion/supersession. | **PASS** |
+| **T09-AC5** | Capability-routed: ownership sessions → coordinator; legacy sessions → delivered+acknowledged legacy-owned disposition with `subagents/completion-legacy-owned` event (PiAdapter.ts:3662-3712). Real-Pi ownership suite 2/2 with provenance verification at the pinned commit; no double notification. | **PASS** |
+| **T09-AC6** | Stale-before-creation fenced inside the create transaction (zero batch); stale-before-submission supersedes the batch with zero command and releases the slot; members remain readable evidence; terminal evidence retrievable by identity. | **PASS** |
+
+---
+
+## 2. Confidence
+
+**HIGH.** Basis: every assigned suite independently reproduced green under the Decision 0008 clean environment (§3); typecheck exit 0; all Decision 0015 remediation bullets and Decision 0016 §10 bullets map to named, inspected tests; the six Decision 0016 invariants listed in the packet verified directly in source with citations (§4); Alfie provenance re-verified clean at `489acd626`. Limitations: no literal two-process concurrency test (covered compositionally by the durable unique index + deterministic identity + engine receipt uniqueness, each directly tested); no dedicated composition-level startup test for `bindOnce` wiring (source + typecheck + unit-level bind tests + real-engine adapter-level suite); engine-backed rollback test is thin (substantively covered elsewhere).
+
+---
+
+## 3. Reproduced evidence (commands + outcomes)
+
+All commands run from `apps/server` with `env -i PATH="$HOME/.bun/bin:$PATH" HOME="$HOME"` (Decision 0008 / Decision 0001):
+
+| Command | Outcome |
+|---|---|
+| `bun run vitest run src/provider/piSubagentCompletionCoordinator.test.ts` | **19/19 passed** |
+| `bun run vitest run src/persistence/Layers/PiSubagentCompletionDispatchBatches.test.ts` | **13/13 passed** |
+| `bun run vitest run src/persistence/Migrations/MigrationReplay.test.ts` | **3/3 passed** |
+| `bun run vitest run src/persistence/Migrations/MigrationLineageReconciliation.test.ts` | **4/4 passed** |
+| `bun run vitest run src/orchestration/Layers/piSubagentEngineBackedAcceptance.test.ts` | **4/4 passed** |
+| `bun run vitest run src/provider/piSubagentParentEffectDispatcher.test.ts` | **10/10 passed** |
+| `bun run vitest run src/provider/piSubagentCompletionDispatchIdentity.test.ts` | **12/12 passed** |
+| `bun run vitest run src/provider/piSubagentCompletionOutbox.test.ts` | **11/11 passed** |
+| `bun run vitest run src/config.test.ts` | **195/195 passed** |
+| `bun run vitest run src/provider/piSubagentCompletionOwnershipAcceptance.test.ts` (wallclock, per-file standalone) | **2/2 passed** |
+| `bun run vitest run src/provider/piSubagentRealExtension.test.ts` (wallclock) | **11/11 passed** |
+| `bun run vitest run src/provider/piSubagentIntegratedAcceptance.test.ts` (wallclock) | **7/7 passed** |
+| `bun run vitest run src/provider/piSubagentRestartAcceptance.test.ts` (wallclock) | **1/1 passed** |
+| `bun run vitest run src/provider/piSubagentTerminalAcceptance.test.ts` (wallclock) | **2/2 passed** |
+| `bunx tsc --noEmit -p tsconfig.json` | **exit 0** |
+| Alfie repo: `git rev-parse HEAD` / `git status --short` | `489acd6264…`, **clean** |
+
+Counts match the Implementation Report's claimed evidence exactly.
+
+---
+
+## 4. Source-inspection findings (Decision 0016 invariants)
+
+**No direct `session.prompt` in the managed completion path.** Grep over `PiAdapter.ts`, coordinator, dispatcher: the only `session.prompt` calls are the generic provider `sendTurn`/`steerTurn` paths (`PiAdapter.ts:4192`, `:4230`) owned by the reactor as downstream delivery. The coordinator dispatches only through the dispatcher port (`piSubagentCompletionCoordinator.ts:333-337`); the adapter's completion wiring states this at `PiAdapter.ts:1924-1927`.
+
+**Transactional batch creation.** `PiSubagentExecutionRepository.ts:1959-2147`: one `sql.withTransaction` — canonical oldest-first selection of pending/within-budget `failed_retryable` for one thread (`:1970-1985`); per-candidate generation fence + cap (`:1992-2007`, `fenceOrSupersede` at `:1612-1652`); builder runs inside the transaction with fail-closed `content_rejected` (`:2010-2020`); structural validation rejects duplicate/noncanonical/cross-thread/oversized/missing membership and payload/id mismatches (`validateBatchContent`, `:1894-1957`); same-batch-id replay only for byte-identical frozen content, else fail-closed (`:2036-2058`); insert reserves the active slot (`:2061-2093`); member association guarded `dispatch_batch_id IS NULL AND delivery_state IN ('pending','failed_retryable')`, any miss fails the whole transaction (`:2098-2120`, caught to `member_collision` at `:2128-2135`); concurrent active batch surfaces as `active_batch_exists` via the UNIQUE-constraint catch (`:2136-2143`).
+
+**Partial unique index = durable one-outstanding authority.** Migration `103_PiSubagentCompletionDispatchBatches.ts:104-112`: `UNIQUE INDEX … ON (parent_thread_id) WHERE state IN ('awaiting_acceptance','retryable','accepted')`. Migration test proves a second nonterminal insert fails and a terminal batch releases the slot (`103_…test.ts:123-169`); migration is additive + replay-idempotent (guarded column add `:44-49`, `CREATE TABLE IF NOT EXISTS`, second-pass no-op asserted).
+
+**Dispatcher: pre-bind/bind-once/delegation/no cycle.** `piSubagentParentEffectDispatcher.ts`: structural engine port (`:68-81`) — no `OrchestrationEngine` import anywhere in `provider/`; unbound → `unavailable` with no retry accounting (`:105-109`); `bindOnce` throws on rebinding, same-instance rebind is a no-op (`:195-215`); dispatch delegates to `live.dispatch`, maps typed engine errors without inserting/interpreting receipts (`:122-140`, `:240-274`); acceptance additionally requires the committed `thread.message-sent` with exact `commandId` + `messageId` in the accepted command's event range (`:143-184`); timeouts/unconfirmable → `unverified` (retryable, byte-identical). Composition: bridge constructed before the provider layer (`serverLayers.ts:269-276`, threaded via `runtimeLayer.ts:87-96`), bound once in `main.ts:494` after the engine is live; `tsc --noEmit` exit 0 confirms the real engine satisfies the port.
+
+**Coordinator: exact-correlation finalization, generic events can't ack.** `piSubagentCompletionCoordinator.ts`: `accepted` batches finalize without touching the turn (`:262-266`); stale-before-submission supersedes with zero effect (`:268-290`); busy/unavailable/dispatcher-absent park before any dispatch and consume nothing (`:296-311`); pre-dispatch fingerprint recompute fails closed to `exhausted` under the same identity (`:313-330`); acceptance recorded only through `recordCompletionDispatchAccepted` guarded on command id + fingerprint version/value + message id (`repository :2196-2266`); finalization acknowledges only rows with `dispatch_batch_id = batch AND delivery_state = 'delivered'` (`:2330-2343`) and is idempotent (`:2313-2316`). `onParentTurnSettled`/`onManagedSessionHydrated`/`triggerScan` only call `advanceThread` — no acknowledgement path exists outside exact receipt correlation; proven by the "unrelated settle … cannot settle" test. PiAdapter settle/hydrate hooks (`:2518-2519`, `:2887-2888`, `:3198-3202`) and the 10 s bounded scan over hydrated ownership-capable threads only (`:2062-2067`, cleanup `:4740-4742`) never synthesize absent sessions.
+
+**Retry/rejection accounting never touches the execution aggregate.** `failCompletionDispatchBatch` (`:2387-2426`) increments one attempt per genuine boundary failure and exhausts at the ceiling; `rejectCompletionDispatchBatch` (`:2428-2478`) settles exhausted with one attempt and never re-increments an already-exhausted identity; no batch method writes `pi_subagent_executions` (grep: zero references); evidence readable after exhaustion/supersession (tests).
+
+**Migration/rollback/mixed-version.** Old-binary scan surface unchanged (`listRecoverableCompletionOutbox` selects `pending` + within-budget `failed_retryable` only, `:1526-1558`) — batch-associated `delivered` rows are invisible to it (pause-liveness, no redrive/redeliver), satisfying §8; coordinator + repository rollback-inertness tests prove it; legacy disposition path byte-identical to the accepted Ticket 09 behavior (`PiAdapter.ts:3662-3712`).
+
+**Identity/frozen payload.** `piSubagentCompletionDispatchIdentity.ts`: versioned domain-separated SHA-256 over protocol version + thread + canonical ordered outbox ids with distinct `pi-cdb_`/`pi-ccmd_`/`pi-cmsg_` prefixes (`:77-110`); frozen command authored once with derived ids and `dispatchMode:"queue"`/`dispatchOrigin:"agent"` (`:141-172`); retry replays stored JSON bytes (`:183-198`); recompute-and-compare against the batch-creation fingerprint using the *existing* `fingerprintOrchestrationCommand` (`:236-260`). Adapter freezes the full fingerprint-bearing field set including the current harness-policy header at creation (`PiAdapter.ts:1971-2024`).
+
+**Engine acceptance atomicity (relied-upon invariant).** `OrchestrationEngine.ts`: message-sent + turn/queue events + accepted receipt commit in one `sql.withTransaction` (`:754-820`); same-command-id replay resolves the stored receipt with fingerprint identity validation and no new events (`:663-690`, `resolveStoredCommandOutcome :271-296`); invariant failures persist a `rejected` receipt (`:950-966`); collision on differing content under the same id (`:213-233`). Engine-backed tests prove exactly-once event/receipt counts through the real bridge.
+
+**Config knob.** `SYNARA_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES` resolver: default 8, bounds 1–64, fail-to-default on invalid (`config.ts:196-231`); wired on the production config path (`main.ts:381-383`) and consumed by the adapter coordinator (`PiAdapter.ts:2017`); 3 dedicated resolver tests in `config.test.ts:656-681`.
+
+---
+
+## 5. Findings
+
+| ID | Severity | Finding | Disposition recommendation |
+|---|---|---|---|
+| **F1** | LOW | Diagnostic-code mislabeling: success-path evidence is emitted under the failure code `pi_subagent_completion_delivery_failed` — receipt-correlation confirmation (`piSubagentCompletionCoordinator.ts:401-405`, message `completion-recovery-correlation-confirmed:<seq>`) and accepted-and-acknowledged finalization (`:470-476`). Persisted batch evidence (`last_error`, timestamps) is correct; only the runtime-event surface mislabels success as failure. | Add a dedicated success/finalization diagnostic literal at the next contracts touch. Not acceptance-blocking; no behavioral impact. |
+| **F2** | LOW | The engine-backed "rollback/mixed-version" test is thin — it only asserts the ledger table exists (`piSubagentEngineBackedAcceptance.test.ts:307-330`). The substantive rollback inertness claim is carried by the coordinator "rollback inertness" test and the repository "rollback leaves pre-batch delivered evidence inert" test, so the §8 bullet is still evidenced, but the engine-level test's name overstates what it proves. | Optional: strengthen or rename that test on the next touch. No remediation required. |
+| **F3** | INFO | No dedicated composition/startup test pins `main.ts:494` `bindOnce` or a `ServerConfigLive`-path env test for `SYNARA_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES` (Ticket 13's knobs received a `main.test.ts` addition; this one did not). Wiring is verified by source inspection, `tsc --noEmit`, the dispatcher's bind-semantics unit tests, and the ownership suite binding a real engine through `makePiAdapterLive`; the resolver itself has direct tests. | Accept as-is; consider a small `main.test.ts` knob/bind assertion on the next planning touch for symmetry. |
+| **F4** | INFO | Dispatcher maps a malformed stored payload to `transient` (`piSubagentParentEffectDispatcher.ts:111-117`) rather than collision. Unreachable from the coordinator path (pre-dispatch fingerprint verification fails closed first, `piSubagentCompletionCoordinator.ts:313-330`), and pinned by its own unit test; a direct caller could nonetheless retry garbage indefinitely. | Note only; no action. Coordinator-path behavior conforms to §3 fail-closed. |
+| **F5** | INFO | Follow-up text no longer embeds the stable outbox id (the pre-remediation in-text dedupe key); correlation is now structural (deterministic command/message/batch ids + engine receipt dedupe), which is strictly stronger. Parent-transcript traceability is by `executionId`; ledger traceability is by outbox-id membership. | None — record for traceability. |
+| **F6** | INFO | Exhausted/superseded batches retain members in `delivered` (never acknowledged) as readable evidence, and the slot releases. This is the designed bounded-retry terminal semantics (Decision 0016 §7 / Ticket 08 policy), not a residual loss window: loss only after `retryLimit` genuine boundary failures, with evidence preserved. | None — confirm at final acceptance that this bounded-exhaustion semantics is the intended reading of T09-AC4 "remains retryable". |
+
+**Disclosed-risk adjudication (packet item 5):** no residual crash window found beyond designed bounded exhaustion (F6); no double-message on replay (engine receipt dedupe proven at the real-engine level); no correlation gaps (exact command/fingerprint/message/sequence + membership-scoped acknowledgement); no recovery starvation (five §5 triggers implemented incl. the 10 s bounded scan over hydrated ownership threads, with lazy absence correctly non-failing); no config/migration regressions (additive, replay-safe, guarded resolver, 195-test config suite green).
+
+---
+
+## 6. Method observations
+
+- **M1:** All real-Pi/wallclock suites ran per-file standalone under `env -i PATH="$HOME/.bun/bin:$PATH" HOME="$HOME"` per Decision 0008; no aggregate substitution, no timing failures observed.
+- **M2:** Ticket 13 commits (`8465b0fa`, `2de776a8`) interleave in main's history and touch disjoint files (admission quotas/telemetry/diagnostics + `apps/web/src/index.css`, `packages/contracts/src/server.ts`); they were excluded from this verdict per the packet. The working tree carries unrelated uncommitted modifications (`apps/server/.pi/notifications.jsonl`, `apps/web` composer styles) — not part of the reviewed candidate.
+- **M3:** Alfie repo re-verified: HEAD `489acd6264eeedbb1a84e2ba2295af8d1b766b3b`, clean tree, matching the Decision 0015 pin; the ownership suite's internal provenance check passed against it.
+- **M4:** Suites not in the packet's required list (e.g. `OrchestrationCommandReceipts.test.ts`, dedicated queued-promotion suites) were not individually rerun; engine receipt and queued-promotion behavior is exercised through the engine-backed, integrated, terminal, and restart acceptance suites, and those modules are unchanged by this remediation's diff.
+- **M5:** The review was conducted against committed `main` at `ebf224a6`; no repository files were modified in either repo.
+
+---
