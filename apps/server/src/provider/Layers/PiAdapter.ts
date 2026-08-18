@@ -139,6 +139,8 @@ import {
   admitSubagentSpawn,
   type AdmissionSnapshotQuery,
 } from "../piSubagentAdmissionCoordinator.ts";
+import { cancelParentTurnScope } from "../piSubagentCancellationCoordinator.ts";
+import { extractPiSubagentBridge } from "../piSubagentBridge.ts";
 import {
   makePiSubagentControlHealth,
   type PiSubagentControlHealthShape,
@@ -3708,6 +3710,91 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             activeTurnId: context.activeTurnId,
           });
           return;
+        }
+        // Ticket 06: durable parent-turn cancellation runs BEFORE the
+        // provider-turn interrupt — the cancellation intent is journaled
+        // first (T06-AC1), then dispatched to every managed child in the
+        // parent-turn scope (T06-AC2) with bounded retry and acknowledgement
+        // waits. The provider-turn interrupt below is the FIRST ESCALATION
+        // STAGE (T06-AC6) and runs regardless of the coordinator outcome:
+        // its own `session.abort()` resolution is never treated as
+        // termination proof (T06-AC5).
+        if (context.subagentCapability?.isManaged && piSubagentRepository) {
+          const bridgeForCancel =
+            context.subagentCapability.capabilities?.includes("durable-cancellation") === true
+              ? extractPiSubagentBridge(context.runtime.session)
+              : undefined;
+          const cancelOutcome = yield* cancelParentTurnScope({
+            threadId,
+            repository: piSubagentRepository,
+            bridge: bridgeForCancel,
+            isOwnerGenerationDead: () => false,
+            listActive: () =>
+              typeof bridgeForCancel?.getActiveExecutions === "function"
+                ? bridgeForCancel.getActiveExecutions()
+                : undefined,
+            cancelAckTimeoutMs: serverConfig.piSubagentCancelAckTimeoutMs,
+            cancelRetryLimit: serverConfig.piSubagentCancelRetryLimit,
+            leaseDurationMs: serverConfig.piSubagentLeaseDurationMs,
+            onDiagnostic: (event: {
+              readonly executionId: string;
+              readonly diagnosticCode: string;
+              readonly diagnosticMessage: string;
+            }) => {
+              offerRuntimeEvent({
+                ...makeEventBase(context),
+                type: "runtime.warning",
+                payload: {
+                  message: `Pi subagent cancellation remains pending [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                  detail: {
+                    executionId: event.executionId,
+                    diagnosticCode: event.diagnosticCode,
+                  },
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/cancel-diagnostic",
+                  payload: {
+                    executionId: event.executionId,
+                    diagnosticCode: event.diagnosticCode,
+                  },
+                },
+              } satisfies ProviderRuntimeEvent);
+            },
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "subagents/cancel-parent-turn",
+                  detail: toMessage(cause, "Failed to run durable parent-turn cancellation."),
+                  cause,
+                }),
+            ),
+          );
+          for (const outcome of cancelOutcome.outcomes) {
+            if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+              offerRuntimeEvent({
+                ...makeEventBase(context),
+                type: "runtime.warning",
+                payload: {
+                  message: `Pi subagent execution cancelled with termination evidence [${outcome.executionId}]`,
+                  detail: {
+                    executionId: outcome.executionId,
+                    evidence: outcome.kind,
+                  },
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/cancel-settled",
+                  payload: {
+                    executionId: outcome.executionId,
+                    evidence: outcome.kind,
+                  },
+                },
+              } satisfies ProviderRuntimeEvent);
+            }
+          }
         }
         yield* Effect.tryPromise({
           try: () => context.runtime.session.abort(),

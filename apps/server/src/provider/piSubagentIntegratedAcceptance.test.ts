@@ -388,6 +388,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "abort-propagation",
     "bounded-foreground-attachment",
     "coalesced-progress",
+    "durable-cancellation",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -627,7 +628,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
     // any leg of this file.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.11.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.12.0-alfie.1");
 
     const rootDir = mkdtempSync(join(tmpdir(), "synara-t24-integrated-"));
     createdDirs.push(rootDir);
@@ -1762,7 +1763,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         "bounded-foreground-attachment",
         "coalesced-progress",
       ],
-      extensionVersion: "0.11.0-alfie.1",
+      extensionVersion: "0.12.0-alfie.1",
     });
     const capturingFloodExtension = {
       name: "pi-subagents-t24-flood",

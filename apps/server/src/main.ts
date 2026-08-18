@@ -27,6 +27,8 @@ import {
   resolvePiSubagentHeartbeatIntervalMs,
   resolvePiSubagentLeaseDurationMs,
   resolvePiSubagentProgressRateHz,
+  resolvePiSubagentCancelAckTimeoutMs,
+  resolvePiSubagentCancelRetryLimit,
   resolveStaticDir,
   ServerConfig,
   type RuntimeMode,
@@ -348,6 +350,12 @@ const ServerConfigLive = (input: CliInput) =>
         ),
         piSubagentLeaseDurationMs: resolvePiSubagentLeaseDurationMs(
           process.env.SYNARA_PI_SUBAGENT_LEASE_DURATION_MS,
+        ),
+        piSubagentCancelAckTimeoutMs: resolvePiSubagentCancelAckTimeoutMs(
+          process.env.SYNARA_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
+        ),
+        piSubagentCancelRetryLimit: resolvePiSubagentCancelRetryLimit(
+          process.env.SYNARA_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
         ),
       } satisfies ServerConfigShape;
 

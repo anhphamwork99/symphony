@@ -1,14 +1,4 @@
-import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  symlinkSync,
-  writeFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -37,9 +27,8 @@ import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagen
 import { makePiAdapterLive } from "./Layers/PiAdapter.ts";
 import { PiAdapter } from "./Services/PiAdapter.ts";
 
-// Local provenance helpers (copied from piSubagentRealExtension.test.ts —
-// cross-test-file imports double-register the source file's suites in
-// vitest, so the established pattern is a local copy).
+// Local provenance helpers (established pattern: cross-test-file imports
+// double-register the source file's suites in vitest).
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface ProvenanceManifest {
@@ -141,26 +130,27 @@ function verifyExtensionGitProvenance(): { isVerified: boolean; packageVersion: 
 }
 
 /**
- * Ticket 23 / T23-AC9 real-Pi acceptance: the ACTUAL pinned
- * `@alfie/pi-subagents` extension (no synthetic Agent replacement) produces
- * coalesced progress observations and heartbeat lease observations through
- * the production PiAdapter managed path against the deterministic local
- * OpenAI-completions model fixture (the same owner-approved seam as Issue 22:
- * only the model endpoint is a fixture; adapter, extension bridge,
- * AgentManager, runAgent and the streaming client are all real).
+ * Ticket 06 / T06-AC2, T06-AC4, T06-AC5, T06-AC7 real-Pi acceptance: Stop on
+ * a parent turn runs the durable cancellation coordinator against the ACTUAL
+ * pinned extension (no synthetic Agent replacement) with the deterministic
+ * loopback model fixture. Proves on the live path:
  *
- * Proves on the live path:
- * - T23-AC1: the managed producer never calls onUpdate (no legacy 80 ms
- *   spinner publication) — captured via a spy passed to the real Agent tool.
- * - T23-AC2: real producer progress observations arrive at the server rate
- *   cap and the latest durable snapshot reflects real child activity.
- * - T23-AC3: real heartbeat observations refresh the durable lease
- *   (last_heartbeat_at / lease_expires_at) without journal rows or
- *   transcript-message runtime events.
+ * - T06-AC2: adapter.interruptTurn targets every managed child declaring the
+ *   parent-turn scope — a foreground-DETACHED child and a BACKGROUND child
+ *   in the same thread are both cancelled.
+ * - T06-AC4: the durable aggregate reaches `cancelled` only through a child
+ *   terminal acknowledgement carrying the same attempt/generation (journal
+ *   rows cancelling → cancelled with evidenceChannel child_ack).
+ * - T06-AC5: `session.abort()` resolution alone is insufficient — the test
+ *   drives interruptTurn (which itself awaits session.abort()) and asserts
+ *   the durable state was already settled by evidence, not by the abort
+ *   promise.
+ * - T06-AC7: the background managed spawn receives and honors parent abort
+ *   propagation (the real bridge.cancel aborts the background record and the
+ *   ack resolves after its settlement).
  */
 
 const DETERMINISTIC_MODEL_PROVIDER_ID = "synara-local-echo";
-const DETERMINISTIC_FAST_MODEL_ID = "echo";
 const DETERMINISTIC_SLOW_MODEL_ID = "echo-slow";
 const DETERMINISTIC_SLOW_DELAY_MS = 4000;
 
@@ -191,8 +181,8 @@ function startDeterministicModelServer(): Promise<{
       } catch {
         requestedModel = "";
       }
-      const delayMs =
-        requestedModel === DETERMINISTIC_SLOW_MODEL_ID ? DETERMINISTIC_SLOW_DELAY_MS : 0;
+      // Slow model never finishes a turn quickly enough to self-settle: the
+      // child stays genuinely live until the durable cancel aborts it.
       const respond = () => {
         res.writeHead(200, { "content-type": "text/event-stream" });
         const chunkEvent = (delta: Record<string, unknown>, finishReason: string | null) =>
@@ -218,18 +208,14 @@ function startDeterministicModelServer(): Promise<{
         res.write("data: [DONE]\n\n");
         res.end();
       };
-      if (delayMs > 0) {
-        setTimeout(respond, delayMs);
-      } else {
-        respond();
-      }
+      setTimeout(respond, DETERMINISTIC_SLOW_DELAY_MS);
     });
   });
-  return new Promise((resolve) => {
+  return new Promise((resolve_) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address !== null ? address.port : 0;
-      resolve({
+      resolve_({
         server,
         baseUrl: `http://127.0.0.1:${port}/v1`,
         close: () =>
@@ -251,6 +237,10 @@ function writeAgentDir(tempAgentDir: string, baseUrl: string): void {
   if (existsSync(sharedDir)) {
     symlinkSync(sharedDir, join(extensionsDir, "shared"), "dir");
   }
+  const systemDir = join(repoDir, "agent", "system");
+  if (existsSync(systemDir)) {
+    symlinkSync(systemDir, join(tempAgentDir, "system"), "dir");
+  }
   const models = {
     providers: {
       [DETERMINISTIC_MODEL_PROVIDER_ID]: {
@@ -261,14 +251,6 @@ function writeAgentDir(tempAgentDir: string, baseUrl: string): void {
         authHeader: true,
         compat: { supportsDeveloperRole: false },
         models: [
-          {
-            id: DETERMINISTIC_FAST_MODEL_ID,
-            name: "Local Echo",
-            reasoning: false,
-            input: ["text"],
-            contextWindow: 100_000,
-            maxTokens: 1_000,
-          },
           {
             id: DETERMINISTIC_SLOW_MODEL_ID,
             name: "Local Echo (slow)",
@@ -363,8 +345,8 @@ function makeAuthorityFixture(threadId: string) {
   return { authorityService, binding };
 }
 
-describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () => {
-  it("T23-AC9/AC1/AC2/AC3: real pinned extension produces coalesced progress and heartbeat lease observations with no legacy spinner onUpdate", async () => {
+describe("Pi Subagent Durable Parent-Turn Cancellation Real-Pi Acceptance (Issue 06)", () => {
+  it("T06-AC2/AC4/AC5/AC7: Stop cancels foreground-detached and background children with termination evidence", async () => {
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
@@ -372,21 +354,20 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
 
     const modelServer = await startDeterministicModelServer();
 
-    const parentAgentDir = `/tmp/synara-t23-real-${Date.now()}-parent`;
-    const childAgentDir = `/tmp/synara-t23-real-${Date.now()}-child`;
+    const parentAgentDir = `/tmp/synara-t06-real-${Date.now()}-parent`;
+    const childAgentDir = `/tmp/synara-t06-real-${Date.now()}-child`;
     createdDirs.push(parentAgentDir, childAgentDir);
     writeAgentDir(parentAgentDir, modelServer.baseUrl);
     writeAgentDir(childAgentDir, modelServer.baseUrl);
 
-    const foregroundWaitMs = 12_000; // slow model takes ~4 s/turn × turns
-    const heartbeatIntervalMs = 1_500;
-    const leaseDurationMs = 4_500;
+    const foregroundWaitMs = 1_500; // detach well before the slow model settles
+    // The acknowledgement bound must cover the real settlement latency of the
+    // deterministic slow model (the abort signal does not cancel an
+    // in-flight SSE request that has not yet received headers; the child's
+    // promise settles when the stream closes at ~4s). 8s keeps the bound
+    // well below the wallclock testTimeout while proving bounded waits.
+    const ackTimeoutMs = 8_000;
 
-    // Real parent tool-execution model context: the real ModelRegistry over
-    // the same agent dir, resolving the deterministic SLOW model so the real
-    // child runs long enough for genuine progress + heartbeat observations.
-    // PI_CODING_AGENT_DIR points the child session's own services at the same
-    // deterministic provider (established Issue-22 pattern).
     const modelRuntime = await ModelRuntime.create({
       authPath: join(parentAgentDir, "auth.json"),
       modelsPath: join(parentAgentDir, "models.json"),
@@ -401,11 +382,10 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
 
     const serverConfig = makeServerConfig(parentAgentDir, {
       piSubagentForegroundWaitMs: foregroundWaitMs,
-      piSubagentProgressRateHz: 2,
-      piSubagentHeartbeatIntervalMs: heartbeatIntervalMs,
-      piSubagentLeaseDurationMs: leaseDurationMs,
+      piSubagentCancelAckTimeoutMs: ackTimeoutMs,
+      piSubagentCancelRetryLimit: 1,
     });
-    const { authorityService, binding } = makeAuthorityFixture("th_t23_real_1");
+    const { authorityService, binding } = makeAuthorityFixture("th_t06_real_1");
 
     const runtimeEvents: any[] = [];
     let observedSession: any;
@@ -448,7 +428,7 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
           thread_id, project_id, title, model_selection_json,
           runtime_mode, interaction_mode, env_mode, created_at, updated_at, deleted_at
         ) VALUES (
-          'th_t23_real_1', 'proj_default', 'T23 Real',
+          'th_t06_real_1', 'proj_default', 'T06 Real',
           '{"provider":"pi","model":"pi"}',
           'full-access', 'default', 'local',
           '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z', NULL
@@ -462,7 +442,7 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
       ).pipe(Effect.forkChild);
 
       yield* adapter.startSession({
-        threadId: "th_t23_real_1" as ThreadId,
+        threadId: "th_t06_real_1" as ThreadId,
         cwd: parentAgentDir,
         runtimeMode: "full-access",
         providerOptions: { pi: { agentDir: parentAgentDir } },
@@ -470,10 +450,224 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
       });
 
       // Managed negotiation with the REAL extension must include
-      // coalesced-progress now.
+      // durable-cancellation now.
       const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
       expect(negotiated?.isManaged).toBe(true);
-      expect(negotiated?.capabilities).toContain("coalesced-progress");
+      expect(negotiated?.capabilities).toContain("durable-cancellation");
+
+      const loadedExt = observedSession.resourceLoader
+        .getExtensions()
+        .extensions.find((e: any) => e.tools instanceof Map && e.tools.has("Agent")) as any;
+      const agentEntry = loadedExt.tools.get("Agent");
+      const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
+      const bridge = loadedExt.handlers.get("synara:subagents:bridge")[0]();
+
+      const parentCtx = {
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
+        cwd: parentAgentDir,
+        model: slowModel,
+        modelRegistry: registry,
+        sessionManager: observedSession.sessionManager,
+        getSystemPrompt: () => "",
+      };
+
+      // 1. Foreground child that detaches within the budget and keeps running.
+      const fgResult = yield* Effect.promise(() =>
+        executeFn(
+          "call_t06_fg",
+          {
+            commandId: "cmd_t06_fg",
+            subagent_type: "researcher",
+            task: "Detached foreground child that must be durably cancelled",
+            context: "Cancellation context.",
+            link_references: "None",
+            expected_outcome: "Outcome.",
+            run_in_background: false,
+          },
+          undefined,
+          undefined,
+          parentCtx,
+        ),
+      );
+      const fgExecutionId = (fgResult as any).executionId;
+      expect(fgExecutionId).toMatch(/^exec_/);
+      expect((fgResult as any).details?.disposition ?? "detached").toBeTruthy();
+
+      // 2. Background managed child in the same parent-turn scope (T06-AC2/AC7).
+      const bgResult = yield* Effect.promise(() =>
+        executeFn(
+          "call_t06_bg",
+          {
+            commandId: "cmd_t06_bg",
+            subagent_type: "researcher",
+            task: "Background child that must receive the durable cancel",
+            context: "Cancellation context.",
+            link_references: "None",
+            expected_outcome: "Outcome.",
+            run_in_background: true,
+          },
+          undefined,
+          undefined,
+          parentCtx,
+        ),
+      );
+      const bgExecutionId = (bgResult as any).executionId;
+      expect(bgExecutionId).toMatch(/^exec_/);
+
+      // Both children are live in the bridge active set before Stop.
+      const activeBefore = bridge.getActiveExecutions();
+      expect(activeBefore.some((e: any) => e.executionId === fgExecutionId)).toBe(true);
+      expect(activeBefore.some((e: any) => e.executionId === bgExecutionId)).toBe(true);
+
+      // 3. Stop on the parent turn: interruptTurn runs the durable
+      // coordinator BEFORE session.abort (T06-AC5: the abort promise itself
+      // is never the termination proof).
+      yield* adapter.interruptTurn("th_t06_real_1" as ThreadId);
+
+      // 4. Termination evidence settled durably: both executions reached
+      // cancelled through child acknowledgements carrying the same
+      // attempt/generation (T06-AC4).
+      for (const executionId of [fgExecutionId, bgExecutionId]) {
+        const recordOption = yield* repo.getById(executionId);
+        expect(Option.isSome(recordOption)).toBe(true);
+        if (Option.isSome(recordOption)) {
+          expect(recordOption.value.observedState).toBe("cancelled");
+          expect(recordOption.value.desiredState).toBe("cancelled");
+        }
+        const journal = yield* repo.listJournalEvents(executionId);
+        const cancelling = journal.find((event) => event.state === "cancelling");
+        expect(cancelling).toBeDefined();
+        const cancelledEvent = journal.find((event) => event.state === "cancelled");
+        expect(cancelledEvent).toBeDefined();
+        expect(cancelledEvent!.attemptId).toBe(cancelling!.attemptId);
+        expect(cancelledEvent!.generation).toBe(cancelling!.generation);
+        expect(cancelledEvent!.metadata).toMatchObject({ evidenceChannel: "child_ack" });
+      }
+
+      // 5. The children are gone from the live active set (T06-AC7: the
+      // background child received and honored the abort).
+      const activeAfter = bridge.getActiveExecutions();
+      expect(activeAfter.some((e: any) => e.executionId === fgExecutionId)).toBe(false);
+      expect(activeAfter.some((e: any) => e.executionId === bgExecutionId)).toBe(false);
+
+      // 6. A cancellation-settled runtime event was offered for each child.
+      // Give the forked streamEvents consumer a moment to drain the offered
+      // runtime events before filtering (the durable truth above is the
+      // primary evidence; this is the operator-visibility surface).
+      yield* Effect.sleep(250);
+      const settledEvents = runtimeEvents.filter(
+        (event) => event.raw?.method === "subagents/cancel-settled",
+      );
+      const settledIds = settledEvents.map((e) => e.raw.payload.executionId);
+      expect(settledIds).toEqual(expect.arrayContaining([fgExecutionId, bgExecutionId]));
+
+      yield* adapter.stopSession("th_t06_real_1" as ThreadId);
+    });
+
+    try {
+      await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+    } finally {
+      if (previousAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+      }
+      await modelServer.close();
+    }
+  }, 120_000);
+
+  it("T06-AC6/T06-AC1: replayed Stop against settled executions re-dispatches nothing and keeps durable truth", async () => {
+    const provenance = verifyExtensionGitProvenance();
+    expect(provenance.isVerified).toBe(true);
+
+    const modelServer = await startDeterministicModelServer();
+
+    const parentAgentDir = `/tmp/synara-t06-replay-${Date.now()}-parent`;
+    const childAgentDir = `/tmp/synara-t06-replay-${Date.now()}-child`;
+    createdDirs.push(parentAgentDir, childAgentDir);
+    writeAgentDir(parentAgentDir, modelServer.baseUrl);
+    writeAgentDir(childAgentDir, modelServer.baseUrl);
+
+    const modelRuntime = await ModelRuntime.create({
+      authPath: join(parentAgentDir, "auth.json"),
+      modelsPath: join(parentAgentDir, "models.json"),
+    });
+    const registry = new ModelRegistry(modelRuntime);
+    const slowModel = registry.find(DETERMINISTIC_MODEL_PROVIDER_ID, DETERMINISTIC_SLOW_MODEL_ID);
+    if (!slowModel) {
+      throw new Error("Deterministic slow model not available in test registry");
+    }
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = childAgentDir;
+
+    const serverConfig = makeServerConfig(parentAgentDir, {
+      piSubagentForegroundWaitMs: 1_000,
+      piSubagentCancelAckTimeoutMs: 8_000,
+      piSubagentCancelRetryLimit: 1,
+    });
+    const { authorityService, binding } = makeAuthorityFixture("th_t06_replay_1");
+
+    let observedSession: any;
+
+    const piAdapterLayer = makePiAdapterLive({
+      onSubagentCapability: (event) => {
+        observedSession = event.session;
+      },
+    }).pipe(
+      Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
+      Layer.provide(NodeFileSystem.layer),
+      Layer.provide(PiSubagentExecutionRepositoryLive),
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+      Layer.provide(Layer.succeed(McpSessionAuthority, authorityService)),
+      Layer.provide(SqlitePersistenceMemory),
+    );
+
+    const testLayer = Layer.mergeAll(
+      piAdapterLayer,
+      PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+      SqlitePersistenceMemory,
+    );
+
+    const testProgram = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const repo = yield* PiSubagentExecutionRepository;
+      const adapter = yield* PiAdapter;
+
+      yield* sql`
+        INSERT OR IGNORE INTO projection_projects (
+          project_id, kind, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at
+        ) VALUES (
+          'proj_default', 'project', 'Default', ${parentAgentDir}, '{"provider":"pi","model":"pi"}',
+          '[]', '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z'
+        )
+      `;
+      yield* sql`
+        INSERT OR IGNORE INTO projection_threads (
+          thread_id, project_id, title, model_selection_json,
+          runtime_mode, interaction_mode, env_mode, created_at, updated_at, deleted_at
+        ) VALUES (
+          'th_t06_replay_1', 'proj_default', 'T06 Replay',
+          '{"provider":"pi","model":"pi"}',
+          'full-access', 'default', 'local',
+          '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z', NULL
+        )
+      `;
+
+      yield* adapter.startSession({
+        threadId: "th_t06_replay_1" as ThreadId,
+        cwd: parentAgentDir,
+        runtimeMode: "full-access",
+        providerOptions: { pi: { agentDir: parentAgentDir } },
+        mcpAuthority: binding,
+      });
 
       const loadedExt = observedSession.resourceLoader
         .getExtensions()
@@ -481,98 +675,72 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
       const agentEntry = loadedExt.tools.get("Agent");
       const executeFn = agentEntry.execute ?? agentEntry.definition?.execute;
 
-      // T23-AC1: onUpdate spy — the real managed producer must NEVER emit the
-      // legacy spinner stream through the tool-update channel.
-      const onUpdateCalls: any[] = [];
-      const onUpdateSpy = (partial: any) => {
-        onUpdateCalls.push(partial);
+      const parentCtx = {
+        ui: {
+          notify: () => {},
+          setStatus: () => {},
+          setWidget: () => {},
+          select: async () => undefined,
+          confirm: async () => true,
+          input: async () => undefined,
+        },
+        cwd: parentAgentDir,
+        model: slowModel,
+        modelRegistry: registry,
+        sessionManager: observedSession.sessionManager,
+        getSystemPrompt: () => "",
       };
 
-      const startedAt = Date.now();
-      const result = yield* Effect.promise(() =>
+      const bgResult = yield* Effect.promise(() =>
         executeFn(
-          "call_t23_real_1",
+          "call_t06_replay",
           {
-            commandId: "cmd_t23_real_1",
+            commandId: "cmd_t06_replay",
             subagent_type: "researcher",
-            task: "Slow deterministic task that emits real activity",
-            context: "Real progress context.",
+            task: "Background child for the replay test",
+            context: "Cancellation context.",
             link_references: "None",
             expected_outcome: "Outcome.",
-            run_in_background: false,
+            run_in_background: true,
           },
           undefined,
-          onUpdateSpy,
-          {
-            ui: {
-              notify: () => {},
-              setStatus: () => {},
-              setWidget: () => {},
-              select: async () => undefined,
-              confirm: async () => true,
-              input: async () => undefined,
-            },
-            cwd: parentAgentDir,
-            model: slowModel,
-            modelRegistry: registry,
-            sessionManager: observedSession.sessionManager,
-            getSystemPrompt: () => "",
-          },
+          undefined,
+          parentCtx,
         ),
       );
-      const elapsedMs = Date.now() - startedAt;
+      const executionId = (bgResult as any).executionId;
 
-      expect(onUpdateCalls).toHaveLength(0); // T23-AC1: no legacy spinner
-      expect(result).toBeDefined();
-      const executionId = (result as any).executionId;
-      expect(executionId).toMatch(/^exec_/);
+      // First Stop settles the child.
+      yield* adapter.interruptTurn("th_t06_replay_1" as ThreadId);
+      const afterFirst = yield* repo.getById(executionId);
+      expect(Option.isSome(afterFirst)).toBe(true);
+      if (Option.isSome(afterFirst)) {
+        expect(afterFirst.value.observedState).toBe("cancelled");
+      }
+      const journalAfterFirst = yield* repo.listJournalEvents(executionId);
+      const cancellingCount = journalAfterFirst.filter(
+        (event) => event.state === "cancelling",
+      ).length;
+      const cancelledCount = journalAfterFirst.filter(
+        (event) => event.state === "cancelled",
+      ).length;
 
-      // Give fire-and-forget observation writes + collector a moment.
-      yield* Effect.sleep(500);
-
-      // Journal truth: admission + started (+ detached if over budget).
-      const journal = yield* repo.listJournalEvents(executionId);
-      expect(journal.length).toBeGreaterThanOrEqual(2);
-      expect(journal[0]!.sequence).toBe(1);
-      expect(journal[1]!.sequence).toBe(2);
-
-      // T23-AC2: durable latest progress snapshot from the REAL producer.
-      const observationOption = yield* repo.getObservation(executionId);
-      expect(Option.isSome(observationOption)).toBe(true);
-      if (Option.isSome(observationOption)) {
-        const observation = observationOption.value;
-        if (observation.lastProgressJson !== null) {
-          const progress = JSON.parse(observation.lastProgressJson);
-          // Real producer payload contract: no spinnerFrame, real counters.
-          expect("spinnerFrame" in progress).toBe(false);
-          expect(progress.toolUses).toBeGreaterThanOrEqual(0);
-          expect(progress.status).toBe("running");
-        }
-        // T23-AC3: real heartbeat refreshed the durable lease.
-        expect(observation.lastHeartbeatAt).not.toBeNull();
-        expect(observation.leaseExpiresAt).not.toBeNull();
-        const leaseLead =
-          Date.parse(observation.leaseExpiresAt!) - Date.parse(observation.lastHeartbeatAt!);
-        expect(leaseLead).toBe(leaseDurationMs);
-
-        // Rate-cap accounting on the live path: total observed ≤ rateHz ×
-        // wall time + margin (the producer + server both cap at 2 Hz).
-        expect(observation.droppedProgressCount).toBeGreaterThanOrEqual(0);
+      // Replayed Stop: nothing left in the parent-turn scope — no new intent
+      // rows, no new ack rows, no new dispatch (T06-AC1 idempotency).
+      yield* adapter.interruptTurn("th_t06_replay_1" as ThreadId);
+      const journalAfterReplay = yield* repo.listJournalEvents(executionId);
+      expect(journalAfterReplay.filter((event) => event.state === "cancelling").length).toBe(
+        cancellingCount,
+      );
+      expect(journalAfterReplay.filter((event) => event.state === "cancelled").length).toBe(
+        cancelledCount,
+      );
+      const afterReplay = yield* repo.getById(executionId);
+      if (Option.isSome(afterReplay)) {
+        expect(afterReplay.value.observedState).toBe("cancelled");
       }
 
-      // No transcript-message runtime events from progress/heartbeat: only
-      // tool.progress activity emissions are allowed from the observation path.
-      const messageLike = runtimeEvents.filter((e) =>
-        ["message.completed", "message.updated", "message.started"].includes(e.type),
-      );
-      expect(messageLike).toHaveLength(0);
-
-      // The child ran long enough for at least one heartbeat (1.5 s interval)
-      // only when the child actually exceeded the interval; accept either but
-      // require the observation write to have occurred.
-      expect(elapsedMs).toBeGreaterThan(0);
-
-      yield* adapter.stopSession("th_t23_real_1" as ThreadId);
+      yield* adapter.stopSession("th_t06_replay_1" as ThreadId);
     });
 
     try {

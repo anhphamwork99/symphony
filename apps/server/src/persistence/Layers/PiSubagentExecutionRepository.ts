@@ -434,10 +434,16 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           // regresses the current aggregate (spec: late events must not
           // overwrite current truth).
           if (input.generation >= currentExecution.generation) {
+            // Ticket 06: a `cancelling` journal event is durable INTENT, not
+            // termination — desired stays `cancelling` until a `cancelled`
+            // terminal event arrives with evidence (T06-AC4). The legacy
+            // premature mapping of cancelling→cancelled(desired) is removed;
+            // terminal states map desired=state as before.
             const nextDesired =
-              input.state === "cancelled" || input.state === "cancelling"
-                ? "cancelled"
-                : input.state === "failed" ||
+              input.state === "cancelling"
+                ? "cancelling"
+                : input.state === "cancelled" ||
+                    input.state === "failed" ||
                     input.state === "succeeded" ||
                     input.state === "rejected"
                   ? input.state
@@ -695,6 +701,325 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       return rows.map(rowToExecutionRecord);
     });
 
+  // ---------------------------------------------------------------------
+  // Ticket 06 durable parent-turn cancellation paths.
+  // ---------------------------------------------------------------------
+
+  const listCancellableByParentTurn: PiSubagentExecutionRepositoryShape["listCancellableByParentTurn"] =
+    (threadId) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<ExecutionRow>`
+          SELECT ${executionColumns(sql)}
+          FROM pi_subagent_executions
+          WHERE parent_thread_id = ${threadId}
+            AND cancellation_scope = 'parent_turn'
+            AND observed_state IN (
+              'requested', 'accepted', 'queued', 'running', 'cancelling', 'orphaned'
+            )
+          ORDER BY created_at ASC
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.listCancellableByParentTurn:query",
+            ),
+          ),
+        );
+        return rows.map(rowToExecutionRecord);
+      });
+
+  const makeJournalInsert = (input: {
+    readonly eventId: string;
+    readonly executionId: string;
+    readonly attemptId: string;
+    readonly generation: number;
+    readonly sequence: number;
+    readonly state: PiSubagentLifecycleState;
+    readonly occurredAt: string;
+    readonly diagnosticCode: PiSubagentDiagnosticCode | null;
+    readonly diagnosticMessage: string | null;
+    readonly metadataJson: string | null;
+  }) =>
+    sql`
+      INSERT INTO pi_subagent_lifecycle_journal (
+        event_id,
+        execution_id,
+        attempt_id,
+        generation,
+        sequence,
+        state,
+        occurred_at,
+        diagnostic_code,
+        diagnostic_message,
+        metadata_json
+      ) VALUES (
+        ${input.eventId},
+        ${input.executionId},
+        ${input.attemptId},
+        ${input.generation},
+        ${input.sequence},
+        ${input.state},
+        ${input.occurredAt},
+        ${input.diagnosticCode},
+        ${input.diagnosticMessage},
+        ${input.metadataJson}
+      )
+    `;
+
+  const lookupJournalEvent = (input: {
+    readonly eventId: string;
+    readonly executionId: string;
+    readonly attemptId: string;
+    readonly generation: number;
+    readonly sequence: number;
+  }) =>
+    sql<JournalRow>`
+      SELECT
+        event_id AS "eventId",
+        execution_id AS "executionId",
+        attempt_id AS "attemptId",
+        generation,
+        sequence,
+        state,
+        occurred_at AS "occurredAt",
+        diagnostic_code AS "diagnosticCode",
+        diagnostic_message AS "diagnosticMessage",
+        metadata_json AS "metadataJson"
+      FROM pi_subagent_lifecycle_journal
+      WHERE event_id = ${input.eventId}
+         OR (
+           execution_id = ${input.executionId}
+           AND attempt_id = ${input.attemptId}
+           AND generation = ${input.generation}
+           AND sequence = ${input.sequence}
+         )
+      LIMIT 1
+    `;
+
+  const journalRowToEvent = (
+    row: JournalRow,
+    execution: PiSubagentExecutionRecord,
+  ): PiSubagentLifecycleEvent => ({
+    eventId: row.eventId,
+    executionId: row.executionId,
+    attemptId: row.attemptId,
+    generation: row.generation,
+    sequence: row.sequence,
+    state: row.state,
+    occurredAt: row.occurredAt,
+    parentThreadId: execution.parentThreadId,
+    parentTurnId: execution.parentTurnId,
+    parentToolCallId: execution.parentToolCallId,
+    projectId: execution.projectId,
+    diagnosticCode: row.diagnosticCode ?? undefined,
+    diagnosticMessage: row.diagnosticMessage ?? undefined,
+    metadata: row.metadataJson ? JSON.parse(row.metadataJson) : undefined,
+  });
+
+  /**
+   * Ticket 06 journal-first cancellation intent (T06-AC1). The `cancelling`
+   * event is written BEFORE any dispatch; the desired state on the aggregate
+   * becomes `cancelling` (never `cancelled` — that requires termination
+   * evidence). Idempotency: the dedup identity is the deterministic eventId
+   * `cancel_<cancelCommandId>` plus the attempt/generation sequence key, so a
+   * replayed cancel command returns already_applied WITHOUT re-dispatching.
+   */
+  const recordCancellationIntent: PiSubagentExecutionRepositoryShape["recordCancellationIntent"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `cancel_${input.cancelCommandId}`;
+          const metadataJson = JSON.stringify({
+            phase: "cancelling",
+            cancelCommandId: input.cancelCommandId,
+            reason: input.reason ?? null,
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordCancellationIntent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            return {
+              kind: "already_applied" as const,
+              event: journalRowToEvent(existing[0]!, execution),
+              execution,
+            };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+            state: "cancelling",
+            occurredAt: input.occurredAt,
+            diagnosticCode: null,
+            diagnosticMessage: input.reason ?? null,
+            metadataJson,
+          });
+
+          // Generation-gated aggregate advance: desired → cancelling only
+          // when this intent targets the CURRENT attempt/generation. A stale
+          // intent (older generation) journals as history without touching
+          // the newer attempt's truth (T06-AC3).
+          if (input.generation >= execution.generation) {
+            yield* sql`
+                UPDATE pi_subagent_executions
+                SET
+                  desired_state = 'cancelling',
+                  updated_at = ${input.occurredAt}
+                WHERE execution_id = ${input.executionId}
+                  AND desired_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+              `;
+          }
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return {
+            kind: "recorded" as const,
+            event: journalRowToEvent(
+              {
+                eventId,
+                executionId: input.executionId,
+                attemptId: input.attemptId,
+                generation: input.generation,
+                sequence: input.sequence,
+                state: "cancelling",
+                occurredAt: input.occurredAt,
+                diagnosticCode: null,
+                diagnosticMessage: input.reason ?? null,
+                metadataJson,
+              },
+              refreshed,
+            ),
+            execution: refreshed,
+          };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordCancellationIntent:insert"),
+        ),
+      );
+
+  /**
+   * Ticket 06 terminal cancellation settlement (T06-AC4). Requires the
+   * aggregate to still be on the acknowledged attempt/generation; a late
+   * stale settlement journals as history only and does not regress a newer
+   * attempt (T06-AC3).
+   */
+  const recordCancelledAck: PiSubagentExecutionRepositoryShape["recordCancelledAck"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `cancel_ack_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+          const metadataJson = JSON.stringify({
+            phase: "cancelled",
+            evidenceChannel: input.evidenceChannel,
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordCancelledAck:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            return {
+              kind: "already_applied" as const,
+              event: journalRowToEvent(existing[0]!, execution),
+              execution,
+            };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+            state: "cancelled",
+            occurredAt: input.occurredAt,
+            diagnosticCode: input.diagnosticCode ?? null,
+            diagnosticMessage: input.diagnosticMessage ?? null,
+            metadataJson,
+          });
+
+          // Terminal settlement requires the SAME attempt/generation to still
+          // be current: a stale late settlement cannot affect a newer attempt
+          // (T06-AC3) and a terminal aggregate never regresses.
+          if (
+            input.generation === execution.generation &&
+            input.attemptId === execution.attemptId
+          ) {
+            yield* sql`
+              UPDATE pi_subagent_executions
+              SET
+                observed_state = 'cancelled',
+                desired_state = 'cancelled',
+                diagnostic_code = ${input.diagnosticCode ?? null},
+                updated_at = ${input.occurredAt}
+              WHERE execution_id = ${input.executionId}
+                AND observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+            `;
+          }
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return {
+            kind: "recorded" as const,
+            event: journalRowToEvent(
+              {
+                eventId,
+                executionId: input.executionId,
+                attemptId: input.attemptId,
+                generation: input.generation,
+                sequence: input.sequence,
+                state: "cancelled",
+                occurredAt: input.occurredAt,
+                diagnosticCode: input.diagnosticCode ?? null,
+                diagnosticMessage: input.diagnosticMessage ?? null,
+                metadataJson,
+              },
+              refreshed,
+            ),
+            execution: refreshed,
+          };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordCancelledAck:insert"),
+        ),
+      );
+
   const listJournalEvents: PiSubagentExecutionRepositoryShape["listJournalEvents"] = (
     executionId,
   ) =>
@@ -753,6 +1078,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     getByCommandId,
     listByThreadId,
     listJournalEvents,
+    listCancellableByParentTurn,
+    recordCancellationIntent,
+    recordCancelledAck,
   } satisfies PiSubagentExecutionRepositoryShape;
 });
 

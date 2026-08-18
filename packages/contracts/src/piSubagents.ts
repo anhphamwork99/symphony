@@ -18,6 +18,7 @@ export const PI_SUBAGENT_CAPABILITIES = [
   "abort-propagation",
   "bounded-foreground-attachment",
   "coalesced-progress",
+  "durable-cancellation",
   "terminal-outbox",
   "restart-reconciliation",
   "paginated-transcripts",
@@ -42,6 +43,12 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_already_applied",
   "pi_subagent_lifecycle_persistence_failed",
   "pi_subagent_control_degraded",
+  "pi_subagent_cancel_dispatch_failed",
+  "pi_subagent_cancel_ack_timeout",
+  "pi_subagent_cancel_stale_generation",
+  "pi_subagent_cancel_already_terminal",
+  "pi_subagent_cancel_owner_death",
+  "pi_subagent_cancel_escalated",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -212,3 +219,31 @@ export const PiSubagentExecutionRecord = Schema.Struct({
   updatedAt: TrimmedNonEmptyString,
 });
 export type PiSubagentExecutionRecord = typeof PiSubagentExecutionRecord.Type;
+
+/**
+ * Ticket 06 durable cancel command (host → extension). Carries the exact
+ * attempt/generation the server expects to terminate; a mismatching live
+ * child is stale and must not be aborted (generation fencing, T06-AC3).
+ */
+export const PiSubagentCancelCommand = Schema.Struct({
+  cancelCommandId: TrimmedNonEmptyString,
+  executionId: PiSubagentExecutionId,
+  expectedAttemptId: PiSubagentAttemptId,
+  expectedGeneration: PositiveInt,
+});
+export type PiSubagentCancelCommand = typeof PiSubagentCancelCommand.Type;
+
+/**
+ * Ticket 06 terminal acknowledgement (extension → host). `cancelled` is
+ * claimed ONLY after the child operation settled on the extension side —
+ * never merely because abort() was invoked (T06-AC4/AC5).
+ */
+export const PiSubagentCancelResult = Schema.Struct({
+  status: Schema.Literals(["cancelled", "already_terminal", "stale", "missing", "dispatch_failed"]),
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+  diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
+});
+export type PiSubagentCancelResult = typeof PiSubagentCancelResult.Type;

@@ -655,6 +655,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "abort-propagation",
     "bounded-foreground-attachment",
     "coalesced-progress",
+    "durable-cancellation",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -1306,7 +1307,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     const provenance = verifyExtensionGitProvenance(repoDir);
     expect(provenance.isVerified).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.packageVersion).toBe("0.11.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.12.0-alfie.1");
     expect(provenance.commit).toMatch(/^[0-9a-f]{40}$/);
 
     // 2. Reject synthetic inline factory extension

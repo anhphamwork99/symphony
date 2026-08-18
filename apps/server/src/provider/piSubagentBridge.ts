@@ -5,6 +5,8 @@ import {
   PI_SUBAGENTS_MAX_PROTOCOL_VERSION,
   PI_SUBAGENTS_MIN_PROTOCOL_VERSION,
   PI_SUBAGENTS_PROTOCOL_VERSION,
+  type PiSubagentCancelCommand,
+  type PiSubagentCancelResult,
   type PiSubagentCapability,
   type PiSubagentHandshakeFailureResponse,
   type PiSubagentHandshakeRequest,
@@ -207,6 +209,15 @@ export interface PiSubagentExtensionBridge {
   readonly spawn?: (
     command: PiSubagentSpawnCommand,
   ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
+  /**
+   * Ticket 06 fenced durable cancel (host → extension). The result MUST
+   * resolve only after the child operation settled on the extension side
+   * (termination evidence), carrying the same attempt/generation. A live
+   * child whose identity does not match returns `stale` and is NOT aborted.
+   */
+  readonly cancel?: (
+    command: PiSubagentCancelCommand,
+  ) => Promise<PiSubagentCancelResult> | PiSubagentCancelResult;
   readonly abort?: (id: string) => boolean | Promise<boolean>;
   readonly abortAll?: () => number | Promise<number>;
   readonly getActiveExecutions?: () => ReadonlyArray<PiSubagentActiveChild>;
@@ -221,6 +232,7 @@ export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
     requiredCapabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
     optionalCapabilities: [
       "coalesced-progress",
+      "durable-cancellation",
       "terminal-outbox",
       "restart-reconciliation",
       "paginated-transcripts",
@@ -394,6 +406,14 @@ function extractBridge(target: unknown): PiSubagentExtensionBridge | undefined {
   return undefined;
 }
 
+/**
+ * Ticket 06: public bridge extraction for the durable-cancellation dispatch
+ * path (same extraction rules as the capability probe).
+ */
+export function extractPiSubagentBridge(target: unknown): PiSubagentExtensionBridge | undefined {
+  return extractBridge(target);
+}
+
 export async function probePiSubagentBridge(
   target: unknown,
 ): Promise<PiSubagentNegotiatedCapability> {
@@ -440,6 +460,9 @@ export interface CompatibleExtensionOptions {
     command: PiSubagentSpawnCommand,
   ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
   readonly onLifecycleEvent?: (event: PiSubagentLifecycleEvent) => Promise<void> | void;
+  readonly onCancel?: (
+    command: PiSubagentCancelCommand,
+  ) => Promise<PiSubagentCancelResult> | PiSubagentCancelResult;
 }
 
 export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionOptions) {
@@ -456,6 +479,7 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
       capabilities,
     }),
     ...(options?.onSpawn !== undefined ? { spawn: options.onSpawn } : {}),
+    ...(options?.onCancel !== undefined ? { cancel: options.onCancel } : {}),
     emitLifecycleEvent: async (event) => {
       emittedEvents.push(event);
       if (options?.onLifecycleEvent) {

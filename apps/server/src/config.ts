@@ -43,6 +43,17 @@ export const DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS = 30000;
 export const MIN_PI_SUBAGENT_LEASE_DURATION_MS = 1000;
 export const MAX_PI_SUBAGENT_LEASE_DURATION_MS = 3600000;
 
+// Ticket 06: durable cancellation dispatch knobs follow the same resolver
+// contract as the ticket-23 knobs — nullish → default, range check, invalid
+// anything → default, never clamped.
+export const DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS = 5000;
+export const MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS = 100;
+export const MAX_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS = 60000;
+
+export const DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 2;
+export const MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 0;
+export const MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 5;
+
 export function resolvePiSubagentProgressRateHz(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -185,6 +196,78 @@ export function resolvePiSubagentForegroundWaitMs(
   return DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
 }
 
+export function resolvePiSubagentCancelAckTimeoutMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS ||
+      rawInput > MAX_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS ||
+      parsed > MAX_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+}
+
+export function resolvePiSubagentCancelRetryLimit(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT ||
+      rawInput > MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT
+    ) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT ||
+      parsed > MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT
+    ) {
+      return DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+}
+
 export type RuntimeMode = "web" | "desktop";
 export type AntigravityTerminalRecoveryMode = "off" | "shadow" | "enforce";
 
@@ -276,6 +359,8 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentProgressRateHz?: number;
   readonly piSubagentHeartbeatIntervalMs?: number;
   readonly piSubagentLeaseDurationMs?: number;
+  readonly piSubagentCancelAckTimeoutMs?: number;
+  readonly piSubagentCancelRetryLimit?: number;
 }
 
 export function preparePrivateServerPaths(

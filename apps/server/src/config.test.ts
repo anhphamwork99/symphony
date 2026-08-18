@@ -17,14 +17,20 @@ import {
   DEFAULT_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
   DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS,
   DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ,
+  DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
+  DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
   MAX_PI_SUBAGENT_FOREGROUND_WAIT_MS,
   MAX_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
   MAX_PI_SUBAGENT_LEASE_DURATION_MS,
   MAX_PI_SUBAGENT_PROGRESS_RATE_HZ,
+  MAX_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
+  MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
   MIN_PI_SUBAGENT_FOREGROUND_WAIT_MS,
   MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
   MIN_PI_SUBAGENT_LEASE_DURATION_MS,
   MIN_PI_SUBAGENT_PROGRESS_RATE_HZ,
+  MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
+  MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
@@ -32,6 +38,8 @@ import {
   resolvePiSubagentHeartbeatIntervalMs,
   resolvePiSubagentLeaseDurationMs,
   resolvePiSubagentProgressRateHz,
+  resolvePiSubagentCancelAckTimeoutMs,
+  resolvePiSubagentCancelRetryLimit,
   resolveStaticDir,
 } from "./config";
 
@@ -474,6 +482,65 @@ describe("resolvePiSubagentLeaseDurationMs (Issue 23 / WP-B)", () => {
       it(`falls back to default 30000 for ${label}`, () => {
         expect(resolvePiSubagentLeaseDurationMs(input)).toBe(DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS);
       });
+    }
+  });
+});
+
+describe("resolvePiSubagentCancelAckTimeoutMs (Issue 06)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS).toBe(5000);
+    expect(MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS).toBe(100);
+    expect(MAX_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS).toBe(60000);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentCancelAckTimeoutMs(undefined)).toBe(5000);
+    expect(resolvePiSubagentCancelAckTimeoutMs(100)).toBe(100);
+    expect(resolvePiSubagentCancelAckTimeoutMs("100")).toBe(100);
+    expect(resolvePiSubagentCancelAckTimeoutMs(60000)).toBe(60000);
+    expect(resolvePiSubagentCancelAckTimeoutMs("  2500  ")).toBe(2500);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [
+      null,
+      "",
+      "abc",
+      "5000ms",
+      true,
+      {},
+      Infinity,
+      NaN,
+      5000.5,
+      99,
+      60001,
+      -1,
+    ]) {
+      expect(resolvePiSubagentCancelAckTimeoutMs(input)).toBe(
+        DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
+      );
+    }
+  });
+});
+
+describe("resolvePiSubagentCancelRetryLimit (Issue 06)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT).toBe(2);
+    expect(MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT).toBe(0);
+    expect(MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT).toBe(5);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentCancelRetryLimit(undefined)).toBe(2);
+    expect(resolvePiSubagentCancelRetryLimit(0)).toBe(0);
+    expect(resolvePiSubagentCancelRetryLimit("0")).toBe(0);
+    expect(resolvePiSubagentCancelRetryLimit(5)).toBe(5);
+    expect(resolvePiSubagentCancelRetryLimit("3")).toBe(3);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [null, "", "abc", "2x", true, {}, Infinity, NaN, 2.5, -1, 6]) {
+      expect(resolvePiSubagentCancelRetryLimit(input)).toBe(DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT);
     }
   });
 });
