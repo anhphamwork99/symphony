@@ -747,7 +747,6 @@ describe("resolvePiSubagentWallTimeMs (Issue 13 / T13-AC3, T13-AC7)", () => {
   });
 });
 
-
 describe("resolvePiSubagentOrphanAfterMs (Issue 10)", () => {
   it("exports the expected bounds and default constants (~60s initial threshold)", () => {
     expect(DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS).toBe(60000);

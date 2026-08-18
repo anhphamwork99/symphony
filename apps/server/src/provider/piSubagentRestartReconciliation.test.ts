@@ -51,9 +51,7 @@ const repositoryLayer = PiSubagentExecutionRepositoryLive.pipe(
 
 const BASE_TIME_MS = Date.parse("2026-08-18T08:00:00.000Z");
 
-function makeExecution(
-  overrides?: Partial<PiSubagentExecutionRecord>,
-): PiSubagentExecutionRecord {
+function makeExecution(overrides?: Partial<PiSubagentExecutionRecord>): PiSubagentExecutionRecord {
   return {
     executionId: "exec_t10_1",
     attemptId: "att_t10_1",
@@ -269,9 +267,7 @@ describe("Pi Subagent restart reconciliation (Issue 10)", () => {
         const observation = yield* repository.getObservation("exec_t10_1");
         expect(Option.isSome(observation)).toBe(true);
         if (Option.isSome(observation)) {
-          expect(observation.value.lastHeartbeatAt).toBe(
-            new Date(BASE_TIME_MS).toISOString(),
-          );
+          expect(observation.value.lastHeartbeatAt).toBe(new Date(BASE_TIME_MS).toISOString());
           expect(observation.value.leaseExpiresAt).toBe(
             new Date(BASE_TIME_MS + 30000).toISOString(),
           );
@@ -280,7 +276,12 @@ describe("Pi Subagent restart reconciliation (Issue 10)", () => {
         // A listActive record that does NOT match the current attempt or
         // generation is not live-owner evidence (identity mismatch → orphan).
         yield* admitRunning(
-          makeExecution({ executionId: "exec_t10_2", attemptId: "att_t10_2", commandId: "cmd_t10_2", parentToolCallId: "call_2" }),
+          makeExecution({
+            executionId: "exec_t10_2",
+            attemptId: "att_t10_2",
+            commandId: "cmd_t10_2",
+            parentToolCallId: "call_2",
+          }),
         );
         const mismatched = yield* reconcilePiSubagentExecutions({
           repository,

@@ -73,13 +73,11 @@ export const PI_SUBAGENT_OWNER_LOSS_DIAGNOSTIC_CODE: PiSubagentDiagnosticCode =
  */
 export const PI_SUBAGENT_OWNER_LOSS_DIAGNOSTIC_MESSAGE =
   "Owner loss: no live bridge owner or terminal evidence could be proven for this execution. " +
-    "Partial external or workspace side effects may already exist — inspect the workspace and " +
-    "the transcript before resuming; the execution was not automatically replayed.";
+  "Partial external or workspace side effects may already exist — inspect the workspace and " +
+  "the transcript before resuming; the execution was not automatically replayed.";
 
 /** Live-owner probe: bridge active-children snapshot per live session. */
-export type PiSubagentLiveOwnerProbe = () =>
-  | ReadonlyArray<PiSubagentActiveChild>
-  | undefined;
+export type PiSubagentLiveOwnerProbe = () => ReadonlyArray<PiSubagentActiveChild> | undefined;
 
 /**
  * T10-AC2 transcript terminal-evidence reader. Production restart recovery
@@ -255,7 +253,9 @@ export const reconcilePiSubagentExecutions = (
     const now = input.now ?? (() => Date.now());
     const probes = input.liveOwnerProbes ?? [];
     const leaseDurationMs =
-      input.leaseDurationMs !== undefined && input.leaseDurationMs > 0 ? input.leaseDurationMs : 30000;
+      input.leaseDurationMs !== undefined && input.leaseDurationMs > 0
+        ? input.leaseDurationMs
+        : 30000;
     const orphanAfterMs =
       input.orphanAfterMs !== undefined && input.orphanAfterMs >= 0
         ? input.orphanAfterMs
@@ -305,7 +305,9 @@ export const reconcilePiSubagentExecutions = (
       // Evidence 2 — TERMINAL EVIDENCE for the CURRENT attempt/generation
       // (T10-AC2). Journal rows first (durable production path), then the
       // injectable transcript-marker seam. Identity+generation must match.
-      const journal = yield* Effect.result(input.repository.listJournalEvents(execution.executionId));
+      const journal = yield* Effect.result(
+        input.repository.listJournalEvents(execution.executionId),
+      );
       let terminalMarker:
         | {
             readonly state: "succeeded" | "failed";
@@ -322,8 +324,10 @@ export const reconcilePiSubagentExecutions = (
             event.attemptId === execution.attemptId &&
             event.generation === execution.generation,
         );
-        if (journalTerminal !== undefined &&
-            (journalTerminal.state === "succeeded" || journalTerminal.state === "failed")) {
+        if (
+          journalTerminal !== undefined &&
+          (journalTerminal.state === "succeeded" || journalTerminal.state === "failed")
+        ) {
           const journalState: "succeeded" | "failed" = journalTerminal.state;
           const metadata = (journalTerminal.metadata ?? {}) as Record<string, unknown>;
           const summary =
@@ -454,10 +458,7 @@ export const reconcilePiSubagentExecutions = (
         });
         continue;
       }
-      if (
-        settled.kind === "already_applied" &&
-        settled.execution.observedState === "orphaned"
-      ) {
+      if (settled.kind === "already_applied" && settled.execution.observedState === "orphaned") {
         // Idempotent re-reconciliation: the SAME attempt/generation already
         // settled as orphaned and its fence (generation advance) stands —
         // report the already-fenced generation, never advance again.

@@ -366,9 +366,7 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
       "pi_subagent_quota_unknown",
       "pi_subagent_completion_batch_unknown",
     ] as const) {
-      expect(() =>
-        Schema.decodeSync(PiSubagentDiagnosticCode)(invalid as never),
-      ).toThrow();
+      expect(() => Schema.decodeSync(PiSubagentDiagnosticCode)(invalid as never)).toThrow();
     }
   });
 });

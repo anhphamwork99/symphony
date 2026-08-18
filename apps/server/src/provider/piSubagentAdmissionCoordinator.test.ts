@@ -1064,7 +1064,7 @@ describe("Pi subagent production fail-closed control health (Ticket 21: T21-AC1,
 
       const failingRepo: typeof liveRepo = {
         ...liveRepo,
-          recordAdmission: (input) => {
+        recordAdmission: (input) => {
           recordAdmissionCalls += 1;
           return storeFailing
             ? Effect.fail({
@@ -1237,7 +1237,7 @@ describe("Pi subagent production fail-closed control health (Ticket 21: T21-AC1,
       let recordAdmissionCalls = 0;
       const failingRepo: typeof liveRepo = {
         ...liveRepo,
-          recordAdmission: (_input) => {
+        recordAdmission: (_input) => {
           recordAdmissionCalls += 1;
           return Effect.fail({
             _tag: "PersistenceSqlError",
