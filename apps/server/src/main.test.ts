@@ -562,6 +562,56 @@ it.layer(testLayer)("server CLI command", (it) => {
       }),
   );
 
+  it.effect(
+    "resolves Ticket 13 admission and wall-time knobs on the production ServerConfigLive path (T13-AC1, T13-AC3, T13-AC7)",
+    () =>
+      Effect.gen(function* () {
+        const keys = [
+          "SYNARA_PI_SUBAGENT_PROVIDER_CONCURRENCY",
+          "SYNARA_PI_SUBAGENT_SERVER_QUEUE_CAP",
+          "SYNARA_PI_SUBAGENT_PROJECT_QUEUE_CAP",
+          "SYNARA_PI_SUBAGENT_WALL_TIME_MS",
+        ] as const;
+        const previous = new Map(keys.map((key) => [key, process.env[key]]));
+        const restore = Effect.sync(() => {
+          for (const key of keys) {
+            const value = previous.get(key);
+            if (value === undefined) {
+              delete process.env[key];
+            } else {
+              process.env[key] = value;
+            }
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            process.env.SYNARA_PI_SUBAGENT_PROVIDER_CONCURRENCY = "8";
+            process.env.SYNARA_PI_SUBAGENT_SERVER_QUEUE_CAP = "128";
+            process.env.SYNARA_PI_SUBAGENT_PROJECT_QUEUE_CAP = "32";
+            process.env.SYNARA_PI_SUBAGENT_WALL_TIME_MS = "3600000";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProviderConcurrency, 8);
+            assert.equal(resolvedConfig?.piSubagentServerQueueCap, 128);
+            assert.equal(resolvedConfig?.piSubagentProjectQueueCap, 32);
+            assert.equal(resolvedConfig?.piSubagentWallTimeMs, 3_600_000);
+
+            // Every invalid limit falls back to its finite safe default;
+            // no field can create unlimited concurrency, queueing, or time.
+            process.env.SYNARA_PI_SUBAGENT_PROVIDER_CONCURRENCY = "0";
+            process.env.SYNARA_PI_SUBAGENT_SERVER_QUEUE_CAP = "unlimited";
+            process.env.SYNARA_PI_SUBAGENT_PROJECT_QUEUE_CAP = "1.5";
+            process.env.SYNARA_PI_SUBAGENT_WALL_TIME_MS = "86400001";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentProviderConcurrency, 4);
+            assert.equal(resolvedConfig?.piSubagentServerQueueCap, 64);
+            assert.equal(resolvedConfig?.piSubagentProjectQueueCap, 16);
+            assert.equal(resolvedConfig?.piSubagentWallTimeMs, 7_200_000);
+          }),
+          () => restore,
+        );
+      }),
+  );
+
   it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>
     Effect.gen(function* () {
       const messages: string[] = [];

@@ -60,6 +60,11 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_completion_superseded",
   "pi_subagent_owner_loss_orphaned",
   "pi_subagent_restart_reconciliation_failed",
+  "pi_subagent_admission_provider_concurrency_exhausted",
+  "pi_subagent_admission_server_queue_saturated",
+  "pi_subagent_admission_project_queue_saturated",
+  "pi_subagent_admission_quota_unavailable",
+  "pi_subagent_walltime_expired",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -384,8 +389,7 @@ export const PiSubagentTranscriptTerminalMarker = Schema.Struct({
   transcriptRef: Schema.optional(TrimmedNonEmptyString),
   outcomeState: Schema.optional(TrimmedNonEmptyString),
 });
-export type PiSubagentTranscriptTerminalMarker =
-  typeof PiSubagentTranscriptTerminalMarker.Type;
+export type PiSubagentTranscriptTerminalMarker = typeof PiSubagentTranscriptTerminalMarker.Type;
 
 /**
  * Ticket 10 reconciliation outcome per execution (T10-AC1..AC6). `orphaned`

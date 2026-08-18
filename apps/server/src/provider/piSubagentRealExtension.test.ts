@@ -48,7 +48,6 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeMcpSessionAuthorityRegistry } from "../agentGateway/mcpSessionAuthority.ts";
 import {
   McpSessionAuthority,
@@ -1367,6 +1366,8 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
     let recordAdmissionAttempts = 0;
     let delegateRepo: any;
     const flakyRepo = {
+      getByCommandId: (commandId: string) => delegateRepo.getByCommandId(commandId),
+      listNonTerminalExecutions: () => delegateRepo.listNonTerminalExecutions(),
       recordAdmission: (input: any) => {
         recordAdmissionAttempts += 1;
         return failAdmissionWrites

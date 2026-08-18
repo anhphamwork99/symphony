@@ -1064,7 +1064,7 @@ describe("Pi subagent production fail-closed control health (Ticket 21: T21-AC1,
 
       const failingRepo: typeof liveRepo = {
         ...liveRepo,
-        recordAdmission: (input) => {
+          recordAdmission: (input) => {
           recordAdmissionCalls += 1;
           return storeFailing
             ? Effect.fail({
@@ -1237,7 +1237,7 @@ describe("Pi subagent production fail-closed control health (Ticket 21: T21-AC1,
       let recordAdmissionCalls = 0;
       const failingRepo: typeof liveRepo = {
         ...liveRepo,
-        recordAdmission: (input) => {
+          recordAdmission: (_input) => {
           recordAdmissionCalls += 1;
           return Effect.fail({
             _tag: "PersistenceSqlError",
@@ -1535,7 +1535,7 @@ describe("Pi subagent admission-driven recovery (Ticket 21: T21-AC5, T21-AC7)", 
 
   it("T21-AC7: legacy and unhandshaked sessions are never gated by degraded control health and never create managed truth", async () => {
     const snapshotQuery = createMockSnapshotQuery([validThread]);
-    const { registry, binding } = makeAuthorityFixture();
+    const { binding } = makeAuthorityFixture();
 
     const program = Effect.gen(function* () {
       const liveRepo = yield* PiSubagentExecutionRepository;
@@ -1680,6 +1680,425 @@ describe("Pi subagent degraded admission concurrency (Ticket 21: T21-AC3, T21-AC
         const row = yield* liveRepo.getByCommandId(`cmd_t21_concurrent_${n}`);
         expect(Option.isNone(row)).toBe(true);
       }
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Ticket 13: admission quotas (T13-AC1, T13-AC2, T13-AC7)
+// ─────────────────────────────────────────────────────────────────────
+
+interface QuotaPolicyInput {
+  readonly providerConcurrency?: number;
+  readonly serverQueueCap?: number;
+  readonly projectQueueCap?: number;
+}
+
+const makeQuotaAdmission = (
+  repository: PiSubagentExecutionRepository extends never ? never : any,
+  overrides: {
+    readonly policy?: QuotaPolicyInput | null;
+    readonly command?: Partial<PiSubagentSpawnCommand>;
+    readonly snapshotThreads?: OrchestrationReadModel["threads"];
+  } = {},
+) => {
+  const { registry, binding } = makeAuthorityFixture();
+  const snapshotQuery = createMockSnapshotQuery(overrides.snapshotThreads ?? [validThread]);
+  return admitSubagentSpawn({
+    command: { ...validCommand, ...overrides.command },
+    sessionCapability: managedCapability,
+    snapshotQuery,
+    repository,
+    authorityRegistry: registry,
+    trustedContext: makeTrustedContext(binding),
+    ...(overrides.policy === null ? {} : { admissionPolicy: overrides.policy ?? {} }),
+    now: "2026-08-18T12:00:00.000Z",
+  });
+};
+
+describe("Pi subagent admission quotas (Ticket 13: T13-AC1, T13-AC2, T13-AC7)", () => {
+  it("admits up to the provider concurrency cap and rejects the next spawn with a stable diagnostic (T13-AC1, T13-AC2)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      // Fill the provider concurrency budget: three accepted/running
+      // executions exist for the pi provider, cap is three.
+      for (const executionId of ["exec_seed_1", "exec_seed_2", "exec_seed_3"]) {
+        yield* repository.recordAdmission({
+          executionId,
+          attemptId: `att_${executionId}`,
+          generation: 1,
+          commandId: `cmd_${executionId}`,
+          commandFingerprint: `fp_${executionId}`,
+          clientCommandId: null,
+          projectId: "proj_default",
+          parentThreadId: "thread_main",
+          parentTurnId: "turn_001",
+          parentToolCallId: null,
+          agentType: "researcher",
+          prompt: "seed",
+          mode: "foreground",
+          cancellationScope: "parent_turn",
+          state: "accepted",
+          diagnosticCode: "pi_subagent_managed_enabled",
+          now: "2026-08-18T11:00:00.000Z",
+        });
+      }
+
+      const admitted = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 3 },
+        command: { commandId: "cmd_within_budget" },
+      });
+      // Wait — three running + this one = over cap already at admission
+      // time. The seeded executions count against the cap, so this command
+      // must be rejected.
+      expect(admitted.status).toBe("rejected");
+      expect(admitted.diagnosticCode).toBe("pi_subagent_admission_provider_concurrency_exhausted");
+
+      // With a cap of four the same load admits.
+      const admittedFour = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 4 },
+        command: { commandId: "cmd_within_budget_4" },
+      });
+      expect(admittedFour.status).toBe("accepted");
+
+      // And the fifth execution is rejected again.
+      const rejected = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 4 },
+        command: { commandId: "cmd_over_budget" },
+      });
+      expect(rejected.status).toBe("rejected");
+      expect(rejected.diagnosticCode).toBe("pi_subagent_admission_provider_concurrency_exhausted");
+      expect(rejected.rejectionReason).toBeTruthy();
+
+      // A replay of the fourth accepted command starts no new child and
+      // retains T20 idempotency even while the quota is full.
+      const replay = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 4 },
+        command: { commandId: "cmd_within_budget_4" },
+      });
+      expect(replay.status).toBe("already_applied");
+      expect(replay.executionId).toBe(admittedFour.executionId);
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("counts running states against the concurrency cap and frees budget when executions settle (T13-AC1)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      // Seed one accepted execution; the terminal settlement must release
+      // the budget slot.
+      yield* repository.recordAdmission({
+        executionId: "exec_settled",
+        attemptId: "att_settled",
+        generation: 1,
+        commandId: "cmd_settled",
+        commandFingerprint: "fp_settled",
+        clientCommandId: null,
+        projectId: "proj_default",
+        parentThreadId: "thread_main",
+        parentTurnId: "turn_001",
+        parentToolCallId: null,
+        agentType: "researcher",
+        prompt: "seed",
+        mode: "foreground",
+        cancellationScope: "parent_turn",
+        state: "accepted",
+        diagnosticCode: "pi_subagent_managed_enabled",
+        now: "2026-08-18T11:00:00.000Z",
+      });
+      yield* repository.recordTerminalEvent({
+        executionId: "exec_settled",
+        attemptId: "att_settled",
+        generation: 1,
+        sequence: 40,
+        state: "succeeded",
+        occurredAt: "2026-08-18T11:05:00.000Z",
+        summary: "done",
+        diagnosticCode: "pi_subagent_managed_enabled",
+      });
+
+      const rejectedAtOne = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 1 },
+        command: { commandId: "cmd_after_settle_rejected" },
+      });
+      // exec_settled is terminal now — budget free, so this admits.
+      expect(rejectedAtOne.status).toBe("accepted");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("enforces the server-wide queue cap across projects with a stable diagnostic (T13-AC1, T13-AC2)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      for (const executionId of ["exec_srv_1", "exec_srv_2"]) {
+        yield* repository.recordAdmission({
+          executionId,
+          attemptId: `att_${executionId}`,
+          generation: 1,
+          commandId: `cmd_${executionId}`,
+          commandFingerprint: `fp_${executionId}`,
+          clientCommandId: null,
+          projectId: "proj_default",
+          parentThreadId: "thread_main",
+          parentTurnId: "turn_001",
+          parentToolCallId: null,
+          agentType: "researcher",
+          prompt: "seed",
+          mode: "foreground",
+          cancellationScope: "parent_turn",
+          state: "accepted",
+          diagnosticCode: "pi_subagent_managed_enabled",
+          now: "2026-08-18T11:00:00.000Z",
+        });
+      }
+
+      const within = yield* makeQuotaAdmission(repository, {
+        policy: { serverQueueCap: 3 },
+        command: { commandId: "cmd_server_within" },
+      });
+      expect(within.status).toBe("accepted");
+
+      const saturated = yield* makeQuotaAdmission(repository, {
+        policy: { serverQueueCap: 3 },
+        command: { commandId: "cmd_server_over" },
+      });
+      expect(saturated.status).toBe("rejected");
+      expect(saturated.diagnosticCode).toBe("pi_subagent_admission_server_queue_saturated");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("enforces the per-project queue cap independent of other projects (T13-AC1, T13-AC2)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      const otherProjectThread = {
+        ...validThread,
+        id: "thread_other" as ThreadId,
+        projectId: "proj_other" as ProjectId,
+      };
+      for (const executionId of ["exec_proj_a_1", "exec_proj_a_2"]) {
+        yield* repository.recordAdmission({
+          executionId,
+          attemptId: `att_${executionId}`,
+          generation: 1,
+          commandId: `cmd_${executionId}`,
+          commandFingerprint: `fp_${executionId}`,
+          clientCommandId: null,
+          projectId: "proj_default",
+          parentThreadId: "thread_main",
+          parentTurnId: "turn_001",
+          parentToolCallId: null,
+          agentType: "researcher",
+          prompt: "seed",
+          mode: "foreground",
+          cancellationScope: "parent_turn",
+          state: "accepted",
+          diagnosticCode: "pi_subagent_managed_enabled",
+          now: "2026-08-18T11:00:00.000Z",
+        });
+      }
+
+      // proj_default has two non-terminal executions; cap of two rejects.
+      const saturated = yield* makeQuotaAdmission(repository, {
+        policy: { projectQueueCap: 2 },
+        command: { commandId: "cmd_project_over" },
+      });
+      expect(saturated.status).toBe("rejected");
+      expect(saturated.diagnosticCode).toBe("pi_subagent_admission_project_queue_saturated");
+
+      // The other project is unaffected by proj_default saturation.
+      const { registry: otherRegistry, binding: otherBinding } = makeAuthorityFixture({
+        projectId: "proj_other",
+      });
+      const otherTrusted: TrustedAdmissionContext = {
+        trustedThreadId: "thread_other" as ThreadId,
+        trustedProjectId: "proj_other" as ProjectId,
+        trustedActiveTurnId: "turn_001" as TurnId,
+        trustedProvider: "pi",
+        mcpAuthority: otherBinding,
+      };
+      const otherAdmits = yield* admitSubagentSpawn({
+        command: {
+          ...validCommand,
+          commandId: "cmd_other_project",
+          projectId: "proj_other" as ProjectId,
+          parentThreadId: "thread_other" as ThreadId,
+        },
+        sessionCapability: managedCapability,
+        snapshotQuery: createMockSnapshotQuery([otherProjectThread]),
+        repository,
+        authorityRegistry: otherRegistry,
+        trustedContext: otherTrusted,
+        admissionPolicy: { projectQueueCap: 2 },
+        now: "2026-08-18T12:00:00.000Z",
+      });
+      expect(otherAdmits.status).toBe("accepted");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("does not start a child outside the admitted budget: quota rejection journals durable seq-1 rejected audit (T13-AC2)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      yield* repository.recordAdmission({
+        executionId: "exec_quota_fill",
+        attemptId: "att_quota_fill",
+        generation: 1,
+        commandId: "cmd_quota_fill",
+        commandFingerprint: "fp_quota_fill",
+        clientCommandId: null,
+        projectId: "proj_default",
+        parentThreadId: "thread_main",
+        parentTurnId: "turn_001",
+        parentToolCallId: null,
+        agentType: "researcher",
+        prompt: "seed",
+        mode: "foreground",
+        cancellationScope: "parent_turn",
+        state: "accepted",
+        diagnosticCode: "pi_subagent_managed_enabled",
+        now: "2026-08-18T11:00:00.000Z",
+      });
+
+      const rejected = yield* makeQuotaAdmission(repository, {
+        policy: { providerConcurrency: 1 },
+        command: { commandId: "cmd_quota_rejected" },
+      });
+      expect(rejected.status).toBe("rejected");
+
+      const stored = yield* repository.getByCommandId("cmd_quota_rejected");
+      expect(Option.isSome(stored)).toBe(true);
+      if (Option.isSome(stored)) {
+        expect(stored.value.observedState).toBe("rejected");
+        expect(stored.value.diagnosticCode).toBe(
+          "pi_subagent_admission_provider_concurrency_exhausted",
+        );
+        const journal = yield* repository.listJournalEvents(stored.value.executionId);
+        expect(journal).toHaveLength(1);
+        expect(journal[0]!.sequence).toBe(1);
+        expect(journal[0]!.state).toBe("rejected");
+      }
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("fails closed with a distinct diagnostic when durable quota counts are unavailable (T13-AC2)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+      const unavailableRepository = {
+        ...repository,
+        listNonTerminalExecutions: () => Effect.fail(new Error("quota store unavailable") as never),
+      };
+      const { registry, binding } = makeAuthorityFixture();
+
+      const result = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_quota_unavailable" },
+        sessionCapability: managedCapability,
+        snapshotQuery: createMockSnapshotQuery([validThread]),
+        repository: unavailableRepository,
+        authorityRegistry: registry,
+        trustedContext: makeTrustedContext(binding),
+        admissionPolicy: { providerConcurrency: 4 },
+        now: "2026-08-18T12:00:00.000Z",
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.diagnosticCode).toBe("pi_subagent_admission_quota_unavailable");
+      expect(result.rejectionReason).not.toContain("Investigate performance bottleneck");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("falls back to safe default policies when the policy input is absent or invalid (T13-AC7)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+
+      // Absent policy → compatibility defaults admit normally (no unlimited
+      // behavior, no rejection at low load).
+      const defaultAdmission = yield* makeQuotaAdmission(repository, {
+        policy: null,
+        command: { commandId: "cmd_default_policy" },
+      });
+      expect(defaultAdmission.status).toBe("accepted");
+
+      // Invalid (non-positive / non-integer) policy fields fall back to the
+      // safe default values rather than producing unlimited admission.
+      const invalidFixture = makeAuthorityFixture();
+      const invalidPolicyAdmission = yield* admitSubagentSpawn({
+        command: { ...validCommand, commandId: "cmd_invalid_policy" },
+        sessionCapability: managedCapability,
+        snapshotQuery: createMockSnapshotQuery([validThread]),
+        repository,
+        authorityRegistry: invalidFixture.registry,
+        trustedContext: makeTrustedContext(invalidFixture.binding),
+        admissionPolicy: {
+          providerConcurrency: 0,
+          serverQueueCap: -1,
+          projectQueueCap: 1.5,
+        },
+        now: "2026-08-18T12:00:00.000Z",
+      });
+      expect(invalidPolicyAdmission.status).toBe("accepted");
+    });
+
+    await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
+  });
+
+  it("keeps the admitted set bounded under sustained concurrent pressure (T13-AC2, T13-AC6)", async () => {
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+      const { registry, binding } = makeAuthorityFixture();
+
+      const results = yield* Effect.forEach(
+        Array.from({ length: 100 }, (_, index) => index),
+        (index) =>
+          admitSubagentSpawn({
+            command: {
+              ...validCommand,
+              commandId: `cmd_saturation_${index}`,
+              parentToolCallId: `call_saturation_${index}`,
+            },
+            sessionCapability: managedCapability,
+            snapshotQuery: createMockSnapshotQuery([validThread]),
+            repository,
+            authorityRegistry: registry,
+            trustedContext: makeTrustedContext(binding),
+            admissionPolicy: {
+              providerConcurrency: 4,
+              serverQueueCap: 64,
+              projectQueueCap: 16,
+            },
+            now: "2026-08-18T12:00:00.000Z",
+          }),
+        { concurrency: "unbounded" },
+      );
+
+      const accepted = results.filter((result) => result.status === "accepted");
+      const rejected = results.filter((result) => result.status === "rejected");
+      expect(accepted).toHaveLength(4);
+      expect(rejected).toHaveLength(96);
+      expect(
+        rejected.every(
+          (result) =>
+            result.diagnosticCode === "pi_subagent_admission_provider_concurrency_exhausted",
+        ),
+      ).toBe(true);
+
+      const durableNonTerminal = yield* repository.listNonTerminalExecutions();
+      expect(durableNonTerminal).toHaveLength(4);
     });
 
     await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));

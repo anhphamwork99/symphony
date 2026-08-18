@@ -47,6 +47,22 @@ import {
   MIN_PI_SUBAGENT_ORPHAN_AFTER_MS,
   MAX_PI_SUBAGENT_ORPHAN_AFTER_MS,
   resolvePiSubagentOrphanAfterMs,
+  DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+  MIN_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+  MAX_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+  resolvePiSubagentProviderConcurrency,
+  DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP,
+  MIN_PI_SUBAGENT_SERVER_QUEUE_CAP,
+  MAX_PI_SUBAGENT_SERVER_QUEUE_CAP,
+  resolvePiSubagentServerQueueCap,
+  DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+  MIN_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+  MAX_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+  resolvePiSubagentProjectQueueCap,
+  DEFAULT_PI_SUBAGENT_WALL_TIME_MS,
+  MIN_PI_SUBAGENT_WALL_TIME_MS,
+  MAX_PI_SUBAGENT_WALL_TIME_MS,
+  resolvePiSubagentWallTimeMs,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
@@ -605,6 +621,97 @@ describe("resolvePiSubagentCompletionBatchWindowMs (Issue 09)", () => {
       expect(resolvePiSubagentCompletionBatchWindowMs(input)).toBe(
         DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
       );
+    }
+  });
+});
+
+describe("resolvePiSubagentProviderConcurrency (Issue 13 / T13-AC1, T13-AC7)", () => {
+  it("exports the compatibility default of four running agents per provider session", () => {
+    expect(DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY).toBe(4);
+    expect(MIN_PI_SUBAGENT_PROVIDER_CONCURRENCY).toBe(1);
+    expect(MAX_PI_SUBAGENT_PROVIDER_CONCURRENCY).toBe(64);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentProviderConcurrency(undefined)).toBe(4);
+    expect(resolvePiSubagentProviderConcurrency(1)).toBe(1);
+    expect(resolvePiSubagentProviderConcurrency("1")).toBe(1);
+    expect(resolvePiSubagentProviderConcurrency(64)).toBe(64);
+    expect(resolvePiSubagentProviderConcurrency(" 8 ")).toBe(8);
+    expect(resolvePiSubagentProviderConcurrency("+8")).toBe(8);
+  });
+
+  it("falls back to the default without clamping for invalid inputs (no unlimited concurrency)", () => {
+    for (const input of [null, "", "abc", true, {}, Infinity, NaN, 2.5, 0, -1, 65]) {
+      expect(resolvePiSubagentProviderConcurrency(input)).toBe(
+        DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+      );
+    }
+  });
+});
+
+describe("resolvePiSubagentServerQueueCap (Issue 13 / T13-AC1, T13-AC7)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP).toBe(64);
+    expect(MIN_PI_SUBAGENT_SERVER_QUEUE_CAP).toBe(1);
+    expect(MAX_PI_SUBAGENT_SERVER_QUEUE_CAP).toBe(1024);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentServerQueueCap(undefined)).toBe(64);
+    expect(resolvePiSubagentServerQueueCap(1)).toBe(1);
+    expect(resolvePiSubagentServerQueueCap("1")).toBe(1);
+    expect(resolvePiSubagentServerQueueCap(1024)).toBe(1024);
+    expect(resolvePiSubagentServerQueueCap("128")).toBe(128);
+  });
+
+  it("falls back to the default without clamping for invalid inputs (no unlimited queueing)", () => {
+    for (const input of [null, "", "x1", false, {}, Infinity, NaN, 1.5, 0, -4, 1025]) {
+      expect(resolvePiSubagentServerQueueCap(input)).toBe(DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP);
+    }
+  });
+});
+
+describe("resolvePiSubagentProjectQueueCap (Issue 13 / T13-AC1, T13-AC7)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP).toBe(16);
+    expect(MIN_PI_SUBAGENT_PROJECT_QUEUE_CAP).toBe(1);
+    expect(MAX_PI_SUBAGENT_PROJECT_QUEUE_CAP).toBe(256);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentProjectQueueCap(undefined)).toBe(16);
+    expect(resolvePiSubagentProjectQueueCap(1)).toBe(1);
+    expect(resolvePiSubagentProjectQueueCap("1")).toBe(1);
+    expect(resolvePiSubagentProjectQueueCap(256)).toBe(256);
+    expect(resolvePiSubagentProjectQueueCap(" 32 ")).toBe(32);
+  });
+
+  it("falls back to the default without clamping for invalid inputs (no unlimited queueing)", () => {
+    for (const input of [null, "", "abc", true, {}, Infinity, NaN, 0.5, 0, -1, 257]) {
+      expect(resolvePiSubagentProjectQueueCap(input)).toBe(DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP);
+    }
+  });
+});
+
+describe("resolvePiSubagentWallTimeMs (Issue 13 / T13-AC3, T13-AC7)", () => {
+  it("exports the two-hour default wall-time budget", () => {
+    expect(DEFAULT_PI_SUBAGENT_WALL_TIME_MS).toBe(7200000);
+    expect(MIN_PI_SUBAGENT_WALL_TIME_MS).toBe(60000);
+    expect(MAX_PI_SUBAGENT_WALL_TIME_MS).toBe(86400000);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentWallTimeMs(undefined)).toBe(7200000);
+    expect(resolvePiSubagentWallTimeMs(60000)).toBe(60000);
+    expect(resolvePiSubagentWallTimeMs("60000")).toBe(60000);
+    expect(resolvePiSubagentWallTimeMs(86400000)).toBe(86400000);
+    expect(resolvePiSubagentWallTimeMs("3600000")).toBe(3600000);
+  });
+
+  it("falls back to the default without clamping for invalid inputs (no unlimited wall time)", () => {
+    for (const input of [null, "", "abc", true, {}, Infinity, NaN, 5999.5, 59999, 86400001]) {
+      expect(resolvePiSubagentWallTimeMs(input)).toBe(DEFAULT_PI_SUBAGENT_WALL_TIME_MS);
     }
   });
 });

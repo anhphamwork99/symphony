@@ -243,6 +243,32 @@ export const ServerDiagnosticsChildProcess = Schema.Struct({
 });
 export type ServerDiagnosticsChildProcess = typeof ServerDiagnosticsChildProcess.Type;
 
+export const ServerDiagnosticsLatencyMs = Schema.Struct({
+  p50: NonNegativeInt,
+  p95: NonNegativeInt,
+  max: NonNegativeInt,
+});
+export type ServerDiagnosticsLatencyMs = typeof ServerDiagnosticsLatencyMs.Type;
+
+export const ServerDiagnosticsPiSubagents = Schema.Struct({
+  executionCounts: Schema.Struct({
+    active: NonNegativeInt,
+    queued: NonNegativeInt,
+    cancelling: NonNegativeInt,
+    orphaned: NonNegativeInt,
+    terminal: NonNegativeInt,
+  }),
+  leaseExpiryCount: NonNegativeInt,
+  detachLatencyMs: ServerDiagnosticsLatencyMs,
+  cancelLatencyMs: ServerDiagnosticsLatencyMs,
+  progress: Schema.Struct({
+    coalesced: NonNegativeInt,
+    dropped: NonNegativeInt,
+  }),
+  completionRetries: NonNegativeInt,
+});
+export type ServerDiagnosticsPiSubagents = typeof ServerDiagnosticsPiSubagents.Type;
+
 export const ServerDiagnosticsResult = Schema.Struct({
   generatedAt: IsoDateTime,
   process: Schema.Struct({
@@ -257,6 +283,7 @@ export const ServerDiagnosticsResult = Schema.Struct({
     projectCount: NonNegativeInt,
     threadCount: NonNegativeInt,
   }),
+  piSubagents: Schema.optional(ServerDiagnosticsPiSubagents),
 });
 export type ServerDiagnosticsResult = typeof ServerDiagnosticsResult.Type;
 

@@ -9,24 +9,15 @@ import {
   ThreadId,
   TurnId,
 } from "@synara/contracts";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import {
-  type PersistenceSqlError,
-  toPersistenceDecodeError,
-  toPersistenceSqlError,
-} from "../Errors.ts";
+import { type PersistenceSqlError, toPersistenceSqlError } from "../Errors.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
   type PiSubagentExecutionObservation,
   type PiSubagentCompletionOutboxEntry,
-  type RecordPiSubagentCompletionOutboxInput,
-  type RecordPiSubagentAdmissionInput,
-  type RecordPiSubagentHeartbeatObservationInput,
-  type RecordPiSubagentLifecycleEventInput,
-  type RecordPiSubagentProgressObservationInput,
 } from "../Services/PiSubagentExecutionRepository.ts";
 
 interface ExecutionRow {
@@ -131,6 +122,23 @@ interface TerminalEvidenceRow {
   readonly staleTerminalEvents: number;
 }
 
+interface TelemetrySnapshotRow {
+  readonly activeCount: number;
+  readonly queuedCount: number;
+  readonly cancellingCount: number;
+  readonly orphanedCount: number;
+  readonly terminalCount: number;
+  readonly leaseExpiryCount: number;
+  readonly detachP50Ms: number;
+  readonly detachP95Ms: number;
+  readonly detachMaxMs: number;
+  readonly cancelP50Ms: number;
+  readonly cancelP95Ms: number;
+  readonly cancelMaxMs: number;
+  readonly progressCoalesced: number;
+  readonly completionRetries: number;
+}
+
 /** Ticket 08 completion-outbox row (delivery state machine, T08-AC2). */
 interface OutboxRow {
   readonly outboxId: string;
@@ -153,6 +161,9 @@ interface OutboxRow {
 }
 
 const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
+
+const telemetryMetric = (value: number | undefined): number =>
+  Math.max(0, Math.round(Number.isFinite(value) ? (value ?? 0) : 0));
 
 export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -1969,6 +1980,287 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         ),
       );
 
+  /**
+   * Ticket 13 wall-time expiry trigger (T13-AC3). Journal-only transaction:
+   * dedup (deterministic eventId `walltime_<exec>_<attempt>_gen<gen>`, band
+   * 60) → execution lookup → attempt/generation fence → journal insert with
+   * the `pi_subagent_walltime_expired` diagnostic. The aggregate is NEVER
+   * mutated — no observed/desired change, no generation advance, no
+   * terminal claim. Ticket 15's watchdog stages consume this trigger.
+   */
+  const recordWallTimeExpiryEvent: PiSubagentExecutionRepositoryShape["recordWallTimeExpiryEvent"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const eventId = `walltime_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+            const sequence = 60;
+            const metadataJson = JSON.stringify({
+              phase: "walltime_expiry",
+              wallTimeMs: input.wallTimeMs,
+              attemptId: input.attemptId,
+              generation: input.generation,
+            });
+
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+            });
+            const executionRows = yield* getByIdInternal(input.executionId);
+            if (executionRows.length === 0) {
+              return yield* Effect.fail(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordWallTimeExpiryEvent:execution-lookup",
+                )(new Error(`Execution '${input.executionId}' not found`)),
+              );
+            }
+            const execution = rowToExecutionRecord(executionRows[0]!);
+
+            if (existing.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                execution,
+              };
+            }
+
+            // The trigger targets the current attempt/generation only: a
+            // resumed or reconciled execution must not fire a stale expiry.
+            if (
+              execution.attemptId !== input.attemptId ||
+              execution.generation !== input.generation
+            ) {
+              return {
+                kind: "stale_generation" as const,
+                execution,
+              };
+            }
+
+            // Terminal truth wins: no expiry trigger for a settled
+            // aggregate (the diagnostic would mislead ticket 15's consumer).
+            if (TERMINAL_OBSERVED_STATES.has(execution.observedState)) {
+              return {
+                kind: "already_applied" as const,
+                execution,
+              };
+            }
+
+            yield* makeJournalInsert({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+              state: execution.observedState,
+              occurredAt: input.occurredAt,
+              diagnosticCode: "pi_subagent_walltime_expired",
+              diagnosticMessage: `Execution wall-time budget of ${input.wallTimeMs}ms expired`,
+              metadataJson,
+            });
+
+            // Aggregate is intentionally untouched (T13-AC3: expiry never
+            // silently settles projection).
+            return {
+              kind: "recorded" as const,
+              execution,
+            };
+          }),
+        )
+        .pipe(
+          Effect.catch((err) =>
+            Effect.gen(function* () {
+              const eventId = `walltime_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+              const existing = yield* lookupJournalEvent({
+                eventId,
+                executionId: input.executionId,
+                attemptId: input.attemptId,
+                generation: input.generation,
+                sequence: 60,
+              }).pipe(
+                Effect.mapError(
+                  toPersistenceSqlError(
+                    "PiSubagentExecutionRepository.recordWallTimeExpiryEvent:dedup-recheck",
+                  ),
+                ),
+              );
+              const executionRows = yield* getByIdInternal(input.executionId).pipe(
+                Effect.mapError(
+                  toPersistenceSqlError(
+                    "PiSubagentExecutionRepository.recordWallTimeExpiryEvent:execution-recheck",
+                  ),
+                ),
+              );
+              if (existing.length > 0 && executionRows.length > 0) {
+                return {
+                  kind: "already_applied" as const,
+                  execution: rowToExecutionRecord(executionRows[0]!),
+                };
+              }
+              return yield* Effect.fail(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordWallTimeExpiryEvent:insert",
+                )(err),
+              );
+            }),
+          ),
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.recordWallTimeExpiryEvent:insert"),
+          ),
+        );
+
+  /**
+   * T13-AC4 bounded operator snapshot. Percentiles are nearest-rank values
+   * calculated inside SQLite so diagnostics never materializes an unbounded
+   * latency sample array in the Node process.
+   *
+   * `dropped_progress_count` currently counts snapshots replaced by the
+   * server's latest-slot coalescer. Every such snapshot is both coalesced and
+   * dropped from emission, so the two approved fields intentionally share the
+   * same durable value until another drop mode is introduced.
+   */
+  const getTelemetrySnapshot: PiSubagentExecutionRepositoryShape["getTelemetrySnapshot"] = (now) =>
+    sql<TelemetrySnapshotRow>`
+      WITH
+      detach_samples AS (
+        SELECT MAX(
+          0,
+          ROUND(
+            (julianday(detached.occurred_at) - julianday(admitted.occurred_at))
+            * 86400000.0
+          )
+        ) AS value
+        FROM pi_subagent_lifecycle_journal AS detached
+        INNER JOIN pi_subagent_lifecycle_journal AS admitted
+          ON admitted.execution_id = detached.execution_id
+         AND admitted.attempt_id = detached.attempt_id
+         AND admitted.generation = detached.generation
+         AND admitted.sequence = 1
+        WHERE detached.sequence = 3
+          AND json_extract(detached.metadata_json, '$.phase') = 'detached'
+          AND detached.occurred_at >= admitted.occurred_at
+      ),
+      detach_ranked AS (
+        SELECT
+          value,
+          row_number() OVER (ORDER BY value) AS rank,
+          count(*) OVER () AS sample_count
+        FROM detach_samples
+      ),
+      cancel_starts AS (
+        SELECT
+          execution_id,
+          attempt_id,
+          generation,
+          MIN(occurred_at) AS occurred_at
+        FROM pi_subagent_lifecycle_journal
+        WHERE state = 'cancelling'
+        GROUP BY execution_id, attempt_id, generation
+      ),
+      cancel_samples AS (
+        SELECT MAX(
+          0,
+          ROUND(
+            (julianday(MIN(terminal.occurred_at)) - julianday(started.occurred_at))
+            * 86400000.0
+          )
+        ) AS value
+        FROM cancel_starts AS started
+        INNER JOIN pi_subagent_lifecycle_journal AS terminal
+          ON terminal.execution_id = started.execution_id
+         AND terminal.attempt_id = started.attempt_id
+         AND terminal.generation = started.generation
+         AND terminal.state IN ('cancelled', 'succeeded', 'failed')
+         AND terminal.occurred_at >= started.occurred_at
+        GROUP BY started.execution_id, started.attempt_id, started.generation
+      ),
+      cancel_ranked AS (
+        SELECT
+          value,
+          row_number() OVER (ORDER BY value) AS rank,
+          count(*) OVER () AS sample_count
+        FROM cancel_samples
+      )
+      SELECT
+        COALESCE(SUM(CASE
+          WHEN execution.observed_state IN ('requested', 'accepted', 'running')
+          THEN 1 ELSE 0 END), 0) AS "activeCount",
+        COALESCE(SUM(CASE WHEN execution.observed_state = 'queued' THEN 1 ELSE 0 END), 0)
+          AS "queuedCount",
+        COALESCE(SUM(CASE WHEN execution.observed_state = 'cancelling' THEN 1 ELSE 0 END), 0)
+          AS "cancellingCount",
+        COALESCE(SUM(CASE WHEN execution.observed_state = 'orphaned' THEN 1 ELSE 0 END), 0)
+          AS "orphanedCount",
+        COALESCE(SUM(CASE
+          WHEN execution.observed_state IN ('cancelled', 'succeeded', 'failed', 'rejected')
+          THEN 1 ELSE 0 END), 0) AS "terminalCount",
+        COALESCE(SUM(CASE
+          WHEN execution.observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+           AND execution.lease_expires_at IS NOT NULL
+           AND execution.lease_expires_at <= ${now}
+          THEN 1 ELSE 0 END), 0) AS "leaseExpiryCount",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((sample_count + 1) / 2 AS INTEGER) THEN value END)
+          FROM detach_ranked
+        ), 0) AS "detachP50Ms",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((95 * sample_count + 99) / 100 AS INTEGER) THEN value END)
+          FROM detach_ranked
+        ), 0) AS "detachP95Ms",
+        COALESCE((SELECT MAX(value) FROM detach_ranked), 0) AS "detachMaxMs",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((sample_count + 1) / 2 AS INTEGER) THEN value END)
+          FROM cancel_ranked
+        ), 0) AS "cancelP50Ms",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((95 * sample_count + 99) / 100 AS INTEGER) THEN value END)
+          FROM cancel_ranked
+        ), 0) AS "cancelP95Ms",
+        COALESCE((SELECT MAX(value) FROM cancel_ranked), 0) AS "cancelMaxMs",
+        COALESCE(SUM(execution.dropped_progress_count), 0) AS "progressCoalesced",
+        COALESCE((
+          SELECT SUM(attempt_count) FROM pi_subagent_completion_outbox
+        ), 0) AS "completionRetries"
+      FROM pi_subagent_executions AS execution
+    `.pipe(
+      Effect.map(([row]) => {
+        const coalesced = telemetryMetric(row?.progressCoalesced);
+        return {
+          executionCounts: {
+            active: telemetryMetric(row?.activeCount),
+            queued: telemetryMetric(row?.queuedCount),
+            cancelling: telemetryMetric(row?.cancellingCount),
+            orphaned: telemetryMetric(row?.orphanedCount),
+            terminal: telemetryMetric(row?.terminalCount),
+          },
+          leaseExpiryCount: telemetryMetric(row?.leaseExpiryCount),
+          detachLatencyMs: {
+            p50: telemetryMetric(row?.detachP50Ms),
+            p95: telemetryMetric(row?.detachP95Ms),
+            max: telemetryMetric(row?.detachMaxMs),
+          },
+          cancelLatencyMs: {
+            p50: telemetryMetric(row?.cancelP50Ms),
+            p95: telemetryMetric(row?.cancelP95Ms),
+            max: telemetryMetric(row?.cancelMaxMs),
+          },
+          progress: {
+            coalesced,
+            dropped: coalesced,
+          },
+          completionRetries: telemetryMetric(row?.completionRetries),
+        };
+      }),
+      Effect.mapError(
+        toPersistenceSqlError("PiSubagentExecutionRepository.getTelemetrySnapshot:query"),
+      ),
+    );
+
   return {
     recordAdmission,
     recordLifecycleEvent,
@@ -1994,6 +2286,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     markCompletionSuperseded,
     listNonTerminalExecutions,
     recordOrphanedEvent,
+    recordWallTimeExpiryEvent,
+    getTelemetrySnapshot,
   } satisfies PiSubagentExecutionRepositoryShape;
 });
 

@@ -29,7 +29,6 @@ import {
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
   type ServerConfigStreamEvent,
-  type ServerDiagnosticsResult,
   type ServerLifecycleStreamEvent,
 } from "@synara/contracts";
 import { clamp } from "effect/Number";
@@ -119,6 +118,7 @@ import { OrchestrationEngineService } from "./orchestration/Services/Orchestrati
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
 import { ProjectionStateIncompleteError } from "./persistence/Errors";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { PiSubagentExecutionRepository } from "./persistence/Services/PiSubagentExecutionRepository";
 import { shouldPublishThreadShellForEvent } from "./orchestration/threadShellEvents";
 import { ProviderDiscoveryService } from "./provider/Services/ProviderDiscoveryService";
 import { discoverSkillsCatalog, synaraSkillsDir } from "./provider/skillsCatalog";
@@ -138,6 +138,7 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
 import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
+import { buildServerDiagnosticsResult } from "./serverDiagnostics";
 import { ServerSettingsService } from "./serverSettings";
 import { isLoopbackHost } from "./startupAccess";
 import { TerminalManager } from "./terminal/Services/Manager";
@@ -434,6 +435,7 @@ const makeWsRpcHandlersLayer = () =>
       const pullRequests = yield* PullRequestService;
       const profileStatsQuery = yield* ProfileStatsQuery;
       const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
+      const piSubagentExecutionRepository = yield* PiSubagentExecutionRepository;
       const providerAdapterRegistry = yield* ProviderAdapterRegistry;
       const providerDiscoveryService = yield* ProviderDiscoveryService;
       const providerHealth = yield* ProviderHealth;
@@ -1931,33 +1933,23 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.serverGetDiagnostics]: () =>
           rpcEffect(
             Effect.gen(function* () {
-              const [projection, fullChildProcesses] = yield* Effect.all([
+              const generatedAt = new Date().toISOString();
+              const [projection, fullChildProcesses, piSubagents] = yield* Effect.all([
                 projectionReadModelQuery.getCounts(),
                 Effect.promise(() => readDescendantProcesses(process.pid)),
+                piSubagentExecutionRepository.getTelemetrySnapshot(generatedAt),
               ]);
               const memory = process.memoryUsage();
-              const diagnostics: ServerDiagnosticsResult = {
-                generatedAt: new Date().toISOString(),
-                process: {
-                  pid: process.pid,
-                  uptimeSeconds: Math.max(0, Math.round(process.uptime())),
-                  memory: {
-                    rssBytes: Math.max(0, Math.round(memory.rss)),
-                    heapTotalBytes: Math.max(0, Math.round(memory.heapTotal)),
-                    heapUsedBytes: Math.max(0, Math.round(memory.heapUsed)),
-                    externalBytes: Math.max(0, Math.round(memory.external)),
-                    arrayBuffersBytes: Math.max(0, Math.round(memory.arrayBuffers)),
-                  },
-                },
-                childProcesses: fullChildProcesses.slice(0, MAX_DIAGNOSTIC_CHILD_PROCESSES),
-                childProcessTotalCount: fullChildProcesses.length,
-                childProcessTotalRssBytes: fullChildProcesses.reduce(
-                  (total, processRow) => total + processRow.rssBytes,
-                  0,
-                ),
+              return buildServerDiagnosticsResult({
+                generatedAt,
+                pid: process.pid,
+                uptimeSeconds: process.uptime(),
+                memory,
+                childProcesses: fullChildProcesses,
                 projection,
-              };
-              return diagnostics;
+                piSubagents,
+                maxChildProcesses: MAX_DIAGNOSTIC_CHILD_PROCESSES,
+              });
             }),
             "Failed to load server diagnostics",
           ),

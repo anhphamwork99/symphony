@@ -62,6 +62,10 @@ import {
   DEFAULT_PI_SUBAGENT_LEASE_DURATION_MS,
   DEFAULT_PI_SUBAGENT_PROGRESS_RATE_HZ,
   DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+  DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+  DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+  DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP,
+  DEFAULT_PI_SUBAGENT_WALL_TIME_MS,
   ServerConfig,
 } from "../../config.ts";
 import { lazyModule } from "../../lazyModule.ts";
@@ -153,6 +157,8 @@ import {
   type PiSubagentControlHealthShape,
   type PiSubagentControlHealthTransition,
 } from "../piSubagentControlHealth.ts";
+import { startPiSubagentWallTimeSweep } from "../piSubagentWallTimeSweep.ts";
+import { makePiSubagentSafeCorrelation } from "../piSubagentTelemetrySafety.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
 
@@ -522,6 +528,16 @@ export interface PiAdapterLiveOptions {
   readonly piSubagentProgressClock?: {
     readonly now: () => number;
     readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
+  };
+  /**
+   * Ticket 13 test seam: wall-time sweep clock/scheduler. Production uses
+   * the server clock and a 30-second periodic timer; deterministic tests
+   * inject a manually-driven scheduler.
+   */
+  readonly piSubagentWallTimeClock?: {
+    readonly now: () => number;
+    readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
+    readonly intervalMs?: number;
   };
 }
 
@@ -2005,6 +2021,65 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       runtimeEventIngress.offer(compactProviderRuntimeEventForIngress(event));
     };
 
+    // Ticket 13 (T13-AC3/AC5): one adapter-lifetime wall-time sweep over
+    // durable execution truth. Expiry journals the band-60 escalation
+    // trigger but never aborts a child or settles projection; ticket 15 owns
+    // those stages. The operator warning carries safe correlation metadata
+    // only — never prompt, result, transcript, or secret content.
+    const piSubagentWallTimeSweep =
+      piSubagentRepository === undefined
+        ? undefined
+        : startPiSubagentWallTimeSweep({
+            repository: piSubagentRepository,
+            wallTimeMs: serverConfig.piSubagentWallTimeMs ?? DEFAULT_PI_SUBAGENT_WALL_TIME_MS,
+            ...(options?.piSubagentWallTimeClock?.now
+              ? { nowMs: options.piSubagentWallTimeClock.now }
+              : {}),
+            ...(options?.piSubagentWallTimeClock?.schedule
+              ? { schedule: options.piSubagentWallTimeClock.schedule }
+              : {}),
+            ...(options?.piSubagentWallTimeClock?.intervalMs !== undefined
+              ? { intervalMs: options.piSubagentWallTimeClock.intervalMs }
+              : {}),
+            onExpiryRecorded: (trigger) => {
+              const safeCorrelation = makePiSubagentSafeCorrelation({
+                executionId: trigger.executionId,
+                attemptId: trigger.attemptId,
+                threadId: trigger.parentThreadId,
+                generation: trigger.generation,
+                diagnosticCode: trigger.diagnosticCode,
+              });
+              const safeDetail = {
+                ...safeCorrelation,
+                wallTimeMs: trigger.wallTimeMs,
+              };
+              void Effect.runPromise(
+                Effect.logWarning("pi.subagent.walltime_expired", safeDetail),
+              ).catch(() => undefined);
+              offerRuntimeEvent({
+                ...makePiRuntimeEventBase(
+                  {
+                    session: {
+                      threadId: ThreadId.makeUnsafe(trigger.parentThreadId),
+                    },
+                    activeTurnId: undefined,
+                  },
+                  { includeTurnId: false },
+                ),
+                type: "runtime.warning",
+                payload: {
+                  message: `Pi subagent wall-time budget expired (${trigger.diagnosticCode}); durable watchdog escalation is pending`,
+                  detail: safeDetail,
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/walltime-expired",
+                  payload: safeDetail,
+                },
+              } satisfies ProviderRuntimeEvent);
+            },
+          });
+
     // Ticket 21: bounded, safe operator diagnostics for managed control
     // health transitions only (never per-rejection). The payload is limited
     // to fixed-vocabulary status/code/timestamp metadata scoped to the
@@ -3263,6 +3338,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                       trustedProvider: PROVIDER,
                       mcpAuthority: input.mcpAuthority ?? null,
                     },
+                    admissionPolicy: {
+                      providerConcurrency:
+                        serverConfig.piSubagentProviderConcurrency ??
+                        DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+                      serverQueueCap:
+                        serverConfig.piSubagentServerQueueCap ??
+                        DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP,
+                      projectQueueCap:
+                        serverConfig.piSubagentProjectQueueCap ??
+                        DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+                    },
                     ...(mcpSessionAuthority === undefined
                       ? {}
                       : { authorityRegistry: mcpSessionAuthority }),
@@ -3291,6 +3377,21 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               });
 
               if (admissionResult.status === "rejected") {
+                // Ticket 13 (T13-AC5): default logs carry correlation IDs and
+                // stable diagnostic code only. Never log command.prompt,
+                // rejectionReason, result content, transcript, or secrets.
+                void Effect.runPromise(
+                  Effect.logWarning(
+                    "pi.subagent.admission_rejected",
+                    makePiSubagentSafeCorrelation({
+                      executionId: admissionResult.executionId,
+                      attemptId: admissionResult.attemptId,
+                      threadId: String(input.threadId),
+                      generation: admissionResult.generation,
+                      diagnosticCode: admissionResult.diagnosticCode,
+                    }),
+                  ),
+                ).catch(() => undefined);
                 return {
                   content: [
                     {
@@ -4355,10 +4456,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       );
 
     const stopAll: PiAdapterShape["stopAll"] = () =>
-      Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
-        concurrency: "unbounded",
-        discard: true,
-      }).pipe(Effect.asVoid);
+      Effect.sync(() => piSubagentWallTimeSweep?.stop()).pipe(
+        Effect.andThen(
+          Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
+            concurrency: "unbounded",
+            discard: true,
+          }),
+        ),
+        Effect.asVoid,
+      );
 
     const listModels: NonNullable<PiAdapterShape["listModels"]> = (input) =>
       Effect.tryPromise({

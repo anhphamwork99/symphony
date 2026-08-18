@@ -32,6 +32,10 @@ import {
   resolvePiSubagentCompletionRetryLimit,
   resolvePiSubagentCompletionBatchWindowMs,
   resolvePiSubagentOrphanAfterMs,
+  resolvePiSubagentProviderConcurrency,
+  resolvePiSubagentServerQueueCap,
+  resolvePiSubagentProjectQueueCap,
+  resolvePiSubagentWallTimeMs,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveStaticDir,
   ServerConfig,
@@ -375,6 +379,18 @@ const ServerConfigLive = (input: CliInput) =>
         ),
         piSubagentOrphanAfterMs: resolvePiSubagentOrphanAfterMs(
           process.env.SYNARA_PI_SUBAGENT_ORPHAN_AFTER_MS,
+        ),
+        piSubagentProviderConcurrency: resolvePiSubagentProviderConcurrency(
+          process.env.SYNARA_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+        ),
+        piSubagentServerQueueCap: resolvePiSubagentServerQueueCap(
+          process.env.SYNARA_PI_SUBAGENT_SERVER_QUEUE_CAP,
+        ),
+        piSubagentProjectQueueCap: resolvePiSubagentProjectQueueCap(
+          process.env.SYNARA_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+        ),
+        piSubagentWallTimeMs: resolvePiSubagentWallTimeMs(
+          process.env.SYNARA_PI_SUBAGENT_WALL_TIME_MS,
         ),
       } satisfies ServerConfigShape;
 

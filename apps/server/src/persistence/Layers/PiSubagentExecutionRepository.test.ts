@@ -699,3 +699,295 @@ describe("PiSubagentExecutionRepository observation reopen (Issue 23 / T23-AC8)"
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Ticket 13: wall-time expiry trigger (T13-AC3)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("PiSubagentExecutionRepository wall-time expiry trigger (Issue 13 / T13-AC3)", () => {
+  it.layer(PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)))(
+    "records journal-only band-60 expiry without settling the aggregate",
+    (it) => {
+      it.effect("records expiry trigger leaving observed state untouched", () =>
+        Effect.gen(function* () {
+          const repo = yield* PiSubagentExecutionRepository;
+
+          const admission = yield* repo.recordAdmission({
+            ...baseAdmission,
+            executionId: "exec_walltime_001",
+            attemptId: "att_walltime_001",
+            commandId: "cmd_walltime_001",
+            now: "2026-08-18T10:00:00.000Z",
+          });
+          expect(admission.kind).toBe("admitted");
+
+          const result = yield* repo.recordWallTimeExpiryEvent({
+            executionId: "exec_walltime_001",
+            attemptId: "att_walltime_001",
+            generation: 1,
+            occurredAt: "2026-08-18T12:00:00.000Z",
+            wallTimeMs: 7200000,
+          });
+          expect(result.kind).toBe("recorded");
+          expect(result.execution.observedState).toBe("accepted");
+          expect(result.execution.generation).toBe(1);
+
+          // Aggregate untouched: no projection settlement (T13-AC3).
+          const fetched = yield* repo.getById("exec_walltime_001");
+          expect(Option.isSome(fetched)).toBe(true);
+          if (Option.isSome(fetched)) {
+            expect(fetched.value.observedState).toBe("accepted");
+            expect(fetched.value.desiredState).toBe("running");
+            expect(fetched.value.generation).toBe(1);
+          }
+
+          const journal = yield* repo.listJournalEvents("exec_walltime_001");
+          expect(journal).toHaveLength(2);
+          expect(journal[1]!.sequence).toBe(60);
+          expect(journal[1]!.diagnosticCode).toBe("pi_subagent_walltime_expired");
+          expect(journal[1]!.state).toBe("accepted");
+
+          // Idempotent replay: already_applied, no second journal row.
+          const replay = yield* repo.recordWallTimeExpiryEvent({
+            executionId: "exec_walltime_001",
+            attemptId: "att_walltime_001",
+            generation: 1,
+            occurredAt: "2026-08-18T12:00:01.000Z",
+            wallTimeMs: 7200000,
+          });
+          expect(replay.kind).toBe("already_applied");
+          const journalAfterReplay = yield* repo.listJournalEvents("exec_walltime_001");
+          expect(journalAfterReplay).toHaveLength(2);
+        }),
+      );
+
+      it.effect(
+        "never fires a stale expiry for a superseded generation and never for terminals",
+        () =>
+          Effect.gen(function* () {
+            const repo = yield* PiSubagentExecutionRepository;
+
+            const admission = yield* repo.recordAdmission({
+              ...baseAdmission,
+              executionId: "exec_walltime_002",
+              attemptId: "att_walltime_002",
+              commandId: "cmd_walltime_002",
+              now: "2026-08-18T10:00:00.000Z",
+            });
+            expect(admission.kind).toBe("admitted");
+
+            // Generation advanced by reconciliation (orphan fence +1).
+            const orphaned = yield* repo.recordOrphanedEvent({
+              executionId: "exec_walltime_002",
+              attemptId: "att_walltime_002",
+              generation: 1,
+              occurredAt: "2026-08-18T10:30:00.000Z",
+              diagnosticCode: "pi_subagent_owner_loss_orphaned",
+              diagnosticMessage: "owner lost",
+            });
+            expect(orphaned.kind).toBe("recorded");
+
+            const stale = yield* repo.recordWallTimeExpiryEvent({
+              executionId: "exec_walltime_002",
+              attemptId: "att_walltime_002",
+              generation: 1,
+              occurredAt: "2026-08-18T12:00:00.000Z",
+              wallTimeMs: 7200000,
+            });
+            expect(stale.kind).toBe("stale_generation");
+            const journal = yield* repo.listJournalEvents("exec_walltime_002");
+            expect(journal.every((event) => event.sequence !== 60)).toBe(true);
+
+            // Terminal aggregates never receive an expiry trigger.
+            yield* repo.recordAdmission({
+              ...baseAdmission,
+              executionId: "exec_walltime_003",
+              attemptId: "att_walltime_003",
+              commandId: "cmd_walltime_003",
+              now: "2026-08-18T10:00:00.000Z",
+            });
+            yield* repo.recordTerminalEvent({
+              executionId: "exec_walltime_003",
+              attemptId: "att_walltime_003",
+              generation: 1,
+              sequence: 40,
+              state: "succeeded",
+              occurredAt: "2026-08-18T10:05:00.000Z",
+              summary: "done",
+            });
+            const terminalGuard = yield* repo.recordWallTimeExpiryEvent({
+              executionId: "exec_walltime_003",
+              attemptId: "att_walltime_003",
+              generation: 1,
+              occurredAt: "2026-08-18T12:00:00.000Z",
+              wallTimeMs: 7200000,
+            });
+            expect(terminalGuard.kind).toBe("already_applied");
+          }),
+      );
+    },
+  );
+});
+
+describe("PiSubagentExecutionRepository operator telemetry (Issue 13 / T13-AC4)", () => {
+  it.layer(PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)))(
+    "derives bounded counts, timing summaries, progress, lease, and retry metrics",
+    (it) => {
+      it.effect("returns the approved serverGetDiagnostics metrics mapping", () =>
+        Effect.gen(function* () {
+          const repository = yield* PiSubagentExecutionRepository;
+          const sql = yield* SqlClient.SqlClient;
+          const executions = [
+            ["exec_metrics_active_1", "accepted", 12, "2026-08-18T11:00:00.000Z"],
+            ["exec_metrics_active_2", "running", 0, "2026-08-18T13:00:00.000Z"],
+            ["exec_metrics_active_3", "requested", 0, null],
+            ["exec_metrics_queued", "queued", 0, null],
+            ["exec_metrics_cancelling", "cancelling", 0, null],
+            ["exec_metrics_orphaned", "orphaned", 0, null],
+            ["exec_metrics_cancelled", "cancelled", 0, null],
+            ["exec_metrics_succeeded", "succeeded", 0, null],
+            ["exec_metrics_failed", "failed", 0, null],
+            ["exec_metrics_rejected", "rejected", 0, null],
+          ] as const;
+
+          for (const [executionId, state, droppedProgressCount, leaseExpiresAt] of executions) {
+            yield* sql`
+              INSERT INTO pi_subagent_executions (
+                execution_id, attempt_id, generation, command_id, project_id,
+                parent_thread_id, parent_turn_id, parent_tool_call_id, agent_type,
+                prompt, mode, cancellation_scope, desired_state, observed_state,
+                created_at, updated_at, dropped_progress_count, lease_expires_at
+              ) VALUES (
+                ${executionId}, ${`att_${executionId}`}, 1, ${`cmd_${executionId}`},
+                'proj_metrics', 'thread_metrics', 'turn_metrics', 'call_metrics',
+                'researcher', 'never emitted by telemetry', 'foreground',
+                'parent_turn', ${state}, ${state},
+                '2026-08-18T10:00:00.000Z', '2026-08-18T10:00:00.000Z',
+                ${droppedProgressCount}, ${leaseExpiresAt}
+              )
+            `;
+          }
+
+          const journalEvents = [
+            [
+              "evt_detach_1_admit",
+              "exec_metrics_active_1",
+              1,
+              "accepted",
+              "2026-08-18T10:00:00.000Z",
+              null,
+            ],
+            [
+              "evt_detach_1",
+              "exec_metrics_active_1",
+              3,
+              "running",
+              "2026-08-18T10:00:00.250Z",
+              '{"phase":"detached"}',
+            ],
+            [
+              "evt_detach_2_admit",
+              "exec_metrics_active_2",
+              1,
+              "accepted",
+              "2026-08-18T10:00:01.000Z",
+              null,
+            ],
+            [
+              "evt_detach_2",
+              "exec_metrics_active_2",
+              3,
+              "running",
+              "2026-08-18T10:00:02.000Z",
+              '{"phase":"detached"}',
+            ],
+            [
+              "evt_cancel_1_intent",
+              "exec_metrics_cancelled",
+              10,
+              "cancelling",
+              "2026-08-18T10:00:03.000Z",
+              '{"phase":"cancelling"}',
+            ],
+            [
+              "evt_cancel_1_done",
+              "exec_metrics_cancelled",
+              20,
+              "cancelled",
+              "2026-08-18T10:00:03.400Z",
+              '{"phase":"cancelled"}',
+            ],
+            [
+              "evt_cancel_2_intent",
+              "exec_metrics_succeeded",
+              10,
+              "cancelling",
+              "2026-08-18T10:00:04.000Z",
+              '{"phase":"cancelling"}',
+            ],
+            [
+              "evt_cancel_2_done",
+              "exec_metrics_succeeded",
+              40,
+              "succeeded",
+              "2026-08-18T10:00:05.200Z",
+              null,
+            ],
+          ] as const;
+          for (const [
+            eventId,
+            executionId,
+            sequence,
+            state,
+            occurredAt,
+            metadataJson,
+          ] of journalEvents) {
+            yield* sql`
+              INSERT INTO pi_subagent_lifecycle_journal (
+                event_id, execution_id, attempt_id, generation, sequence, state,
+                occurred_at, metadata_json
+              ) VALUES (
+                ${eventId}, ${executionId}, ${`att_${executionId}`}, 1, ${sequence},
+                ${state}, ${occurredAt}, ${metadataJson}
+              )
+            `;
+          }
+
+          for (const [outboxId, executionId, attemptCount] of [
+            ["outbox_metrics_1", "exec_metrics_succeeded", 2],
+            ["outbox_metrics_2", "exec_metrics_failed", 3],
+          ] as const) {
+            yield* sql`
+              INSERT INTO pi_subagent_completion_outbox (
+                outbox_id, execution_id, attempt_id, generation, terminal_event_id,
+                parent_thread_id, delivery_state, terminal_state, summary,
+                attempt_count, created_at, updated_at
+              ) VALUES (
+                ${outboxId}, ${executionId}, ${`att_${executionId}`}, 1,
+                ${`terminal_${executionId}`}, 'thread_metrics', 'failed_retryable',
+                'failed', 'bounded summary', ${attemptCount},
+                '2026-08-18T10:00:00.000Z', '2026-08-18T10:00:00.000Z'
+              )
+            `;
+          }
+
+          const snapshot = yield* repository.getTelemetrySnapshot("2026-08-18T12:00:00.000Z");
+          expect(snapshot).toEqual({
+            executionCounts: {
+              active: 3,
+              queued: 1,
+              cancelling: 1,
+              orphaned: 1,
+              terminal: 4,
+            },
+            leaseExpiryCount: 1,
+            detachLatencyMs: { p50: 250, p95: 1_000, max: 1_000 },
+            cancelLatencyMs: { p50: 400, p95: 1_200, max: 1_200 },
+            progress: { coalesced: 12, dropped: 12 },
+            completionRetries: 5,
+          });
+        }),
+      );
+    },
+  );
+});

@@ -8,11 +8,16 @@ import {
   ThreadId,
   TurnId,
 } from "@synara/contracts";
-import { Effect } from "effect";
+import { Effect, Option, Semaphore } from "effect";
 
 import type { McpAuthorityBinding } from "../agentGateway/mcpSessionAuthority.ts";
 import type { McpSessionAuthorityShape } from "../agentGateway/Services/McpSessionAuthority.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import {
+  resolvePiSubagentProjectQueueCap,
+  resolvePiSubagentProviderConcurrency,
+  resolvePiSubagentServerQueueCap,
+} from "../config.ts";
 import type {
   PiSubagentControlHealthMarkContext,
   PiSubagentControlHealthShape,
@@ -46,6 +51,74 @@ export interface TrustedAdmissionContext {
   readonly mcpAuthority: McpAuthorityBinding | null;
 }
 
+/**
+ * Ticket 13 admission resource policy (T13-AC1/AC7). Every field is
+ * optional and resolved to a safe default when absent or invalid: an
+ * invalid value can never produce unlimited concurrency or queueing.
+ */
+export interface PiSubagentAdmissionPolicy {
+  /**
+   * Max admitted (non-terminal, non-orphaned) executions for one provider
+   * session. Pi sessions are thread-scoped in this adapter.
+   */
+  readonly providerConcurrency?: number;
+  /** Server-wide cap on admitted non-terminal executions. */
+  readonly serverQueueCap?: number;
+  /** Per-project cap on admitted non-terminal executions. */
+  readonly projectQueueCap?: number;
+}
+
+/**
+ * Adapter/process-local serialization of the quota count + durable admission
+ * write. Without this arbiter concurrent requests could all observe the same
+ * pre-admission count and oversubscribe the configured budget (T13-AC2/AC6).
+ */
+export interface PiSubagentAdmissionArbiter {
+  readonly run: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+}
+
+export function makePiSubagentAdmissionArbiter(): PiSubagentAdmissionArbiter {
+  const semaphore = Semaphore.makeUnsafe(1);
+  return {
+    run: (effect) => semaphore.withPermit(effect),
+  };
+}
+
+// The production Pi adapter has one instance, but coordinator-level callers
+// and tests may invoke this module directly. The shared fallback preserves
+// the same no-oversubscription invariant when no explicit arbiter is wired.
+const defaultAdmissionArbiter = makePiSubagentAdmissionArbiter();
+
+/**
+ * Normalizes a policy input to safe bounded values (T13-AC7): nullish,
+ * non-finite, non-integer, or non-positive fields fall back to the
+ * compatibility defaults; there is no clamping and no unbounded result.
+ */
+export function normalizeAdmissionPolicy(policy: PiSubagentAdmissionPolicy | null | undefined): {
+  readonly providerConcurrency: number;
+  readonly serverQueueCap: number;
+  readonly projectQueueCap: number;
+} {
+  return {
+    providerConcurrency: resolvePiSubagentProviderConcurrency(policy?.providerConcurrency),
+    serverQueueCap: resolvePiSubagentServerQueueCap(policy?.serverQueueCap),
+    projectQueueCap: resolvePiSubagentProjectQueueCap(policy?.projectQueueCap),
+  };
+}
+
+/**
+ * Ticket 13 admitted-budget state set (T13-AC1): the observed states that
+ * hold an admission slot. `orphaned` is excluded — it is non-terminal but
+ * owns no live child, so it must not consume another spawn's budget.
+ */
+const ADMITTED_BUDGET_STATES: ReadonlySet<string> = new Set([
+  "requested",
+  "accepted",
+  "queued",
+  "running",
+  "cancelling",
+]);
+
 export interface AdmitSubagentSpawnInput {
   readonly command: PiSubagentSpawnCommand;
   readonly sessionCapability?: PiSubagentNegotiatedCapability;
@@ -59,6 +132,14 @@ export interface AdmitSubagentSpawnInput {
    * re-validated against server truth.
    */
   readonly authorityRegistry?: Pick<McpSessionAuthorityShape, "assertAdmittable">;
+  /**
+   * Ticket 13 admission resource policy (T13-AC1/AC2/AC7): bounded
+   * concurrency and queue caps enforced before spawn. Absent or invalid
+   * fields resolve to the safe compatibility defaults.
+   */
+  readonly admissionPolicy?: PiSubagentAdmissionPolicy | null;
+  /** Optional adapter-owned arbiter; shared fallback preserves safety. */
+  readonly admissionArbiter?: PiSubagentAdmissionArbiter;
   /**
    * Operator observation seam for control-health status transitions
    * (Ticket 21). Called at most once per status change with safe metadata
@@ -144,8 +225,6 @@ export const admitSubagentSpawn = (
   input: AdmitSubagentSpawnInput,
 ): Effect.Effect<PiSubagentSpawnResult, unknown> =>
   Effect.gen(function* () {
-    const command = input.command;
-
     // 1. Capability handshake (managed sessions only). Legacy and unhandshaked
     //    sessions are never gated by control health and are never labeled
     //    managed (T21-AC7).
@@ -202,6 +281,14 @@ export const admitSubagentSpawn = (
  * health available again and admits this same fresh command.
  */
 const runManagedAdmission = (
+  input: AdmitSubagentSpawnInput,
+  probeOptions: { readonly recoveryProbe: boolean },
+): Effect.Effect<PiSubagentSpawnResult, unknown> =>
+  (input.admissionArbiter ?? defaultAdmissionArbiter).run(
+    runManagedAdmissionUnlocked(input, probeOptions),
+  );
+
+const runManagedAdmissionUnlocked = (
   input: AdmitSubagentSpawnInput,
   probeOptions: { readonly recoveryProbe: boolean },
 ): Effect.Effect<PiSubagentSpawnResult, unknown> =>
@@ -459,6 +546,107 @@ const runManagedAdmission = (
         "pi_subagent_admission_unauthorized",
         `Subject authority admission failed (${authorityFailure}): the server-minted MCP authority binding is not currently admittable`,
       );
+    }
+
+    // 7b. Ticket 13 resource admission (T13-AC1/AC2/AC7): bounded
+    //     concurrency and queue caps, enforced before any child spawn and
+    //     after authorization so an exhausted budget is never confused with
+    //     an authorization diagnostic. The count is derived from durable
+    //     repository truth (restart-safe): every non-terminal execution
+    //     holding an admission slot. A counting failure fails closed — no
+    //     budget proof, no child.
+    const policy = normalizeAdmissionPolicy(input.admissionPolicy);
+    const replayLookup = yield* Effect.result(input.repository.getByCommandId(command.commandId));
+    if (replayLookup._tag === "Failure") {
+      return yield* rejectedResult(
+        input,
+        computeCommandFingerprint({
+          subject: trusted.mcpAuthority.subject,
+          projectId: command.projectId,
+          parentThreadId: command.parentThreadId,
+          parentTurnId: command.parentTurnId,
+          parentToolCallId: command.parentToolCallId,
+        }),
+        now,
+        "pi_subagent_admission_quota_unavailable",
+        "Admission replay lookup is unavailable; quota cannot be proven and managed spawn is refused (fail-closed)",
+      );
+    }
+    // Exact/mismatched command replays must reach recordAdmission's identity
+    // logic even while the budget is full: replays start no child, so quota
+    // must not replace `already_applied` / identity-mismatch semantics.
+    const isReplay = Option.isSome(replayLookup.success);
+    if (!isReplay) {
+      const budgetRows = yield* Effect.result(input.repository.listNonTerminalExecutions());
+      if (budgetRows._tag === "Failure") {
+        return yield* rejectedResult(
+          input,
+          computeCommandFingerprint({
+            subject: trusted.mcpAuthority.subject,
+            projectId: command.projectId,
+            parentThreadId: command.parentThreadId,
+            parentTurnId: command.parentTurnId,
+            parentToolCallId: command.parentToolCallId,
+          }),
+          now,
+          "pi_subagent_admission_quota_unavailable",
+          "Admission budget count is unavailable; quota cannot be proven and managed spawn is refused (fail-closed)",
+        );
+      }
+      const admittedExecutions = budgetRows.success.filter((row) =>
+        ADMITTED_BUDGET_STATES.has(row.observedState),
+      );
+      const providerSessionAdmitted = admittedExecutions.filter(
+        (row) => row.parentThreadId === command.parentThreadId,
+      );
+      const projectAdmitted = admittedExecutions.filter(
+        (row) => row.projectId === command.projectId,
+      );
+      if (projectAdmitted.length >= policy.projectQueueCap) {
+        return yield* rejectedResult(
+          input,
+          computeCommandFingerprint({
+            subject: trusted.mcpAuthority.subject,
+            projectId: command.projectId,
+            parentThreadId: command.parentThreadId,
+            parentTurnId: command.parentTurnId,
+            parentToolCallId: command.parentToolCallId,
+          }),
+          now,
+          "pi_subagent_admission_project_queue_saturated",
+          `Project queue saturated: ${projectAdmitted.length} admitted executions for project '${command.projectId}' meet the configured cap ${policy.projectQueueCap}`,
+        );
+      }
+      if (admittedExecutions.length >= policy.serverQueueCap) {
+        return yield* rejectedResult(
+          input,
+          computeCommandFingerprint({
+            subject: trusted.mcpAuthority.subject,
+            projectId: command.projectId,
+            parentThreadId: command.parentThreadId,
+            parentTurnId: command.parentTurnId,
+            parentToolCallId: command.parentToolCallId,
+          }),
+          now,
+          "pi_subagent_admission_server_queue_saturated",
+          `Server queue saturated: ${admittedExecutions.length} admitted executions meet the configured server-wide cap ${policy.serverQueueCap}`,
+        );
+      }
+      if (providerSessionAdmitted.length >= policy.providerConcurrency) {
+        return yield* rejectedResult(
+          input,
+          computeCommandFingerprint({
+            subject: trusted.mcpAuthority.subject,
+            projectId: command.projectId,
+            parentThreadId: command.parentThreadId,
+            parentTurnId: command.parentTurnId,
+            parentToolCallId: command.parentToolCallId,
+          }),
+          now,
+          "pi_subagent_admission_provider_concurrency_exhausted",
+          `Provider-session concurrency exhausted: ${providerSessionAdmitted.length} admitted executions for thread '${command.parentThreadId}' meet the configured cap ${policy.providerConcurrency}`,
+        );
+      }
     }
 
     // 8. Authorized: mint identities and durably record the execution, first

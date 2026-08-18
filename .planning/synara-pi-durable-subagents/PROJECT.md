@@ -75,10 +75,15 @@
   batches use deterministic internal `thread.turn.start` commands and exact
   orchestration command receipts as the idempotent parent-effect boundary;
   Ticket 09 owns recovery, Ticket 10/Alfie remain unchanged.
-- [decisions/0014-t13-ac4-metrics-surface-approval-authority.md](decisions/0014-t13-ac4-metrics-surface-approval-authority.md) —
-  binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
-  is an ordinary ticket-level seam but still requires fresh human-owner
-  approval before the first metrics-surface test.
+  - [decisions/0014-t13-ac4-metrics-surface-approval-authority.md](decisions/0014-t13-ac4-metrics-surface-approval-authority.md) —
+    binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
+    is an ordinary ticket-level seam but still requires fresh human-owner
+    approval before the first metrics-surface test.
+  - [decisions/0017-t13-admission-quotas-and-safe-telemetry-final-acceptance.md](decisions/0017-t13-admission-quotas-and-safe-telemetry-final-acceptance.md) —
+    accepted Ticket 13: finite provider-session/server/project admission
+    budgets, journal-only wall-time escalation trigger, owner-approved safe
+    `serverGetDiagnostics.piSubagents` telemetry, bounded saturation, and
+    finite invalid-config fallback; Ticket 15's Ticket-13 blocker is satisfied.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -110,8 +115,10 @@
   are satisfied, but Ticket 11 remains blocked by Ticket 09. Ticket 11
   becomes blocker-free when Ticket 09 is accepted. Ticket 12 remains
   blocked by Ticket 11 and owns production transcript/result reading.
-  Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
-  Ticket-10 blocker is satisfied, but it remains blocked by Ticket 13.
+    Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
+    Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.
+  - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
+    telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer
   must complete that report with exact evidence before requesting review.
 

@@ -124,6 +124,33 @@ export const DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS = 60000;
 export const MIN_PI_SUBAGENT_ORPHAN_AFTER_MS = 1000;
 export const MAX_PI_SUBAGENT_ORPHAN_AFTER_MS = 3600000;
 
+// Ticket 13 (T13-AC1/AC7): managed admission resource policies. The
+// per-provider concurrency default of four running agents preserves the
+// legacy extension's compatibility behavior (spec Further Notes); the
+// server-wide and per-project queue caps bound admitted non-terminal work
+// before spawn. Same resolver contract: nullish → default, range check,
+// invalid → default, never clamped — an invalid value can never produce
+// unlimited concurrency or queueing.
+export const DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY = 4;
+export const MIN_PI_SUBAGENT_PROVIDER_CONCURRENCY = 1;
+export const MAX_PI_SUBAGENT_PROVIDER_CONCURRENCY = 64;
+
+export const DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP = 64;
+export const MIN_PI_SUBAGENT_SERVER_QUEUE_CAP = 1;
+export const MAX_PI_SUBAGENT_SERVER_QUEUE_CAP = 1024;
+
+export const DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP = 16;
+export const MIN_PI_SUBAGENT_PROJECT_QUEUE_CAP = 1;
+export const MAX_PI_SUBAGENT_PROJECT_QUEUE_CAP = 256;
+
+// Ticket 13 (T13-AC3/AC7): per-execution wall-time budget. Two hours
+// initially (spec Further Notes); expiry records a stable diagnostic and
+// emits the durable escalation trigger consumed by ticket 15 — it never
+// settles projection by itself.
+export const DEFAULT_PI_SUBAGENT_WALL_TIME_MS = 7200000;
+export const MIN_PI_SUBAGENT_WALL_TIME_MS = 60000;
+export const MAX_PI_SUBAGENT_WALL_TIME_MS = 86400000;
+
 export function resolvePiSubagentCompletionRetryLimit(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -194,6 +221,154 @@ export function resolvePiSubagentOrphanAfterMs(
     return parsed;
   }
   return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
+}
+
+// Ticket 13 (T13-AC1/AC7): per-provider running-agent concurrency cap.
+export function resolvePiSubagentProviderConcurrency(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_PROVIDER_CONCURRENCY ||
+      rawInput > MAX_PI_SUBAGENT_PROVIDER_CONCURRENCY
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_PROVIDER_CONCURRENCY ||
+      parsed > MAX_PI_SUBAGENT_PROVIDER_CONCURRENCY
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY;
+}
+
+// Ticket 13 (T13-AC1/AC7): server-wide admitted non-terminal work cap.
+export function resolvePiSubagentServerQueueCap(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_SERVER_QUEUE_CAP ||
+      rawInput > MAX_PI_SUBAGENT_SERVER_QUEUE_CAP
+    ) {
+      return DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_SERVER_QUEUE_CAP ||
+      parsed > MAX_PI_SUBAGENT_SERVER_QUEUE_CAP
+    ) {
+      return DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP;
+}
+
+// Ticket 13 (T13-AC1/AC7): per-project admitted non-terminal work cap.
+export function resolvePiSubagentProjectQueueCap(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_PROJECT_QUEUE_CAP ||
+      rawInput > MAX_PI_SUBAGENT_PROJECT_QUEUE_CAP
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_PROJECT_QUEUE_CAP ||
+      parsed > MAX_PI_SUBAGENT_PROJECT_QUEUE_CAP
+    ) {
+      return DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP;
+}
+
+// Ticket 13 (T13-AC3/AC7): per-execution wall-time budget in milliseconds.
+export function resolvePiSubagentWallTimeMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_WALL_TIME_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_WALL_TIME_MS ||
+      rawInput > MAX_PI_SUBAGENT_WALL_TIME_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_WALL_TIME_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_WALL_TIME_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_WALL_TIME_MS ||
+      parsed > MAX_PI_SUBAGENT_WALL_TIME_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_WALL_TIME_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_WALL_TIME_MS;
 }
 
 export function resolvePiSubagentTerminalSummaryMaxChars(
@@ -545,6 +720,14 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentCompletionBatchWindowMs?: number;
   /** Ticket 10: lease-expiry orphan threshold (T10-AC7), ~60s initially. */
   readonly piSubagentOrphanAfterMs?: number;
+  /** Ticket 13: per-provider running-agent concurrency cap (compat default 4). */
+  readonly piSubagentProviderConcurrency?: number;
+  /** Ticket 13: server-wide admitted non-terminal work cap. */
+  readonly piSubagentServerQueueCap?: number;
+  /** Ticket 13: per-project admitted non-terminal work cap. */
+  readonly piSubagentProjectQueueCap?: number;
+  /** Ticket 13: per-execution wall-time budget (default two hours). */
+  readonly piSubagentWallTimeMs?: number;
 }
 
 export function preparePrivateServerPaths(

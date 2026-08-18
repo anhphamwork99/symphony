@@ -347,4 +347,19 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
       Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_completion_unknown" as never),
     ).toThrow();
   });
+
+  it("exposes the Ticket 13 admission-quota and wall-time diagnostic codes as first-class literals", () => {
+    for (const code of [
+      "pi_subagent_admission_provider_concurrency_exhausted",
+      "pi_subagent_admission_server_queue_saturated",
+      "pi_subagent_admission_project_queue_saturated",
+      "pi_subagent_admission_quota_unavailable",
+      "pi_subagent_walltime_expired",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_quota_unknown" as never),
+    ).toThrow();
+  });
 });

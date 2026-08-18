@@ -5,6 +5,7 @@ import {
   type PiSubagentLifecycleEvent,
   type PiSubagentLifecycleState,
   type PiSubagentTransportMode,
+  type ServerDiagnosticsPiSubagents,
 } from "@synara/contracts";
 import { type Effect, type Option, ServiceMap } from "effect";
 
@@ -349,6 +350,35 @@ export interface RecordPiSubagentOrphanedEventInput {
   readonly diagnosticMessage: string;
 }
 
+/**
+ * Ticket 13 wall-time expiry trigger (T13-AC3). Journal-only evidence: the
+ * durable escalation trigger consumed by ticket 15's watchdog stages. It
+ * NEVER settles the aggregate — observed state is left untouched.
+ */
+export interface RecordPiSubagentWallTimeExpiryInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly occurredAt: string;
+  readonly wallTimeMs: number;
+}
+
+export type PiSubagentWallTimeExpiryRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** The aggregate advanced past the listed attempt/generation — the
+       * expiry trigger must not fire for a superseded attempt. */
+      readonly kind: "stale_generation";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export type PiSubagentOrphanedRecordResult =
   | {
       readonly kind: "recorded";
@@ -580,6 +610,22 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordOrphanedEvent: (
     input: RecordPiSubagentOrphanedEventInput,
   ) => Effect.Effect<PiSubagentOrphanedRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 13 wall-time expiry trigger (T13-AC3): journal-only insert
+   * (band 60, deterministic idempotent eventId, `pi_subagent_walltime_expired`
+   * diagnostic). The aggregate is never mutated — projection is never
+   * silently settled; ticket 15's watchdog owns any staged escalation.
+   */
+  readonly recordWallTimeExpiryEvent: (
+    input: RecordPiSubagentWallTimeExpiryInput,
+  ) => Effect.Effect<PiSubagentWallTimeExpiryRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 13 operator snapshot (T13-AC4): bounded SQL aggregates only. The
+   * result contains no prompt, result, transcript, summary, or secret content.
+   */
+  readonly getTelemetrySnapshot: (
+    now: string,
+  ) => Effect.Effect<ServerDiagnosticsPiSubagents, PiSubagentExecutionRepositoryError>;
 }
 
 export class PiSubagentExecutionRepository extends ServiceMap.Service<
