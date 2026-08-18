@@ -2,58 +2,62 @@ import type { PiSubagentDiagnosticCode } from "@synara/contracts";
 import { Effect, Option } from "effect";
 
 import type {
+  PiSubagentCompletionDispatchBatch,
+  PiSubagentCompletionDispatchBatchContent,
+  PiSubagentCompletionDispatchCreateResult,
   PiSubagentCompletionOutboxEntry,
   PiSubagentExecutionRepositoryShape,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT } from "../config.ts";
+import type { PiSubagentParentEffectDispatcher } from "./piSubagentParentEffectDispatcher.ts";
+import { verifyPiSubagentCompletionDispatchFingerprint } from "./piSubagentCompletionDispatchIdentity.ts";
 
 /**
- * Ticket 09 — Per-thread completion coordinator.
+ * Decision 0016 — per-thread completion coordinator (Ticket 09 remediation,
+ * WP5).
  *
- * Completion delivery is coordinated PER PARENT THREAD on top of the Ticket 08
- * durable outbox (spec Implementation Decisions 23 and 24, Decision 0013 F3):
+ * The durable completion-dispatch batch is the recovery authority. The
+ * coordinator:
  *
- * 1. Production pump (T09 wiring obligation, Decision 0013 F3): this
- *    coordinator IS the production consumer of the outbox. It consumes the
- *    `piSubagentCompletionRetryLimit` policy through the same repository
- *    scan the Ticket 08 pump uses (`listRecoverableCompletionOutbox`), now
- *    filtered per parent thread.
- * 2. Bounded per-thread batching (T09-AC1): near-simultaneous completions
- *    for one thread inside `batchWindowMs` coalesce into ONE follow-up
- *    carrying bounded summaries and execution identities. The batch is
- *    capped (`maxBatchEntries`) so one follow-up stays bounded no matter
- *    how large the burst is; overflow joins the NEXT batch.
- * 3. At most one outstanding follow-up per thread (T09-AC2): while a
- *    thread's current batch is dispatched-but-unacknowledged, later bursts
- *    wait and join a later batch. Delivery state (`delivered` /
- *    `acknowledged`) is the durable one-outstanding ledger; the in-memory
- *    registry is only a cache of it.
- * 4. Safe parent boundary (T09-AC3): a follow-up is dispatched ONLY when
- *    the parent has no active turn. A busy parent defers the batch — the
- *    coordinator never interrupts current reasoning or tool work. When the
- *    parent turn settles (`onParentTurnSettled`), the deferred batch
- *    retries the boundary check. User-read state is structurally not an
- *    input of this coordinator — it can never be a delivery gate.
- * 5. Journal-first dispatch (T09-AC4, Decision 0013 F4): entries are marked
- *    `delivered` BEFORE the parent effect is dispatched. A dispatch failure
- *    returns them to `failed_retryable` (bounded by the retry policy) with
- *    a stable diagnostic; the execution outcome is NEVER rewritten. The
- *    stable outbox identity travels with every follow-up entry as the
- *    parent-effect dedupe key, so at-least-once redelivery can never create
- *    duplicate parent content. A follow-up turn that FAILS BEFORE RUNNING
- *    (prompt rejection) produced no parent content, so its entries safely
- *    return to retryable delivery (`notifyFollowUpSettled` with outcome
- *    `"failed"`); a follow-up turn that RAN is acknowledged — its content
- *    was seen and must never be re-sent.
- * 6. Supersede (T09-AC6): stale attempt/generation entries are fenced by
- *    the repository transitions (`markCompletionDelivered` /
- *    `markCompletionSuperseded` re-check the fence inside the transaction)
- *    and produce NO follow-up effect; their execution evidence remains
- *    retrievable by identity.
+ * 1. Batching (T09-AC1): near-simultaneous managed terminals for one parent
+ *    thread inside the configured window coalesce into ONE immutable batch
+ *    whose content (derived identities + frozen `thread.turn.start` command
+ *    + bounded parent message with the harness-policy header) is authored
+ *    transactionally with its canonical members.
+ * 2. One outstanding follow-up per thread (T09-AC2): the durable
+ *    one-active-batch partial unique index is the authority; later bursts
+ *    wait outside the active batch and join the next batch after it settles.
+ * 3. Safe parent boundary (T09-AC3): the ONLY delivery gate is `isParentBusy`;
+ *    a busy or unavailable/lazy parent parks without writing durable state and
+ *    without consuming retry budget, then re-flushes on settle/hydration.
+ * 4. The parent effect is accepted exactly when the batch's deterministic
+ *    internal command receives a fingerprint-matched accepted orchestration
+ *    receipt (Decision 0016 §1). Dispatch goes through the narrow
+ *    parent-effect dispatcher port; the coordinator NEVER calls Pi
+ *    `session.prompt` and never infers acceptance from outbox `delivered`.
+ * 5. Exact correlation (Decision 0016 §6): finalization only after the
+ *    batch's stored command id + fingerprint + parent message id match the
+ *    accepted receipt, and only its exact associated members are
+ *    acknowledged. Generic thread-level `message_end` / settle / session
+ *    events may trigger a recovery check but can never acknowledge a batch.
+ * 6. Stable retry + exhaustion (Decision 0016 §7): transient no-receipt
+ *    failures re-dispatch the STORED frozen command byte-for-byte under the
+ *    same identity, consuming the Ticket 08 retry policy; the batch settles
+ *    `exhausted` at the ceiling with evidence preserved and the execution
+ *    outcome never mutated.
+ * 7. Immutable rejection / collision: a fingerprint-matched persisted
+ *    rejection or identity collision settles the batch `exhausted` with one
+ *    genuine attempt and NO repeated increments.
+ * 8. Supersede (T09-AC6): stale members (newer attempt/generation) are
+ *    fenced at create and pre-submission with zero parent effect; evidence
+ *    stays readable by identity.
+ * 9. Ticket 09 recovery: awaiting + within-budget retryable batches are
+ *    driven to acceptance/finalization on new completions, safe-boundary,
+ *    managed-session hydration, dispatcher binding, and the adapter's bounded
+ *    ongoing scan — no new terminal is required for recovery.
  *
- * Legacy sessions (extension without `completion-delivery-ownership`) never
- * reach this coordinator — the adapter dispositions their entries at
- * terminal-persist time (the legacy nudge path owns delivery there).
+ * Legacy sessions never reach this coordinator (the adapter dispositions
+ * their entries at terminal-persist time).
  */
 
 /** Default retry budget when no config value is supplied (Ticket 08 knob). */
@@ -69,9 +73,9 @@ export interface CompletionCoordinatorScheduler {
   readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
 }
 
-/** One bounded follow-up entry — the parent-effect dedupe key travels with it. */
+/** One bounded batch member — the stable outbox identity travels with it. */
 export interface PiSubagentCompletionCoordinatorFollowUpEntry {
-  /** Stable outbox identity — the parent-effect dedupe key (Decision 0013 F4). */
+  /** Stable outbox identity — the parent-effect key (Decision 0013 F4). */
   readonly dedupeId: string;
   readonly executionId: string;
   readonly attemptId: string;
@@ -82,6 +86,14 @@ export interface PiSubagentCompletionCoordinatorFollowUpEntry {
   readonly transcriptRef: string | null;
 }
 
+export interface PiSubagentCompletionCoordinatorDiagnosticEvent {
+  readonly parentThreadId: string;
+  readonly executionId?: string | undefined;
+  readonly batchId?: string | undefined;
+  readonly diagnosticCode: PiSubagentDiagnosticCode;
+  readonly diagnosticMessage: string;
+}
+
 export interface PiSubagentCompletionCoordinatorInput {
   /** Live repository — may be a lazy getter bound inside an Effect scope. */
   readonly repository: PiSubagentExecutionRepositoryShape;
@@ -89,71 +101,75 @@ export interface PiSubagentCompletionCoordinatorInput {
   readonly batchWindowMs?: number;
   /** Ticket 08 retry policy — consumed from the resolved server config. */
   readonly retryLimit?: number | undefined;
-  /** Per-follow-up bounded entry cap; overflow joins the NEXT batch. */
+  /** Per-batch bounded entry cap; overflow joins the NEXT batch. */
   readonly maxBatchEntries?: number | undefined;
   readonly scheduler?: CompletionCoordinatorScheduler | undefined;
   readonly now?: (() => number) | undefined;
   readonly schedule?: CompletionCoordinatorScheduler["schedule"] | undefined;
   /**
    * T09-AC3 parent-turn boundary: `true` while the parent thread has an
-   * active turn. The ONLY delivery gate — user-read state is never an
-   * input here.
+   * active turn. The ONLY delivery gate — user-read state is never an input.
    */
   readonly isParentBusy: (parentThreadId: string) => boolean;
   /**
-   * The parent follow-up boundary: dispatches ONE bounded follow-up turn
-   * for the batch. Must resolve `{ accepted: true }` only after the
-   * follow-up turn was actually started; a synchronous dispatch failure
-   * returns `{ accepted: false }` and the batch stays retryable.
+   * Managed parent session availability. Absent / lazy / stopped sessions are
+   * NOT failure: they park the thread without durable writes or retry
+   * accounting and re-flush when the session hydrates (Decision 0016 §5).
    */
-  readonly sendFollowUp: (
-    parentThreadId: string,
-    entries: readonly PiSubagentCompletionCoordinatorFollowUpEntry[],
-  ) => Promise<{ accepted: boolean; error?: string }>;
-  readonly onDiagnostic?: (event: {
+  readonly parentSessionAvailable?: ((parentThreadId: string) => boolean) | undefined;
+  /**
+   * The narrow parent-effect dispatcher port (Decision 0016 §4/§9). A
+   * partially-wired composition (dispatcher absent) parks: dispatch is
+   * `unavailable`, consuming no retry budget.
+   */
+  readonly parentEffectDispatcher?: PiSubagentParentEffectDispatcher | undefined;
+  /**
+   * Author the immutable batch content (derived identities + frozen
+   * `thread.turn.start` command + bounded parent message text) from the
+   * exact canonical member selection. Runs INSIDE the create transaction.
+   * A throwing builder fails the create closed (`content_rejected`).
+   */
+  readonly buildBatchContent: (input: {
     readonly parentThreadId: string;
-    readonly executionId?: string | undefined;
-    readonly diagnosticCode: PiSubagentDiagnosticCode;
-    readonly diagnosticMessage: string;
-  }) => void;
+    readonly members: readonly PiSubagentCompletionOutboxEntry[];
+    readonly createdAt: string;
+  }) => PiSubagentCompletionDispatchBatchContent;
+  readonly onDiagnostic?: (event: PiSubagentCompletionCoordinatorDiagnosticEvent) => void;
+}
+
+export interface PiSubagentCompletionCoordinator {
+  /** Post-commit trigger: a durable pending completion exists for the thread. */
+  readonly onCompletionPending: (event: { readonly parentThreadId: string }) => void;
+  /**
+   * T09-AC3 busy-then-idle release AND a Decision 0016 §6 recovery-trigger:
+   * the parent turn settled; run a recovery check for the thread (may dispatch
+   * or finalize an active batch). NEVER an acknowledgement by itself.
+   */
+  readonly onParentTurnSettled: (parentThreadId: string) => void;
+  /**
+   * Decision 0016 §5: a relevant managed parent session hydrated/started —
+   * run a recovery check for that thread.
+   */
+  readonly onManagedSessionHydrated: (parentThreadId: string) => void;
+  /**
+   * Decision 0016 §5 bounded Ticket 09 recovery scan: drive recovery for each
+   * listed managed-session thread (awaiting/retryable batches, then new
+   * batches for pending members) without synthesizing absent sessions.
+   */
+  readonly triggerScan: (parentThreadIds: readonly string[]) => void;
+  /** Test/diagnostics support: resolves when no dispatch work is in flight. */
+  readonly waitForIdle: () => Promise<void>;
+  /** Inspection: threads carrying a durable active (nonterminal) batch. */
+  readonly outstandingThreads: () => ReadonlyArray<{ parentThreadId: string; state: string }>;
 }
 
 type ThreadState = {
   readonly parentThreadId: string;
   /** Flush timer for the open batching window, when one is open. */
   windowTimer: { readonly cancel: () => void } | undefined;
-  /**
-   * Entries of the CURRENT dispatched-but-unacknowledged follow-up
-   * (T09-AC2 one-outstanding ledger, in-memory cache of durable state).
-   */
-  outstanding: ReadonlyArray<PiSubagentCompletionCoordinatorFollowUpEntry>;
-  /** True while a deferral wait is parked on the busy parent boundary. */
-  parkedForParentBoundary: boolean;
+  /** True while a dispatch/defer decision for the thread is in flight. */
+  processing: boolean;
 };
-
-export interface PiSubagentCompletionCoordinator {
-  /** Post-commit trigger: a durable pending completion exists for the thread. */
-  readonly onCompletionPending: (event: { readonly parentThreadId: string }) => void;
-  /**
-   * T09-AC3 busy-then-idle release: the parent turn settled; retry the
-   * deferred batch at the now-safe boundary.
-   */
-  readonly onParentTurnSettled: (parentThreadId: string) => void;
-  /**
-   * The dispatched follow-up turn settled. `"completed"` (or any outcome of
-   * a turn that RAN) acknowledges the batch; `"failed"` means the turn was
-   * rejected BEFORE running — no parent content was shown, so the batch
-   * returns to retryable delivery.
-   */
-  readonly notifyFollowUpSettled: (event: {
-    readonly parentThreadId: string;
-    readonly outcome: "completed" | "failed";
-  }) => void;
-  /** Test/diagnostics support: resolves when no dispatch work is in flight. */
-  readonly waitForIdle: () => Promise<void>;
-  /** Inspection: threads with an outstanding (unacknowledged) follow-up. */
-  readonly outstandingThreads: () => ReadonlyArray<{ parentThreadId: string; entries: number }>;
-}
 
 const toEntry = (
   entry: PiSubagentCompletionOutboxEntry,
@@ -188,6 +204,8 @@ export const makePiSubagentCompletionCoordinator = (
       : DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
   const now = input.scheduler?.now ?? input.now ?? (() => Date.now());
   const schedule = input.scheduler?.schedule ?? input.schedule ?? makeDefaultScheduler();
+  const dispatcher = input.parentEffectDispatcher;
+  const parentSessionAvailable = input.parentSessionAvailable ?? (() => true);
 
   const threads = new Map<string, ThreadState>();
   let idleResolvers: Array<() => void> = [];
@@ -215,15 +233,17 @@ export const makePiSubagentCompletionCoordinator = (
 
   const emit = (
     parentThreadId: string,
-    executionId: string | undefined,
-    diagnosticCode: PiSubagentDiagnosticCode,
-    diagnosticMessage: string,
+    event: Partial<Omit<PiSubagentCompletionCoordinatorDiagnosticEvent, "parentThreadId">> & {
+      readonly diagnosticCode: PiSubagentDiagnosticCode;
+      readonly diagnosticMessage: string;
+    },
   ): void => {
     input.onDiagnostic?.({
       parentThreadId,
-      ...(executionId !== undefined ? { executionId } : {}),
-      diagnosticCode,
-      diagnosticMessage,
+      ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
+      ...(event.batchId !== undefined ? { batchId: event.batchId } : {}),
+      diagnosticCode: event.diagnosticCode,
+      diagnosticMessage: event.diagnosticMessage,
     });
   };
 
@@ -235,268 +255,501 @@ export const makePiSubagentCompletionCoordinator = (
     const created: ThreadState = {
       parentThreadId,
       windowTimer: undefined,
-      outstanding: [],
-      parkedForParentBoundary: false,
+      processing: false,
     };
     threads.set(parentThreadId, created);
     return created;
   };
 
-  /**
-   * Delivery attempt for one thread (window elapsed, boundary reached, or
-   * retry). Journal-first: entries transition to `delivered` BEFORE the
-   * parent effect; a dispatch failure immediately returns them to
-   * `failed_retryable` (T09-AC4). Stale entries are fenced by the
-   * repository transaction and produce no effect (T09-AC6).
-   */
-  const deliverThread = (parentThreadId: string): void => {
-    const state = stateFor(parentThreadId);
-    if (state.outstanding.length > 0) {
-      // T09-AC2: one outstanding follow-up per thread — later bursts wait.
+  /** True when a batch member's execution is no longer on the batch's
+   * attempt/generation (a resume advanced past it → the completion is stale). */
+  const batchMembersStale = (
+    batch: PiSubagentCompletionDispatchBatch,
+  ): Effect.Effect<boolean, never> =>
+    Effect.gen(function* () {
+      for (const outboxId of batch.membership) {
+        const entryOpt = yield* Effect.result(input.repository.getCompletionOutboxEntry(outboxId));
+        if (entryOpt._tag === "Failure" || Option.isNone(entryOpt.success)) {
+          // Missing entry: treat as stale — the durable membership cannot be
+          // re-verified, so the batch must not produce a parent effect.
+          return true;
+        }
+        const entry = entryOpt.success.value;
+        const executionOpt = yield* Effect.result(input.repository.getById(entry.executionId));
+        if (executionOpt._tag === "Failure" || Option.isNone(executionOpt.success)) {
+          return true;
+        }
+        const execution = executionOpt.success.value;
+        if (execution.attemptId !== entry.attemptId || execution.generation !== entry.generation) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+  /** After the active slot releases (finalize/supersede/exhaust/reject), any
+   * remaining recoverable members may form the next batch immediately. */
+  const scheduleRedrive = (parentThreadId: string): void => {
+    schedule(0, () => advanceThread(parentThreadId));
+  };
+
+  /** Drive ONE durable active batch: dispatch or finalize per its state. */
+  const driveBatch = (batch: PiSubagentCompletionDispatchBatch): void => {
+    if (batch.state === "accepted") {
+      finalizeAcceptedBatch(batch);
       return;
     }
+    if (batch.state !== "awaiting_acceptance" && batch.state !== "retryable") {
+      // superseded / exhausted: already terminal, nothing to drive.
+      return;
+    }
+
+    inFlight += 1;
+    // Stale-before-submission: supersede with zero parent effect and release
+    // the slot (T09-AC6 / Decision 0016 §10).
+    void Effect.runPromise(
+      Effect.gen(function* () {
+        const stale = yield* batchMembersStale(batch);
+        if (stale) {
+          const result = yield* Effect.result(
+            input.repository.supersedeCompletionDispatchBatch({
+              batchId: batch.batchId,
+              now: new Date(now()).toISOString(),
+              supersededByReason: "a member's attempt/generation advanced before submission",
+            }),
+          );
+          if (result._tag === "Success" && result.success.kind === "transitioned") {
+            emit(batch.parentThreadId, {
+              batchId: batch.batchId,
+              diagnosticCode: "pi_subagent_completion_superseded",
+              diagnosticMessage: `Completion dispatch batch '${batch.batchId}' superseded before submission (stale generation); zero parent effect`,
+            });
+          }
+          scheduleRedrive(batch.parentThreadId);
+          return;
+        }
+
+        // Safe boundary still holds at dispatch time (T09-AC3): never steer
+        // into an active parent turn.
+        if (input.isParentBusy(batch.parentThreadId)) {
+          return; // parked; onParentTurnSettled re-flushes
+        }
+        if (!parentSessionAvailable(batch.parentThreadId)) {
+          return; // parked; onManagedSessionHydrated re-flushes
+        }
+
+        if (dispatcher === undefined) {
+          // Partially-wired composition: dispatch unavailable — consume no
+          // retry budget; the adapter binds / triggers recovery later.
+          return;
+        }
+
+        // Drift / malformed stored payload fails closed BEFORE dispatch under
+        // the SAME identity — no rotated identity, no parent effect
+        // (Decision 0016 §3, §10). A mismatched fingerprint means this batch
+        // can never be accepted; settle it exhausted with evidence.
+        if (
+          !verifyPiSubagentCompletionDispatchFingerprint({
+            commandPayloadJson: batch.commandPayloadJson,
+            expectedCommandFingerprint: batch.commandFingerprint,
+            expectedFingerprintVersion: batch.fingerprintVersion,
+          })
+        ) {
+          yield* settleRejected(
+            batch,
+            "stored frozen command payload drift: fingerprint mismatch under the same identity",
+            "collision",
+          );
+          return;
+        }
+
+        const outcome = yield* Effect.tryPromise({
+          try: () => dispatcher.dispatch(batch.commandPayloadJson),
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+        }).pipe(Effect.result);
+
+        if (outcome._tag === "Failure") {
+          yield* recordTransientFailure(batch, `dispatcher threw: ${outcome.failure.message}`);
+          return;
+        }
+
+        const dispatch = outcome.success;
+        const startedAt = new Date(now()).toISOString();
+        switch (dispatch.kind) {
+          case "accepted": {
+            // Exact receipt correlation (Decision 0016 §6) — the repository
+            // guards command id + fingerprint + message id + sequence.
+            const accepted = yield* Effect.result(
+              input.repository.recordCompletionDispatchAccepted({
+                batchId: batch.batchId,
+                fingerprintVersion: batch.fingerprintVersion,
+                commandFingerprint: batch.commandFingerprint,
+                parentCommandId: batch.parentCommandId,
+                parentMessageId: batch.parentMessageId,
+                acceptedReceiptSequence: dispatch.receipt.resultSequence,
+                now: startedAt,
+              }),
+            );
+            if (accepted._tag === "Failure") {
+              yield* recordTransientFailure(
+                batch,
+                `durable accepted-recording failed: ${accepted.failure.message}`,
+              );
+              return;
+            }
+            if (accepted.success.kind === "transitioned") {
+              emit(batch.parentThreadId, {
+                batchId: batch.batchId,
+                diagnosticCode: "pi_subagent_completion_delivery_failed",
+                diagnosticMessage: `completion-recovery-correlation-confirmed:${dispatch.receipt.resultSequence}`,
+              });
+              finalizeAcceptedBatch({ ...batch, state: "accepted" as const });
+              return;
+            }
+            if (accepted.success.kind === "receipt_mismatch") {
+              // Identity drift / collision: this identity can never be
+              // accepted — settle exhausted with evidence, no rotated identity.
+              yield* settleRejected(batch, accepted.success.reason, "collision");
+              return;
+            }
+            // invalid_transition / not_found — terminal elsewhere.
+            return;
+          }
+          case "rejected":
+            yield* settleRejected(batch, dispatch.error, "rejected");
+            return;
+          case "collision":
+            yield* settleRejected(batch, dispatch.error, "collision");
+            return;
+          case "transient":
+          case "unverified":
+            yield* recordTransientFailure(batch, dispatch.error);
+            return;
+          case "unavailable":
+            // Pre-bind or engine stopped: no retry accounting; wait for the
+            // bind/session trigger.
+            return;
+        }
+      }),
+    )
+      .finally(() => {
+        inFlight -= 1;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment: failures are reported through Effect.result
+        // + diagnostics; never an unhandled rejection from the coordinator.
+      });
+  };
+
+  const recordTransientFailure = (
+    batch: PiSubagentCompletionDispatchBatch,
+    error: string,
+  ): Effect.Effect<void, never> =>
+    Effect.gen(function* () {
+      const failed = yield* Effect.result(
+        input.repository.failCompletionDispatchBatch({
+          batchId: batch.batchId,
+          now: new Date(now()).toISOString(),
+          error,
+          retryLimit,
+        }),
+      );
+      if (failed._tag === "Failure") {
+        emit(batch.parentThreadId, {
+          batchId: batch.batchId,
+          diagnosticCode: "pi_subagent_completion_batch_persistence_failed",
+          diagnosticMessage: `Batch failure-transition failed for '${batch.batchId}': ${failed.failure.message}`,
+        });
+        return;
+      }
+      const transition = failed.success;
+      if (transition.kind !== "transitioned") {
+        return;
+      }
+      if (transition.batch.state === "exhausted") {
+        emit(batch.parentThreadId, {
+          batchId: batch.batchId,
+          diagnosticCode: "pi_subagent_completion_delivery_failed",
+          diagnosticMessage: `Completion dispatch batch '${batch.batchId}' exhausted after ${transition.batch.attemptCount} attempt(s): ${error}`,
+        });
+        scheduleRedrive(batch.parentThreadId);
+        return;
+      }
+      emit(batch.parentThreadId, {
+        batchId: batch.batchId,
+        diagnosticCode: "pi_subagent_completion_delivery_failed",
+        diagnosticMessage: `Completion dispatch failed for batch '${batch.batchId}' (attempt ${transition.batch.attemptCount}, retryable): ${error}`,
+      });
+      // Stable-identity byte-identical redrive after one batching window.
+      schedule(batchWindowMs, () => advanceThread(batch.parentThreadId));
+    });
+
+  const settleRejected = (
+    batch: PiSubagentCompletionDispatchBatch,
+    error: string,
+    reason: "rejected" | "collision",
+  ): Effect.Effect<void, never> =>
+    Effect.gen(function* () {
+      const rejected = yield* Effect.result(
+        input.repository.rejectCompletionDispatchBatch({
+          batchId: batch.batchId,
+          now: new Date(now()).toISOString(),
+          error,
+          reason,
+        }),
+      );
+      if (rejected._tag === "Failure") {
+        emit(batch.parentThreadId, {
+          batchId: batch.batchId,
+          diagnosticCode: "pi_subagent_completion_batch_persistence_failed",
+          diagnosticMessage: `Batch rejection-transition failed for '${batch.batchId}': ${rejected.failure.message}`,
+        });
+        return;
+      }
+      if (rejected.success.kind !== "transitioned") {
+        return;
+      }
+      emit(batch.parentThreadId, {
+        batchId: batch.batchId,
+        diagnosticCode:
+          reason === "collision"
+            ? "pi_subagent_completion_batch_collision"
+            : "pi_subagent_completion_batch_rejected",
+        diagnosticMessage: `Completion dispatch batch '${batch.batchId}' permanently ${reason === "collision" ? "failed closed (identity collision)" : "rejected"}: ${error}`,
+      });
+      // The slot is released (exhausted is terminal); remaining members may
+      // form the next batch.
+      scheduleRedrive(batch.parentThreadId);
+    });
+
+  const finalizeAcceptedBatch = (batch: PiSubagentCompletionDispatchBatch): void => {
     inFlight += 1;
     void Effect.runPromise(
       Effect.gen(function* () {
+        const finalized = yield* Effect.result(
+          input.repository.finalizeCompletionDispatchBatch({
+            batchId: batch.batchId,
+            now: new Date(now()).toISOString(),
+          }),
+        );
+        if (finalized._tag === "Failure") {
+          emit(batch.parentThreadId, {
+            batchId: batch.batchId,
+            diagnosticCode: "pi_subagent_completion_batch_persistence_failed",
+            diagnosticMessage: `Batch finalization failed for '${batch.batchId}'; recovery will re-finalize: ${finalized.failure.message}`,
+          });
+          schedule(batchWindowMs, () => advanceThread(batch.parentThreadId));
+          return;
+        }
+        if (finalized.success.kind !== "transitioned") {
+          return;
+        }
+        emit(batch.parentThreadId, {
+          batchId: batch.batchId,
+          diagnosticCode: "pi_subagent_completion_delivery_failed",
+          diagnosticMessage: `completion follow-up accepted and acknowledged for batch '${batch.batchId}' (receipt-correlated finalization)`,
+        });
+        scheduleRedrive(batch.parentThreadId);
+      }),
+    )
+      .finally(() => {
+        inFlight -= 1;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment.
+      });
+  };
+
+  /**
+   * Advance ONE parent thread: drive its durable active batch (dispatch /
+   * finalize / supersede) or create the next batch from pending members at the
+   * safe boundary. Everything the coordinator decides is backed by the batch
+   * ledger; in-memory state is only a reentrancy/scheduling optimization.
+   */
+  const advanceThread = (parentThreadId: string): void => {
+    const state = stateFor(parentThreadId);
+    if (state.processing) {
+      return;
+    }
+    state.processing = true;
+    inFlight += 1;
+    void Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* Effect.result(
+          input.repository.getActiveCompletionDispatchBatch(parentThreadId),
+        );
+        if (active._tag === "Failure") {
+          emit(parentThreadId, {
+            diagnosticCode: "pi_subagent_completion_batch_recovery_failed",
+            diagnosticMessage: `Active batch lookup failed for parent thread; retrying on next trigger: ${active.failure.message}`,
+          });
+          return;
+        }
+        if (Option.isSome(active.success)) {
+          // Drive the existing active batch first (recovery); its finalization
+          // redrives for the new completion.
+          driveBatch(active.success.value);
+          return;
+        }
+
+        // No active batch: safe-boundary checks BEFORE any durable write.
+        // Deferral consumes no retry budget and writes no state (T09-AC3).
+        if (input.isParentBusy(parentThreadId)) {
+          return;
+        }
+        if (!parentSessionAvailable(parentThreadId)) {
+          return;
+        }
+
         const scan = yield* Effect.result(
           input.repository.listRecoverableCompletionOutbox({ retryLimit, parentThreadId }),
         );
         if (scan._tag === "Failure") {
-          emit(
-            parentThreadId,
-            undefined,
-            "pi_subagent_completion_delivery_failed",
-            "Completion batch scan failed for parent thread; retrying on next trigger",
-          );
+          emit(parentThreadId, {
+            diagnosticCode: "pi_subagent_completion_delivery_failed",
+            diagnosticMessage:
+              "Completion batch scan failed for parent thread; retrying on next trigger",
+          });
           return;
         }
         if (scan.success.length === 0) {
           return;
         }
 
-        // T09-AC3 safe boundary FIRST: never interrupt an active parent
-        // turn. Checking the boundary BEFORE any durable transition means a
-        // deferral consumes no retry budget and writes no delivery state —
-        // the batch stays exactly as it was (`pending` or
-        // `failed_retryable`) and re-flushes when the boundary opens
-        // (`onParentTurnSettled`) or on the next completion trigger.
-        if (input.isParentBusy(parentThreadId)) {
-          stateFor(parentThreadId).parkedForParentBoundary = true;
+        // Authorman the immutable batch (selection, generation fence, cap,
+        // content, association) in one transaction (Decision 0016 §2).
+        const createdAt = new Date(now()).toISOString();
+        const created = yield* Effect.result(
+          input.repository.createCompletionDispatchBatch({
+            parentThreadId,
+            maxBatchEntries,
+            retryLimit,
+            now: createdAt,
+            buildBatchContent: (members) =>
+              input.buildBatchContent({ parentThreadId, members, createdAt }),
+          }),
+        );
+        if (created._tag === "Failure") {
+          emit(parentThreadId, {
+            diagnosticCode: "pi_subagent_completion_batch_persistence_failed",
+            diagnosticMessage: `Completion batch creation failed for parent thread: ${created.failure.message}`,
+          });
           return;
         }
-
-        // Journal-first intent: mark every batch entry delivered BEFORE the
-        // parent effect. The repository fences stale entries inside the
-        // transaction (superseded entries never join a follow-up).
-        const accepted: PiSubagentCompletionCoordinatorFollowUpEntry[] = [];
-        for (const raw of scan.success) {
-          if (accepted.length >= maxBatchEntries) {
-            break;
-          }
-          const transition = yield* Effect.result(
-            input.repository.markCompletionDelivered({
-              outboxId: raw.outboxId,
-              now: new Date(now()).toISOString(),
-            }),
-          );
-          if (transition._tag === "Failure") {
-            emit(
-              parentThreadId,
-              raw.executionId,
-              "pi_subagent_completion_delivery_failed",
-              `Durable delivered-transition failed for execution '${raw.executionId}'; it stays retryable`,
-            );
-            continue;
-          }
-          const result = transition.success;
-          if (result.kind === "transitioned") {
-            accepted.push(toEntry(result.entry));
-            continue;
-          }
-          if (result.kind === "superseded_instead") {
-            emit(
-              parentThreadId,
-              raw.executionId,
-              "pi_subagent_completion_superseded",
-              `Completion for execution '${raw.executionId}' superseded by generation ${result.entry.generation}; no follow-up effect`,
-            );
-            continue;
-          }
-          // invalid_transition / not_found — settled elsewhere; skip.
-        }
-
-        if (accepted.length === 0) {
-          // Overflow beyond the cap, or every entry fenced/failed: if any
-          // entries remain recoverable, run the next batch immediately.
-          const remaining = yield* Effect.result(
-            input.repository.listRecoverableCompletionOutbox({ retryLimit, parentThreadId }),
-          );
-          if (remaining._tag === "Success" && remaining.success.length > 0) {
-            schedule(0, () => deliverThread(parentThreadId));
-          }
-          return;
-        }
-
-        stateFor(parentThreadId).outstanding = accepted;
-        const dispatch = yield* Effect.tryPromise({
-          try: () => input.sendFollowUp(parentThreadId, accepted),
-          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-        }).pipe(Effect.result);
-
-        if (dispatch._tag === "Failure" || !dispatch.success.accepted) {
-          // Dispatch failed BEFORE any parent effect: return every entry to
-          // retryable delivery. No follow-up content exists — a later retry
-          // cannot duplicate it (T09-AC4).
-          stateFor(parentThreadId).outstanding = [];
-          const message =
-            dispatch._tag === "Failure"
-              ? dispatch.failure.message
-              : (dispatch.success.error ?? "parent follow-up boundary rejected the batch");
-          let retryable = 0;
-          for (const entry of accepted) {
-            const failed = yield* Effect.result(
-              input.repository.markCompletionDeliveryFailed({
-                outboxId: entry.dedupeId,
-                now: new Date(now()).toISOString(),
-                error: message,
-              }),
-            );
-            if (failed._tag === "Success" && failed.success.kind === "transitioned") {
-              retryable += 1;
-              emit(
-                parentThreadId,
-                entry.executionId,
-                "pi_subagent_completion_delivery_failed",
-                `Follow-up dispatch failed for execution '${entry.executionId}' (attempt ${failed.success.entry.attemptCount}, retryable): ${message}`,
-              );
-            } else {
-              emit(
-                parentThreadId,
-                entry.executionId,
-                "pi_subagent_completion_delivery_failed",
-                `Follow-up dispatch failed for execution '${entry.executionId}': ${message}`,
-              );
+        const create = created.success;
+        switch (create.kind) {
+          case "created": {
+            if (create.supersededCount > 0) {
+              emit(parentThreadId, {
+                diagnosticCode: "pi_subagent_completion_superseded",
+                diagnosticMessage: `${create.supersededCount} stale completion member(s) superseded before batch creation; no follow-up effect`,
+              });
             }
+            driveBatch(create.batch);
+            return;
           }
-          // T09-AC4 bounded automatic retry: when at least one entry stayed
-          // within the retry budget, re-flush the thread after one batching
-          // window (the repository scan itself drops exhausted entries).
-          if (retryable > 0) {
-            schedule(batchWindowMs, () => deliverThread(parentThreadId));
+          case "batch_already_present":
+            driveBatch(create.batch);
+            return;
+          case "no_members":
+            if (create.supersededCount > 0) {
+              emit(parentThreadId, {
+                diagnosticCode: "pi_subagent_completion_superseded",
+                diagnosticMessage: `${create.supersededCount} stale completion member(s) superseded before batch creation; no follow-up effect`,
+              });
+            }
+            return;
+          case "active_batch_exists": {
+            // A concurrent process created the active batch first — drive the
+            // durable authority (unique index guarantees at most one).
+            const existing = yield* Effect.result(
+              input.repository.getActiveCompletionDispatchBatch(parentThreadId),
+            );
+            if (existing._tag === "Success" && Option.isSome(existing.success)) {
+              driveBatch(existing.success.value);
+            }
+            return;
           }
-          return;
+          case "member_collision":
+            emit(parentThreadId, {
+              diagnosticCode: "pi_subagent_completion_batch_collision",
+              diagnosticMessage:
+                "Completion batch member collision; the create transaction rolled back",
+            });
+            return;
+          case "content_rejected":
+            emit(parentThreadId, {
+              diagnosticCode: "pi_subagent_completion_batch_collision",
+              diagnosticMessage: `Completion batch content rejected (fail closed): ${create.detail}`,
+            });
+            return;
         }
       }),
-    ).finally(() => {
-      inFlight -= 1;
-      settleIdleWaiters();
-    }).catch(() => {
-      // Framing-level containment (see notifyFollowUpSettled): internal
-      // failures are reported through Effect.result + diagnostics — never
-      // an unhandled rejection from the coordinator.
-    });
+    )
+      .finally(() => {
+        inFlight -= 1;
+        state.processing = false;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment.
+      });
   };
 
-  const onCompletionPending = (event: { readonly parentThreadId: string }): void => {
-    const state = stateFor(event.parentThreadId);
-    if (state.outstanding.length > 0 || state.parkedForParentBoundary) {
-      // One outstanding follow-up / parked deferral: the next batch flush
-      // happens at settle (T09-AC2) or boundary release (T09-AC3).
-      return;
-    }
+  const openBatchWindow = (parentThreadId: string): void => {
+    const state = stateFor(parentThreadId);
     if (state.windowTimer !== undefined) {
       // Window already open: the newcomer joins this batch (T09-AC1).
       return;
     }
+    if (batchWindowMs === 0) {
+      advanceThread(parentThreadId);
+      return;
+    }
     state.windowTimer = schedule(batchWindowMs, () => {
-      const threadState = threads.get(event.parentThreadId);
+      const threadState = threads.get(parentThreadId);
       if (threadState !== undefined) {
         threadState.windowTimer = undefined;
       }
-      deliverThread(event.parentThreadId);
+      advanceThread(parentThreadId);
     });
+  };
+
+  const onCompletionPending = (event: { readonly parentThreadId: string }): void => {
+    openBatchWindow(event.parentThreadId);
   };
 
   const onParentTurnSettled = (parentThreadId: string): void => {
-    const state = threads.get(parentThreadId);
-    if (state === undefined || !state.parkedForParentBoundary) {
-      return;
-    }
-    state.parkedForParentBoundary = false;
-    deliverThread(parentThreadId);
+    // Safe boundary opened (busy-then-idle) and/or a parent settle occurred:
+    // run a recovery check. This NEVER acknowledges a batch by itself.
+    advanceThread(parentThreadId);
   };
 
-  const notifyFollowUpSettled = (event: {
-    readonly parentThreadId: string;
-    readonly outcome: "completed" | "failed";
-  }): void => {
-    const state = threads.get(event.parentThreadId);
-    if (state === undefined || state.outstanding.length === 0) {
-      return;
+  const onManagedSessionHydrated = (parentThreadId: string): void => {
+    advanceThread(parentThreadId);
+  };
+
+  const triggerScan = (parentThreadIds: readonly string[]): void => {
+    for (const parentThreadId of parentThreadIds) {
+      advanceThread(parentThreadId);
     }
-    const batch = state.outstanding;
-    state.outstanding = [];
-    inFlight += 1;
-    void Effect.runPromise(
-      Effect.gen(function* () {
-        if (event.outcome === "failed") {
-          // The follow-up turn was rejected BEFORE running: no parent
-          // content was shown — return the entries to retryable delivery
-          // (T09-AC4). This does NOT count a delivery attempt against the
-          // retry budget: the journal-first `delivered` marks are rolled
-          // back through the same retryable transition without a dispatch
-          // failure.
-          for (const entry of batch) {
-            yield* Effect.result(
-              input.repository.markCompletionDeliveryFailed({
-                outboxId: entry.dedupeId,
-                now: new Date(now()).toISOString(),
-                error: "follow-up turn failed before running",
-              }),
-            );
-          }
-          return;
-        }
-        // The follow-up turn ran to completion: acknowledge the batch.
-        for (const entry of batch) {
-          yield* Effect.result(
-            input.repository.markCompletionAcknowledged({
-              outboxId: entry.dedupeId,
-              now: new Date(now()).toISOString(),
-            }),
-          );
-        }
-      }),
-    ).finally(() => {
-      inFlight -= 1;
-      settleIdleWaiters();
-      // A later burst waiting on the one-outstanding slot flushes now.
-      void waitForIdle().then(() => {
-        const threadState = threads.get(event.parentThreadId);
-        if (threadState !== undefined && threadState.outstanding.length === 0) {
-          deliverThread(event.parentThreadId);
-        }
-      });
-    }).catch(() => {
-      // Framing-level containment: internal failures are already reported
-      // through Effect.result + diagnostics; a coordinator must never leak an
-      // unhandled rejection into the host process (e.g. a scheduled retry
-      // firing after the owning scope was torn down).
-    });
   };
 
   const outstandingThreads = () =>
     [...threads.values()]
-      .filter((state) => state.outstanding.length > 0)
+      .filter((state) => state.windowTimer !== undefined || state.processing)
       .map((state) => ({
         parentThreadId: state.parentThreadId,
-        entries: state.outstanding.length,
+        state: state.processing ? "processing" : "window_open",
       }));
 
   return {
     onCompletionPending,
     onParentTurnSettled,
-    notifyFollowUpSettled,
+    onManagedSessionHydrated,
+    triggerScan,
     waitForIdle,
     outstandingThreads,
   };

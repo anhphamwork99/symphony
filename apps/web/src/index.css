@@ -2579,7 +2579,6 @@ diffs-container {
   position: relative;
 }
 
-.chat-composer-surface::before,
 .chat-composer-stacked-top::before {
   content: "";
   position: absolute;
@@ -2601,12 +2600,11 @@ diffs-container {
   );
 }
 
+/* The primary input must stay fully opaque so transcript/background tones never
+   bleed through the editor or footer. Stacked panels keep their lighter glass
+   treatment above. */
 .chat-composer-surface {
-  background: color-mix(
-    in srgb,
-    var(--composer-glass-surface) var(--composer-glass-opacity),
-    transparent
-  );
+  background: var(--composer-glass-surface);
 }
 
 /* Recessed track: a hairline border + faint inner shadow read the base as a sunken

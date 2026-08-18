@@ -187,6 +187,52 @@ export function resolvePiSubagentCompletionRetryLimit(
   return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
 }
 
+// Decision 0016 (Ticket 09 remediation): per-follow-up bounded entry cap — the
+// maximum outbox members one immutable completion-dispatch batch may contain
+// (overflow joins the NEXT batch, so ONE follow-up stays bounded under any
+// burst). Same resolver contract: nullish → default, range check, invalid
+// anything → default, never clamped. The existing coordinator default (8)
+// becomes the production knob default.
+export const DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES = 8;
+export const MIN_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES = 1;
+export const MAX_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES = 64;
+
+export function resolvePiSubagentCompletionMaxBatchEntries(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES ||
+      rawInput > MAX_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES ||
+      parsed > MAX_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
+}
+
 export function resolvePiSubagentOrphanAfterMs(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -718,6 +764,8 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentCompletionRetryLimit?: number;
   /** Ticket 09: per-thread completion batching window in milliseconds. */
   readonly piSubagentCompletionBatchWindowMs?: number;
+  /** Decision 0016: immutable dispatch-batch member cap (1–64, default 8). */
+  readonly piSubagentCompletionMaxBatchEntries?: number;
   /** Ticket 10: lease-expiry orphan threshold (T10-AC7), ~60s initially. */
   readonly piSubagentOrphanAfterMs?: number;
   /** Ticket 13: per-provider running-agent concurrency cap (compat default 4). */

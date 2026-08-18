@@ -355,11 +355,20 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
       "pi_subagent_admission_project_queue_saturated",
       "pi_subagent_admission_quota_unavailable",
       "pi_subagent_walltime_expired",
+      "pi_subagent_completion_batch_persistence_failed",
+      "pi_subagent_completion_batch_rejected",
+      "pi_subagent_completion_batch_collision",
+      "pi_subagent_completion_batch_recovery_failed",
     ] as const) {
       expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
     }
-    expect(() =>
-      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_quota_unknown" as never),
-    ).toThrow();
+    for (const invalid of [
+      "pi_subagent_quota_unknown",
+      "pi_subagent_completion_batch_unknown",
+    ] as const) {
+      expect(() =>
+        Schema.decodeSync(PiSubagentDiagnosticCode)(invalid as never),
+      ).toThrow();
+    }
   });
 });

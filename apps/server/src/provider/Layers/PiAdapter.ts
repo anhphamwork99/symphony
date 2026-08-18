@@ -141,7 +141,15 @@ import {
   makePiSubagentCompletionCoordinator,
   type PiSubagentCompletionCoordinator,
   type PiSubagentCompletionCoordinatorFollowUpEntry,
+  projectCompletionFollowUpEntry,
 } from "../piSubagentCompletionCoordinator.ts";
+import {
+  buildPiSubagentCompletionDispatchCommand,
+  derivePiSubagentCompletionDispatchIdentity,
+  serializePiSubagentCompletionDispatchCommand,
+} from "../piSubagentCompletionDispatchIdentity.ts";
+import { fingerprintOrchestrationCommand } from "../../orchestration/commandFingerprint.ts";
+import type { PiSubagentParentEffectDispatcher } from "../piSubagentParentEffectDispatcher.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -507,6 +515,14 @@ export interface PiAdapterLiveOptions {
   readonly snapshotQuery?: AdmissionSnapshotQuery;
   readonly controlHealth?: PiSubagentControlHealthShape;
   readonly piSubagentRepository?: PiSubagentExecutionRepositoryShape;
+  /**
+   * Decision 0016: composition-owned late-bound parent-effect dispatcher
+   * (constructed before the provider layer to avoid the OrchestrationEngine →
+   * ProviderCommandReactor → ProviderService/PiAdapter cycle; bound exactly
+   * once when the engine is live). Absent routes (tests / unthrift
+   * composition) leave the coordinator in `unavailable` (no retry).
+   */
+  readonly completionDispatchBridge?: PiSubagentParentEffectDispatcher;
   readonly onSubagentAdmission?: (event: {
     readonly threadId: ThreadId;
     readonly command: PiSubagentSpawnCommand;
@@ -1899,13 +1915,32 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
     const sessions = new Map<ThreadId, PiSessionContext>();
-    // Ticket 09: adapter-lifetime per-thread completion coordinator — the
-    // production consumer of the Ticket 08 durable outbox (Decision 0013
-    // F3). One coordinator spans every managed Pi session of this adapter;
-    // per-thread state is keyed by parentThreadId. The follow-up boundary
-    // dispatches a bounded follow-up turn on the parent session (safe
-    // boundary checked per thread). The coordinator is created only when a
-    // repository exists (same condition as the managed terminal path).
+    // Decision 0016: adapter-lifetime per-thread completion coordinator — the
+    // production consumer of the Ticket 08 durable outbox (Decision 0013 F3).
+    // One coordinator spans every managed Pi session of this adapter;
+    // per-thread state is keyed by parentThreadId. The coordinator dispatches
+    // the batch's frozen deterministic internal `thread.turn.start` command
+    // through the narrow parent-effect dispatcher port; the parent effect is
+    // accepted exactly when the OrchestrationEngine commits a
+    // fingerprint-matched accepted receipt. The coordinator NEVER calls Pi
+    // `session.prompt` directly. It is created only when a repository exists
+    // (same condition as the managed terminal path). The composition-owned
+    // bridge may be absent (tests / simplified composition): the coordinator
+    // then reports dispatch `unavailable` and consumes no retry budget.
+    const completionBridge = options?.completionDispatchBridge;
+    // Threads whose live managed session advertises completion-delivery
+    // ownership — the bounded recovery-scan eligibility set. Never synthesized:
+    // absent lazy sessions are not failure (Decision 0016 §5).
+    const coordinatorEligibleThreads = new Set<string>();
+    const coordinatorRecoveryScanActive = {
+      timer: undefined as ReturnType<typeof setInterval> | undefined,
+    };
+    const triggerCoordinatorRecoveryScans = () => {
+      if (piSubagentCompletionCoordinator === undefined || coordinatorEligibleThreads.size === 0) {
+        return;
+      }
+      piSubagentCompletionCoordinator.triggerScan([...coordinatorEligibleThreads]);
+    };
     const piSubagentCompletionCoordinator: PiSubagentCompletionCoordinator | undefined =
       piSubagentRepository === undefined
         ? undefined
@@ -1922,35 +1957,68 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               serverConfig.piSubagentCompletionBatchWindowMs ??
               DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
             retryLimit: serverConfig.piSubagentCompletionRetryLimit,
+            maxBatchEntries: serverConfig.piSubagentCompletionMaxBatchEntries,
             isParentBusy: (parentThreadId) => {
               const context = sessions.get(parentThreadId as ThreadId);
               return context?.activeTurnId !== undefined;
             },
-            sendFollowUp: async (parentThreadId, entries) => {
+            parentSessionAvailable: (parentThreadId) => {
+              const context = sessions.get(parentThreadId as ThreadId);
+              return context !== undefined && !context.stopped;
+            },
+            parentEffectDispatcher: completionBridge,
+            buildBatchContent: ({ parentThreadId, members, createdAt }) => {
               const context = sessions.get(parentThreadId as ThreadId);
               if (context === undefined || context.stopped) {
-                return {
-                  accepted: false,
-                  error: `parent session for thread '${parentThreadId}' is unavailable`,
-                };
+                throw new Error(
+                  `completion batch content: parent session for thread '${parentThreadId}' is unavailable`,
+                );
               }
-              try {
-                const harnessPolicy = takeSynaraHarnessPolicyForProviderSession(context, {
-                  provider: PROVIDER,
-                  scopedGatewayConnectionAvailable: context.gatewayControlAvailable,
-                });
-                const text = [
-                  harnessPolicy,
-                  formatPiSubagentCompletionFollowUp(parentThreadId, entries),
-                ]
-                  .filter(Boolean)
-                  .join("\n\n");
-                await context.runtime.session.prompt(text);
-                return { accepted: true };
-              } catch (cause) {
-                const message = toMessage(cause, "Failed to dispatch completion follow-up.");
-                return { accepted: false, error: message };
-              }
+              // Freeze the complete fingerprint-bearing command at batch
+              // creation: timestamp, dispatch mode (queue), origin (agent),
+              // runtime/interaction/assistant-delivery modes, deterministic
+              // message id, parent thread, and the bounded parent message
+              // including the CURRENT harness-policy header (Decision 0016 §3,
+              // accepted implementation choice). Retry submits the STORED
+              // content byte-for-byte — never rebuilt from session/config/times.
+              const harnessPolicy = takeSynaraHarnessPolicyForProviderSession(context, {
+                provider: PROVIDER,
+                scopedGatewayConnectionAvailable: context.gatewayControlAvailable,
+              });
+              const entries = members.map((entry) => projectCompletionFollowUpEntry(entry));
+              const parentMessageText = [
+                harnessPolicy,
+                formatPiSubagentCompletionFollowUp(parentThreadId, entries),
+              ]
+                .filter(Boolean)
+                .join("\n\n");
+              const outboxIds = members.map((member) => member.outboxId);
+              const identity = derivePiSubagentCompletionDispatchIdentity({
+                parentThreadId,
+                outboxIds,
+              });
+              const command = buildPiSubagentCompletionDispatchCommand({
+                identity,
+                commandInput: {
+                  parentThreadId,
+                  parentMessageText,
+                  runtimeMode: context.session.runtimeMode,
+                  interactionMode: "default",
+                  assistantDeliveryMode: "buffered",
+                  createdAt,
+                },
+              });
+              const fingerprint = fingerprintOrchestrationCommand(command);
+              return {
+                batchId: identity.batchId,
+                parentCommandId: identity.parentCommandId,
+                parentMessageId: identity.parentMessageId,
+                fingerprintVersion: fingerprint.version,
+                commandFingerprint: fingerprint.value,
+                membership: outboxIds,
+                parentMessageText,
+                commandPayloadJson: serializePiSubagentCompletionDispatchCommand(command),
+              };
             },
             onDiagnostic: (event) => {
               const context = sessions.get(event.parentThreadId as ThreadId);
@@ -1965,6 +2033,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   detail: {
                     diagnosticCode: event.diagnosticCode,
                     ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
+                    ...(event.batchId !== undefined ? { batchId: event.batchId } : {}),
                   },
                 },
                 raw: {
@@ -1973,11 +2042,30 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   payload: {
                     diagnosticCode: event.diagnosticCode,
                     ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
+                    ...(event.batchId !== undefined ? { batchId: event.batchId } : {}),
                   },
                 },
               } satisfies ProviderRuntimeEvent);
             },
           });
+    // Decision 0016 §5/§9: binding the bridge fires a recovery scan for the
+    // hydrated managed parents. The adapter subscribes at construction; the
+    // single bind in main.ts triggers recovery without needing a new terminal.
+    if (piSubagentCompletionCoordinator !== undefined && completionBridge !== undefined) {
+      completionBridge.onBound(() => {
+        triggerCoordinatorRecoveryScans();
+      });
+    }
+    // Decision 0016 §5: a bounded ongoing Ticket 09 scan while eligible managed
+    // sessions exist. It never synthesizes sessions — only the threads whose
+    // sessions currently advertise the ownership capability are scanned.
+    if (piSubagentCompletionCoordinator !== undefined) {
+      coordinatorRecoveryScanActive.timer = setInterval(
+        () => triggerCoordinatorRecoveryScans(),
+        10_000,
+      );
+      coordinatorRecoveryScanActive.timer.unref?.();
+    }
     const ownsNativeEventLogger = options?.nativeEventLogger === undefined;
     const nativeEventLogger =
       options?.nativeEventLogger ??
@@ -2421,15 +2509,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       if (failure.state === "failed") {
         offerRuntimeError(context, { message, method: "prompt", cause });
       }
-      // Ticket 09: the turn was rejected BEFORE running — no parent content
-      // was shown, so an outstanding completion follow-up must return to
-      // retryable delivery rather than acknowledge (T09-AC4).
+      // Decision 0016: a parent turn reached a safe boundary. Generic settle /
+      // session events only TRIGGER a recovery check — they can never
+      // acknowledge a batch by themselves (only a fingerprint-matched accepted
+      // receipt can).
       if (piSubagentCompletionCoordinator) {
-        piSubagentCompletionCoordinator.notifyFollowUpSettled({
-          parentThreadId: String(context.session.threadId),
-          outcome: "failed",
-        });
-        piSubagentCompletionCoordinator.onParentTurnSettled(String(context.session.threadId));
+        const settledThreadId = String(context.session.threadId);
+        piSubagentCompletionCoordinator.onParentTurnSettled(settledThreadId);
+        piSubagentCompletionCoordinator.onManagedSessionHydrated(settledThreadId);
       }
       context.activeTurnId = undefined;
       context.activeAssistantItemId = undefined;
@@ -2789,21 +2876,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           context.activeReasoningItemId = undefined;
           context.activeToolItems.clear();
           context.session = makeSessionSnapshot(context);
-          // Ticket 09: the parent turn reached a terminal boundary. Release
-          // deferred completion batches parked on the busy boundary
-          // (T09-AC3 busy-then-idle) and settle any outstanding follow-up
-          // turn: a turn that RAN (completed or failed mid-run) shows its
-          // content — acknowledge; only a turn that was REJECTED BEFORE
-          // running produces no parent content. `message_end` means the
-          // turn ran, so the batch acknowledges (the prompt-rejection path
-          // below handles the never-ran case).
+          // Decision 0016: the parent turn reached a safe boundary. A settle
+          // event only TRIGGERS a recovery check (the pending batch may now
+          // dispatch, or an accepted batch may finalize). It NEVER
+          // acknowledges a batch by itself — only the exact accepted receipt
+          // does (Decision 0016 §6). Previously the message_end handler
+          // acknowledged the outstanding follow-up; that is removed.
           if (piSubagentCompletionCoordinator) {
             const settledThreadId = String(context.session.threadId);
             piSubagentCompletionCoordinator.onParentTurnSettled(settledThreadId);
-            piSubagentCompletionCoordinator.notifyFollowUpSettled({
-              parentThreadId: settledThreadId,
-              outcome: "completed",
-            });
+            piSubagentCompletionCoordinator.onManagedSessionHydrated(settledThreadId);
           }
           offerRuntimeEvent({
             ...completionBase,
@@ -2936,6 +3018,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           });
           if (sessions.get(input.threadId) === existingContext) {
             sessions.delete(input.threadId);
+            coordinatorEligibleThreads.delete(String(input.threadId));
           }
         }
         const { runtime, modelRegistry, synaraMcp } = yield* Effect.tryPromise({
@@ -3073,6 +3156,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               });
               if (sessions.get(input.threadId) === context) {
                 sessions.delete(input.threadId);
+                coordinatorEligibleThreads.delete(String(input.threadId));
               }
               return yield* Effect.fail(error);
             }),
@@ -3104,6 +3188,19 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           session: runtime.session,
           context,
         });
+        // Decision 0016 §5: a relevant managed parent session hydrated/started.
+        // Mark it eligible for the bounded Ticket 09 recovery scan (only when
+        // the extension acknowledged completion-delivery ownership; legacy
+        // sessions keep the legacy nudge path) and run a recovery check for
+        // the parent thread. Absent/lazy sessions are never synthesized.
+        if (
+          piSubagentCompletionCoordinator !== undefined &&
+          subagentCapability.capabilities?.includes("completion-delivery-ownership") === true
+        ) {
+          const hydratedThreadId = String(input.threadId);
+          coordinatorEligibleThreads.add(hydratedThreadId);
+          piSubagentCompletionCoordinator.onManagedSessionHydrated(hydratedThreadId);
+        }
         if (
           subagentCapability.status === "unsupported_version" ||
           subagentCapability.status === "capability_mismatch" ||
@@ -4294,6 +4391,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         });
         if (sessions.get(threadId) === context) {
           sessions.delete(threadId);
+          coordinatorEligibleThreads.delete(String(threadId));
         }
         offerRuntimeEvent({
           ...makeEventBase(context),
@@ -4637,6 +4735,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     yield* Effect.addFinalizer(() =>
       stopAll().pipe(
         Effect.orDie,
+        Effect.andThen(
+          Effect.sync(() => {
+            if (coordinatorRecoveryScanActive.timer !== undefined) {
+              clearInterval(coordinatorRecoveryScanActive.timer);
+              coordinatorRecoveryScanActive.timer = undefined;
+            }
+          }),
+        ),
         Effect.andThen(runtimeEventIngress.stop),
         Effect.ensuring(
           ownsNativeEventLogger && nativeEventLogger

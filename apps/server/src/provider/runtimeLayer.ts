@@ -24,10 +24,13 @@ import { ProviderSessionDirectoryLive } from "./Layers/ProviderSessionDirectory"
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime";
 import { ProviderRuntimeEventRepositoryLive } from "../persistence/Layers/ProviderRuntimeEvents";
 import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository";
+import type { PiSubagentParentEffectDispatcher } from "./piSubagentParentEffectDispatcher.ts";
 
 export function makeServerProviderLayer(
   options: {
     readonly agentGatewayCredentialsLayer?: typeof AgentGatewayCredentialsWithSecretsLive;
+    /** Decision 0016 composition-owned late-bound parent-effect dispatcher. */
+    readonly completionDispatchBridge?: PiSubagentParentEffectDispatcher;
   } = {},
 ) {
   return Effect.gen(function* () {
@@ -82,7 +85,14 @@ export function makeServerProviderLayer(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));
     const piAdapterLayer = makePiAdapterLive(
-      nativeEventLogger ? { nativeEventLogger } : undefined,
+      nativeEventLogger || options.completionDispatchBridge
+        ? {
+            ...(nativeEventLogger ? { nativeEventLogger } : {}),
+            ...(options.completionDispatchBridge
+              ? { completionDispatchBridge: options.completionDispatchBridge }
+              : {}),
+          }
+        : undefined,
     ).pipe(
       Layer.provide(agentGatewayCredentialsLayer),
       Layer.provide(PiSubagentExecutionRepositoryLive),

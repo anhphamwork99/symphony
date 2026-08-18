@@ -775,9 +775,9 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
           migrationEntries.map(([id, name]) => [id, name]),
         );
-        // effect_sql_migrations rows complete through 102, and a second
+        // effect_sql_migrations rows complete through 103, and a second
         // explicit run is a no-op (idempotent convergence).
-        expect(tracker[tracker.length - 1]!.migration_id).toBe(102);
+        expect(tracker[tracker.length - 1]!.migration_id).toBe(103);
         const secondPass = yield* runMigrations();
         expect(secondPass.length).toBe(0);
         yield* repositoryRoundTrip("fresh", 30_000);
@@ -804,7 +804,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         `;
         const executed = yield* runMigrations();
         expect(executed.map(([id]) => id)).toEqual([
-          90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102,
+          90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
         ]);
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
@@ -847,7 +847,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
             (96, 'ProjectionThreadsGoalAchievements')
         `;
         const executed = yield* runMigrations();
-        expect(executed.map(([id]) => id)).toEqual([97, 98, 99, 100, 101, 102]);
+        expect(executed.map(([id]) => id)).toEqual([97, 98, 99, 100, 101, 102, 103]);
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(

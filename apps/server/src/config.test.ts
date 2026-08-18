@@ -41,6 +41,10 @@ import {
   MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
   MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
   resolvePiSubagentCompletionBatchWindowMs,
+  DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES,
+  MIN_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES,
+  MAX_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES,
+  resolvePiSubagentCompletionMaxBatchEntries,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   resolvePiSubagentTerminalSummaryMaxChars,
   DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS,
@@ -650,6 +654,33 @@ describe("resolvePiSubagentProviderConcurrency (Issue 13 / T13-AC1, T13-AC7)", (
   });
 });
 
+describe("resolvePiSubagentCompletionMaxBatchEntries (Decision 0016)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES).toBe(8);
+    expect(MIN_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES).toBe(1);
+    expect(MAX_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES).toBe(64);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentCompletionMaxBatchEntries(undefined)).toBe(8);
+    expect(resolvePiSubagentCompletionMaxBatchEntries(null)).toBe(8);
+    expect(resolvePiSubagentCompletionMaxBatchEntries(1)).toBe(1);
+    expect(resolvePiSubagentCompletionMaxBatchEntries("1")).toBe(1);
+    expect(resolvePiSubagentCompletionMaxBatchEntries(64)).toBe(64);
+    expect(resolvePiSubagentCompletionMaxBatchEntries("64")).toBe(64);
+    expect(resolvePiSubagentCompletionMaxBatchEntries(16)).toBe(16);
+    expect(resolvePiSubagentCompletionMaxBatchEntries("16")).toBe(16);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of ["", "abc", "3x", true, {}, Infinity, NaN, 2.5, 0, -1, 65, 100]) {
+      expect(resolvePiSubagentCompletionMaxBatchEntries(input)).toBe(
+        DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES,
+      );
+    }
+  });
+});
+
 describe("resolvePiSubagentServerQueueCap (Issue 13 / T13-AC1, T13-AC7)", () => {
   it("exports the expected bounds and default constants", () => {
     expect(DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP).toBe(64);
@@ -715,6 +746,7 @@ describe("resolvePiSubagentWallTimeMs (Issue 13 / T13-AC3, T13-AC7)", () => {
     }
   });
 });
+
 
 describe("resolvePiSubagentOrphanAfterMs (Issue 10)", () => {
   it("exports the expected bounds and default constants (~60s initial threshold)", () => {

@@ -18,6 +18,22 @@ import {
   type PiSubagentExecutionRepositoryShape,
   type PiSubagentExecutionObservation,
   type PiSubagentCompletionOutboxEntry,
+
+  type PiSubagentCompletionDispatchBatch,
+  type PiSubagentCompletionDispatchBatchContent,
+  type PiSubagentCompletionDispatchBatchState,
+  type PiSubagentCompletionDispatchCreateResult,
+  type PiSubagentCompletionDispatchTransitionResult,
+  type CreatePiSubagentCompletionDispatchBatchInput,
+  type FailPiSubagentCompletionDispatchBatchInput,
+  type RejectPiSubagentCompletionDispatchBatchInput,
+  type RecordPiSubagentCompletionDispatchAcceptedInput,
+  PI_SUBAGENT_COMPLETION_DISPATCH_ACTIVE_STATES,
+  type RecordPiSubagentCompletionOutboxInput,
+  type RecordPiSubagentAdmissionInput,
+  type RecordPiSubagentHeartbeatObservationInput,
+  type RecordPiSubagentLifecycleEventInput,
+  type RecordPiSubagentProgressObservationInput,
 } from "../Services/PiSubagentExecutionRepository.ts";
 
 interface ExecutionRow {
@@ -158,6 +174,8 @@ interface OutboxRow {
   readonly acknowledgedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** Decision 0016 batch-membership association (nullable). */
+  readonly dispatchBatchId: string | null;
 }
 
 const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
@@ -1400,7 +1418,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     delivered_at AS "deliveredAt",
     acknowledged_at AS "acknowledgedAt",
     created_at AS "createdAt",
-    updated_at AS "updatedAt"
+    updated_at AS "updatedAt",
+    dispatch_batch_id AS "dispatchBatchId"
   `;
 
   const getOutboxByIdInternal = (outboxId: string) =>
@@ -1795,6 +1814,733 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionSuperseded:update"),
         ),
       );
+
+  // ---------------------------------------------------------------------
+  // Decision 0016 — completion-dispatch batch ledger (Ticket 09 remediation).
+  //
+  // The BATCH is the durable recovery authority. `delivered` members carry
+  // `dispatchBatchId` as membership evidence only — never parent-effect
+  // acceptance. All transitions are guarded, replayable, and never touch the
+  // execution aggregate. Frozen command/message/membership content is
+  // authored once at creation and replayed byte-for-byte.
+  // ---------------------------------------------------------------------
+
+  interface BatchRow {
+    readonly batchId: string;
+    readonly parentThreadId: string;
+    readonly parentCommandId: string;
+    readonly parentMessageId: string;
+    readonly fingerprintVersion: number;
+    readonly commandFingerprint: string;
+    readonly membershipJson: string;
+    readonly parentMessageText: string;
+    readonly commandPayloadJson: string;
+    readonly state: PiSubagentCompletionDispatchBatchState;
+    readonly attemptCount: number;
+    readonly acceptedReceiptSequence: number | null;
+    readonly lastError: string | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly acceptedAt: string | null;
+    readonly acknowledgedAt: string | null;
+    readonly supersededAt: string | null;
+    readonly exhaustedAt: string | null;
+  }
+
+  const batchColumns = sql`
+    batch_id AS "batchId",
+    parent_thread_id AS "parentThreadId",
+    parent_command_id AS "parentCommandId",
+    parent_message_id AS "parentMessageId",
+    fingerprint_version AS "fingerprintVersion",
+    command_fingerprint AS "commandFingerprint",
+    membership_json AS "membershipJson",
+    parent_message_text AS "parentMessageText",
+    command_payload_json AS "commandPayloadJson",
+    state,
+    attempt_count AS "attemptCount",
+    accepted_receipt_sequence AS "acceptedReceiptSequence",
+    last_error AS "lastError",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt",
+    accepted_at AS "acceptedAt",
+    acknowledged_at AS "acknowledgedAt",
+    superseded_at AS "supersededAt",
+    exhausted_at AS "exhaustedAt"
+  `;
+
+  const getBatchByIdInternal = (
+    batchId: string,
+  ): Effect.Effect<readonly BatchRow[], PersistenceSqlError> =>
+    sql<BatchRow>`
+      SELECT ${batchColumns}
+      FROM pi_subagent_completion_dispatch_batches
+      WHERE batch_id = ${batchId}
+      LIMIT 1
+    `.pipe(
+      Effect.mapError(
+        toPersistenceSqlError("PiSubagentExecutionRepository.getCompletionDispatchBatch:query"),
+      ),
+    );
+
+  const decodeBatch = (row: BatchRow): PiSubagentCompletionDispatchBatch => ({
+    ...row,
+    membership: JSON.parse(row.membershipJson) as readonly string[],
+  });
+
+  const decodeBatchOption = (rows: readonly BatchRow[]) =>
+    rows.length > 0 ? Option.some(decodeBatch(rows[0]!)) : Option.none();
+
+  /** Internal sentinel: a selected member is already claimed by another batch. */
+  class CompletionBatchMemberCollisionError extends Error {
+    override readonly name = "CompletionBatchMemberCollisionError";
+  }
+
+  /**
+   * Fail-closed structural validation of the builder-produced immutable
+   * content against the canonical in-transaction member selection
+   * (Decision 0016 §2: duplicate / noncanonical / cross-thread / missing /
+   * oversized membership fails closed; identity immutability).
+   */
+  const validateBatchContent = (
+    content: PiSubagentCompletionDispatchBatchContent,
+    members: readonly OutboxRow[],
+    parentThreadId: string,
+  ): string | null => {
+    if (content.parentCommandId.trim().length === 0) {
+      return "batch parent command id must be non-empty";
+    }
+    if (content.parentMessageId.trim().length === 0) {
+      return "batch parent message id must be non-empty";
+    }
+    if (content.batchId.trim().length === 0) {
+      return "batch id must be non-empty";
+    }
+    if (content.membership.length !== members.length) {
+      return "batch membership length does not match the canonically selected members";
+    }
+    for (let index = 0; index < members.length; index += 1) {
+      if (content.membership[index] !== members[index]!.outboxId) {
+        return "batch membership is noncanonical or references an unselected member";
+      }
+    }
+    if (new Set(content.membership).size !== content.membership.length) {
+      return "batch membership contains a duplicate outbox id";
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(content.commandPayloadJson);
+    } catch {
+      return "batch command payload is not valid JSON";
+    }
+    if (typeof payload !== "object" || payload === null) {
+      return "batch command payload must be an object";
+    }
+    const command = payload as Record<string, unknown>;
+    const message = command.message as Record<string, unknown> | undefined;
+    if (command.type !== "thread.turn.start") {
+      return "batch command payload must type thread.turn.start";
+    }
+    if (command.threadId !== parentThreadId) {
+      return "batch command payload threads a different parent than membership";
+    }
+    if (command.commandId !== content.parentCommandId) {
+      return "batch command payload commandId does not match the frozen parent command id";
+    }
+    if (message?.messageId !== content.parentMessageId) {
+      return "batch command payload messageId does not match the frozen parent message id";
+    }
+    if (message?.text !== content.parentMessageText) {
+      return "batch command payload message text does not match the frozen parent message text";
+    }
+    return null;
+  };
+
+  const createCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["createCompletionDispatchBatch"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            // 1. Canonical selection: generation-applicable pending or
+            //    within-budget failed_retryable rows for one parent thread,
+            //    oldest first (matches the durable outbox scan order).
+            const candidates = yield* sql<OutboxRow>`
+              SELECT ${outboxColumns}
+              FROM pi_subagent_completion_outbox
+              WHERE parent_thread_id = ${input.parentThreadId}
+                AND (
+                  delivery_state = 'pending'
+                  OR (
+                    delivery_state = 'failed_retryable'
+                    AND attempt_count < ${input.retryLimit}
+                  )
+                )
+              ORDER BY created_at ASC, outbox_id ASC
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.createCompletionDispatchBatch:scan",
+                ),
+              ),
+            );
+
+            // 2. Supersede stale members BEFORE any parent command submission
+            //    (Decision 0016 §2 / T09-AC6) and cap the membership.
+            const members: OutboxRow[] = [];
+            let supersededCount = 0;
+            for (const candidate of candidates) {
+              if (members.length >= input.maxBatchEntries) {
+                break;
+              }
+              const fence = yield* fenceOrSupersede(candidate, input.now);
+              if (fence.kind === "superseded_instead") {
+                supersededCount += 1;
+                continue;
+              }
+              members.push(candidate);
+            }
+            if (members.length === 0) {
+              return { kind: "no_members" as const, supersededCount };
+            }
+
+            // 3. Author immutable batch content from the exact selected
+            //    members (identity + frozen command). Fail closed on any
+            //    builder error.
+            let content: PiSubagentCompletionDispatchBatchContent;
+            try {
+              content = input.buildBatchContent(
+                members as readonly PiSubagentCompletionOutboxEntry[],
+              );
+            } catch (cause) {
+              const detail =
+                cause instanceof Error
+                  ? cause.message
+                  : `batch content build failed: ${String(cause)}`;
+              return { kind: "content_rejected" as const, detail };
+            }
+            const validationError = validateBatchContent(content, members, input.parentThreadId);
+            if (validationError !== null) {
+              return { kind: "content_rejected" as const, detail: validationError };
+            }
+
+            // 4. Identity collision / idempotent replay guard: a pre-existing
+            //    batch under the same batch id must carry byte-identical
+            //    content; otherwise fail closed (identity rotation forbidden).
+            const existing = yield* getBatchByIdInternal(content.batchId);
+            if (existing.length > 0) {
+              const prior = existing[0]!;
+              const identical =
+                prior.parentCommandId === content.parentCommandId &&
+                prior.parentMessageId === content.parentMessageId &&
+                prior.fingerprintVersion === content.fingerprintVersion &&
+                prior.commandFingerprint === content.commandFingerprint &&
+                prior.membershipJson === JSON.stringify(content.membership) &&
+                prior.parentMessageText === content.parentMessageText &&
+                prior.commandPayloadJson === content.commandPayloadJson;
+              return identical
+                ? { kind: "batch_already_present" as const, batch: decodeBatch(prior) }
+                : {
+                    kind: "content_rejected" as const,
+                    detail: "batch id identity bound to different frozen content",
+                  };
+            }
+
+            // 5. Insert the immutable batch (active slot reserved by the
+            //    partial unique index — a duplicate parent command/message id
+            //    or a concurrent active batch fails the transaction).
+            yield* sql`
+              INSERT INTO pi_subagent_completion_dispatch_batches (
+                batch_id,
+                parent_thread_id,
+                parent_command_id,
+                parent_message_id,
+                fingerprint_version,
+                command_fingerprint,
+                membership_json,
+                parent_message_text,
+                command_payload_json,
+                state,
+                attempt_count,
+                created_at,
+                updated_at
+              ) VALUES (
+                ${content.batchId},
+                ${input.parentThreadId},
+                ${content.parentCommandId},
+                ${content.parentMessageId},
+                ${content.fingerprintVersion},
+                ${content.commandFingerprint},
+                ${JSON.stringify(content.membership)},
+                ${content.parentMessageText},
+                ${content.commandPayloadJson},
+                'awaiting_acceptance',
+                0,
+                ${input.now},
+                ${input.now}
+              )
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.createCompletionDispatchBatch:insert",
+                ),
+              ),
+            );
+
+            // 6. Associate every member exactly once. A member already claimed
+            //    by a concurrent batch FAILS the transaction so the batch
+            //    insert and all prior associations roll back together
+            //    (multiply-associated membership fails closed).
+            for (const member of members) {
+              const updated = yield* sql<OutboxRow>`
+                UPDATE pi_subagent_completion_outbox
+                SET
+                  dispatch_batch_id = ${content.batchId},
+                  delivery_state = 'delivered',
+                  delivered_at = ${input.now},
+                  updated_at = ${input.now}
+                WHERE outbox_id = ${member.outboxId}
+                  AND dispatch_batch_id IS NULL
+                  AND delivery_state IN ('pending', 'failed_retryable')
+                RETURNING ${outboxColumns}
+              `.pipe(
+                Effect.mapError(
+                  toPersistenceSqlError(
+                    "PiSubagentExecutionRepository.createCompletionDispatchBatch:associate",
+                  ),
+                ),
+              );
+              if (updated.length !== 1) {
+                return yield* Effect.fail(new CompletionBatchMemberCollisionError());
+              }
+            }
+
+            const created = yield* getBatchByIdInternal(content.batchId);
+            return { kind: "created" as const, batch: decodeBatch(created[0]!), supersededCount };
+          }),
+        )
+        .pipe(
+          Effect.catchIf(
+            (error): error is CompletionBatchMemberCollisionError =>
+              error instanceof CompletionBatchMemberCollisionError,
+            () =>
+              Effect.succeed<PiSubagentCompletionDispatchCreateResult>({
+                kind: "member_collision",
+              }),
+          ),
+          Effect.catchIf(
+            (error: unknown) =>
+              error instanceof Error && /UNIQUE constraint failed/iu.test(error.message),
+            () =>
+              Effect.succeed<PiSubagentCompletionDispatchCreateResult>({
+                kind: "active_batch_exists",
+              }),
+          ),
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.createCompletionDispatchBatch:transaction",
+            ),
+          ),
+        );
+
+  const getCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["getCompletionDispatchBatch"] =
+    (batchId) =>
+      Effect.gen(function* () {
+        const rows = yield* getBatchByIdInternal(batchId);
+        return decodeBatchOption(rows);
+      });
+
+  const getCompletionDispatchBatchByCommandId: PiSubagentExecutionRepositoryShape["getCompletionDispatchBatchByCommandId"] =
+    (parentCommandId) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<BatchRow>`
+          SELECT ${batchColumns}
+          FROM pi_subagent_completion_dispatch_batches
+          WHERE parent_command_id = ${parentCommandId}
+          LIMIT 1
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.getCompletionDispatchBatchByCommandId:query",
+            ),
+          ),
+        );
+        return decodeBatchOption(rows);
+      });
+
+  const getActiveCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["getActiveCompletionDispatchBatch"] =
+    (parentThreadId) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<BatchRow>`
+          SELECT ${batchColumns}
+          FROM pi_subagent_completion_dispatch_batches
+          WHERE parent_thread_id = ${parentThreadId}
+            AND state IN ${sql.in(PI_SUBAGENT_COMPLETION_DISPATCH_ACTIVE_STATES)}
+          LIMIT 1
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.getActiveCompletionDispatchBatch:query",
+            ),
+          ),
+        );
+        return decodeBatchOption(rows);
+      });
+
+  const listRecoverableCompletionDispatchBatches: PiSubagentExecutionRepositoryShape["listRecoverableCompletionDispatchBatches"] =
+    (options) => {
+      const mapError = toPersistenceSqlError(
+        "PiSubagentExecutionRepository.listRecoverableCompletionDispatchBatches:query",
+      );
+      // `Effect.map` applies its function to the whole success value; map over
+      // the returned rows explicitly so decodeBatch sees each row, not the array.
+      const decodeRows = (rows: readonly BatchRow[]): PiSubagentCompletionDispatchBatch[] =>
+        rows.map((row) => decodeBatch(row));
+      if (options.parentThreadId !== undefined && options.parentThreadId !== null) {
+        return sql<BatchRow>`
+          SELECT ${batchColumns}
+          FROM pi_subagent_completion_dispatch_batches
+          WHERE parent_thread_id = ${options.parentThreadId}
+            AND (
+              state = 'awaiting_acceptance'
+              OR (state = 'retryable' AND attempt_count < ${options.retryLimit})
+            )
+          ORDER BY created_at ASC, batch_id ASC
+        `.pipe(Effect.map(decodeRows), Effect.mapError(mapError));
+      }
+      return sql<BatchRow>`
+        SELECT ${batchColumns}
+        FROM pi_subagent_completion_dispatch_batches
+        WHERE state = 'awaiting_acceptance'
+           OR (state = 'retryable' AND attempt_count < ${options.retryLimit})
+        ORDER BY created_at ASC, batch_id ASC
+      `.pipe(Effect.map(decodeRows), Effect.mapError(mapError));
+    };
+
+  const recordCompletionDispatchAccepted: PiSubagentExecutionRepositoryShape["recordCompletionDispatchAccepted"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getBatchByIdInternal(input.batchId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const batch = rows[0]!;
+
+            // Exact correlation before any state change (Decision 0016 §6).
+            if (batch.parentCommandId !== input.parentCommandId) {
+              return {
+                kind: "receipt_mismatch" as const,
+                reason: "command_mismatch" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (
+              batch.fingerprintVersion !== input.fingerprintVersion ||
+              batch.commandFingerprint !== input.commandFingerprint
+            ) {
+              return {
+                kind: "receipt_mismatch" as const,
+                reason: "fingerprint_mismatch" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (batch.parentMessageId !== input.parentMessageId) {
+              return {
+                kind: "receipt_mismatch" as const,
+                reason: "message_mismatch" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (batch.state === "accepted") {
+              // Idempotent replay of the same accepted receipt.
+              return { kind: "transitioned" as const, batch: decodeBatch(batch) };
+            }
+            if (batch.state === "acknowledged") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (batch.state === "superseded" || batch.state === "exhausted") {
+              return {
+                kind: "receipt_mismatch" as const,
+                reason: "already_exhausted" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            const updated = yield* sql<BatchRow>`
+              UPDATE pi_subagent_completion_dispatch_batches
+              SET
+                state = 'accepted',
+                accepted_receipt_sequence = ${input.acceptedReceiptSequence},
+                accepted_at = ${input.now},
+                updated_at = ${input.now}
+              WHERE batch_id = ${input.batchId}
+                AND state IN ('awaiting_acceptance', 'retryable')
+              RETURNING ${batchColumns}
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordCompletionDispatchAccepted:update",
+                ),
+              ),
+            );
+            const after = updated[0] ?? batch;
+            return { kind: "transitioned" as const, batch: decodeBatch(after) };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.recordCompletionDispatchAccepted:transaction",
+            ),
+          ),
+        );
+
+  const finalizeCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["finalizeCompletionDispatchBatch"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getBatchByIdInternal(input.batchId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const batch = rows[0]!;
+            if (batch.state === "acknowledged") {
+              // Idempotent finalization replay.
+              return { kind: "transitioned" as const, batch: decodeBatch(batch) };
+            }
+            if (batch.state === "superseded" || batch.state === "exhausted") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            // Acknowledge ONLY the exact associated members (Decision 0016
+            // §6 — never unrelated content; generic message_end cannot ack).
+            yield* sql`
+              UPDATE pi_subagent_completion_outbox
+              SET
+                delivery_state = 'acknowledged',
+                acknowledged_at = ${input.now},
+                updated_at = ${input.now}
+              WHERE dispatch_batch_id = ${input.batchId}
+                AND delivery_state = 'delivered'
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.finalizeCompletionDispatchBatch:members",
+                ),
+              ),
+            );
+            const updated = yield* sql<BatchRow>`
+              UPDATE pi_subagent_completion_dispatch_batches
+              SET
+                state = 'acknowledged',
+                acknowledged_at = ${input.now},
+                updated_at = ${input.now}
+              WHERE batch_id = ${input.batchId}
+                AND state IN ('awaiting_acceptance', 'retryable', 'accepted')
+              RETURNING ${batchColumns}
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.finalizeCompletionDispatchBatch:batch",
+                ),
+              ),
+            );
+            if (updated.length === 0) {
+              const after = yield* getBatchByIdInternal(input.batchId);
+              if (after.length === 0) {
+                return { kind: "not_found" as const };
+              }
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(after[0]!),
+              };
+            }
+            return { kind: "transitioned" as const, batch: decodeBatch(updated[0]!) };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.finalizeCompletionDispatchBatch:transaction",
+            ),
+          ),
+        );
+
+  const failCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["failCompletionDispatchBatch"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getBatchByIdInternal(input.batchId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const batch = rows[0]!;
+            if (batch.state !== "awaiting_acceptance" && batch.state !== "retryable") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            // Transient no-receipt failure: one attempt under the SAME stable
+            // identity; exhausted at the configured ceiling (Decision 0016
+            // §7). Byte-identical redrive is the coordinator's job.
+            const nextAttemptCount = batch.attemptCount + 1;
+            const exhausted = nextAttemptCount >= input.retryLimit;
+            const updated = yield* sql<BatchRow>`
+              UPDATE pi_subagent_completion_dispatch_batches
+              SET
+                state = ${exhausted ? "exhausted" : "retryable"},
+                attempt_count = ${nextAttemptCount},
+                last_error = ${input.error},
+                exhausted_at = ${exhausted ? input.now : null},
+                updated_at = ${input.now}
+              WHERE batch_id = ${input.batchId}
+                AND state IN ('awaiting_acceptance', 'retryable')
+              RETURNING ${batchColumns}
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.failCompletionDispatchBatch:update",
+                ),
+              ),
+            );
+            const after = updated[0] ?? batch;
+            return { kind: "transitioned" as const, batch: decodeBatch(after) };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.failCompletionDispatchBatch:transaction",
+            ),
+          ),
+        );
+
+  const rejectCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["rejectCompletionDispatchBatch"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getBatchByIdInternal(input.batchId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const batch = rows[0]!;
+            if (batch.state === "acknowledged") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (batch.state === "exhausted") {
+              // Immutable rejection replay: evidence preserved, no repeated
+              // increments under the same identity (Decision 0016 §7).
+              return { kind: "transitioned" as const, batch: decodeBatch(batch) };
+            }
+            if (batch.state === "superseded") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            // One genuine boundary-failure attempt, then terminal exhaustion:
+            // that identity can never become accepted (fingerprint-matched
+            // immutable rejection / collision is not a transport failure).
+            const nextAttemptCount = batch.attemptCount + 1;
+            const updated = yield* sql<BatchRow>`
+              UPDATE pi_subagent_completion_dispatch_batches
+              SET
+                state = 'exhausted',
+                attempt_count = ${nextAttemptCount},
+                last_error = ${input.error},
+                exhausted_at = ${input.now},
+                updated_at = ${input.now}
+              WHERE batch_id = ${input.batchId}
+                AND state IN ('awaiting_acceptance', 'retryable', 'accepted')
+              RETURNING ${batchColumns}
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.rejectCompletionDispatchBatch:update",
+                ),
+              ),
+            );
+            const after = updated[0] ?? batch;
+            return { kind: "transitioned" as const, batch: decodeBatch(after) };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.rejectCompletionDispatchBatch:transaction",
+            ),
+          ),
+        );
+
+  const supersedeCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["supersedeCompletionDispatchBatch"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getBatchByIdInternal(input.batchId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const batch = rows[0]!;
+            if (batch.state === "acknowledged" || batch.state === "exhausted") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal" as const,
+                batch: decodeBatch(batch),
+              };
+            }
+            if (batch.state === "superseded") {
+              return { kind: "transitioned" as const, batch: decodeBatch(batch) };
+            }
+            // Stale-before-submission: supersedes the batch (zero parent
+            // effect, T09-AC6) and releases the active-thread slot; members
+            // remain `delivered` as readable evidence.
+            const updated = yield* sql<BatchRow>`
+              UPDATE pi_subagent_completion_dispatch_batches
+              SET
+                state = 'superseded',
+                last_error = ${input.supersededByReason},
+                superseded_at = ${input.now},
+                updated_at = ${input.now}
+              WHERE batch_id = ${input.batchId}
+                AND state IN ('awaiting_acceptance', 'retryable', 'accepted')
+              RETURNING ${batchColumns}
+            `.pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.supersedeCompletionDispatchBatch:update",
+                ),
+              ),
+            );
+            const after = updated[0] ?? batch;
+            return { kind: "transitioned" as const, batch: decodeBatch(after) };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.supersedeCompletionDispatchBatch:transaction",
+            ),
+          ),
+        );
 
   // ---------------------------------------------------------------------
   // Ticket 10 restart / lease-expiry reconciliation.
@@ -2284,6 +3030,16 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     markCompletionAcknowledged,
     markCompletionDeliveryFailed,
     markCompletionSuperseded,
+    createCompletionDispatchBatch,
+    getCompletionDispatchBatch,
+    getCompletionDispatchBatchByCommandId,
+    getActiveCompletionDispatchBatch,
+    listRecoverableCompletionDispatchBatches,
+    recordCompletionDispatchAccepted,
+    finalizeCompletionDispatchBatch,
+    failCompletionDispatchBatch,
+    rejectCompletionDispatchBatch,
+    supersedeCompletionDispatchBatch,
     listNonTerminalExecutions,
     recordOrphanedEvent,
     recordWallTimeExpiryEvent,

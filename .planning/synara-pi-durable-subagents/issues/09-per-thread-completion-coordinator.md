@@ -47,6 +47,76 @@ local finalization. See
 and the persisted
 [independent review](../reviews/09-per-thread-completion-coordinator-review.md).
 
+### Decision 0016 remediation implementation (2026-08-18)
+
+**Status: implemented under Decision 0016 — NOT accepted, NOT yet
+independently reviewed.** Ticket 09 remains `needs remediation`. This section
+records the remediated implementation (isolated worktree branch
+`impl/t09-crash-safe-parent-effect`, commits `0f298eb8` … `3aed8084`) and the
+actual parent-effect sequence; it makes **no acceptance claim**.
+
+**Actual parent-effect sequence (Decision 0016 §1/§6):**
+
+1. **Immutable batch commit** — a bounded `pi_subagent_completion_dispatch_batches`
+   ledger (migration 103) is the durable recovery authority. Batch create
+   transactionally selects canonical, generation-applicable recoverable outbox
+   members, fences stale ones (zero effect), caps membership, freezes the
+   complete deterministic `thread.turn.start` command (timestamp, dispatch
+   mode `queue`, origin `agent`, runtime/interaction/assistant modes,
+   deterministic message id, parent thread, bounded parent message with the
+   current harness-policy header), associates each member exactly once, and
+   reserves the durable one-active-batch slot (partial unique
+   `parent_thread_id` index over nonterminal states).
+2. **Exact command/receipt acceptance** — the coordinator dispatches the
+   STORED frozen command, byte-for-byte, through a narrow single-assignment
+   late-bound parent-effect port. `OrchestrationEngine.dispatch` atomically
+   persists the deterministic parent message, an immediate turn-start or
+   durable queued-turn request, the command fingerprint, and a
+   fingerprint-matched accepted receipt. Delivery (provider turn / queued-turn
+   promotion) is downstream. A pre-dispatch recompute-and-compare of the
+   canonical fingerprint fails closed on drift/malformed payload.
+3. **Receipt-correlated finalization** — recovery transactionally marks the
+   batch accepted (guarded on exact command id + fingerprint + parent message
+   id + accepted receipt sequence), then acknowledges ONLY its exact
+   associated members and releases the active-thread slot. Generic
+   `message_end`/settle/session events only trigger a recovery check; they can
+   never acknowledge a batch.
+
+Batch states: `awaiting_acceptance`, `retryable`, `accepted`, `acknowledged`,
+`superseded`, `exhausted`. Transient no-receipt failures re-dispatch the same
+identity at the Ticket 08 retry ceiling; a persisted rejection or identity
+collision settles exhausted with one genuine attempt and no repeated
+increments; child outcomes and terminal evidence are never mutated.
+
+**Changed surfaces:** migration 103 + batch repository state machine (guarded
+create/recover/fail/reject/finalize/supersede/exhaust, exact receipt
+correlation); deterministic identity/frozen-command module (`SHA-256` over
+parent thread + canonical ordered outbox ids, separately typed batch/command/
+message ids, bytes-identical stored-payload replay); diagnostic literals
+(batch persistence/rejected/collision/recovery) + resolved
+`SYNARA_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES` (1–64, default 8);
+parent-effect dispatcher bridge; coordinator rewrite; PiAdapter/composition
+(bridge created before the provider layer, bound once via main.ts; direct
+completion `session.prompt` removed; recovery on binding, hydration/start,
+safe boundary, new completion, bounded ongoing scan); real-Pi ownership
+acceptance now binds the real OrchestrationEngine.
+
+**Evidence (focused suites, all green):** migration 103 + migration
+replay/lineage (`90..103`); completion-dispatch-batch repository state
+machine (13); dispatch-identity (12); parent-effect bridge (10); coordinator
+deterministic fault suite (19) covering both Decision 0016 crash positions,
+timeout → byte-identical retry, accepted-despite-timeout, payload drift /
+malformed fail-closed, persisted rejection without repeated increments,
+concurrent recovery one-batch, busy/lazy no-budget + recover on exact trigger,
+restart without a new terminal, unrelated settle immunity, stale-before-create
+and stale-before-submit zero command, cross-thread isolation, later
+same-thread batching, evidence byte-stability, rollback inertness;
+engine-backed acceptance (4) through the real OrchestrationEngine; real-Pi
+ownership acceptance managed+legacy (2, per-file standalone under Decision
+0008). Full command outcomes, failure/diagnostic evidence, and the single
+bundled fmt/lint/typecheck pass are recorded in WP-08 (the report revision
+under this issue).
+
 ### Delivered scope
 
 Per-thread completion coordination on top of the Ticket 08 durable outbox,
@@ -155,24 +225,24 @@ suppressed; otherwise → `emitLegacyCompletionNotification` verbatim.
 
 ### Acceptance evidence matrix
 
-| Criterion | Source evidence | Verification evidence | Result |
-| --------- | --------------- | --------------------- | ------ |
-| T09-AC1 | Coordinator batching window + per-follow-up cap; follow-up carries bounded summaries + execution identities + stable dedupe ids | piSubagentCompletionCoordinator.test.ts AC1: two terminals in-window → ONE dispatch with both entries (ids, bounded summaries, dedupeId=outboxId); window-0 flushes immediately; batch-cap overflow joins the NEXT batch | pass |
-| T09-AC2 | One-outstanding registry + durable `delivered`-but-unacknowledged ledger; per-thread scan never co-batches | AC2 tests: later burst while outstanding → no second dispatch until settle, then a later batch with exactly the waiting entries; thread-isolation test: two threads → two separate single-entry follow-ups | pass |
-| T09-AC3 | `isParentBusy` is the only gate (structurally no user-read input); deferral parks without durable writes; `onParentTurnSettled` re-flushes | AC3 test: busy → window elapses → NO dispatch (even 60× later); entry stays pending; busy-then-idle → settle releases exactly one dispatch. Real-Pi AC5 managed test proves safe-boundary dispatch on a live session | pass |
-| T09-AC4 | Journal-first dispatch (delivered before effect); dispatch failure → `failed_retryable` (attempt_count+1) + bounded auto-retry within the Ticket 08 policy; prompt-rejection returns entries to retryable; outcome never rewritten | AC4 tests: failed dispatch → failed_retryable(1) + execution still succeeded → retry → ONE accepted follow-up → acknowledged; retry-budget exhaustion stops dispatching, evidence readable; follow-up-turn-failed → retryable redelivery without duplicate content | pass |
-| T09-AC5 | Extension-side host gate + ack-dependent suppression; server-side capability router + legacy-owned disposition | Extension tests (managed-terminal.test.ts, 3 new): ack resolves → nudge suppressed; older host → nudge fires (followUp+triggerTurn); persistence failure → nudge fires. Real-Pi wallclock (piSubagentCompletionOwnershipAcceptance, 2 tests): managed pin — ack suppresses nudge, ONE Synara follow-up on the real parent, entry acknowledged, no legacy nudge in transcript; legacy 608c1c57d worktree — legacy nudge active on parent, entry legacy-owned acknowledged, NO Synara follow-up (no double notification) | pass |
-| T09-AC6 | Repository-side `fenceOrSupersede` inside `markCompletionDelivered` (superseded_instead, no effect); evidence reads unchanged | AC6 test: resume to generation 2 → stale entry superseded with NO dispatch; `getTerminalEvidence` + summary readable by identity; new attempt's terminal delivers its own batch normally | pass |
+| Criterion | Source evidence                                                                                                                                                                                                                    | Verification evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Result |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T09-AC1   | Coordinator batching window + per-follow-up cap; follow-up carries bounded summaries + execution identities + stable dedupe ids                                                                                                    | piSubagentCompletionCoordinator.test.ts AC1: two terminals in-window → ONE dispatch with both entries (ids, bounded summaries, dedupeId=outboxId); window-0 flushes immediately; batch-cap overflow joins the NEXT batch                                                                                                                                                                                                                                                                                               | pass   |
+| T09-AC2   | One-outstanding registry + durable `delivered`-but-unacknowledged ledger; per-thread scan never co-batches                                                                                                                         | AC2 tests: later burst while outstanding → no second dispatch until settle, then a later batch with exactly the waiting entries; thread-isolation test: two threads → two separate single-entry follow-ups                                                                                                                                                                                                                                                                                                             | pass   |
+| T09-AC3   | `isParentBusy` is the only gate (structurally no user-read input); deferral parks without durable writes; `onParentTurnSettled` re-flushes                                                                                         | AC3 test: busy → window elapses → NO dispatch (even 60× later); entry stays pending; busy-then-idle → settle releases exactly one dispatch. Real-Pi AC5 managed test proves safe-boundary dispatch on a live session                                                                                                                                                                                                                                                                                                   | pass   |
+| T09-AC4   | Journal-first dispatch (delivered before effect); dispatch failure → `failed_retryable` (attempt_count+1) + bounded auto-retry within the Ticket 08 policy; prompt-rejection returns entries to retryable; outcome never rewritten | AC4 tests: failed dispatch → failed_retryable(1) + execution still succeeded → retry → ONE accepted follow-up → acknowledged; retry-budget exhaustion stops dispatching, evidence readable; follow-up-turn-failed → retryable redelivery without duplicate content                                                                                                                                                                                                                                                     | pass   |
+| T09-AC5   | Extension-side host gate + ack-dependent suppression; server-side capability router + legacy-owned disposition                                                                                                                     | Extension tests (managed-terminal.test.ts, 3 new): ack resolves → nudge suppressed; older host → nudge fires (followUp+triggerTurn); persistence failure → nudge fires. Real-Pi wallclock (piSubagentCompletionOwnershipAcceptance, 2 tests): managed pin — ack suppresses nudge, ONE Synara follow-up on the real parent, entry acknowledged, no legacy nudge in transcript; legacy 608c1c57d worktree — legacy nudge active on parent, entry legacy-owned acknowledged, NO Synara follow-up (no double notification) | pass   |
+| T09-AC6   | Repository-side `fenceOrSupersede` inside `markCompletionDelivered` (superseded_instead, no effect); evidence reads unchanged                                                                                                      | AC6 test: resume to generation 2 → stale entry superseded with NO dispatch; `getTerminalEvidence` + summary readable by identity; new attempt's terminal delivers its own batch normally                                                                                                                                                                                                                                                                                                                               | pass   |
 
 ### Failure and diagnostic evidence
 
 - Dispatch failure: `pi_subagent_completion_delivery_failed` (per execution,
- attempt count, bounded message); durable `failed_retryable` within budget.
+  attempt count, bounded message); durable `failed_retryable` within budget.
 - Scan failure: `pi_subagent_completion_delivery_failed` thread-scoped
- diagnostic; the batch retries on the next trigger.
+  diagnostic; the batch retries on the next trigger.
 - Supersede: `pi_subagent_completion_superseded`, zero parent effect.
 - Legacy disposition: `subagents/completion-legacy-owned` runtime event;
- failure leaves the entry recoverable-pending (Ticket 10 recovery scope).
+  failure leaves the entry recoverable-pending (Ticket 10 recovery scope).
 - No new diagnostic literals were required (existing Ticket 07/08 codes
   cover the surfaces); contracts tests pin the capability literal.
 
