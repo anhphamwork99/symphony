@@ -8,21 +8,26 @@ authorized transcript references.
 
 **Blocked by:** 06 — Durable parent-turn cancellation.
 
-**Status:** ready-for-agent → implemented (report below)
+**Status:** ready-for-agent → implemented → **complete (accepted)**
 
-- [ ] **T07-AC1:** A terminal lifecycle event is durably appended and applied
+**Final acceptance:** Accepted — Decision 0012 (2026-08-18), Symphony
+`fe4d1fa3` + `d44f624f`, Alfie `bcfe6edda` + `608c1c57d` (`0.13.0-alfie.1`);
+review F1/F2 remediated, F3–F5 recorded with follow-up owners (tickets
+08/10).
+
+- [x] **T07-AC1:** A terminal lifecycle event is durably appended and applied
       before any completion delivery may begin.
-- [ ] **T07-AC2:** Duplicate or replayed terminal events have exactly one state
+- [x] **T07-AC2:** Duplicate or replayed terminal events have exactly one state
       effect, and the first applicable terminal for an attempt wins.
-- [ ] **T07-AC3:** Attempt event sequence gaps emit a stable diagnostic without
+- [x] **T07-AC3:** Attempt event sequence gaps emit a stable diagnostic without
       deleting or delaying an already-persisted terminal.
-- [ ] **T07-AC4:** Terminal from a superseded attempt or generation is ignored
+- [x] **T07-AC4:** Terminal from a superseded attempt or generation is ignored
       and counted and cannot overwrite current execution truth.
-- [ ] **T07-AC5:** Terminal payload contains a bounded result summary and
+- [x] **T07-AC5:** Terminal payload contains a bounded result summary and
       transcript reference, never unbounded raw transcript output.
-- [ ] **T07-AC6:** Terminal persists when progress ingress is saturated or its
+- [x] **T07-AC6:** Terminal persists when progress ingress is saturated or its
       observation sink is degraded.
-- [ ] **T07-AC7:** Cancellation and normal completion racing for the same
+- [x] **T07-AC7:** Cancellation and normal completion racing for the same
       attempt resolve through one applicable terminal owner without state flip-flop.
 
 ## Testing Seams
@@ -40,8 +45,7 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** implemented — independent review complete (PASS),
-remediation applied (F1/F2); awaiting Supervisor final acceptance
+**Implementation state:** accepted — Decision 0012 (2026-08-18)
 
 ### Delivered scope
 

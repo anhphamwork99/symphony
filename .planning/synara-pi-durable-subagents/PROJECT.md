@@ -47,6 +47,12 @@
   `53f84bb56` (`0.12.0-alfie.1`, capability `durable-cancellation`);
   nonblocking risks F1/F3/F4 recorded with follow-up owners (tickets 10/15/13);
   frontier advances to ticket 07 — journal-first terminal lifecycle.
+- [decisions/0012-t07-journal-first-terminal-lifecycle-final-acceptance.md](decisions/0012-t07-journal-first-terminal-lifecycle-final-acceptance.md) —
+  accepted Ticket 07: Symphony `fe4d1fa3` + remediation `d44f624f` + Alfie
+  `bcfe6edda` + remediation `608c1c57d` (`0.13.0-alfie.1`, capability
+  `journal-terminal-lifecycle`, host-gated terminal reporting); review F1/F2
+  remediated, F3–F5 recorded with follow-up owners (tickets 08/10); frontier
+  advances to ticket 08 — durable completion outbox.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -60,17 +66,19 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–06 complete (Decision 0011 accepted ticket 06
-  — durable parent-turn cancellation at Symphony `df38bfcb`+`f92ad194`,
-  Alfie `53f84bb56`). Recorded nonblocking risks: owner-death production
-  wiring (F1, owner ticket 10), non-terminal replay re-dispatch (F3, owner
-  ticket 15), broad diagnostic code (F4, owner ticket 13).
-- **Blocker-free frontier:** ticket 07 — Journal-first terminal lifecycle
-  (sole blocker, ticket 06, satisfied). Standing obligation from Decisions
-  0009/0010/0011 remains: any lease-based control must validate/re-derive
-  lease authority server-side (producer-supplied occurredAt is not trusted);
-  `session.abort()` resolution, timeouts, or temporary absence are never
-  termination evidence.
+- **Frontier track:** tickets 01–07 complete (Decision 0012 accepted ticket 07
+  — journal-first terminal lifecycle at Symphony `fe4d1fa3`+`d44f624f`,
+  Alfie `bcfe6edda`+`608c1c57d`, `0.13.0-alfie.1`). Recorded nonblocking
+  risks: F3 summaryMaxChars MAX-guard symmetry (owner: ticket 08), F4
+  cancelled-background reporter-entry retention (owner: ticket 10).
+- **Blocker-free frontier:** ticket 08 — Durable completion outbox (sole
+  blocker, ticket 07, satisfied). Ticket 08 inherits: journal-first ordering
+  at the `onTerminalPersisted` seam, the bounded-terminal-evidence
+  preservation obligation (Decision 0012 F2), and the F3 defensive-guard
+  consideration. Standing obligation from Decisions 0009/0010/0011 remains:
+  any lease-based control must validate/re-derive lease authority server-side
+  (producer-supplied occurredAt is not trusted); `session.abort()`
+  resolution, timeouts, or temporary absence are never termination evidence.
 - Every implementation ticket owns an `Implementation Report`; an implementer
   must complete that report with exact evidence before requesting review.
 
