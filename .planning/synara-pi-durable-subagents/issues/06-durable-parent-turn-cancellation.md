@@ -99,13 +99,33 @@ parent_turn-scoped execution (`listCancellableByParentTurn`): journal
 executionId, expectedAttemptId, expectedGeneration})` → Alfie resolves the
 ack ONLY after the child settlement promise → server journals `cancelled`
 (seq 92, evidenceChannel `child_ack`) → both `observed_state`/`desired_state`
-= `cancelled`. Owner-death path: dead owner generation + re-derived expired
-lease + `getActiveExecutions()` no longer listing the execution → journal
-`cancelled` (seq 91, evidenceChannel `owner_death`). Failure path: bounded
-retries (default 2) with backoff sleep, stable diagnostic runtime.warning,
-escalation stage 1 = the existing `session.abort()` in interruptTurn (runs
-unconditionally), state stays `cancelling`. Alfie commit `53f84bb56`
-(bridge.cancel + capability + version bump + tests).
+= `cancelled`. Owner-death path (test-seam exercised; see disclosure below):
+dead owner generation + re-derived expired lease + `getActiveExecutions()` no
+longer listing the execution → journal `cancelled` (seq 91, evidenceChannel
+`owner_death`). Failure path: bounded retries (default 2) with backoff sleep,
+stable diagnostic runtime.warning, escalation stage 1 = the existing
+`session.abort()` in interruptTurn (runs unconditionally), state stays
+`cancelling`. Alfie commit `53f84bb56` (bridge.cancel + capability + version
+bump + tests).
+
+### Review disclosure (independent review 2026-08-18)
+
+- **Owner-death wiring:** `interruptTurn` wires `isOwnerGenerationDead: () =>
+  false` — within this seam the owner is alive by construction
+  (`requireSession` rejects stopped/absent contexts), so the honest value is
+  `false`. The owner-death evidence leg is therefore exercised at the
+  coordinator seam only; its first production consumer is restart
+  reconciliation (later ticket).
+- **Non-terminal replay:** a replayed Stop while the first cancel is still
+  `cancelling` re-dispatches the cancel. The durable intent stays deduped
+  (one seq-90 row) and the child abort effect is not repeated — the
+  extension fences by identity and treats an already-aborted record as
+  `already_terminal` — matching the spec's retryable-cancellation decision
+  (Implementation Decision 25). Post-terminal replays add nothing (no
+  cancellable row).
+- **Diagnostic-code reuse:** the "owner dead + not active + lease not yet
+  expired" pending state reports `pi_subagent_cancel_ack_timeout` (stable,
+  but semantically broad). Cosmetic follow-up only.
 
 ### Acceptance evidence matrix
 
@@ -144,9 +164,9 @@ unconditionally), state stays `cancelling`. Alfie commit `53f84bb56`
   `0.12.0-alfie.1` @ Alfie `53f84bb56`, deterministic loopback model).
 - Alfie extension suite: 30 files / 488 tests pass (including 5 new
   bridge.cancel cases).
-- Regression: piSubagentBridge (38), PiSubagentExecutionRepository (38),
+- Regression: piSubagentBridge (38), PiSubagentExecutionRepository (12),
   admission coordinator + control health + progress observation/saturation
-  (46), config (168), main.test, contracts (215); wallclock suites
+  (46), config (168), main.test (38), contracts (215); wallclock suites
   ForegroundAcceptance (6), ForegroundReopen (1), ForegroundLifecycle (5),
   RealExtension (11), ProgressAcceptance (1), IntegratedAcceptance (7) —
   all green after the capability-list expectation updates.
@@ -156,3 +176,14 @@ unconditionally), state stays `cancelling`. Alfie commit `53f84bb56`
   this scope).
 - `bun run typecheck` (workspace, 7 packages): pass. `oxlint`: 0 errors.
   `oxfmt`: applied (planning/notification reformat noise reverted).
+
+### Independent review outcome (2026-08-18)
+
+**Verdict:** PASS WITH GAPS — all 7 criteria pass with direct/reproducible
+evidence (reviewer independently re-ran the coordinator, acceptance, Alfie
+suite, all six wallclock regression suites, config/bridge/repository/
+admission/main tests, and tsc; provenance pin verified byte-for-byte).
+Findings F1–F5 (owner-death wiring disclosure, report count correction,
+non-terminal replay semantics, diagnostic-code reuse, dead export) — none
+blocking. Remediation applied: report count corrected (F2), dead export
+`dispatchCancelCommand` removed (F5), disclosures for F1/F3/F4 added above.

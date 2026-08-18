@@ -403,18 +403,3 @@ export const cancelParentTurnScope = (
 
     return { outcomes };
   });
-
-/**
- * Bridge dispatch helper for the adapter: resolves the extension bridge from
- * the live session target using the same extraction rules as the capability
- * probe.
- */
-export const dispatchCancelCommand = async (
-  bridge: PiSubagentExtensionBridge | undefined,
-  command: PiSubagentCancelCommand,
-): Promise<PiSubagentCancelResult | undefined> => {
-  if (bridge === undefined || typeof bridge.cancel !== "function") {
-    return undefined;
-  }
-  return bridge.cancel(command);
-};
