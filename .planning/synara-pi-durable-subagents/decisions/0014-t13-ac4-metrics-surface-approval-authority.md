@@ -26,8 +26,9 @@ require a fresh human-owner approval first?
 - `packages/contracts/src/server.ts` (`ServerDiagnosticsResult`).
 - `apps/server/src/wsRpc.ts` (`serverGetDiagnostics` handler).
 
-## Settled verdict — **Fresh human-owner approval is required before the
-first T13-AC4 metrics-surface test.**
+## Settled verdict — \*\*Fresh human-owner approval is required before the
+
+first T13-AC4 metrics-surface test.\*\*
 
 The claim that already-delegated ticket-level authority clears the approval
 gate is rejected:
@@ -71,7 +72,7 @@ After the human owner expressly approves:
   owner-approval record (owner identity, date, verbatim or precisely quoted
   approval text).
 - Preserve the approved `serverGetDiagnostics →
-  ServerDiagnosticsResult.piSubagents` mapping in that section.
+ServerDiagnosticsResult.piSubagents` mapping in that section.
 - Metrics-surface tests may then proceed without another project-scoped
   Decision Record, provided the approved mapping is not materially changed.
   A materially changed surface or field set requires a fresh approval and

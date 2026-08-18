@@ -76,14 +76,14 @@ T09-AC4, not on a second review or unrelated working-tree changes.
 
 **Ticket 09 NEEDS REMEDIATION.**
 
-| Criterion | Verdict | Basis |
-|---|---|---|
-| T09-AC1 | PASS | Per-thread windows produce one bounded follow-up containing summaries, execution identities, and stable outbox identities. |
-| T09-AC2 | PASS | At most one outstanding follow-up exists per thread; later batches wait and threads remain isolated. |
-| T09-AC3 | PASS | Parent activity is the sole delivery gate; busy deferral changes no delivery state or retry accounting. |
-| T09-AC4 | **FAIL** | Process death after rows become `delivered` and before `sendFollowUp` reaches the parent leaves a delivered/unacknowledged row outside all recovery scans. The parent effect can be permanently lost. |
-| T09-AC5 | PASS | Managed suppression requires negotiated ownership plus durable terminal/outbox acknowledgement; older hosts, timeout, and persistence failure retain legacy notification. |
-| T09-AC6 | PASS | Generation fencing supersedes stale entries before parent effect while preserving readable evidence. |
+| Criterion | Verdict  | Basis                                                                                                                                                                                                 |
+| --------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T09-AC1   | PASS     | Per-thread windows produce one bounded follow-up containing summaries, execution identities, and stable outbox identities.                                                                            |
+| T09-AC2   | PASS     | At most one outstanding follow-up exists per thread; later batches wait and threads remain isolated.                                                                                                  |
+| T09-AC3   | PASS     | Parent activity is the sole delivery gate; busy deferral changes no delivery state or retry accounting.                                                                                               |
+| T09-AC4   | **FAIL** | Process death after rows become `delivered` and before `sendFollowUp` reaches the parent leaves a delivered/unacknowledged row outside all recovery scans. The parent effect can be permanently lost. |
+| T09-AC5   | PASS     | Managed suppression requires negotiated ownership plus durable terminal/outbox acknowledgement; older hosts, timeout, and persistence failure retain legacy notification.                             |
+| T09-AC6   | PASS     | Generation fencing supersedes stale entries before parent effect while preserving readable evidence.                                                                                                  |
 
 ## Evidence basis
 

@@ -40,13 +40,13 @@ All six remediation blockers accepted (Decisions 0002–0009) → implementation
 
 This decision authorizes (and only this decision authorizes) restoring tickets 01–05 to complete, with Decision 0010 as the reference. Evidence base: the ticket-24 report's second matrix (31 criteria, all rows passing) plus the remediation acceptances it rolls up.
 
-| Ticket | Remediation owners (accepted) | Second-matrix rows |
-|---|---|---|
-| 01 — managed execution handshake | Ticket 19 (Decision 0003) | T01-AC1..AC6 |
-| 02 — durable execution admission | Tickets 18 (Decision 0002) + 20 (Decision 0004) | T02-AC1..AC6 |
-| 03 — admission fails closed | Ticket 21 (Decision 0005) | T03-AC1..AC6 |
-| 04 — bounded foreground attachment | Ticket 22 (Decision 0008; 0007 reopened and superseded) | T04-AC1..AC6 |
-| 05 — coalesced progress and leases | Ticket 23 (Decision 0009) | T05-AC1..AC7 |
+| Ticket                             | Remediation owners (accepted)                           | Second-matrix rows |
+| ---------------------------------- | ------------------------------------------------------- | ------------------ |
+| 01 — managed execution handshake   | Ticket 19 (Decision 0003)                               | T01-AC1..AC6       |
+| 02 — durable execution admission   | Tickets 18 (Decision 0002) + 20 (Decision 0004)         | T02-AC1..AC6       |
+| 03 — admission fails closed        | Ticket 21 (Decision 0005)                               | T03-AC1..AC6       |
+| 04 — bounded foreground attachment | Ticket 22 (Decision 0008; 0007 reopened and superseded) | T04-AC1..AC6       |
+| 05 — coalesced progress and leases | Ticket 23 (Decision 0009)                               | T05-AC1..AC7       |
 
 The original 2026-08-16 not-accepted verdict remains historically accurate for what was then on the tree; the reviewed defects are the ones this integrated candidate proves fixed at the production boundary. PROJECT.md's frontier and review-verdict sections must be updated to reflect: tickets 01–05 complete again per Decision 0010; tickets 18–24 accepted; frontier = ticket 06.
 

@@ -5,8 +5,7 @@
 **accepted — binding technical direction**
 
 Decisions 0001–0015 remain authoritative and unchanged. Ticket 09 remains
-unaccepted; this record authorizes only the remediation required by Decision
-0015.
+unaccepted; this record authorizes only the remediation required by Decision 0015.
 
 ## Date
 

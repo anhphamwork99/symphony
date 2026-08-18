@@ -95,13 +95,13 @@ telemetry-safety seams in the ticket-breakdown review on 2026-08-16.
 
 ### Acceptance evidence
 
-| Criterion | Evidence | Result |
-| --- | --- | --- |
-| T13-AC1 / AC2 / AC7 | Config resolver matrix; admission coordinator quota/race/replay/store-unavailable tests; production adapter wiring | Pass |
-| T13-AC3 | Pure wall-time policy, durable repository fencing/idempotency test, periodic sweep test, adapter lifecycle wiring | Pass |
-| T13-AC4 | Contract decode/rejection tests; repository aggregate fixture with exact counts/percentiles; `serverGetDiagnostics` closed result-builder test | Pass |
-| T13-AC5 | Closed safe-correlation forbidden-field test plus aggregate-only diagnostics result test | Pass |
-| T13-AC6 | 100 concurrent admissions → exactly 4 accepted / 96 rejected; 5,000 progress observations retain one latest slot; terminal state and completion outbox remain durable | Pass |
+| Criterion           | Evidence                                                                                                                                                              | Result |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T13-AC1 / AC2 / AC7 | Config resolver matrix; admission coordinator quota/race/replay/store-unavailable tests; production adapter wiring                                                    | Pass   |
+| T13-AC3             | Pure wall-time policy, durable repository fencing/idempotency test, periodic sweep test, adapter lifecycle wiring                                                     | Pass   |
+| T13-AC4             | Contract decode/rejection tests; repository aggregate fixture with exact counts/percentiles; `serverGetDiagnostics` closed result-builder test                        | Pass   |
+| T13-AC5             | Closed safe-correlation forbidden-field test plus aggregate-only diagnostics result test                                                                              | Pass   |
+| T13-AC6             | 100 concurrent admissions → exactly 4 accepted / 96 rejected; 5,000 progress observations retain one latest slot; terminal state and completion outbox remain durable | Pass   |
 
 Verification on 2026-08-18:
 

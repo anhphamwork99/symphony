@@ -8,15 +8,15 @@
 
 ## Criterion verdict
 
-| Criterion | Verdict | Principal evidence |
-| --- | --- | --- |
-| T13-AC1 | PASS | Finite 4/64/16 defaults; production policy wiring; durable budget-state count; provider/project/server cap tests |
-| T13-AC2 | PASS | Stable capacity and store-unavailable diagnostics; rejection before child construction; durable rejected audit; replay identity preserved under full quota |
-| T13-AC3 | PASS | Pure fail-safe policy; deterministic fenced journal-only sequence-60 trigger; unref'd sweep; no aggregate settlement or control dispatch |
-| T13-AC4 | PASS | Owner-approved optional `serverGetDiagnostics.piSubagents` contract; bounded SQL aggregates; exact count/percentile fixture; production handler wiring |
-| T13-AC5 | PASS | Closed five-field safe-correlation constructor; aggregate-only metrics; forbidden-content tests |
-| T13-AC6 | PASS | 100 concurrent admissions produce exactly 4 accepted / 96 rejected; 5,000 progress observations retain one latest slot; terminal outbox survives |
-| T13-AC7 | PASS | Nullish, non-finite, fractional, and out-of-range values fall back to finite defaults through unit and production config seams |
+| Criterion | Verdict | Principal evidence                                                                                                                                         |
+| --------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T13-AC1   | PASS    | Finite 4/64/16 defaults; production policy wiring; durable budget-state count; provider/project/server cap tests                                           |
+| T13-AC2   | PASS    | Stable capacity and store-unavailable diagnostics; rejection before child construction; durable rejected audit; replay identity preserved under full quota |
+| T13-AC3   | PASS    | Pure fail-safe policy; deterministic fenced journal-only sequence-60 trigger; unref'd sweep; no aggregate settlement or control dispatch                   |
+| T13-AC4   | PASS    | Owner-approved optional `serverGetDiagnostics.piSubagents` contract; bounded SQL aggregates; exact count/percentile fixture; production handler wiring     |
+| T13-AC5   | PASS    | Closed five-field safe-correlation constructor; aggregate-only metrics; forbidden-content tests                                                            |
+| T13-AC6   | PASS    | 100 concurrent admissions produce exactly 4 accepted / 96 rejected; 5,000 progress observations retain one latest slot; terminal outbox survives           |
+| T13-AC7   | PASS    | Nullish, non-finite, fractional, and out-of-range values fall back to finite defaults through unit and production config seams                             |
 
 ## Independent verification
 
