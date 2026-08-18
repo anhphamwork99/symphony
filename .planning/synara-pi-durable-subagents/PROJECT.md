@@ -110,11 +110,12 @@
 - [decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md](decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md) —
   accepted the remediated Ticket 09: Decision 0015 superseded, T09-AC1..AC6
   all pass with both T09-AC4 crash positions closed.
-- **Next dependency unlock:** Ticket 11 is now blocker-free (Ticket 06, 09,
-  10 edges all satisfied) and is the next frontier ticket. Ticket 12 remains
+- **Next dependency unlock:** Ticket 11 is implemented at Symphony `95b9e169`
+  (working-tree commit; review/acceptance pending) with its Implementation
+  Report complete in the issue. Ticket 12 remains
   blocked by Ticket 11 and owns production transcript/result reading.
-    Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
-    Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.
+  Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
+  Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer
