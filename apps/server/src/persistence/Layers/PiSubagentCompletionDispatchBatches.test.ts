@@ -68,11 +68,7 @@ const admitExecution = (executionId: string, parentThreadId: string, generation 
     assert(result.kind === "admitted" || result.kind === "already_applied");
   });
 
-const createOutboxEntry = (
-  executionId: string,
-  parentThreadId: string,
-  generation = 1,
-) =>
+const createOutboxEntry = (executionId: string, parentThreadId: string, generation = 1) =>
   Effect.gen(function* () {
     const repo = yield* PiSubagentExecutionRepository;
     const result = yield* repo.recordCompletionOutboxEntry({
@@ -110,7 +106,12 @@ const makeBatchContent: (
       type: "thread.turn.start",
       commandId: parentCommandId,
       threadId: parentThreadId,
-      message: { messageId: parentMessageId, role: "user", text: parentMessageText, attachments: [] },
+      message: {
+        messageId: parentMessageId,
+        role: "user",
+        text: parentMessageText,
+        attachments: [],
+      },
       dispatchMode: "queue",
       dispatchOrigin: "agent",
       runtimeMode: "full-access",
@@ -136,80 +137,76 @@ layer("Decision 0016 completion-dispatch batch repository", (it) => {
     }),
   );
 
-  it.effect(
-    "caps membership at maxBatchEntries; overflow stays recoverable pending",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        for (const id of ["e1", "e2", "e3"]) {
-          yield* admitExecution(id, thread);
-          yield* createOutboxEntry(id, thread);
-        }
-        const result = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 2,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(result.kind === "created");
-        assert.equal(result.batch.membership.length, 2);
-        assert.equal(result.batch.state, "awaiting_acceptance");
+  it.effect("caps membership at maxBatchEntries; overflow stays recoverable pending", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      for (const id of ["e1", "e2", "e3"]) {
+        yield* admitExecution(id, thread);
+        yield* createOutboxEntry(id, thread);
+      }
+      const result = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 2,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(result.kind === "created");
+      assert.equal(result.batch.membership.length, 2);
+      assert.equal(result.batch.state, "awaiting_acceptance");
 
-        // The capped-out member is still pending (joins a later batch).
-        const third = yield* repo.getCompletionOutboxEntry(`outbox_e3_att_e3_gen1`);
-        assert(Option.isSome(third));
-        if (Option.isSome(third)) {
-          expect(third.value.deliveryState).toBe("pending");
-          expect(third.value.dispatchBatchId).toBeNull();
-        }
-        // The selected two became `delivered` batch-membership evidence.
-        const first = yield* repo.getCompletionOutboxEntry(`outbox_e1_att_e1_gen1`);
-        assert(Option.isSome(first));
-        if (Option.isSome(first)) {
-          expect(first.value.deliveryState).toBe("delivered");
-          expect(first.value.dispatchBatchId).toBe(result.batch.batchId);
-        }
-      }),
+      // The capped-out member is still pending (joins a later batch).
+      const third = yield* repo.getCompletionOutboxEntry(`outbox_e3_att_e3_gen1`);
+      assert(Option.isSome(third));
+      if (Option.isSome(third)) {
+        expect(third.value.deliveryState).toBe("pending");
+        expect(third.value.dispatchBatchId).toBeNull();
+      }
+      // The selected two became `delivered` batch-membership evidence.
+      const first = yield* repo.getCompletionOutboxEntry(`outbox_e1_att_e1_gen1`);
+      assert(Option.isSome(first));
+      if (Option.isSome(first)) {
+        expect(first.value.deliveryState).toBe("delivered");
+        expect(first.value.dispatchBatchId).toBe(result.batch.batchId);
+      }
+    }),
   );
 
-  it.effect(
-    "second active batch for the same thread is rejected (one-outstanding authority)",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        yield* admitExecution("a1", thread);
-        yield* createOutboxEntry("a1", thread);
-        const first = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(first.kind === "created");
+  it.effect("second active batch for the same thread is rejected (one-outstanding authority)", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      yield* admitExecution("a1", thread);
+      yield* createOutboxEntry("a1", thread);
+      const first = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(first.kind === "created");
 
-        yield* admitExecution("a2", thread);
-        yield* createOutboxEntry("a2", thread);
-        const second = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(second.kind === "active_batch_exists");
+      yield* admitExecution("a2", thread);
+      yield* createOutboxEntry("a2", thread);
+      const second = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(second.kind === "active_batch_exists");
 
-        // The second member was NOT touched by the rejected create.
-        const untouched = yield* repo.getCompletionOutboxEntry(`outbox_a2_att_a2_gen1`);
-        assert(Option.isSome(untouched));
-        if (Option.isSome(untouched)) {
-          expect(untouched.value.deliveryState).toBe("pending");
-          expect(untouched.value.dispatchBatchId).toBeNull();
-        }
-      }),
+      // The second member was NOT touched by the rejected create.
+      const untouched = yield* repo.getCompletionOutboxEntry(`outbox_a2_att_a2_gen1`);
+      assert(Option.isSome(untouched));
+      if (Option.isSome(untouched)) {
+        expect(untouched.value.deliveryState).toBe("pending");
+        expect(untouched.value.dispatchBatchId).toBeNull();
+      }
+    }),
   );
 
   it.effect(
@@ -257,76 +254,74 @@ layer("Decision 0016 completion-dispatch batch repository", (it) => {
       }),
   );
 
-  it.effect(
-    "noncanonical / duplicate / cross-thread / oversized builder output fails closed",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        yield* admitExecution("b1", thread);
-        yield* createOutboxEntry("b1", thread);
-        yield* admitExecution("b2", thread);
-        yield* createOutboxEntry("b2", thread);
+  it.effect("noncanonical / duplicate / cross-thread / oversized builder output fails closed", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      yield* admitExecution("b1", thread);
+      yield* createOutboxEntry("b1", thread);
+      yield* admitExecution("b2", thread);
+      yield* createOutboxEntry("b2", thread);
 
-        // Noncanonical order in the builder output.
-        const noncanonical = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => ({
-            ...makeBatchContent(members, thread),
-            membership: [members[1]!.outboxId, members[0]!.outboxId],
+      // Noncanonical order in the builder output.
+      const noncanonical = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => ({
+          ...makeBatchContent(members, thread),
+          membership: [members[1]!.outboxId, members[0]!.outboxId],
+        }),
+      });
+      assert(noncanonical.kind === "content_rejected");
+
+      // Duplicate membership.
+      const duplicate = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => ({
+          ...makeBatchContent(members, thread),
+          membership: [members[0]!.outboxId, members[0]!.outboxId],
+        }),
+      });
+      assert(duplicate.kind === "content_rejected");
+
+      // Cross-thread command payload.
+      const crossThread = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => ({
+          ...makeBatchContent(members, thread),
+          commandPayloadJson: JSON.stringify({
+            ...JSON.parse(makeBatchContent(members, thread).commandPayloadJson),
+            threadId: "th_other_thread",
           }),
-        });
-        assert(noncanonical.kind === "content_rejected");
+        }),
+      });
+      assert(crossThread.kind === "content_rejected");
 
-        // Duplicate membership.
-        const duplicate = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => ({
-            ...makeBatchContent(members, thread),
-            membership: [members[0]!.outboxId, members[0]!.outboxId],
-          }),
-        });
-        assert(duplicate.kind === "content_rejected");
+      // Oversized membership (more than the selected members).
+      const oversized = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 1,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => ({
+          ...makeBatchContent(members, thread),
+          membership: [members[0]!.outboxId, members[1]!.outboxId],
+        }),
+      });
+      assert(oversized.kind === "content_rejected");
 
-        // Cross-thread command payload.
-        const crossThread = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => ({
-            ...makeBatchContent(members, thread),
-            commandPayloadJson: JSON.stringify({
-              ...JSON.parse(makeBatchContent(members, thread).commandPayloadJson),
-              threadId: "th_other_thread",
-            }),
-          }),
-        });
-        assert(crossThread.kind === "content_rejected");
-
-        // Oversized membership (more than the selected members).
-        const oversized = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 1,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => ({
-            ...makeBatchContent(members, thread),
-            membership: [members[0]!.outboxId, members[1]!.outboxId],
-          }),
-        });
-        assert(oversized.kind === "content_rejected");
-
-        // Nothing was created by any of the rejecting attempts.
-        const active = yield* repo.getActiveCompletionDispatchBatch(thread);
-        assert(Option.isNone(active));
-      }),
+      // Nothing was created by any of the rejecting attempts.
+      const active = yield* repo.getActiveCompletionDispatchBatch(thread);
+      assert(Option.isNone(active));
+    }),
   );
 
   it.effect(
@@ -407,57 +402,55 @@ layer("Decision 0016 completion-dispatch batch repository", (it) => {
       }),
   );
 
-  it.effect(
-    "finalize acknowledges only exact batch members and is idempotent",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        yield* admitExecution("f1", thread);
-        const member = yield* createOutboxEntry("f1", thread);
-        yield* admitExecution("unrelatedRunner", thread);
-        const unrelated = yield* createOutboxEntry("unrelatedRunner", thread);
+  it.effect("finalize acknowledges only exact batch members and is idempotent", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      yield* admitExecution("f1", thread);
+      const member = yield* createOutboxEntry("f1", thread);
+      yield* admitExecution("unrelatedRunner", thread);
+      const unrelated = yield* createOutboxEntry("unrelatedRunner", thread);
 
-        const created = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(created.kind === "created");
-        const batch = created.batch;
+      const created = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(created.kind === "created");
+      const batch = created.batch;
 
-        // Simulate a generic message_end acknowledgement on an unrelated
-        // member (old path) — must NOT settle this batch or its members.
-        yield* repo.markCompletionAcknowledged({ outboxId: unrelated.outboxId, now: NOW });
+      // Simulate a generic message_end acknowledgement on an unrelated
+      // member (old path) — must NOT settle this batch or its members.
+      yield* repo.markCompletionAcknowledged({ outboxId: unrelated.outboxId, now: NOW });
 
-        const finalized = yield* repo.finalizeCompletionDispatchBatch({
-          batchId: batch.batchId,
-          now: NOW,
-        });
-        assert(finalized.kind === "transitioned");
-        expect(finalized.batch.state).toBe("acknowledged");
-        expect(finalized.batch.acknowledgedAt).toBe(NOW);
+      const finalized = yield* repo.finalizeCompletionDispatchBatch({
+        batchId: batch.batchId,
+        now: NOW,
+      });
+      assert(finalized.kind === "transitioned");
+      expect(finalized.batch.state).toBe("acknowledged");
+      expect(finalized.batch.acknowledgedAt).toBe(NOW);
 
-        const settledMember = yield* repo.getCompletionOutboxEntry(member.outboxId);
-        assert(Option.isSome(settledMember));
-        if (Option.isSome(settledMember)) {
-          expect(settledMember.value.deliveryState).toBe("acknowledged");
-        }
+      const settledMember = yield* repo.getCompletionOutboxEntry(member.outboxId);
+      assert(Option.isSome(settledMember));
+      if (Option.isSome(settledMember)) {
+        expect(settledMember.value.deliveryState).toBe("acknowledged");
+      }
 
-        // Idempotent finalization replay.
-        const replay = yield* repo.finalizeCompletionDispatchBatch({
-          batchId: batch.batchId,
-          now: NOW,
-        });
-        assert(replay.kind === "transitioned");
-        expect(replay.batch.state).toBe("acknowledged");
+      // Idempotent finalization replay.
+      const replay = yield* repo.finalizeCompletionDispatchBatch({
+        batchId: batch.batchId,
+        now: NOW,
+      });
+      assert(replay.kind === "transitioned");
+      expect(replay.batch.state).toBe("acknowledged");
 
-        // Slot released: a fresh batch may now form for the thread.
-        const active = yield* repo.getActiveCompletionDispatchBatch(thread);
-        assert(Option.isNone(active));
-      }),
+      // Slot released: a fresh batch may now form for the thread.
+      const active = yield* repo.getActiveCompletionDispatchBatch(thread);
+      assert(Option.isNone(active));
+    }),
   );
 
   it.effect(
@@ -606,43 +599,41 @@ layer("Decision 0016 completion-dispatch batch repository", (it) => {
       }),
   );
 
-  it.effect(
-    "stale-before-creation members are superseded inside create and excluded",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        // Admit at generation 1, then advance to generation 2 (resume).
-        yield* admitExecution("g1", thread, 1);
-        yield* createOutboxEntry("g1", thread, 1);
-        yield* repo.recordLifecycleEvent({
-          eventId: "evt_advance",
-          executionId: "g1",
-          attemptId: "att_g1",
-          generation: 2,
-          sequence: 2,
-          state: "running",
-          occurredAt: NOW,
-        });
-        yield* admitExecution("g2", thread, 1);
-        yield* createOutboxEntry("g2", thread, 1);
+  it.effect("stale-before-creation members are superseded inside create and excluded", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      // Admit at generation 1, then advance to generation 2 (resume).
+      yield* admitExecution("g1", thread, 1);
+      yield* createOutboxEntry("g1", thread, 1);
+      yield* repo.recordLifecycleEvent({
+        eventId: "evt_advance",
+        executionId: "g1",
+        attemptId: "att_g1",
+        generation: 2,
+        sequence: 2,
+        state: "running",
+        occurredAt: NOW,
+      });
+      yield* admitExecution("g2", thread, 1);
+      yield* createOutboxEntry("g2", thread, 1);
 
-        const created = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(created.kind === "created");
-        // Only the current member joins the batch (g1 is fenced superseded).
-        expect(created.batch.membership).toEqual(["outbox_g2_att_g2_gen1"]);
-        const fenced = yield* repo.getCompletionOutboxEntry("outbox_g1_att_g1_gen1");
-        assert(Option.isSome(fenced));
-        if (Option.isSome(fenced)) {
-          expect(fenced.value.deliveryState).toBe("superseded");
-        }
-      }),
+      const created = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(created.kind === "created");
+      // Only the current member joins the batch (g1 is fenced superseded).
+      expect(created.batch.membership).toEqual(["outbox_g2_att_g2_gen1"]);
+      const fenced = yield* repo.getCompletionOutboxEntry("outbox_g1_att_g1_gen1");
+      assert(Option.isSome(fenced));
+      if (Option.isSome(fenced)) {
+        expect(fenced.value.deliveryState).toBe("superseded");
+      }
+    }),
   );
 
   it.effect(
@@ -711,42 +702,40 @@ layer("Decision 0016 completion-dispatch batch repository", (it) => {
       }),
   );
 
-  it.effect(
-    "rollback leaves pre-batch delivered evidence inert (never redriven by recovery)",
-    () =>
-      Effect.gen(function* () {
-        const repo = yield* PiSubagentExecutionRepository;
-        const thread = nextThread();
-        // Legacy/rollback artifact: a `delivered` row with NO batch (old
-        // pre-remediation code, or a downgraded binary).
-        yield* admitExecution("legacy1", thread);
-        const row = yield* repo.recordCompletionOutboxEntry({
-          executionId: "legacy1",
-          attemptId: "att_legacy1",
-          generation: 1,
-          terminalEventId: "evt_legacy1",
-          parentThreadId: thread,
-          terminalState: "succeeded",
-          summary: "legacy",
-          now: NOW,
-        });
-        assert(row.kind === "created");
-        yield* repo.markCompletionDelivered({ outboxId: row.entry.outboxId, now: NOW });
+  it.effect("rollback leaves pre-batch delivered evidence inert (never redriven by recovery)", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const thread = nextThread();
+      // Legacy/rollback artifact: a `delivered` row with NO batch (old
+      // pre-remediation code, or a downgraded binary).
+      yield* admitExecution("legacy1", thread);
+      const row = yield* repo.recordCompletionOutboxEntry({
+        executionId: "legacy1",
+        attemptId: "att_legacy1",
+        generation: 1,
+        terminalEventId: "evt_legacy1",
+        parentThreadId: thread,
+        terminalState: "succeeded",
+        summary: "legacy",
+        now: NOW,
+      });
+      assert(row.kind === "created");
+      yield* repo.markCompletionDelivered({ outboxId: row.entry.outboxId, now: NOW });
 
-        yield* admitExecution("legacy2", thread);
-        yield* createOutboxEntry("legacy2", thread);
-        const created = yield* repo.createCompletionDispatchBatch({
-          parentThreadId: thread,
-          maxBatchEntries: 8,
-          retryLimit: RETRY_LIMIT,
-          now: NOW,
-          buildBatchContent: (members) => makeBatchContent(members, thread),
-        });
-        assert(created.kind === "created");
-        // Only the fresh pending member joins; the pre-batch delivered row is
-        // never selected.
-        expect(created.batch.membership).not.toContain(row.entry.outboxId);
-        expect(created.batch.membership).toEqual(["outbox_legacy2_att_legacy2_gen1"]);
-      }),
+      yield* admitExecution("legacy2", thread);
+      yield* createOutboxEntry("legacy2", thread);
+      const created = yield* repo.createCompletionDispatchBatch({
+        parentThreadId: thread,
+        maxBatchEntries: 8,
+        retryLimit: RETRY_LIMIT,
+        now: NOW,
+        buildBatchContent: (members) => makeBatchContent(members, thread),
+      });
+      assert(created.kind === "created");
+      // Only the fresh pending member joins; the pre-batch delivered row is
+      // never selected.
+      expect(created.batch.membership).not.toContain(row.entry.outboxId);
+      expect(created.batch.membership).toEqual(["outbox_legacy2_att_legacy2_gen1"]);
+    }),
   );
 });

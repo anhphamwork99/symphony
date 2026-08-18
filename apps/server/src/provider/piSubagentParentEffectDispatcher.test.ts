@@ -12,6 +12,7 @@ import {
   buildPiSubagentCompletionDispatchCommand,
   derivePiSubagentCompletionDispatchIdentity,
   serializePiSubagentCompletionDispatchCommand,
+  type PiSubagentCompletionDispatchCommand,
 } from "./piSubagentCompletionDispatchIdentity.ts";
 import {
   makePiSubagentParentEffectDispatcher,
@@ -34,7 +35,7 @@ import {
 
 const MEMBERSHIP = ["outbox_a", "outbox_b"];
 
-const makeCommand = (overrides?: { messageText?: string }): OrchestrationCommand =>
+const makeCommand = (overrides?: { messageText?: string }): PiSubagentCompletionDispatchCommand =>
   buildPiSubagentCompletionDispatchCommand({
     identity: derivePiSubagentCompletionDispatchIdentity({
       parentThreadId: "th_parent",
@@ -58,7 +59,10 @@ type DispatchResult = {
   readonly sequence: number;
 };
 
-const makeFakeEngine = (dispatchResult: DispatchResult, messageSent = true): {
+const makeFakeEngine = (
+  dispatchResult: DispatchResult,
+  messageSent = true,
+): {
   readonly engine: PiSubagentParentEffectEnginePort;
   readonly dispatched: OrchestrationCommand[];
   readonly visibleEvents: OrchestrationEvent[];
@@ -104,14 +108,14 @@ const makeFakeEngine = (dispatchResult: DispatchResult, messageSent = true): {
             }),
           );
         default:
-          return Effect.fail(
-            new Error("unexpected transient engine failure"),
-          ) as never;
+          return Effect.fail(new Error("unexpected transient engine failure")) as never;
       }
     },
     readThreadEventsThrough: (threadId, _from, _through, eventTypes) => {
       const filtered = visibleEvents.filter((event) =>
-        eventTypes === undefined || eventTypes.length === 0 ? true : eventTypes.includes(event.type),
+        eventTypes === undefined || eventTypes.length === 0
+          ? true
+          : eventTypes.includes(event.type),
       );
       return Stream.fromIterable(filtered);
     },
@@ -119,7 +123,7 @@ const makeFakeEngine = (dispatchResult: DispatchResult, messageSent = true): {
   return { engine, dispatched, visibleEvents };
 };
 
-const messageSentEventFor = (command: OrchestrationCommand): OrchestrationEvent =>
+const messageSentEventFor = (command: PiSubagentCompletionDispatchCommand): OrchestrationEvent =>
   ({
     type: "thread.message-sent",
     commandId: command.commandId,
@@ -182,7 +186,9 @@ describe("Decision 0016 parent-effect dispatcher (bridge)", () => {
     dispatcher.bindOnce(engine);
     const outcome = await dispatcher.dispatch(commandPayload());
     expect(outcome.kind).toBe("rejected");
-    expect(outcome.error).toContain("previously rejected");
+    if (outcome.kind === "rejected") {
+      expect(outcome.error).toContain("previously rejected");
+    }
   });
 
   it("maps identity collision to collision (permanent fail-closed)", async () => {
@@ -199,7 +205,9 @@ describe("Decision 0016 parent-effect dispatcher (bridge)", () => {
     dispatcher.bindOnce(engine);
     const outcome = await dispatcher.dispatch(commandPayload());
     expect(outcome.kind).toBe("transient");
-    expect(outcome.error).toContain("timed out");
+    if (outcome.kind === "transient") {
+      expect(outcome.error).toContain("timed out");
+    }
   });
 
   it("maps engine-stopped admission to unavailable (no retry accounting)", async () => {

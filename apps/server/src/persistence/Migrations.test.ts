@@ -305,10 +305,11 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [100, "PiSubagentAdmissionIdentity"],
         [101, "PiSubagentTerminalLifecycle"],
         [102, "PiSubagentCompletionOutbox"],
+        [103, "PiSubagentCompletionDispatchBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
-      assert.deepStrictEqual(tracker.slice(-49), [
+      assert.deepStrictEqual(tracker.slice(-50), [
         { migration_id: 54, name: "DurableProviderCommandDelivery" },
         { migration_id: 55, name: "ManagedAttachments" },
         { migration_id: 56, name: "CommandReceiptFingerprints" },
@@ -358,6 +359,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         { migration_id: 100, name: "PiSubagentAdmissionIdentity" },
         { migration_id: 101, name: "PiSubagentTerminalLifecycle" },
         { migration_id: 102, name: "PiSubagentCompletionOutbox" },
+        { migration_id: 103, name: "PiSubagentCompletionDispatchBatches" },
       ]);
       const preserved = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count FROM orchestration_consumer_state
@@ -452,6 +454,7 @@ agentGatewayRetentionLegacyLayer(
           [100, "PiSubagentAdmissionIdentity"],
           [101, "PiSubagentTerminalLifecycle"],
           [102, "PiSubagentCompletionOutbox"],
+          [103, "PiSubagentCompletionDispatchBatches"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -549,11 +552,12 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [100, "PiSubagentAdmissionIdentity"],
         [101, "PiSubagentTerminalLifecycle"],
         [102, "PiSubagentCompletionOutbox"],
+        [103, "PiSubagentCompletionDispatchBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-33).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-34).map((row) => [row.migration_id, row.name]),
         [
           [70, "AgentGatewayOperations"],
           [71, "ProjectionThreadsGatewayProvenance"],
@@ -588,6 +592,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [100, "PiSubagentAdmissionIdentity"],
           [101, "PiSubagentTerminalLifecycle"],
           [102, "PiSubagentCompletionOutbox"],
+          [103, "PiSubagentCompletionDispatchBatches"],
         ],
       );
 
@@ -680,11 +685,12 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [100, "PiSubagentAdmissionIdentity"],
         [101, "PiSubagentTerminalLifecycle"],
         [102, "PiSubagentCompletionOutbox"],
+        [103, "PiSubagentCompletionDispatchBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-29).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-30).map((row) => [row.migration_id, row.name]),
         [
           [74, "ExternalMcpIntegrations"],
           [75, "ExternalMcpActiveCapacity"],
@@ -715,6 +721,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [100, "PiSubagentAdmissionIdentity"],
           [101, "PiSubagentTerminalLifecycle"],
           [102, "PiSubagentCompletionOutbox"],
+          [103, "PiSubagentCompletionDispatchBatches"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`
@@ -982,7 +989,7 @@ releasedSymphonyV072Layer("released Symphony v0.7.2 database", (it) => {
       // 101 (PiSubagentTerminalLifecycle), 102 (PiSubagentCompletionOutbox) all run.
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102],
+        [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103],
       );
 
       const rows = yield* trackerRows(sql);

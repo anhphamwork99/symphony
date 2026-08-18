@@ -183,7 +183,6 @@ const toEntry = (
   transcriptRef: entry.transcriptRef ?? null,
 });
 
-
 export const makePiSubagentCompletionCoordinator = (
   input: PiSubagentCompletionCoordinatorInput,
 ): PiSubagentCompletionCoordinator => {
@@ -269,9 +268,7 @@ export const makePiSubagentCompletionCoordinator = (
   ): Effect.Effect<boolean, never> =>
     Effect.gen(function* () {
       for (const outboxId of batch.membership) {
-        const entryOpt = yield* Effect.result(
-          input.repository.getCompletionOutboxEntry(outboxId),
-        );
+        const entryOpt = yield* Effect.result(input.repository.getCompletionOutboxEntry(outboxId));
         if (entryOpt._tag === "Failure" || Option.isNone(entryOpt.success)) {
           // Missing entry: treat as stale — the durable membership cannot be
           // re-verified, so the batch must not produce a parent effect.
@@ -368,15 +365,11 @@ export const makePiSubagentCompletionCoordinator = (
 
         const outcome = yield* Effect.tryPromise({
           try: () => dispatcher.dispatch(batch.commandPayloadJson),
-          catch: (cause) =>
-            cause instanceof Error ? cause : new Error(String(cause)),
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
         }).pipe(Effect.result);
 
         if (outcome._tag === "Failure") {
-          yield* recordTransientFailure(
-            batch,
-            `dispatcher threw: ${outcome.failure.message}`,
-          );
+          yield* recordTransientFailure(batch, `dispatcher threw: ${outcome.failure.message}`);
           return;
         }
 
@@ -438,13 +431,15 @@ export const makePiSubagentCompletionCoordinator = (
             return;
         }
       }),
-    ).finally(() => {
-      inFlight -= 1;
-      settleIdleWaiters();
-    }).catch(() => {
-      // Framing-level containment: failures are reported through Effect.result
-      // + diagnostics; never an unhandled rejection from the coordinator.
-    });
+    )
+      .finally(() => {
+        inFlight -= 1;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment: failures are reported through Effect.result
+        // + diagnostics; never an unhandled rejection from the coordinator.
+      });
   };
 
   const recordTransientFailure = (
@@ -557,12 +552,14 @@ export const makePiSubagentCompletionCoordinator = (
         });
         scheduleRedrive(batch.parentThreadId);
       }),
-    ).finally(() => {
-      inFlight -= 1;
-      settleIdleWaiters();
-    }).catch(() => {
-      // Framing-level containment.
-    });
+    )
+      .finally(() => {
+        inFlight -= 1;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment.
+      });
   };
 
   /**
@@ -612,7 +609,8 @@ export const makePiSubagentCompletionCoordinator = (
         if (scan._tag === "Failure") {
           emit(parentThreadId, {
             diagnosticCode: "pi_subagent_completion_delivery_failed",
-            diagnosticMessage: "Completion batch scan failed for parent thread; retrying on next trigger",
+            diagnosticMessage:
+              "Completion batch scan failed for parent thread; retrying on next trigger",
           });
           return;
         }
@@ -677,7 +675,8 @@ export const makePiSubagentCompletionCoordinator = (
           case "member_collision":
             emit(parentThreadId, {
               diagnosticCode: "pi_subagent_completion_batch_collision",
-              diagnosticMessage: "Completion batch member collision; the create transaction rolled back",
+              diagnosticMessage:
+                "Completion batch member collision; the create transaction rolled back",
             });
             return;
           case "content_rejected":
@@ -688,13 +687,15 @@ export const makePiSubagentCompletionCoordinator = (
             return;
         }
       }),
-    ).finally(() => {
-      inFlight -= 1;
-      state.processing = false;
-      settleIdleWaiters();
-    }).catch(() => {
-      // Framing-level containment.
-    });
+    )
+      .finally(() => {
+        inFlight -= 1;
+        state.processing = false;
+        settleIdleWaiters();
+      })
+      .catch(() => {
+        // Framing-level containment.
+      });
   };
 
   const openBatchWindow = (parentThreadId: string): void => {

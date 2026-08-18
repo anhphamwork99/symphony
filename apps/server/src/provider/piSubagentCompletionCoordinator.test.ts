@@ -3,6 +3,8 @@ import type {
   PiSubagentExecutionRecord,
   PiSubagentLifecycleState,
 } from "@synara/contracts";
+import { ProjectId, ThreadId, TurnId } from "@synara/contracts";
+import { assert } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
@@ -52,19 +54,23 @@ const repositoryLayer = PiSubagentExecutionRepositoryLive.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 );
 
-const runTest = (effect: Effect.Effect<void, never, never>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(repositoryLayer)));
+const runTest = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(repositoryLayer)) as unknown as Effect.Effect<A, unknown, never>,
+  );
 
 const PARENT_THREAD = "th_decision_16";
 
-const makeExecution = (overrides?: Partial<PiSubagentExecutionRecord>): PiSubagentExecutionRecord => ({
+const makeExecution = (
+  overrides?: Partial<PiSubagentExecutionRecord>,
+): PiSubagentExecutionRecord => ({
   executionId: "exec_d16_1",
   attemptId: "att_d16_1",
   generation: 1,
   commandId: "cmd_d16_1",
-  projectId: "proj_default" as const,
-  parentThreadId: PARENT_THREAD as const,
-  parentTurnId: "turn_d16" as const,
+  projectId: "proj_default" as ProjectId,
+  parentThreadId: PARENT_THREAD as ThreadId,
+  parentTurnId: "turn_d16" as TurnId,
   parentToolCallId: "call_d16",
   agentType: "general-purpose",
   prompt: "task",
@@ -331,7 +337,11 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         bindRepository(repository);
         yield* admit(makeExecution());
         yield* admit(
-          makeExecution({ executionId: "exec_d16_2", attemptId: "att_d16_2", commandId: "cmd_d16_2" }),
+          makeExecution({
+            executionId: "exec_d16_2",
+            attemptId: "att_d16_2",
+            commandId: "cmd_d16_2",
+          }),
         );
         yield* ingestPiSubagentTerminal({ repository, observation: makeObservation() });
         coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD });
@@ -374,7 +384,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         );
 
         const created = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(created)).toBe(true);
+        assert(Option.isSome(created));
         expect(created.value.state).toBe("awaiting_acceptance");
         const member = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
         expect(Option.isSome(member) && member.value.deliveryState === "delivered").toBe(true);
@@ -392,8 +402,12 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
 
         const after = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
         expect(Option.isNone(after)).toBe(true);
-        const recovered = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
-        expect(Option.isSome(recovered) && recovered.value.deliveryState === "acknowledged").toBe(true);
+        const recovered = yield* repository.getCompletionOutboxEntry(
+          outboxIdFor(makeObservation()),
+        );
+        expect(Option.isSome(recovered) && recovered.value.deliveryState === "acknowledged").toBe(
+          true,
+        );
         expect(c2.binder.dispatchCount()).toBe(1);
       }),
     );
@@ -414,7 +428,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           c1.coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const active = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(active)).toBe(true);
+        assert(Option.isSome(active));
         expect(active.value.state).toBe("awaiting_acceptance");
 
         // Engine accepted, then process died before local finalization.
@@ -428,7 +442,9 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           now: "2026-08-18T00:02:00.000Z",
         });
         expect(accepted.kind).toBe("transitioned");
-        expect(accepted.batch.state).toBe("accepted");
+        if (accepted.kind === "transitioned") {
+          expect(accepted.batch.state).toBe("accepted");
+        }
 
         const c2 = setupCoordinator();
         c2.bindRepository(repository);
@@ -460,7 +476,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           c1.coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const batchOpt = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(batchOpt)).toBe(true);
+        assert(Option.isSome(batchOpt));
         expect(batchOpt.value.state).toBe("awaiting_acceptance");
         expect(c1.binder.dispatched).toHaveLength(1);
 
@@ -496,7 +512,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         yield* flush(coordinator, clock);
 
         const retryable = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(retryable)).toBe(true);
+        assert(Option.isSome(retryable));
         expect(retryable.value.state).toBe("retryable");
         expect(retryable.value.attemptCount).toBe(1);
 
@@ -553,7 +569,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           c1.coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const active = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(active)).toBe(true);
+        assert(Option.isSome(active));
         const batch = active.value;
 
         const parsed = JSON.parse(batch.commandPayloadJson) as {
@@ -577,7 +593,8 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
 
         expect(c2.binder.dispatchCount()).toBe(0);
         const finalBatch = yield* repository.getCompletionDispatchBatch(batch.batchId);
-        expect(Option.isSome(finalBatch) && finalBatch.value.state).toBe("exhausted");
+        assert(Option.isSome(finalBatch));
+        expect(finalBatch.value.state).toBe("exhausted");
         expect(finalBatch.value.batchId).toBe(batch.batchId); // no identity rotation
         const slot = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
         expect(Option.isNone(slot)).toBe(true);
@@ -604,7 +621,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           c1.coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const active = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(active)).toBe(true);
+        assert(Option.isSome(active));
         yield* sql`
           UPDATE pi_subagent_completion_dispatch_batches
           SET command_payload_json = '{{{not json'
@@ -722,11 +739,15 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
     await runTest(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        yield* admit(makeExecution({ parentThreadId: "th_a" }));
+        yield* admit(makeExecution({ parentThreadId: "th_a" as ThreadId }));
         yield* ingestPiSubagentTerminal({ repository, observation: makeObservation() });
 
         const binderA = makeBinder({ always: { kind: "transient", error: "th_a failing" } });
-        const { clock: clockA, coordinator: coordA, bindRepository: bindA } = setupCoordinator({
+        const {
+          clock: clockA,
+          coordinator: coordA,
+          bindRepository: bindA,
+        } = setupCoordinator({
           binder: binderA,
           retryLimit: 1,
         });
@@ -742,19 +763,19 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
             executionId: "exec_b",
             attemptId: "att_b",
             commandId: "cmd_b",
-            parentThreadId: "th_b",
+            parentThreadId: "th_b" as ThreadId,
           }),
         );
         yield* ingestPiSubagentTerminal({
           repository,
-          observation: makeObservation({
-            executionId: "exec_b",
-            attemptId: "att_b",
-            parentThreadId: "th_b",
-          }),
+          observation: makeObservation({ executionId: "exec_b", attemptId: "att_b" }),
         });
         const binderB = makeBinder({ always: ACCEPTED });
-        const { clock: clockB, coordinator: coordB, bindRepository: bindB } = setupCoordinator({
+        const {
+          clock: clockB,
+          coordinator: coordB,
+          bindRepository: bindB,
+        } = setupCoordinator({
           binder: binderB,
         });
         bindB(repository);
@@ -762,13 +783,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           coordB.onCompletionPending({ parentThreadId: "th_b" }),
         );
         const acked = yield* repository.getCompletionOutboxEntry(
-          outboxIdFor(
-            makeObservation({
-              executionId: "exec_b",
-              attemptId: "att_b",
-              parentThreadId: "th_b",
-            }),
-          ),
+          outboxIdFor(makeObservation({ executionId: "exec_b", attemptId: "att_b" })),
         );
         expect(Option.isSome(acked) && acked.value.deliveryState === "acknowledged").toBe(true);
       }),
@@ -793,12 +808,19 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const batch1 = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(batch1) && batch1.value.membership).toHaveLength(1);
-        const parkedEntry = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
+        assert(Option.isSome(batch1));
+        expect(batch1.value.membership).toHaveLength(1);
+        const parkedEntry = yield* repository.getCompletionOutboxEntry(
+          outboxIdFor(makeObservation()),
+        );
         expect(Option.isSome(parkedEntry) && parkedEntry.value.deliveryState).toBe("delivered");
 
         yield* admit(
-          makeExecution({ executionId: "exec_second", attemptId: "att_second", commandId: "cmd_second" }),
+          makeExecution({
+            executionId: "exec_second",
+            attemptId: "att_second",
+            commandId: "cmd_second",
+          }),
         );
         yield* ingestPiSubagentTerminal({
           repository,
@@ -811,7 +833,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         // STILL exactly one active batch (batch #1); the newer completion is
         // parked OUTSIDE it (durable one-outstanding authority).
         const stillActive = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(stillActive)).toBe(true);
+        assert(Option.isSome(stillActive));
         expect(stillActive.value.batchId).toBe(batch1.value.batchId);
         expect(stillActive.value.membership).toHaveLength(1);
         const parkedSecond = yield* repository.getCompletionOutboxEntry(
@@ -854,7 +876,11 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         expect(Option.isSome(member) && member.value.deliveryState === "delivered").toBe(true);
 
         const binderOk = makeBinder({ always: ACCEPTED });
-        const { clock: c2clock, coordinator: coord2, bindRepository: bind2 } = setupCoordinator({ binder: binderOk });
+        const {
+          clock: c2clock,
+          coordinator: coord2,
+          bindRepository: bind2,
+        } = setupCoordinator({ binder: binderOk });
         bind2(repository);
         yield* triggerAndFlush(coord2, c2clock, () => coord2.onParentTurnSettled(PARENT_THREAD));
         const acked = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
@@ -910,7 +936,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           c1.coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD }),
         );
         const active = yield* repository.getActiveCompletionDispatchBatch(PARENT_THREAD);
-        expect(Option.isSome(active)).toBe(true);
+        assert(Option.isSome(active));
 
         yield* repository.recordLifecycleEvent({
           eventId: "evt_resume2",
@@ -943,7 +969,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
         yield* admit(makeExecution());
         yield* ingestPiSubagentTerminal({ repository, observation: makeObservation() });
         const evidenceBefore = yield* repository.getTerminalEvidence("exec_d16_1");
-        expect(Option.isSome(evidenceBefore)).toBe(true);
+        assert(Option.isSome(evidenceBefore));
 
         const binder = makeBinder({
           script: [
@@ -964,7 +990,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
 
         const evidenceAfter = yield* repository.getTerminalEvidence("exec_d16_1");
         const member = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
-        expect(Option.isSome(evidenceAfter)).toBe(true);
+        assert(Option.isSome(evidenceAfter));
         expect(evidenceAfter.value.terminalSummary).toBe(evidenceBefore.value.terminalSummary);
         expect(Option.isSome(member) && member.value.summary).toBe(
           "Agent completed: 3 tool uses. Outcome: done.",

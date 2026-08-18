@@ -1920,10 +1920,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       timer: undefined as ReturnType<typeof setInterval> | undefined,
     };
     const triggerCoordinatorRecoveryScans = () => {
-      if (
-        piSubagentCompletionCoordinator === undefined ||
-        coordinatorEligibleThreads.size === 0
-      ) {
+      if (piSubagentCompletionCoordinator === undefined || coordinatorEligibleThreads.size === 0) {
         return;
       }
       piSubagentCompletionCoordinator.triggerScan([...coordinatorEligibleThreads]);

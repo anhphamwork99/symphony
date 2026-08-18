@@ -570,6 +570,7 @@ const makeServerProgram = (input: CliInput) => {
 
     return yield* stopSignal;
   }).pipe(Effect.scoped, Effect.provide(LayerLive(input, serverLayers)));
+};
 
 /**
  * These flags mirrors the environment variables and the config shape.

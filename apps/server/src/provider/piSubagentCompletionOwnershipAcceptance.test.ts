@@ -12,7 +12,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-import { CommandId, DEFAULT_PROVIDER_INTERACTION_MODE, ProjectId, type ThreadId } from "@synara/contracts";
+import {
+  CommandId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  ProjectId,
+  type OrchestrationEvent,
+  type ThreadId,
+} from "@synara/contracts";
 
 import { makeMcpSessionAuthorityRegistry } from "../agentGateway/mcpSessionAuthority.ts";
 import {
@@ -389,28 +395,29 @@ function makeServerConfig(
  * provider `sendTurn` boundary in the test.
  */
 async function createOwnershipEngine(config?: ServerConfigShape) {
-  const engineLayer = OrchestrationEngineLive.pipe(
+  let engineLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(SqlitePersistenceMemory),
-    ...(config !== undefined
-      ? [Layer.provideMerge(Layer.succeed(ServerConfig, config))]
-      : []),
-    Layer.provideMerge(NodeServices.layer),
   );
-  const runtime = ManagedRuntime.make(engineLayer);
+  engineLayer = engineLayer.pipe(
+    Layer.provideMerge(Layer.succeed(ServerConfig, config ?? makeServerConfig(process.cwd()))),
+  );
+  engineLayer = engineLayer.pipe(Layer.provideMerge(NodeServices.layer));
+  const runtime = ManagedRuntime.make(engineLayer as never);
   const engineService = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   const bridged = makePiSubagentParentEffectDispatcher();
   const port = engineService as unknown as {
     dispatch: (command: unknown) => Effect.Effect<{ sequence: number }, unknown, never>;
+    readEvents: (from: number) => Stream.Stream<unknown, unknown, never>;
     readThreadEventsThrough: (
       threadId: string,
       from: number,
       through: number,
       eventTypes?: readonly string[],
-    ) => Stream.Stream<unknown, unknown, never>;
+    ) => Stream.Stream<OrchestrationEvent, unknown, never>;
   };
   bridged.bindOnce(port);
   return { runtime, bridged, port };
@@ -574,30 +581,34 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
       // model for the coordinator's internal turn.start to be accepted there
       // (production threads are created through the same engine).
       yield* Effect.promise(() =>
-        ownershipEngine.port.dispatch({
-          type: "project.create",
-          commandId: CommandId.makeUnsafe("cmd-ownership-project"),
-          projectId: ProjectId.makeUnsafe("project-ownership"),
-          title: "Ownership",
-          workspaceRoot: parentAgentDir,
-          defaultModelSelection: null,
-          createdAt: new Date().toISOString(),
-        }).pipe(Effect.runPromise),
+        ownershipEngine.port
+          .dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe("cmd-ownership-project"),
+            projectId: ProjectId.makeUnsafe("project-ownership"),
+            title: "Ownership",
+            workspaceRoot: parentAgentDir,
+            defaultModelSelection: null,
+            createdAt: new Date().toISOString(),
+          })
+          .pipe(Effect.runPromise),
       );
       yield* Effect.promise(() =>
-        ownershipEngine.port.dispatch({
-          type: "thread.create",
-          commandId: CommandId.makeUnsafe("cmd-ownership-thread"),
-          threadId: "th_t09_managed_1" as ThreadId,
-          projectId: ProjectId.makeUnsafe("project-ownership"),
-          title: "T09 Managed",
-          modelSelection: { provider: "pi", model: "deterministic" },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt: new Date().toISOString(),
-        }).pipe(Effect.runPromise),
+        ownershipEngine.port
+          .dispatch({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe("cmd-ownership-thread"),
+            threadId: "th_t09_managed_1" as ThreadId,
+            projectId: ProjectId.makeUnsafe("project-ownership"),
+            title: "T09 Managed",
+            modelSelection: { provider: "pi", model: "deterministic" },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: new Date().toISOString(),
+          })
+          .pipe(Effect.runPromise),
       );
 
       yield* adapter.startSession({
@@ -686,10 +697,12 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
       // provider boundary the reactor uses in production (PiAdapter.sendTurn).
       // The accepted parent message is durable in the real engine (one
       // thread.message-sent + accepted receipt, verified by the coordinator).
-      yield* adapter.sendTurn({
-        threadId: "th_t09_managed_1" as ThreadId,
-        input: `A background subagent finished: ${executionId}`,
-      }).pipe(Effect.ignore);
+      yield* adapter
+        .sendTurn({
+          threadId: "th_t09_managed_1" as ThreadId,
+          input: `A background subagent finished: ${executionId}`,
+        })
+        .pipe(Effect.ignore);
       yield* Effect.sleep(1_000);
 
       // The parent transcript carries the Synara follow-up signature — and

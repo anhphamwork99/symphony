@@ -2,12 +2,11 @@ import * as Crypto from "node:crypto";
 
 import type {
   AssistantDeliveryMode,
-  MessageId,
-  OrchestrationCommand,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
 } from "@synara/contracts";
+import { ThreadTurnStartCommand } from "@synara/contracts";
 
 import {
   ORCHESTRATION_COMMAND_FINGERPRINT_VERSION,
@@ -123,10 +122,13 @@ export interface PiSubagentCompletionDispatchCommandInput {
  * message text is the frozen bounded parent message INCLUDING the current
  * harness-policy header captured at batch creation.
  */
+/** The narrow frozen internal command type (a `thread.turn.start`). */
+export type PiSubagentCompletionDispatchCommand = typeof ThreadTurnStartCommand.Type;
+
 export function buildPiSubagentCompletionDispatchCommand(input: {
   readonly identity: PiSubagentCompletionDispatchIdentity;
   readonly commandInput: PiSubagentCompletionDispatchCommandInput;
-}): OrchestrationCommand {
+}): PiSubagentCompletionDispatchCommand {
   const { identity, commandInput } = input;
   return {
     type: "thread.turn.start",
@@ -144,7 +146,7 @@ export function buildPiSubagentCompletionDispatchCommand(input: {
     interactionMode: commandInput.interactionMode,
     assistantDeliveryMode: commandInput.assistantDeliveryMode,
     createdAt: commandInput.createdAt,
-  } as OrchestrationCommand;
+  } as unknown as PiSubagentCompletionDispatchCommand;
 }
 
 /**
@@ -153,7 +155,7 @@ export function buildPiSubagentCompletionDispatchCommand(input: {
  * authored key order.
  */
 export const serializePiSubagentCompletionDispatchCommand = (
-  command: OrchestrationCommand,
+  command: PiSubagentCompletionDispatchCommand,
 ): string => JSON.stringify(command);
 
 /**
@@ -164,7 +166,7 @@ export const serializePiSubagentCompletionDispatchCommand = (
  */
 export function deserializePiSubagentCompletionDispatchCommand(
   commandPayloadJson: string,
-): OrchestrationCommand | null {
+): PiSubagentCompletionDispatchCommand | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(commandPayloadJson);
@@ -178,11 +180,13 @@ export function deserializePiSubagentCompletionDispatchCommand(
   if (record.type !== "thread.turn.start" || typeof record.commandId !== "string") {
     return null;
   }
-  return parsed as OrchestrationCommand;
+  return parsed as unknown as PiSubagentCompletionDispatchCommand;
 }
 
 /** The message id carried by the frozen command (Decision 0016 §6 correlation). */
-export function frozenParentMessageIdOf(command: OrchestrationCommand): string | null {
+export function frozenParentMessageIdOf(
+  command: PiSubagentCompletionDispatchCommand,
+): string | null {
   if (command.type !== "thread.turn.start") {
     return null;
   }
@@ -210,7 +214,9 @@ export function verifyPiSubagentCompletionDispatchFingerprint(input: {
     return false;
   }
   try {
-    return fingerprintOrchestrationCommand(command).value === input.expectedCommandFingerprint;
+    return (
+      fingerprintOrchestrationCommand(command as never).value === input.expectedCommandFingerprint
+    );
   } catch {
     // A stored payload that cannot even be fingerprinted must fail closed.
     return false;

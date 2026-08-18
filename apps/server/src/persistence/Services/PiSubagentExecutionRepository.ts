@@ -723,15 +723,18 @@ export interface PiSubagentExecutionRepositoryShape {
   // remediation). All transitions are guarded, replayable, and never mutate
   // the execution aggregate.
   // -------------------------------------------------------------------
-  readonly createCompletionDispatchBatch: (input: CreatePiSubagentCompletionDispatchBatchInput) => Effect.Effect<
-    PiSubagentCompletionDispatchCreateResult,
-    PiSubagentExecutionRepositoryError
-  >;
-  readonly getCompletionDispatchBatch: (batchId: string) => Effect.Effect<
+  readonly createCompletionDispatchBatch: (
+    input: CreatePiSubagentCompletionDispatchBatchInput,
+  ) => Effect.Effect<PiSubagentCompletionDispatchCreateResult, PiSubagentExecutionRepositoryError>;
+  readonly getCompletionDispatchBatch: (
+    batchId: string,
+  ) => Effect.Effect<
     Option.Option<PiSubagentCompletionDispatchBatch>,
     PiSubagentExecutionRepositoryError
   >;
-  readonly getCompletionDispatchBatchByCommandId: (parentCommandId: string) => Effect.Effect<
+  readonly getCompletionDispatchBatchByCommandId: (
+    parentCommandId: string,
+  ) => Effect.Effect<
     Option.Option<PiSubagentCompletionDispatchBatch>,
     PiSubagentExecutionRepositoryError
   >;
@@ -739,7 +742,9 @@ export interface PiSubagentExecutionRepositoryShape {
    * Durable one-outstanding authority (Decision 0016 §2): the single
    * nonterminal batch for one parent thread, if any.
    */
-  readonly getActiveCompletionDispatchBatch: (parentThreadId: string) => Effect.Effect<
+  readonly getActiveCompletionDispatchBatch: (
+    parentThreadId: string,
+  ) => Effect.Effect<
     Option.Option<PiSubagentCompletionDispatchBatch>,
     PiSubagentExecutionRepositoryError
   >;

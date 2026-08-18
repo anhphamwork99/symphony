@@ -1852,7 +1852,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     exhausted_at AS "exhaustedAt"
   `;
 
-  const getBatchByIdInternal = (batchId: string): Effect.Effect<BatchRow[], PersistenceSqlError> =>
+  const getBatchByIdInternal = (
+    batchId: string,
+  ): Effect.Effect<readonly BatchRow[], PersistenceSqlError> =>
     sql<BatchRow>`
       SELECT ${batchColumns}
       FROM pi_subagent_completion_dispatch_batches
@@ -1999,11 +2001,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                   : `batch content build failed: ${String(cause)}`;
               return { kind: "content_rejected" as const, detail };
             }
-            const validationError = validateBatchContent(
-              content,
-              members,
-              input.parentThreadId,
-            );
+            const validationError = validateBatchContent(content, members, input.parentThreadId);
             if (validationError !== null) {
               return { kind: "content_rejected" as const, detail: validationError };
             }
@@ -2114,7 +2112,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           ),
           Effect.catchIf(
             (error: unknown) =>
-              error instanceof Error && /UNIQUE constraint failed/ui.test(error.message),
+              error instanceof Error && /UNIQUE constraint failed/iu.test(error.message),
             () =>
               Effect.succeed<PiSubagentCompletionDispatchCreateResult>({
                 kind: "active_batch_exists",

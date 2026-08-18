@@ -67,11 +67,18 @@ async function createEngineSystem() {
   ).pipe(Layer.provideMerge(SqlitePersistenceMemory));
   const runtime = ManagedRuntime.make(orchestrationLayer);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
-  const run = <A, E>(effect: Effect.Effect<A, E, never>) => runtime.runPromise(effect);
+  const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    runtime.runPromise(effect as Effect.Effect<A, E, never>);
   // Structural subset of the engine the bridge needs.
   const port = engine as unknown as {
     dispatch: (command: unknown) => Effect.Effect<{ sequence: number }, unknown, never>;
     readEvents: (from: number) => Stream.Stream<OrchestrationEvent, unknown, never>;
+    readThreadEventsThrough: (
+      threadId: string,
+      fromSequenceExclusive: number,
+      throughSequenceInclusive: number,
+      eventTypes?: ReadonlyArray<string>,
+    ) => Stream.Stream<OrchestrationEvent, unknown, never>;
     refreshCommandReadModel: () => Effect.Effect<unknown, unknown, never>;
   };
   return { run, port, dispose: () => runtime.dispose() };
@@ -185,17 +192,19 @@ describe("Decision 0016 engine-backed acceptance (WP7)", () => {
       const turnRequests = events.filter(
         (event) =>
           event.type === "thread.turn-start-requested" &&
-          event.payload.messageId === command.message.messageId,
+          (event.payload as { messageId?: string }).messageId === command.message.messageId,
       );
       expect(messageSents).toHaveLength(1);
       expect(turnRequests).toHaveLength(1);
-      expect(messageSents[0]!.payload.messageId).toBe(command.message.messageId);
-      expect(messageSents[0]!.payload.dispatchOrigin).toBe("agent");
+      expect((messageSents[0]!.payload as { messageId?: string }).messageId).toBe(
+        command.message.messageId,
+      );
+      expect((messageSents[0]!.payload as { dispatchOrigin?: string }).dispatchOrigin).toBe(
+        "agent",
+      );
 
       const receipts = await readReceiptRows(system);
-      expect(
-        receipts.filter((receipt) => receipt.commandId === command.commandId),
-      ).toHaveLength(1);
+      expect(receipts.filter((receipt) => receipt.commandId === command.commandId)).toHaveLength(1);
     } finally {
       await system.dispose();
     }
@@ -230,7 +239,7 @@ describe("Decision 0016 engine-backed acceptance (WP7)", () => {
       const turnRequests = events.filter(
         (event) =>
           event.type === "thread.turn-start-requested" &&
-          event.payload.messageId === command.message.messageId,
+          (event.payload as { messageId?: string }).messageId === command.message.messageId,
       );
       expect(messageSents).toHaveLength(1);
       expect(turnRequests).toHaveLength(1);
@@ -250,7 +259,11 @@ describe("Decision 0016 engine-backed acceptance (WP7)", () => {
     const sql = await system.run(Effect.service(SqlClient.SqlClient));
     try {
       await createProjectAndThread(system, "q");
-      const { payload, command } = makeInternalCommand("thread-pi-t09-q", ["outbox_pi_5"], createdAt());
+      const { payload, command } = makeInternalCommand(
+        "thread-pi-t09-q",
+        ["outbox_pi_5"],
+        createdAt(),
+      );
       expect(command.dispatchMode).toBe("queue");
 
       // Mark the parent root busy through the projected session row the
@@ -282,7 +295,7 @@ describe("Decision 0016 engine-backed acceptance (WP7)", () => {
       const turnIntents = events.filter(
         (event) =>
           (event.type === "thread.turn-queued" || event.type === "thread.turn-start-requested") &&
-          event.payload.messageId === command.message.messageId,
+          (event.payload as { messageId?: string }).messageId === command.message.messageId,
       );
       expect(messageSents).toHaveLength(1);
       expect(turnIntents).toHaveLength(1);

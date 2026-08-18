@@ -154,7 +154,9 @@ describe("Decision 0016 frozen command authoring and fingerprint", () => {
     const replayed = deserializePiSubagentCompletionDispatchCommand(serialized);
     expect(replayed).not.toBeNull();
     expect(serializePiSubagentCompletionDispatchCommand(replayed!)).toBe(serialized);
-    expect(JSON.parse(serialized)).toEqual(JSON.parse(serializePiSubagentCompletionDispatchCommand(replayed!)));
+    expect(JSON.parse(serialized)).toEqual(
+      JSON.parse(serializePiSubagentCompletionDispatchCommand(replayed!)),
+    );
   });
 
   it("uses the existing orchestration fingerprint and recomputes it exactly", () => {

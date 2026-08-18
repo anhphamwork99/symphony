@@ -1,7 +1,7 @@
 import type { OrchestrationEvent } from "@synara/contracts";
 import { Effect, Stream } from "effect";
 
-import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
+import type { OrchestrationCommand } from "@synara/contracts";
 import {
   OrchestrationCommandAdmissionError,
   OrchestrationCommandIdentityCollisionError,
@@ -65,15 +65,20 @@ export type PiSubagentParentEffectDispatchOutcome =
 /** The narrow engine surface the bridge depends on (structural subset of
  * OrchestrationEngineShape; the real service satisfies it). */
 export interface PiSubagentParentEffectEnginePort {
-  readonly dispatch: OrchestrationEngineShape["dispatch"];
-  readonly readThreadEventsThrough: OrchestrationEngineShape["readThreadEventsThrough"];
+  readonly dispatch: (
+    command: OrchestrationCommand,
+  ) => Effect.Effect<{ readonly sequence: number }, unknown, never>;
+  readonly readThreadEventsThrough: (
+    threadId: string,
+    fromSequenceExclusive: number,
+    throughSequenceInclusive: number,
+    eventTypes?: ReadonlyArray<string>,
+  ) => Stream.Stream<OrchestrationEvent, unknown, never>;
 }
 
 export interface PiSubagentParentEffectDispatcher {
   /** Dispatch ONE frozen deterministic internal command, never throws. */
-  readonly dispatch: (
-    commandPayloadJson: string,
-  ) => Promise<PiSubagentParentEffectDispatchOutcome>;
+  readonly dispatch: (commandPayloadJson: string) => Promise<PiSubagentParentEffectDispatchOutcome>;
   /** Bind exactly once when the engine is live; rebinding is forbidden. */
   readonly bindOnce: (engine: PiSubagentParentEffectEnginePort) => void;
   readonly isBound: () => boolean;
@@ -97,7 +102,10 @@ const runWithBoundary = async <T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const boundaryMessage = `${label} exceeded ${PARENT_EFFECT_DISPATCH_BOUNDARY_MS}ms`;
   const boundary = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(boundaryMessage)), PARENT_EFFECT_DISPATCH_BOUNDARY_MS);
+    timer = setTimeout(
+      () => reject(new Error(boundaryMessage)),
+      PARENT_EFFECT_DISPATCH_BOUNDARY_MS,
+    );
   });
   try {
     const outcome = await Promise.race([make(), boundary]);
@@ -113,141 +121,136 @@ const runWithBoundary = async <T>(
   }
 };
 
-export const makePiSubagentParentEffectDispatcher =
-  (): PiSubagentParentEffectDispatcher => {
-    let engine: PiSubagentParentEffectEnginePort | undefined;
-    const boundCallbacks = new Set<() => void>();
+export const makePiSubagentParentEffectDispatcher = (): PiSubagentParentEffectDispatcher => {
+  let engine: PiSubagentParentEffectEnginePort | undefined;
+  const boundCallbacks = new Set<() => void>();
 
-    const dispatch: PiSubagentParentEffectDispatcher["dispatch"] = async (commandPayloadJson) => {
-      const live = engine;
-      if (live === undefined) {
-        return {
-          kind: "unavailable",
-          error: "completion dispatcher is not bound to the orchestration engine",
-        };
-      }
-      const command = deserializePiSubagentCompletionDispatchCommand(commandPayloadJson);
-      if (command === null || command.type !== "thread.turn.start") {
-        return {
-          kind: "transient",
-          error: "stored completion dispatch command payload is malformed",
-        };
-      }
-
-      // Engine dispatch: the engine owns receipt persistence, fingerprint
-      // deduplication, and same-command-id replay. A failure here yields the
-      // engine's typed dispatch error (resolved stored receipt where one
-      // exists).
-      const dispatched = await runWithBoundary(
-        () => Effect.runPromise(Effect.result(live.dispatch(command))),
-        "completion dispatch",
-      );
-      if (dispatched._tag === "timeout") {
-        return {
-          kind: "unverified",
-          error: "completion dispatch exceeded the wall boundary without a confirmed outcome",
-        };
-      }
-      if (dispatched._tag === "error") {
-        return mapEngineError(dispatched.error);
-      }
-      if (dispatched.value._tag === "Failure") {
-        return mapEngineError(dispatched.value.failure);
-      }
-      const resultSequence = dispatched.value.success.sequence;
-
-      // Exact parent-message proof: the accepted command's committed event set
-      // must contain thread.message-sent for OUR exact command/message id.
-      const verified = await runWithBoundary(
-        () =>
-          Effect.runPromise(
-            live
-              .readThreadEventsThrough(String(command.threadId), 0, resultSequence, [
-                "thread.message-sent",
-              ])
-              .pipe(
-                Stream.filter(
-                  (
-                    event,
-                  ): event is Extract<OrchestrationEvent, { type: "thread.message-sent" }> =>
-                    event.type === "thread.message-sent" &&
-                    event.commandId === command.commandId &&
-                    event.payload.messageId === command.message.messageId,
-                ),
-                Stream.take(1),
-                Stream.runCollect,
-              ),
-          ),
-        "completion dispatch message verification",
-      );
-      if (verified._tag !== "ok") {
-        return {
-          kind: "unverified",
-          error:
-            verified._tag === "timeout"
-              ? "accepted dispatch message verification exceeded the wall boundary"
-              : `accepted dispatch message verification failed: ${verified.error.message}`,
-        };
-      }
-      const messageEvent = verified.value[0];
-      if (messageEvent === undefined) {
-        return {
-          kind: "unverified",
-          error: "accepted dispatch did not commit the frozen parent message",
-        };
-      }
+  const dispatch: PiSubagentParentEffectDispatcher["dispatch"] = async (commandPayloadJson) => {
+    const live = engine;
+    if (live === undefined) {
       return {
-        kind: "accepted",
-        receipt: {
-          commandId: command.commandId,
-          resultSequence,
-          messageId: command.message.messageId,
-          acceptedAt: messageEvent.occurredAt,
-        },
+        kind: "unavailable",
+        error: "completion dispatcher is not bound to the orchestration engine",
       };
-    };
+    }
+    const command = deserializePiSubagentCompletionDispatchCommand(commandPayloadJson);
+    if (command === null || command.type !== "thread.turn.start") {
+      return {
+        kind: "transient",
+        error: "stored completion dispatch command payload is malformed",
+      };
+    }
 
-    const bindOnce: PiSubagentParentEffectDispatcher["bindOnce"] = (candidate) => {
-      if (engine !== undefined) {
-        if (engine === candidate) {
-          return;
-        }
-        throw new Error("completion dispatcher has already been bound; rebinding is forbidden");
-      }
-      engine = candidate;
-      for (const callback of Array.from(boundCallbacks)) {
-        try {
-          callback();
-        } catch (cause) {
-          // A binding-triggered recovery callback must never break binding;
-          // the callback is advisory and its failure is contained.
-          // eslint-disable-next-line no-console
-          console.error("completion dispatcher onBound callback failed", cause);
-        }
-      }
-    };
+    // Engine dispatch: the engine owns receipt persistence, fingerprint
+    // deduplication, and same-command-id replay. A failure here yields the
+    // engine's typed dispatch error (resolved stored receipt where one
+    // exists).
+    const dispatched = await runWithBoundary(
+      () => Effect.runPromise(Effect.result(live.dispatch(command))),
+      "completion dispatch",
+    );
+    if (dispatched._tag === "timeout") {
+      return {
+        kind: "unverified",
+        error: "completion dispatch exceeded the wall boundary without a confirmed outcome",
+      };
+    }
+    if (dispatched._tag === "error") {
+      return mapEngineError(dispatched.error);
+    }
+    if (dispatched.value._tag === "Failure") {
+      return mapEngineError(dispatched.value.failure);
+    }
+    const resultSequence = dispatched.value.success.sequence;
 
+    // Exact parent-message proof: the accepted command's committed event set
+    // must contain thread.message-sent for OUR exact command/message id.
+    const verified = await runWithBoundary(
+      () =>
+        Effect.runPromise(
+          live
+            .readThreadEventsThrough(String(command.threadId), 0, resultSequence, [
+              "thread.message-sent",
+            ])
+            .pipe(
+              Stream.filter(
+                (event): event is Extract<OrchestrationEvent, { type: "thread.message-sent" }> =>
+                  event.type === "thread.message-sent" &&
+                  event.commandId === command.commandId &&
+                  event.payload.messageId === command.message.messageId,
+              ),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+        ),
+      "completion dispatch message verification",
+    );
+    if (verified._tag !== "ok") {
+      return {
+        kind: "unverified",
+        error:
+          verified._tag === "timeout"
+            ? "accepted dispatch message verification exceeded the wall boundary"
+            : `accepted dispatch message verification failed: ${verified.error.message}`,
+      };
+    }
+    const messageEvent = verified.value[0];
+    if (messageEvent === undefined) {
+      return {
+        kind: "unverified",
+        error: "accepted dispatch did not commit the frozen parent message",
+      };
+    }
     return {
-      dispatch,
-      bindOnce,
-      isBound: () => engine !== undefined,
-      onBound: (callback) => {
-        if (engine !== undefined) {
-          // Already bound: fire immediately (composition may construct the
-          // provider layer after the engine is bound).
-          try {
-            callback();
-          } catch (cause) {
-            // Advisory; contained.
-            // eslint-disable-next-line no-console
-            console.error("completion dispatcher onBound callback failed", cause);
-          }
-        }
-        boundCallbacks.add(callback);
-        return () => boundCallbacks.delete(callback);
+      kind: "accepted",
+      receipt: {
+        commandId: command.commandId,
+        resultSequence,
+        messageId: command.message.messageId,
+        acceptedAt: messageEvent.occurredAt,
       },
     };
   };
+
+  const bindOnce: PiSubagentParentEffectDispatcher["bindOnce"] = (candidate) => {
+    if (engine !== undefined) {
+      if (engine === candidate) {
+        return;
+      }
+      throw new Error("completion dispatcher has already been bound; rebinding is forbidden");
+    }
+    engine = candidate;
+    for (const callback of Array.from(boundCallbacks)) {
+      try {
+        callback();
+      } catch (cause) {
+        // A binding-triggered recovery callback must never break binding;
+        // the callback is advisory and its failure is contained.
+        console.error("completion dispatcher onBound callback failed", cause);
+      }
+    }
+  };
+
+  return {
+    dispatch,
+    bindOnce,
+    isBound: () => engine !== undefined,
+    onBound: (callback) => {
+      if (engine !== undefined) {
+        // Already bound: fire immediately (composition may construct the
+        // provider layer after the engine is bound).
+        try {
+          callback();
+        } catch (cause) {
+          // Advisory; contained.
+          console.error("completion dispatcher onBound callback failed", cause);
+        }
+      }
+      boundCallbacks.add(callback);
+      return () => boundCallbacks.delete(callback);
+    },
+  };
+};
 
 const mapEngineError = (error: unknown): PiSubagentParentEffectDispatchOutcome => {
   if (error instanceof OrchestrationCommandIdentityCollisionError) {

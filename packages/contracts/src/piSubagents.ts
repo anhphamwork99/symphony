@@ -388,8 +388,7 @@ export const PiSubagentTranscriptTerminalMarker = Schema.Struct({
   transcriptRef: Schema.optional(TrimmedNonEmptyString),
   outcomeState: Schema.optional(TrimmedNonEmptyString),
 });
-export type PiSubagentTranscriptTerminalMarker =
-  typeof PiSubagentTranscriptTerminalMarker.Type;
+export type PiSubagentTranscriptTerminalMarker = typeof PiSubagentTranscriptTerminalMarker.Type;
 
 /**
  * Ticket 10 reconciliation outcome per execution (T10-AC1..AC6). `orphaned`
