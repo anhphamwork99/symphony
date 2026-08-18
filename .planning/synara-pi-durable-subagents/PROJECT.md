@@ -70,6 +70,11 @@
   pass, but T09-AC4 fails because `delivered` is persisted before the parent
   effect and a process crash can strand an unrecoverable completion. Ticket
   09 remains the active frontier; Ticket 11 remains blocked.
+- [decisions/0016-t09-crash-safe-parent-effect-technical-direction.md](decisions/0016-t09-crash-safe-parent-effect-technical-direction.md) —
+  binding Ticket 09 remediation direction: immutable durable completion
+  batches use deterministic internal `thread.turn.start` commands and exact
+  orchestration command receipts as the idempotent parent-effect boundary;
+  Ticket 09 owns recovery, Ticket 10/Alfie remain unchanged.
 - [decisions/0014-t13-ac4-metrics-surface-approval-authority.md](decisions/0014-t13-ac4-metrics-surface-approval-authority.md) —
   binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
   is an ordinary ticket-level seam but still requires fresh human-owner
