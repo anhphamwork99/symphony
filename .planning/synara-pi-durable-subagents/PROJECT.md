@@ -97,23 +97,21 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–08 and 10 are complete. Ticket 10
-  (restart reconciliation to terminal or orphaned) was accepted by
-  Decision 0014 at Symphony `e58ff719` plus the disclosed Ticket-10 hunks
-  in `98b9e990`. Decision-0013 F1 recovery clamping, F2 stale-terminal
-  applicability, and F3 startup recovery invocation are closed. Restart
-  reconciliation never replays delegation, restores terminal truth only
-  for matching identity/generation, records owner loss as non-terminal
-  `orphaned`, fences late events, and derives lease expiry from
-  server-observed heartbeat data rather than stored producer-derived
-  expiry.
-- **Active acceptance frontier:** Ticket 09 — Per-thread completion
-  coordinator — is implemented but not accepted. Decision 0015 requires a
-  recoverable durable dispatch protocol with stable-idempotent parent effects
-  across crashes before and after parent acceptance.
-- **Next dependency unlock:** Ticket 11's Ticket-06 and Ticket-10 blockers
-  are satisfied, but Ticket 11 remains blocked by Ticket 09. Ticket 11
-  becomes blocker-free when Ticket 09 is accepted. Ticket 12 remains
+- **Frontier track:** tickets 01–10, 13 are complete. Ticket 09 (per-thread
+  completion coordinator) was rejected by Decision 0015 (crash window:
+  durable `delivered` before the parent effect), remediated under Decision
+  0016's crash-safe direction (immutable dispatch batch ledger migration 103,
+  deterministic frozen `thread.turn.start`, accepted fingerprint-matched
+  orchestration command receipt as the sole parent-effect acceptance proof),
+  and accepted by Decision 0018 at Symphony `ebf224a6` (Alfie unchanged at
+  `489acd626` / `0.14.0-alfie.1`). Review findings F1–F6 dispositioned:
+  F1 → Ticket 11 success-diagnostic literal; F2/F3 → Ticket 17 test
+  hardening; F4/F5/F6 recorded as intended semantics.
+- [decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md](decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md) —
+  accepted the remediated Ticket 09: Decision 0015 superseded, T09-AC1..AC6
+  all pass with both T09-AC4 crash positions closed.
+- **Next dependency unlock:** Ticket 11 is now blocker-free (Ticket 06, 09,
+  10 edges all satisfied) and is the next frontier ticket. Ticket 12 remains
   blocked by Ticket 11 and owns production transcript/result reading.
     Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
     Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.

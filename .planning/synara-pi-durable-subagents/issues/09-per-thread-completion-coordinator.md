@@ -8,7 +8,16 @@ only after Synara acknowledges ownership for that managed execution.
 
 **Blocked by:** 08 — Durable completion outbox.
 
-**Status:** ready-for-agent → implemented → **needs remediation (Decision 0015)**
+**Status:** ready-for-agent → implemented → needs remediation (Decision 0015) → **complete (accepted)**
+
+**Final acceptance:** Accepted — Decision 0018 (2026-08-18), superseding
+Decision 0015's rejection. Remediated candidate: Symphony merge `ebf224a6`
+(WP commits `0f298eb8`..`cf641ba7` under Decision 0016's crash-safe
+parent-effect direction); Alfie unchanged at `489acd626` / `0.14.0-alfie.1`.
+Remediation review PASS/HIGH at
+[reviews/09-per-thread-completion-coordinator-remediation-review.md](../reviews/09-per-thread-completion-coordinator-remediation-review.md);
+findings F1–F6 dispositioned (F1 → Ticket 11 success-diagnostic literal;
+F2/F3 → Ticket 17 test hardening; F4/F5/F6 intended semantics).
 
 - [x] **T09-AC1:** Completions for one parent thread inside the configured
       batching window produce one follow-up containing bounded summaries and
@@ -27,7 +36,7 @@ only after Synara acknowledges ownership for that managed execution.
 
 ## Implementation Report
 
-**Implementation state:** needs remediation — Decision 0015 (2026-08-18)
+**Implementation state:** accepted — Decision 0018 (2026-08-18)
 
 ### Final-acceptance outcome (2026-08-18)
 
@@ -49,11 +58,11 @@ and the persisted
 
 ### Decision 0016 remediation implementation (2026-08-18)
 
-**Status: implemented under Decision 0016 — NOT accepted, NOT yet
-independently reviewed.** Ticket 09 remains `needs remediation`. This section
-records the remediated implementation (isolated worktree branch
-`impl/t09-crash-safe-parent-effect`, commits `0f298eb8` … `3aed8084`) and the
-actual parent-effect sequence; it makes **no acceptance claim**.
+**Status: implemented under Decision 0016 and ACCEPTED by Decision 0018.**
+This section records the remediated implementation (branch
+`impl/t09-crash-safe-parent-effect`, commits `0f298eb8`..`cf641ba7`, merged
+at `ebf224a6`) and the actual parent-effect sequence; acceptance evidence:
+the remediation review (PASS/HIGH) and Decision 0018.
 
 **Actual parent-effect sequence (Decision 0016 §1/§6):**
 
