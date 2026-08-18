@@ -388,8 +388,13 @@ export type PiSubagentCompletionDispatchTransitionResult =
  * `content_rejected` fail closed (the whole transaction rolled back).
  */
 export type PiSubagentCompletionDispatchCreateResult =
-  | { readonly kind: "created"; readonly batch: PiSubagentCompletionDispatchBatch }
-  | { readonly kind: "no_members" }
+  | {
+      readonly kind: "created";
+      readonly batch: PiSubagentCompletionDispatchBatch;
+      /** Members fenced/superseded inside the create before submission. */
+      readonly supersededCount: number;
+    }
+  | { readonly kind: "no_members"; readonly supersededCount: number }
   | { readonly kind: "active_batch_exists" }
   | { readonly kind: "member_collision" }
   | { readonly kind: "content_rejected"; readonly detail: string }

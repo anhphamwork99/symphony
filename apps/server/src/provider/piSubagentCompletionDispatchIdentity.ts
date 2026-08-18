@@ -209,5 +209,10 @@ export function verifyPiSubagentCompletionDispatchFingerprint(input: {
   if (command === null) {
     return false;
   }
-  return fingerprintOrchestrationCommand(command).value === input.expectedCommandFingerprint;
+  try {
+    return fingerprintOrchestrationCommand(command).value === input.expectedCommandFingerprint;
+  } catch {
+    // A stored payload that cannot even be fingerprinted must fail closed.
+    return false;
+  }
 }

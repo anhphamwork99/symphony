@@ -1968,18 +1968,20 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             // 2. Supersede stale members BEFORE any parent command submission
             //    (Decision 0016 §2 / T09-AC6) and cap the membership.
             const members: OutboxRow[] = [];
+            let supersededCount = 0;
             for (const candidate of candidates) {
               if (members.length >= input.maxBatchEntries) {
                 break;
               }
               const fence = yield* fenceOrSupersede(candidate, input.now);
               if (fence.kind === "superseded_instead") {
+                supersededCount += 1;
                 continue;
               }
               members.push(candidate);
             }
             if (members.length === 0) {
-              return { kind: "no_members" as const };
+              return { kind: "no_members" as const, supersededCount };
             }
 
             // 3. Author immutable batch content from the exact selected
@@ -2098,7 +2100,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             }
 
             const created = yield* getBatchByIdInternal(content.batchId);
-            return { kind: "created" as const, batch: decodeBatch(created[0]!) };
+            return { kind: "created" as const, batch: decodeBatch(created[0]!), supersededCount };
           }),
         )
         .pipe(
