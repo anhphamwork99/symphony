@@ -65,6 +65,11 @@
   replay-free, and derives lease authority server-side. Ticket 10 is
   complete; Ticket 09 remains awaiting its separate acceptance, after
   which Ticket 11 becomes blocker-free.
+- [decisions/0015-t09-per-thread-completion-coordinator-final-acceptance-remediation.md](decisions/0015-t09-per-thread-completion-coordinator-final-acceptance-remediation.md) —
+  Ticket 09 final acceptance returned NEEDS REMEDIATION: T09-AC1/2/3/5/6
+  pass, but T09-AC4 fails because `delivered` is persisted before the parent
+  effect and a process crash can strand an unrecoverable completion. Ticket
+  09 remains the active frontier; Ticket 11 remains blocked.
 - [decisions/0014-t13-ac4-metrics-surface-approval-authority.md](decisions/0014-t13-ac4-metrics-surface-approval-authority.md) —
   binding adjudication: the persisted T13-AC4 `serverGetDiagnostics` mapping
   is an ordinary ticket-level seam but still requires fresh human-owner
@@ -93,9 +98,9 @@
   server-observed heartbeat data rather than stored producer-derived
   expiry.
 - **Active acceptance frontier:** Ticket 09 — Per-thread completion
-  coordinator — is implemented and awaiting its separate review and final
-  acceptance in the parallel stream. Decision 0014 does not accept Ticket
-  09.
+  coordinator — is implemented but not accepted. Decision 0015 requires a
+  recoverable durable dispatch protocol with stable-idempotent parent effects
+  across crashes before and after parent acceptance.
 - **Next dependency unlock:** Ticket 11's Ticket-06 and Ticket-10 blockers
   are satisfied, but Ticket 11 remains blocked by Ticket 09. Ticket 11
   becomes blocker-free when Ticket 09 is accepted. Ticket 12 remains

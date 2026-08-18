@@ -8,7 +8,7 @@ only after Synara acknowledges ownership for that managed execution.
 
 **Blocked by:** 08 — Durable completion outbox.
 
-**Status:** ready-for-agent → **implemented (awaiting review)**
+**Status:** ready-for-agent → implemented → **needs remediation (Decision 0015)**
 
 - [x] **T09-AC1:** Completions for one parent thread inside the configured
       batching window produce one follow-up containing bounded summaries and
@@ -27,7 +27,25 @@ only after Synara acknowledges ownership for that managed execution.
 
 ## Implementation Report
 
-**Implementation state:** implemented — awaiting independent feature review
+**Implementation state:** needs remediation — Decision 0015 (2026-08-18)
+
+### Final-acceptance outcome (2026-08-18)
+
+**NEEDS REMEDIATION.** The independent review returned PASS/HIGH for
+T09-AC1..AC6, but the Project Supervisor rejected final acceptance under
+Decision 0015. T09-AC1/2/3/5/6 remain proven. T09-AC4 remains open because
+the coordinator persists `delivered` before `sendFollowUp`; process death
+between those operations can leave a delivered/unacknowledged row outside
+all recovery scans and permanently lose the parent effect.
+
+The binding remediation must make unfinished dispatch durably recoverable,
+reuse stable outbox/batch identity at an enforceably idempotent parent-effect
+boundary, preserve one outstanding batch per thread across recovery, and prove
+both crash positions: before parent acceptance and after acceptance but before
+local finalization. See
+[Decision 0015](../decisions/0015-t09-per-thread-completion-coordinator-final-acceptance-remediation.md)
+and the persisted
+[independent review](../reviews/09-per-thread-completion-coordinator-review.md).
 
 ### Delivered scope
 
