@@ -174,9 +174,10 @@ for session-attached paths.
   obligation) and proves the lease-expiry reconciliation behavior at the
   seam.
 - **Working-tree isolation note:** this implementation was completed while
-  uncommitted Ticket 09 WIP (completion coordinator) sits in the shared
-  working tree. The ticket-10 commit contains ONLY ticket-10 changes;
-  ticket-09 files remain uncommitted and untouched.
+  a parallel Ticket 09 stream worked in the same tree. Part of the
+  ticket-10 infrastructure landed inside the ticket-09 stream's commit
+  `98b9e990` (see the commit note below); the ticket-10 completion commit is
+  `e58ff719`.
 
 ### Acceptance evidence matrix
 
@@ -219,14 +220,22 @@ for session-attached paths.
 - Regression: PiSubagentExecutionRepository 12/12, piSubagentCompletionOutbox,
   piSubagentTerminalLifecycle, piSubagentCancellationCoordinator,
   piSubagentBridge, piSubagentRestartReconciliation — 98/98; config.test.ts +
-  main.test.ts — 220/220; contracts piSubagents.test.ts — 13/13; wallclock
+  main.test.ts — 243/243; contracts piSubagents.test.ts — 13/13; wallclock
   per-file standalone: TerminalAcceptance 2/2, CancellationAcceptance 2/2
   (Decision 0008 binding method, clean env `env -i PATH HOME`).
-- Server typecheck (`tsc --noEmit`): zero errors attributable to this
-  ticket. (Pre-existing unrelated errors remain in the working tree from
-  uncommitted Ticket 09 WIP — `piSubagentCompletionCoordinator.test.ts`
-  importing its not-yet-written module and `PiAdapter.ts` ticket-09
-  references; documented in the isolation note above.)
-- Full server unit project: 4,562 passed / 7 failed / 17 skipped — the 7
-  failures are the documented pre-existing `CursorTextGeneration.test.ts`
-  environment failures (identical to the Ticket 07/08 reports).
+- Server typecheck (`tsc --noEmit`): zero errors at the final commit.
+- Full server unit project (pre-commit run): 4,558 passed / 7 failed /
+  17 skipped — the 7 failures are the documented pre-existing
+  `CursorTextGeneration.test.ts` environment failures (identical to the
+  Ticket 07/08 reports).
+
+### Commit note (shared working tree)
+
+Ticket 10 was implemented while a parallel ticket-09 stream worked in the
+same tree. The ticket-10 persistence/contract/config seams
+(`listNonTerminalExecutions`, `recordOrphanedEvent`, the F1/F2 recovery
+changes, the diagnostic literals, the orphan-after resolver and its tests)
+landed inside the ticket-09 stream's commit `98b9e990` when it committed the
+shared tree first; commit `e58ff719` adds the reconciliation coordinator,
+startup wiring, wallclock acceptance file, and the ticket document that
+complete ticket 10. Both commits are on `main`.
