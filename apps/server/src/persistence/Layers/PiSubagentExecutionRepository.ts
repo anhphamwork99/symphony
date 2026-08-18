@@ -121,6 +121,14 @@ interface ObservationRow {
   readonly leaseExpiresAt: string | null;
 }
 
+interface TerminalEvidenceRow {
+  readonly terminalSummary: string | null;
+  readonly terminalTranscriptRef: string | null;
+  readonly staleTerminalEvents: number;
+}
+
+const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
+
 export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -439,28 +447,42 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             // terminal event arrives with evidence (T06-AC4). The legacy
             // premature mapping of cancelling→cancelled(desired) is removed;
             // terminal states map desired=state as before.
+            const inputIsTerminal =
+              input.state === "cancelled" ||
+              input.state === "failed" ||
+              input.state === "succeeded" ||
+              input.state === "rejected";
+            const aggregateAlreadyTerminal = TERMINAL_OBSERVED_STATES.has(
+              currentExecution.observedState,
+            );
             const nextDesired =
               input.state === "cancelling"
                 ? "cancelling"
-                : input.state === "cancelled" ||
-                    input.state === "failed" ||
-                    input.state === "succeeded" ||
-                    input.state === "rejected"
+                : inputIsTerminal
                   ? input.state
                   : currentExecution.desiredState;
 
-            yield* sql`
-              UPDATE pi_subagent_executions
-              SET
-                attempt_id = ${input.attemptId},
-                generation = ${input.generation},
-                observed_state = ${input.state},
-                desired_state = ${nextDesired},
-                diagnostic_code = ${diagnosticCode},
-                rejection_reason = ${diagnosticMessage},
-                updated_at = ${input.occurredAt}
-              WHERE execution_id = ${input.executionId}
-            `;
+            // Ticket 07: a terminal event through the generic lifecycle path
+            // must never overwrite an already-terminal aggregate — the first
+            // applicable terminal wins (T07-AC2/T07-AC7). Such a terminal is
+            // journaled as history only (the journal insert above stands);
+            // the dedicated recordTerminalEvent seam additionally counts it.
+            if (inputIsTerminal && aggregateAlreadyTerminal) {
+              // No aggregate mutation: first applicable terminal stays owner.
+            } else {
+              yield* sql`
+                UPDATE pi_subagent_executions
+                SET
+                  attempt_id = ${input.attemptId},
+                  generation = ${input.generation},
+                  observed_state = ${input.state},
+                  desired_state = ${nextDesired},
+                  diagnostic_code = ${diagnosticCode},
+                  rejection_reason = ${diagnosticMessage},
+                  updated_at = ${input.occurredAt}
+                WHERE execution_id = ${input.executionId}
+              `;
+            }
           }
 
           const updatedExecutionRows = yield* getByIdInternal(input.executionId);
@@ -1020,6 +1042,216 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         ),
       );
 
+  /**
+   * Ticket 07 journal-first terminal ingest (T07-AC1/AC2/AC4/AC7).
+   *
+   * One transaction, in order: dedup lookup → execution lookup → sequence
+   * continuity evidence → journal insert → guarded aggregate UPDATE. The
+   * first applicable terminal for the CURRENT attempt/generation wins and
+   * the UPDATE applies only when the aggregate is not already terminal;
+   * stale/racing terminals increment the durable stale counter and never
+   * mutate truth. Sequence gaps are REPORTED (continuity), never repaired,
+   * deleted, or delayed (T07-AC3).
+   */
+  const recordTerminalEvent: PiSubagentExecutionRepositoryShape["recordTerminalEvent"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `terminal_${input.executionId}_${input.attemptId}_gen${input.generation}_${input.state}`;
+          const metadataJson = JSON.stringify({
+            phase: "terminal",
+            summary: input.summary,
+            ...(input.transcriptRef !== undefined && input.transcriptRef !== null
+              ? { transcriptRef: input.transcriptRef }
+              : {}),
+            ...(input.outcomeState !== undefined && input.outcomeState !== null
+              ? { outcomeState: input.outcomeState }
+              : {}),
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordTerminalEvent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          // Sequence continuity evidence (T07-AC3): attempt/generation-local
+          // prior max. Computed BEFORE the insert so the gap signal describes
+          // the ingest, not the post-state.
+          const priorMaxRows = yield* sql<{ readonly maxSequence: number | null }>`
+              SELECT MAX(sequence) AS "maxSequence"
+              FROM pi_subagent_lifecycle_journal
+              WHERE execution_id = ${input.executionId}
+                AND attempt_id = ${input.attemptId}
+                AND generation = ${input.generation}
+            `;
+          const priorMaxSequence = priorMaxRows[0]?.maxSequence ?? null;
+          const hasGap = priorMaxSequence !== null && input.sequence > priorMaxSequence + 1;
+          const continuity = { hasGap, priorMaxSequence };
+
+          if (existing.length > 0) {
+            return {
+              kind: "already_applied" as const,
+              event: journalRowToEvent(existing[0]!, execution),
+              execution,
+              continuity,
+            };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+            state: input.state,
+            occurredAt: input.occurredAt,
+            diagnosticCode: input.diagnosticCode ?? null,
+            diagnosticMessage: input.diagnosticMessage ?? null,
+            metadataJson,
+          });
+
+          // Stale classification BEFORE any aggregate mutation.
+          const supersededAttempt = input.attemptId !== execution.attemptId;
+          const supersededGeneration = input.generation < execution.generation;
+          const alreadyTerminal = TERMINAL_OBSERVED_STATES.has(execution.observedState);
+
+          if (supersededAttempt || supersededGeneration) {
+            // Journaled as history + counted; never overwrites current
+            // truth (T07-AC4).
+            const counted = yield* sql<{ readonly stale: number }>`
+                UPDATE pi_subagent_executions
+                SET stale_terminal_events = stale_terminal_events + 1,
+                    updated_at = ${input.occurredAt}
+                WHERE execution_id = ${input.executionId}
+                RETURNING stale_terminal_events AS "stale"
+              `;
+            const refreshed = yield* getByIdInternal(input.executionId);
+            const reason: "superseded_attempt" | "superseded_generation" = supersededAttempt
+              ? "superseded_attempt"
+              : "superseded_generation";
+            return {
+              kind: "ignored_stale" as const,
+              reason,
+              staleTerminalEvents: counted[0]?.stale ?? 1,
+              execution: rowToExecutionRecord(refreshed[0] ?? executionRows[0]!),
+              continuity,
+            };
+          }
+
+          if (alreadyTerminal) {
+            // First applicable terminal already owns the aggregate (a
+            // durable `cancelled` from the cancel coordinator, or another
+            // terminal). This terminal is history + counted (T07-AC7).
+            const counted = yield* sql<{ readonly stale: number }>`
+                UPDATE pi_subagent_executions
+                SET stale_terminal_events = stale_terminal_events + 1,
+                    updated_at = ${input.occurredAt}
+                WHERE execution_id = ${input.executionId}
+                RETURNING stale_terminal_events AS "stale"
+              `;
+            const refreshed = yield* getByIdInternal(input.executionId);
+            return {
+              kind: "ignored_stale" as const,
+              reason: "already_terminal_other_event" as const,
+              staleTerminalEvents: counted[0]?.stale ?? 1,
+              execution: rowToExecutionRecord(refreshed[0] ?? executionRows[0]!),
+              continuity,
+            };
+          }
+
+          // First applicable terminal: applied atomically with the journal
+          // insert (single transaction). observed+desired both settle.
+          yield* sql`
+              UPDATE pi_subagent_executions
+              SET
+                attempt_id = ${input.attemptId},
+                generation = ${input.generation},
+                observed_state = ${input.state},
+                desired_state = ${input.state},
+                diagnostic_code = ${input.diagnosticCode ?? null},
+                rejection_reason = ${input.diagnosticMessage ?? null},
+                terminal_summary = ${input.summary},
+                terminal_transcript_ref = ${input.transcriptRef ?? null},
+                updated_at = ${input.occurredAt}
+              WHERE execution_id = ${input.executionId}
+                AND observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+            `;
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return {
+            kind: "recorded" as const,
+            event: journalRowToEvent(
+              {
+                eventId,
+                executionId: input.executionId,
+                attemptId: input.attemptId,
+                generation: input.generation,
+                sequence: input.sequence,
+                state: input.state,
+                occurredAt: input.occurredAt,
+                diagnosticCode: input.diagnosticCode ?? null,
+                diagnosticMessage: input.diagnosticMessage ?? null,
+                metadataJson,
+              },
+              refreshed,
+            ),
+            execution: refreshed,
+            continuity,
+          };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordTerminalEvent:insert"),
+        ),
+      );
+
+  /**
+   * Ticket 07 durable terminal-evidence reader (bounded summary,
+   * transcript reference, stale counter) for projections/reconciliation.
+   */
+  const getTerminalEvidence: PiSubagentExecutionRepositoryShape["getTerminalEvidence"] = (
+    executionId,
+  ) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<TerminalEvidenceRow>`
+          SELECT
+            terminal_summary AS "terminalSummary",
+            terminal_transcript_ref AS "terminalTranscriptRef",
+            stale_terminal_events AS "staleTerminalEvents"
+          FROM pi_subagent_executions
+          WHERE execution_id = ${executionId}
+          LIMIT 1
+        `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getTerminalEvidence:query"),
+        ),
+      );
+      if (rows.length === 0) {
+        return Option.none();
+      }
+      const row = rows[0]!;
+      return Option.some({
+        terminalSummary: row.terminalSummary ?? null,
+        terminalTranscriptRef: row.terminalTranscriptRef ?? null,
+        staleTerminalEvents:
+          typeof row.staleTerminalEvents === "number" ? row.staleTerminalEvents : 0,
+      });
+    });
+
   const listJournalEvents: PiSubagentExecutionRepositoryShape["listJournalEvents"] = (
     executionId,
   ) =>
@@ -1081,6 +1313,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     listCancellableByParentTurn,
     recordCancellationIntent,
     recordCancelledAck,
+    recordTerminalEvent,
+    getTerminalEvidence,
   } satisfies PiSubagentExecutionRepositoryShape;
 });
 

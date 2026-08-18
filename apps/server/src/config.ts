@@ -54,6 +54,50 @@ export const DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 2;
 export const MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 0;
 export const MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 5;
 
+// Ticket 07: terminal payload bounding knob (T07-AC5) — the server truncates
+// any producer-supplied terminal summary to this length before it is stored
+// or emitted. Same resolver contract: nullish → default, range check,
+// invalid anything → default, never clamped.
+export const DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 2000;
+export const MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 64;
+export const MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS = 32768;
+
+export function resolvePiSubagentTerminalSummaryMaxChars(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS ||
+      rawInput > MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS
+    ) {
+      return DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS ||
+      parsed > MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS
+    ) {
+      return DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+}
+
 export function resolvePiSubagentProgressRateHz(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -361,6 +405,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentLeaseDurationMs?: number;
   readonly piSubagentCancelAckTimeoutMs?: number;
   readonly piSubagentCancelRetryLimit?: number;
+  readonly piSubagentTerminalSummaryMaxChars?: number;
 }
 
 export function preparePrivateServerPaths(

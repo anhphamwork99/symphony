@@ -31,6 +31,10 @@ import {
   MIN_PI_SUBAGENT_PROGRESS_RATE_HZ,
   MIN_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
   MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
+  DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  resolvePiSubagentTerminalSummaryMaxChars,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
@@ -541,6 +545,43 @@ describe("resolvePiSubagentCancelRetryLimit (Issue 06)", () => {
   it("falls back to the default without clamping for invalid inputs", () => {
     for (const input of [null, "", "abc", "2x", true, {}, Infinity, NaN, 2.5, -1, 6]) {
       expect(resolvePiSubagentCancelRetryLimit(input)).toBe(DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT);
+    }
+  });
+});
+
+describe("resolvePiSubagentTerminalSummaryMaxChars (Issue 07)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS).toBe(2000);
+    expect(MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS).toBe(64);
+    expect(MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS).toBe(32768);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentTerminalSummaryMaxChars(undefined)).toBe(2000);
+    expect(resolvePiSubagentTerminalSummaryMaxChars(64)).toBe(64);
+    expect(resolvePiSubagentTerminalSummaryMaxChars("64")).toBe(64);
+    expect(resolvePiSubagentTerminalSummaryMaxChars(32768)).toBe(32768);
+    expect(resolvePiSubagentTerminalSummaryMaxChars(" 1500 ")).toBe(1500);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [
+      null,
+      "",
+      "abc",
+      "2000chars",
+      true,
+      {},
+      Infinity,
+      NaN,
+      2000.5,
+      63,
+      32769,
+      -1,
+    ]) {
+      expect(resolvePiSubagentTerminalSummaryMaxChars(input)).toBe(
+        DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+      );
     }
   });
 });

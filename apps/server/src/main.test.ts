@@ -462,6 +462,56 @@ it.layer(testLayer)("server CLI command", (it) => {
       }),
   );
 
+  it.effect(
+    "resolves the Pi subagent terminal-summary bound knob on the production ServerConfigLive path (issue 07 / T07-AC5)",
+    () =>
+      // Same production resolution site as the other Pi subagent knobs: the
+      // env is mutated directly and always restored.
+      Effect.gen(function* () {
+        const key = "SYNARA_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS";
+        const previousValue = process.env[key];
+        const restore = Effect.sync(() => {
+          if (previousValue === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previousValue;
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            // Valid in-range value is preserved verbatim (no clamping).
+            process.env[key] = "4096";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 4_096);
+
+            // Invalid classes fall back to the 2000 default: non-numeric,
+            // fractional, under-range, and over-range are rejected.
+            process.env[key] = "abc";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 2_000);
+
+            process.env[key] = "2000.5";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 2_000);
+
+            process.env[key] = "63";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 2_000);
+
+            process.env[key] = "32769";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 2_000);
+
+            // Unset also resolves to the default.
+            delete process.env[key];
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentTerminalSummaryMaxChars, 2_000);
+          }),
+          () => restore,
+        );
+      }),
+  );
+
   it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>
     Effect.gen(function* () {
       const messages: string[] = [];

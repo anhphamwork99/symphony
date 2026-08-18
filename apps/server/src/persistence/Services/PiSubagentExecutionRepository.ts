@@ -182,6 +182,70 @@ export interface RecordPiSubagentCancelledAckInput {
   readonly diagnosticMessage?: string;
 }
 
+/**
+ * Ticket 07 terminal evidence input (T07-AC5). The summary is server-bounded
+ * before this call; the transcript reference is opaque authorization-scoped.
+ */
+export interface RecordPiSubagentTerminalEventInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  /** Attempt-local terminal sequence (band 40: child settlement terminals). */
+  readonly sequence: number;
+  readonly state: "succeeded" | "failed";
+  readonly occurredAt: string;
+  readonly summary: string;
+  readonly transcriptRef?: string | null;
+  readonly outcomeState?: string | null;
+  readonly diagnosticCode?: PiSubagentDiagnosticCode | null;
+  readonly diagnosticMessage?: string | null;
+}
+
+/**
+ * Ticket 07 terminal ingest outcome. Exactly one state effect per terminal:
+ * - `recorded` — first applicable terminal for the CURRENT attempt/generation
+ *   (or non-terminal aggregate advancing into that terminal); aggregate and
+ *   journal updated atomically.
+ * - `already_applied` — exact replay of a previously ingested terminal
+ *   (dedup identity: eventId or attempt/generation/sequence key).
+ * - `ignored_stale` — journaled as history and counted, but never applied:
+ *   either a superseded attempt/generation, or the aggregate already holds an
+ *   applicable terminal from a different event (first applicable terminal
+ *   wins; no flip-flop, T07-AC2/T07-AC4/T07-AC7).
+ */
+export type PiSubagentTerminalRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly event: PiSubagentLifecycleEvent;
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly event: PiSubagentLifecycleEvent;
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "ignored_stale";
+      readonly reason:
+        | "superseded_attempt"
+        | "superseded_generation"
+        | "already_terminal_other_event";
+      readonly staleTerminalEvents: number;
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
+/**
+ * Ticket 07 attempt-sequence continuity evidence for the terminal ingest
+ * (T07-AC3). Reported by the repository layer so the coordinator can emit a
+ * stable sequence-gap diagnostic WITHOUT deleting or delaying the terminal.
+ */
+export interface PiSubagentSequenceContinuity {
+  /** True when the ingested event's sequence is > max prior sequence + 1. */
+  readonly hasGap: boolean;
+  /** Highest sequence previously journaled for this attempt/generation. */
+  readonly priorMaxSequence: number | null;
+}
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
@@ -248,6 +312,33 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordCancelledAck: (
     input: RecordPiSubagentCancelledAckInput,
   ) => Effect.Effect<PiSubagentLifecycleRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 07 journal-first terminal ingest (T07-AC1/AC2/AC4/AC7). Appends
+   * the terminal journal row and applies the aggregate atomically: the first
+   * applicable terminal wins; replays are already_applied; superseded or
+   * racing terminals are journaled, counted (stale_terminal_events), and
+   * never overwrite current truth. Sequence-gap evidence is returned so the
+   * caller emits a stable diagnostic (T07-AC3) without deleting or delaying
+   * the terminal.
+   */
+  readonly recordTerminalEvent: (
+    input: RecordPiSubagentTerminalEventInput,
+  ) => Effect.Effect<
+    PiSubagentTerminalRecordResult & { readonly continuity: PiSubagentSequenceContinuity },
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 07 durable terminal evidence reader (bounded summary + transcript
+   * reference + stale counter) for projections and reconciliation.
+   */
+  readonly getTerminalEvidence: (executionId: string) => Effect.Effect<
+    Option.Option<{
+      readonly terminalSummary: string | null;
+      readonly terminalTranscriptRef: string | null;
+      readonly staleTerminalEvents: number;
+    }>,
+    PiSubagentExecutionRepositoryError
+  >;
 }
 
 export class PiSubagentExecutionRepository extends ServiceMap.Service<

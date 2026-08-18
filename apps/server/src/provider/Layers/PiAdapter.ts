@@ -131,6 +131,7 @@ import {
   makeDefaultPiSubagentProgressSchedule,
   type PiSubagentProgressCoalescer,
 } from "../piSubagentProgressCoalescer.ts";
+import { ingestPiSubagentTerminal } from "../piSubagentTerminalCoordinator.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -3229,10 +3230,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   (obsInput.kind !== "started" &&
                     obsInput.kind !== "detached" &&
                     obsInput.kind !== "progress" &&
-                    obsInput.kind !== "heartbeat")
+                    obsInput.kind !== "heartbeat" &&
+                    obsInput.kind !== "terminal")
                 ) {
                   throw new Error(
-                    "Invalid observation kind: expected 'started', 'detached', 'progress', or 'heartbeat'",
+                    "Invalid observation kind: expected 'started', 'detached', 'progress', 'heartbeat', or 'terminal'",
                   );
                 }
 
@@ -3240,6 +3242,125 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   typeof obsInput.occurredAt === "string" && obsInput.occurredAt.trim().length > 0
                     ? obsInput.occurredAt.trim()
                     : new Date().toISOString();
+
+                // Ticket 07 terminal path (T07-AC1..AC7): terminal evidence
+                // is control truth — it NEVER enters the progress coalescer
+                // (T07-AC6) and is journaled first; notification happens
+                // strictly post-commit. Unlike progress/heartbeat, a failed
+                // terminal write degrades control health and rejects the
+                // producer: an undurable terminal must never be swallowed
+                // into a silent success-shaped handle.
+                if (obsInput.kind === "terminal") {
+                  const payload = obsInput.terminal;
+                  if (
+                    !payload ||
+                    (payload.state !== "succeeded" && payload.state !== "failed") ||
+                    typeof payload.summary !== "string"
+                  ) {
+                    throw new Error(
+                      "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
+                    );
+                  }
+                  const ingest = await Effect.runPromise(
+                    Effect.result(
+                      ingestPiSubagentTerminal({
+                        repository: piSubagentRepository,
+                        summaryMaxChars: serverConfig.piSubagentTerminalSummaryMaxChars,
+                        observation: {
+                          executionId: admissionResult.executionId,
+                          attemptId: admissionResult.attemptId,
+                          generation: admissionResult.generation,
+                          state: payload.state,
+                          occurredAt,
+                          summary: payload.summary,
+                          transcriptRef:
+                            typeof payload.transcriptRef === "string" &&
+                            payload.transcriptRef.trim().length > 0
+                              ? payload.transcriptRef.trim()
+                              : undefined,
+                          outcomeState:
+                            typeof payload.outcomeState === "string" &&
+                            payload.outcomeState.trim().length > 0
+                              ? payload.outcomeState.trim()
+                              : undefined,
+                          diagnosticMessage:
+                            typeof payload.diagnosticMessage === "string" &&
+                            payload.diagnosticMessage.trim().length > 0
+                              ? payload.diagnosticMessage.trim()
+                              : undefined,
+                        },
+                        onTerminalPersisted: (event) => {
+                          // T07-AC1: completion delivery may begin only now
+                          // (journal + aggregate are committed). Ticket 08
+                          // attaches its outbox creation here.
+                          offerRuntimeEvent({
+                            ...makeEventBase(context),
+                            type: "runtime.warning",
+                            payload: {
+                              message: `Pi subagent execution ${event.result.execution.observedState} with durable terminal evidence [${event.result.execution.executionId}]`,
+                              detail: {
+                                executionId: event.result.execution.executionId,
+                                observedState: event.result.execution.observedState,
+                              },
+                            },
+                            raw: {
+                              source: "pi.sdk.event",
+                              method: "subagents/terminal-settled",
+                              payload: {
+                                executionId: event.result.execution.executionId,
+                                observedState: event.result.execution.observedState,
+                                attemptId: event.result.execution.attemptId,
+                                generation: event.result.execution.generation,
+                              },
+                            },
+                          } satisfies ProviderRuntimeEvent);
+                        },
+                        onDiagnostic: (event) => {
+                          offerRuntimeEvent({
+                            ...makeEventBase(context),
+                            type: "runtime.warning",
+                            payload: {
+                              message: `Pi subagent terminal diagnostic [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                              detail: {
+                                executionId: event.executionId,
+                                diagnosticCode: event.diagnosticCode,
+                              },
+                            },
+                            raw: {
+                              source: "pi.sdk.event",
+                              method: "subagents/terminal-diagnostic",
+                              payload: {
+                                executionId: event.executionId,
+                                diagnosticCode: event.diagnosticCode,
+                              },
+                            },
+                          } satisfies ProviderRuntimeEvent);
+                        },
+                        onTerminalPersistenceFailed: (event) => {
+                          if (adapterControlHealth) {
+                            void Effect.runPromise(
+                              adapterControlHealth.markDegraded(
+                                `Failed to persist terminal evidence: ${event.diagnosticMessage}`,
+                                "pi_subagent_terminal_persistence_failed",
+                                { threadId: input.threadId },
+                              ),
+                            ).then((transition) => {
+                              if (transition) {
+                                offerSubagentControlHealthWarning(transition);
+                              }
+                            });
+                          }
+                        },
+                      }),
+                    ),
+                  );
+                  if (ingest._tag === "Failure") {
+                    const err = new Error("pi_subagent_terminal_persistence_failed");
+                    (err as any).diagnosticCode = "pi_subagent_terminal_persistence_failed";
+                    throw err;
+                  }
+                  return;
+                }
 
                 // Ticket 23 observation kinds take the coalescing/UPDATE-only
                 // paths — they never journal and never touch desired/observed

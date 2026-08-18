@@ -35,13 +35,38 @@ export const PI_SUBAGENT_MANAGED_FOREGROUND_KEY = Symbol.for(
 );
 const PI_SUBAGENT_PROBE_CACHE_KEY = Symbol.for("synara.pi.subagents.probe_cache");
 
-export type PiSubagentObservationKind = "started" | "detached" | "progress" | "heartbeat";
+export type PiSubagentObservationKind =
+  | "started"
+  | "detached"
+  | "progress"
+  | "heartbeat"
+  | "terminal";
 
 export interface PiSubagentObservationInput {
   readonly kind: PiSubagentObservationKind;
   readonly occurredAt: string;
   /** Present for progress-kind observations only; opaque latest-snapshot JSON. */
   readonly progressJson?: string;
+  /** Present for terminal-kind observations only (Ticket 07 / T07-AC5). */
+  readonly terminal?: PiSubagentTerminalObservationPayload;
+}
+
+/**
+ * Ticket 07 terminal observation payload (extension → host). Carries only a
+ * bounded summary and an authorized transcript reference — never raw
+ * unbounded transcript output. The server truncates the summary again
+ * before persistence regardless of producer bounding.
+ */
+export interface PiSubagentTerminalObservationPayload {
+  /** "succeeded" | "failed" (cancellation settles via the durable cancel path). */
+  readonly state: string;
+  /** Bounded excerpt of the child result (producer-side cap). */
+  readonly summary: string;
+  /** Opaque reference to the extension-owned transcript artifact. */
+  readonly transcriptRef?: string;
+  /** Best-effort parsed outcome judgment, distinct from execution status. */
+  readonly outcomeState?: string;
+  readonly diagnosticMessage?: string;
 }
 
 export interface PiSubagentProgressPolicy {

@@ -19,6 +19,7 @@ export const PI_SUBAGENT_CAPABILITIES = [
   "bounded-foreground-attachment",
   "coalesced-progress",
   "durable-cancellation",
+  "journal-terminal-lifecycle",
   "terminal-outbox",
   "restart-reconciliation",
   "paginated-transcripts",
@@ -49,6 +50,9 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_cancel_already_terminal",
   "pi_subagent_cancel_owner_death",
   "pi_subagent_cancel_escalated",
+  "pi_subagent_event_sequence_gap",
+  "pi_subagent_terminal_stale_ignored",
+  "pi_subagent_terminal_persistence_failed",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -247,3 +251,33 @@ export const PiSubagentCancelResult = Schema.Struct({
   diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentCancelResult = typeof PiSubagentCancelResult.Type;
+
+/**
+ * Ticket 07 terminal states a child settlement may report. `cancelled` is
+ * NOT reported through this surface — the durable cancel coordinator owns
+ * cancellation settlement from termination evidence (T06-AC4); an extension
+ * terminal arriving after a durable `cancelled` is ignored and counted
+ * without flip-flop (T07-AC7).
+ */
+export const PiSubagentTerminalState = Schema.Literals(["succeeded", "failed"]);
+export type PiSubagentTerminalState = typeof PiSubagentTerminalState.Type;
+
+/**
+ * Ticket 07 bounded terminal payload (T07-AC5). The summary is a bounded
+ * excerpt of the child result; the transcript reference points at the
+ * extension-owned output/transcript artifact. Never raw unbounded output.
+ */
+export const PiSubagentTerminalEvidence = Schema.Struct({
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  state: PiSubagentTerminalState,
+  occurredAt: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  /** Reference (opaque to the server) to the authorized transcript artifact. */
+  transcriptRef: Schema.optional(TrimmedNonEmptyString),
+  /** Best-effort parsed outcome judgment, distinct from execution status. */
+  outcomeState: Schema.optional(TrimmedNonEmptyString),
+  diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
+});
+export type PiSubagentTerminalEvidence = typeof PiSubagentTerminalEvidence.Type;

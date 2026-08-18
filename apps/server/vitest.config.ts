@@ -28,6 +28,7 @@ const WALLCLOCK_TESTS = [
   "src/provider/piSubagentProgressAcceptance.test.ts",
   "src/provider/piSubagentIntegratedAcceptance.test.ts",
   "src/provider/piSubagentCancellationAcceptance.test.ts",
+  "src/provider/piSubagentTerminalAcceptance.test.ts",
 ];
 
 const wallclockProject = defineConfig({

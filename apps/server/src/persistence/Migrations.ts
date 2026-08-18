@@ -116,6 +116,7 @@ import Migration0097 from "./Migrations/097_ProjectMcpActivation.ts";
 import Migration0098 from "./Migrations/098_PiSubagentExecutions.ts";
 import Migration0099 from "./Migrations/099_PiSubagentLeasesAndProgress.ts";
 import Migration0100 from "./Migrations/100_PiSubagentAdmissionIdentity.ts";
+import Migration0101 from "./Migrations/101_PiSubagentTerminalLifecycle.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -231,6 +232,7 @@ export const migrationEntries = [
   [98, "PiSubagentExecutions", Migration0098],
   [99, "PiSubagentLeasesAndProgress", Migration0099],
   [100, "PiSubagentAdmissionIdentity", Migration0100],
+  [101, "PiSubagentTerminalLifecycle", Migration0101],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

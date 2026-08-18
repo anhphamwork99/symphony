@@ -389,6 +389,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "bounded-foreground-attachment",
     "coalesced-progress",
     "durable-cancellation",
+    "journal-terminal-lifecycle",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -628,7 +629,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
     // any leg of this file.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.12.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.13.0-alfie.1");
 
     const rootDir = mkdtempSync(join(tmpdir(), "synara-t24-integrated-"));
     createdDirs.push(rootDir);
@@ -773,9 +774,9 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
           migrationEntries.map(([id, name]) => [id, name]),
         );
-        // effect_sql_migrations rows complete through 100, and a second
+        // effect_sql_migrations rows complete through 101, and a second
         // explicit run is a no-op (idempotent convergence).
-        expect(tracker[tracker.length - 1]!.migration_id).toBe(100);
+        expect(tracker[tracker.length - 1]!.migration_id).toBe(101);
         const secondPass = yield* runMigrations();
         expect(secondPass.length).toBe(0);
         yield* repositoryRoundTrip("fresh", 30_000);
@@ -801,7 +802,9 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
           VALUES (90, 'ProjectMcpActivation')
         `;
         const executed = yield* runMigrations();
-        expect(executed.map(([id]) => id)).toEqual([90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]);
+        expect(executed.map(([id]) => id)).toEqual([
+          90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
+        ]);
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
@@ -843,7 +846,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
             (96, 'ProjectionThreadsGoalAchievements')
         `;
         const executed = yield* runMigrations();
-        expect(executed.map(([id]) => id)).toEqual([97, 98, 99, 100]);
+        expect(executed.map(([id]) => id)).toEqual([97, 98, 99, 100, 101]);
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
@@ -1763,7 +1766,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         "bounded-foreground-attachment",
         "coalesced-progress",
       ],
-      extensionVersion: "0.12.0-alfie.1",
+      extensionVersion: "0.13.0-alfie.1",
     });
     const capturingFloodExtension = {
       name: "pi-subagents-t24-flood",
@@ -1882,10 +1885,20 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
           Date.parse(observation.leaseExpiresAt!) - Date.parse(observation.lastHeartbeatAt!);
         expect(leaseLead).toBe(leaseDurationMs);
       }
-      // Journal truth for the real child is still lifecycle-only.
+      // Journal truth for the real child: lifecycle + the journal-first
+      // terminal (Issue 07: the slow child is aborted by session teardown
+      // after the assertions, so no terminal row lands HERE — but the
+      // foreground-detached child reports its terminal asynchronously; the
+      // sequence set therefore ends with the terminal band when it lands
+      // before the journal read).
       const realJournal = yield* repo.listJournalEvents(realExecutionId);
       expect(realJournal[0]!.state).toBe("accepted");
-      expect(realJournal.map((e) => e.sequence)).toEqual([1, 2, 3]);
+      const realSequences = realJournal.map((e) => e.sequence);
+      expect(realSequences.slice(0, 3)).toEqual([1, 2, 3]);
+      for (const sequence of realSequences.slice(3)) {
+        // Anything after the lifecycle band is terminal evidence only.
+        expect(sequence).toBe(40);
+      }
       yield* adapter.stopSession("th_t24_ac6_real" as ThreadId);
 
       // ── Deterministic saturation flood on the REAL schedule ──

@@ -29,6 +29,7 @@ import {
   resolvePiSubagentProgressRateHz,
   resolvePiSubagentCancelAckTimeoutMs,
   resolvePiSubagentCancelRetryLimit,
+  resolvePiSubagentTerminalSummaryMaxChars,
   resolveStaticDir,
   ServerConfig,
   type RuntimeMode,
@@ -356,6 +357,9 @@ const ServerConfigLive = (input: CliInput) =>
         ),
         piSubagentCancelRetryLimit: resolvePiSubagentCancelRetryLimit(
           process.env.SYNARA_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
+        ),
+        piSubagentTerminalSummaryMaxChars: resolvePiSubagentTerminalSummaryMaxChars(
+          process.env.SYNARA_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
         ),
       } satisfies ServerConfigShape;
 
