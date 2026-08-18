@@ -37,6 +37,10 @@ import {
   MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
   resolvePiSubagentCompletionRetryLimit,
+  DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+  MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+  MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+  resolvePiSubagentCompletionBatchWindowMs,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveCanonicalWorkspaceRoots,
@@ -572,6 +576,30 @@ describe("resolvePiSubagentCompletionRetryLimit (Issue 08)", () => {
     for (const input of [null, "", "abc", "3x", true, {}, Infinity, NaN, 2.5, -1, 101]) {
       expect(resolvePiSubagentCompletionRetryLimit(input)).toBe(
         DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
+      );
+    }
+  });
+});
+
+describe("resolvePiSubagentCompletionBatchWindowMs (Issue 09)", () => {
+  it("exports the expected bounds and default constants", () => {
+    expect(DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS).toBe(2000);
+    expect(MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS).toBe(0);
+    expect(MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS).toBe(30000);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentCompletionBatchWindowMs(undefined)).toBe(2000);
+    expect(resolvePiSubagentCompletionBatchWindowMs(0)).toBe(0);
+    expect(resolvePiSubagentCompletionBatchWindowMs("0")).toBe(0);
+    expect(resolvePiSubagentCompletionBatchWindowMs(30000)).toBe(30000);
+    expect(resolvePiSubagentCompletionBatchWindowMs("500")).toBe(500);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [null, "", "abc", "3x", true, {}, Infinity, NaN, 2.5, -1, 30001]) {
+      expect(resolvePiSubagentCompletionBatchWindowMs(input)).toBe(
+        DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
       );
     }
   });

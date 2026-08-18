@@ -70,6 +70,60 @@ export const DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 5;
 export const MIN_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 0;
 export const MAX_PI_SUBAGENT_COMPLETION_RETRY_LIMIT = 100;
 
+// Ticket 09: per-thread completion batching window (T09-AC1) — near-
+// simultaneous managed child terminals inside this window coalesce into ONE
+// bounded parent follow-up turn. 0 disables batching (each terminal delivers
+// in its own follow-up). Same resolver contract: nullish → default, range
+// check, invalid anything → default, never clamped.
+export const DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS = 2000;
+export const MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS = 0;
+export const MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS = 30000;
+
+export function resolvePiSubagentCompletionBatchWindowMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS ||
+      rawInput > MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS ||
+      parsed > MAX_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS;
+}
+
+// Ticket 10: lease-expiry orphan threshold (T10-AC7) — how long a non-terminal
+// execution may remain without renewed live-owner evidence (lease expired,
+// no heartbeat) before the same owner-loss reconciliation that runs at
+// restart orphans it. Approximately 60 seconds initially. Same resolver
+// contract: nullish → default, range check, invalid → default, never clamped.
+export const DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS = 60000;
+export const MIN_PI_SUBAGENT_ORPHAN_AFTER_MS = 1000;
+export const MAX_PI_SUBAGENT_ORPHAN_AFTER_MS = 3600000;
+
 export function resolvePiSubagentCompletionRetryLimit(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -104,6 +158,42 @@ export function resolvePiSubagentCompletionRetryLimit(
     return parsed;
   }
   return DEFAULT_PI_SUBAGENT_COMPLETION_RETRY_LIMIT;
+}
+
+export function resolvePiSubagentOrphanAfterMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_ORPHAN_AFTER_MS ||
+      rawInput > MAX_PI_SUBAGENT_ORPHAN_AFTER_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_ORPHAN_AFTER_MS ||
+      parsed > MAX_PI_SUBAGENT_ORPHAN_AFTER_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS;
 }
 
 export function resolvePiSubagentTerminalSummaryMaxChars(
@@ -451,6 +541,10 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentCancelRetryLimit?: number;
   readonly piSubagentTerminalSummaryMaxChars?: number;
   readonly piSubagentCompletionRetryLimit?: number;
+  /** Ticket 09: per-thread completion batching window in milliseconds. */
+  readonly piSubagentCompletionBatchWindowMs?: number;
+  /** Ticket 10: lease-expiry orphan threshold (T10-AC7), ~60s initially. */
+  readonly piSubagentOrphanAfterMs?: number;
 }
 
 export function preparePrivateServerPaths(

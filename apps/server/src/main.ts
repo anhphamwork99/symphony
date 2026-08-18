@@ -30,6 +30,7 @@ import {
   resolvePiSubagentCancelAckTimeoutMs,
   resolvePiSubagentCancelRetryLimit,
   resolvePiSubagentCompletionRetryLimit,
+  resolvePiSubagentCompletionBatchWindowMs,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveStaticDir,
   ServerConfig,
@@ -53,6 +54,9 @@ import { ServerSettingsService } from "./serverSettings";
 import { formatHostForUrl, isLoopbackHost, isWildcardHost } from "./startupAccess";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { startThreadRetentionJob } from "./threadRetention";
+import { PiSubagentExecutionRepository } from "./persistence/Services/PiSubagentExecutionRepository.ts";
+import { recoverCompletionOutbox } from "./provider/piSubagentCompletionOutbox.ts";
+import { reconcilePiSubagentExecutions } from "./provider/piSubagentRestartReconciliation.ts";
 import {
   pairExternalMcpClient,
   resolveExternalMcpBaseDir,
@@ -365,6 +369,9 @@ const ServerConfigLive = (input: CliInput) =>
         piSubagentCompletionRetryLimit: resolvePiSubagentCompletionRetryLimit(
           process.env.SYNARA_PI_SUBAGENT_COMPLETION_RETRY_LIMIT,
         ),
+        piSubagentCompletionBatchWindowMs: resolvePiSubagentCompletionBatchWindowMs(
+          process.env.SYNARA_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+        ),
       } satisfies ServerConfigShape;
 
       return config;
@@ -456,6 +463,39 @@ const makeServerProgram = (input: CliInput) =>
     // Start the retention loop after the server is live so startup can serve
     // existing history first, then hide inactive threads from the app in the background.
     yield* startThreadRetentionJob(orchestrationEngine, projectionSnapshotQuery);
+    // Ticket 10: startup reconciliation for managed Pi subagent executions.
+    // Runs AFTER the server is live (history is served first) and BEFORE any
+    // new Pi session can exist — at boot no in-process Pi child can be proven
+    // alive, so this pass restores terminal outcomes from durable journal
+    // truth and orphans every remaining non-terminal execution with the
+    // owner-loss diagnostic (Decision 0013 F3: journal-first outbox recovery
+    // is invoked here and its recovered pending entries enter the fenced
+    // delivery path owned by Ticket 09's consumer).
+    yield* Effect.forkChild(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const outbox = yield* recoverCompletionOutbox({ repository });
+        const reconciliation = yield* reconcilePiSubagentExecutions({
+          repository,
+          mode: "restart",
+          summaryMaxChars: config.piSubagentTerminalSummaryMaxChars,
+        });
+        if (
+          outbox.recovered > 0 ||
+          outbox.failures > 0 ||
+          reconciliation.outcomes.length > 0 ||
+          reconciliation.failures.length > 0
+        ) {
+          yield* Effect.logInfo("pi.subagent.startup-reconciliation", {
+            outboxRecovered: outbox.recovered,
+            outboxFailures: outbox.failures,
+            reconciled: reconciliation.outcomes.length,
+            settlementFailures: reconciliation.failures.length,
+            outcomes: reconciliation.outcomes.map((outcome) => outcome.kind),
+          });
+        }
+      }),
+    );
     // Optional Claude OAuth keepalive. Disabled by default because it touches
     // Claude Code auth data in the background; users can opt in with
     // SYNARA_CLAUDE_KEEPALIVE=1.

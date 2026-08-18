@@ -1,6 +1,12 @@
 import type { PiSubagentDiagnosticCode } from "@synara/contracts";
 import { Effect, Option } from "effect";
 
+import {
+  DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+  MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
+} from "../config.ts";
+
 import type {
   PiSubagentCompletionOutboxEntry,
   PiSubagentExecutionRepositoryShape,
@@ -67,6 +73,19 @@ export interface PiSubagentCompletionDeliveryOutcome {
 export interface RecoverCompletionOutboxInput {
   readonly repository: PiSubagentExecutionRepositoryShape;
   readonly now?: () => string;
+  /**
+   * Decision 0013 F1 (Ticket 10 disposition): summary bound re-applied at
+   * the journal→outbox recovery boundary. Defaults to the accepted terminal
+   * summary cap; integer values within the configuration range are honored,
+   * anything else falls back to the default (symmetric with the terminal
+   * coordinator's MAX guard).
+   */
+  readonly summaryMaxChars?: number | undefined;
+  /**
+   * Decision 0013 F1: transcript-reference bound re-applied at the recovery
+   * boundary (same cap as the terminal coordinator's bounded metadata).
+   */
+  readonly transcriptRefMaxChars?: number | undefined;
   readonly onDiagnostic?: (event: {
     readonly executionId: string;
     readonly diagnosticCode: PiSubagentDiagnosticCode;
@@ -81,16 +100,48 @@ export interface RecoverCompletionOutboxResult {
   readonly failures: number;
 }
 
+/** Recovery-boundary metadata caps (Decision 0013 F1). */
+const MAX_RECOVERY_TRANSCRIPT_REF_CHARS = 1024;
+
+const boundRecoveredString = (value: string | null | undefined, maxChars: number) => {
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+};
+
 /**
  * Journal-first recovery (T08-AC1/AC4): scan applicable terminal journal rows
  * without outbox entries and create their durable pending entries. Idempotent
- * — a second pass recovers nothing.
+ * — a second pass recovers nothing. Decision 0013 F1 (Ticket 10): journal-
+ * extracted summary and transcript-reference values are re-clamped here so
+ * recovered outbox content can never exceed the accepted bounded-evidence
+ * envelope, even for a legacy or future generic journal producer. Decision
+ * 0013 F2 (Ticket 10): the repository scan excludes inapplicable stale
+ * terminals (attempt/generation no longer current) so recovery never
+ * materializes transiently-pending stale entries.
  */
 export const recoverCompletionOutbox = (
   input: RecoverCompletionOutboxInput,
 ): Effect.Effect<RecoverCompletionOutboxResult, unknown> =>
   Effect.gen(function* () {
     const now = input.now ?? (() => new Date().toISOString());
+    const summaryMaxChars =
+      input.summaryMaxChars !== undefined &&
+      Number.isInteger(input.summaryMaxChars) &&
+      input.summaryMaxChars >= MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS &&
+      input.summaryMaxChars <= MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS
+        ? input.summaryMaxChars
+        : DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
+    const transcriptRefMaxChars =
+      input.transcriptRefMaxChars !== undefined &&
+      Number.isInteger(input.transcriptRefMaxChars) &&
+      input.transcriptRefMaxChars > 0
+        ? input.transcriptRefMaxChars
+        : MAX_RECOVERY_TRANSCRIPT_REF_CHARS;
     const missing = yield* Effect.result(input.repository.listTerminalEventsWithoutOutbox());
     if (missing._tag === "Failure") {
       return { recovered: 0, failures: 0 };
@@ -98,9 +149,14 @@ export const recoverCompletionOutbox = (
     let recovered = 0;
     let failures = 0;
     for (const terminal of missing.success) {
+      const boundedSummary = boundRecoveredString(terminal.summary, summaryMaxChars);
+      const boundedTranscriptRef = boundRecoveredString(
+        terminal.transcriptRef,
+        transcriptRefMaxChars,
+      );
       const summary =
-        typeof terminal.summary === "string" && terminal.summary.trim().length > 0
-          ? terminal.summary
+        boundedSummary !== undefined && boundedSummary.trim().length > 0
+          ? boundedSummary
           : `(terminal ${terminal.state}, no summary)`;
       const result = yield* Effect.result(
         input.repository.recordCompletionOutboxEntry({
@@ -111,7 +167,7 @@ export const recoverCompletionOutbox = (
           parentThreadId: terminal.parentThreadId,
           terminalState: terminal.state,
           summary,
-          transcriptRef: terminal.transcriptRef ?? null,
+          transcriptRef: boundedTranscriptRef ?? null,
           now: now(),
         }),
       );

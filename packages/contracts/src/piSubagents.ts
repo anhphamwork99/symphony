@@ -22,6 +22,7 @@ export const PI_SUBAGENT_CAPABILITIES = [
   "durable-cancellation",
   "journal-terminal-lifecycle",
   "terminal-outbox",
+  "completion-delivery-ownership",
   "restart-reconciliation",
   "paginated-transcripts",
 ] as const;
@@ -57,6 +58,8 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_completion_outbox_persistence_failed",
   "pi_subagent_completion_delivery_failed",
   "pi_subagent_completion_superseded",
+  "pi_subagent_owner_loss_orphaned",
+  "pi_subagent_restart_reconciliation_failed",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -343,3 +346,85 @@ export const PiSubagentCompletionOutboxEntry = Schema.Struct({
   acknowledgedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type PiSubagentCompletionOutboxEntry = typeof PiSubagentCompletionOutboxEntry.Type;
+
+/**
+ * Ticket 10 restart-reconciliation evidence (T10-AC1/AC2/AC3). Evidence is
+ * matched against the execution's CURRENT attempt/generation: only a live
+ * owner or a terminal marker carrying the same identity and generation can
+ * keep an execution running or restore its outcome (T10-AC2); anything else
+ * reconciles to non-terminal `orphaned` with an owner-loss diagnostic
+ * (T10-AC1).
+ */
+export const PiSubagentLiveOwnerEvidence = Schema.Struct({
+  /** Bridge listActive/describe match for the current attempt/generation. */
+  kind: Schema.Literal("live_owner"),
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  /** Server clock at which liveness was proven (observation refresh). */
+  observedAt: TrimmedNonEmptyString,
+});
+export type PiSubagentLiveOwnerEvidence = typeof PiSubagentLiveOwnerEvidence.Type;
+
+/**
+ * Ticket 10 transcript terminal marker (T10-AC2). A terminal marker recovered
+ * from transcript evidence carries the attempt/generation it settles; a
+ * marker whose identity does not match the current attempt/generation is
+ * stale and cannot restore an outcome.
+ */
+export const PiSubagentTranscriptTerminalMarker = Schema.Struct({
+  kind: Schema.Literal("transcript_terminal"),
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  /** Restored outcome for the execution aggregate (never `cancelled`). */
+  state: PiSubagentTerminalState,
+  /** Bounded summary excerpt; the server truncates again before persisting. */
+  summary: TrimmedNonEmptyString,
+  transcriptRef: Schema.optional(TrimmedNonEmptyString),
+  outcomeState: Schema.optional(TrimmedNonEmptyString),
+});
+export type PiSubagentTranscriptTerminalMarker =
+  typeof PiSubagentTranscriptTerminalMarker.Type;
+
+/**
+ * Ticket 10 reconciliation outcome per execution (T10-AC1..AC6). `orphaned`
+ * is non-terminal: it exits only through new evidence or explicit resume
+ * (Ticket 14) and makes no claim that prior side effects were rolled back.
+ */
+export const PiSubagentReconciliationOutcome = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("orphaned"),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    /** Generation AFTER the reconciliation fence (old generation + 1). */
+    generation: PositiveInt,
+    diagnosticCode: PiSubagentDiagnosticCode,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("running_refreshed"),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    generation: PositiveInt,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("terminal_restored"),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    generation: PositiveInt,
+    state: PiSubagentTerminalState,
+    source: Schema.Literals(["journal", "transcript_marker"]),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("already_terminal"),
+    executionId: PiSubagentExecutionId,
+    observedState: PiSubagentLifecycleState,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("lease_not_expired"),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    generation: PositiveInt,
+  }),
+]);
+export type PiSubagentReconciliationOutcome = typeof PiSubagentReconciliationOutcome.Type;

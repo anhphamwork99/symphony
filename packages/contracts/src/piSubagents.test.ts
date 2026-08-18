@@ -241,6 +241,15 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
       Schema.decodeSync(PiSubagentCapability)("unsupported-capability" as never),
     ).toThrow();
   });
+
+  it("decodes completion-delivery-ownership capability as a first-class additive capability (T09)", () => {
+    expect(PI_SUBAGENT_CAPABILITIES).toContain("completion-delivery-ownership");
+    const decoded = Schema.decodeSync(PiSubagentCapability)("completion-delivery-ownership");
+    expect(decoded).toBe("completion-delivery-ownership");
+    expect(() =>
+      Schema.decodeSync(PiSubagentCapability)("completion-ownership" as never),
+    ).toThrow();
+  });
 });
 
 describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {

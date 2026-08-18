@@ -1494,26 +1494,38 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     });
 
   const listRecoverableCompletionOutbox: PiSubagentExecutionRepositoryShape["listRecoverableCompletionOutbox"] =
-    (options) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<OutboxRow>`
+    (options) => {
+      const mapError = toPersistenceSqlError(
+        "PiSubagentExecutionRepository.listRecoverableCompletionOutbox:query",
+      );
+      // Ticket 09 per-thread filter: a separate query shape (not an
+      // optional SQL fragment) keeps each statement cacheable.
+      if (options.parentThreadId !== undefined && options.parentThreadId !== null) {
+        return sql<OutboxRow>`
           SELECT ${outboxColumns}
           FROM pi_subagent_completion_outbox
-          WHERE delivery_state = 'pending'
-             OR (
-               delivery_state = 'failed_retryable'
-               AND attempt_count < ${options.retryLimit}
-             )
+          WHERE parent_thread_id = ${options.parentThreadId}
+            AND (
+              delivery_state = 'pending'
+              OR (
+                delivery_state = 'failed_retryable'
+                AND attempt_count < ${options.retryLimit}
+              )
+            )
           ORDER BY created_at ASC, outbox_id ASC
-        `.pipe(
-          Effect.mapError(
-            toPersistenceSqlError(
-              "PiSubagentExecutionRepository.listRecoverableCompletionOutbox:query",
-            ),
-          ),
-        );
-        return rows;
-      });
+        `.pipe(Effect.mapError(mapError));
+      }
+      return sql<OutboxRow>`
+        SELECT ${outboxColumns}
+        FROM pi_subagent_completion_outbox
+        WHERE delivery_state = 'pending'
+           OR (
+             delivery_state = 'failed_retryable'
+             AND attempt_count < ${options.retryLimit}
+           )
+        ORDER BY created_at ASC, outbox_id ASC
+      `.pipe(Effect.mapError(mapError));
+    };
 
   const listTerminalEventsWithoutOutbox: PiSubagentExecutionRepositoryShape["listTerminalEventsWithoutOutbox"] =
     () =>
@@ -1542,6 +1554,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           FROM pi_subagent_lifecycle_journal j
           JOIN pi_subagent_executions e ON j.execution_id = e.execution_id
           WHERE j.state IN ('succeeded', 'failed')
+            AND j.attempt_id = e.attempt_id
+            AND j.generation = e.generation
             AND NOT EXISTS (
               SELECT 1
               FROM pi_subagent_completion_outbox o
@@ -1771,6 +1785,194 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         ),
       );
 
+  // ---------------------------------------------------------------------
+  // Ticket 10 restart / lease-expiry reconciliation.
+  // ---------------------------------------------------------------------
+
+  const listNonTerminalExecutions: PiSubagentExecutionRepositoryShape["listNonTerminalExecutions"] =
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* sql<ExecutionRow>`
+          SELECT ${executionColumns(sql)}
+          FROM pi_subagent_executions
+          WHERE observed_state IN (
+            'requested', 'accepted', 'queued', 'running', 'cancelling', 'orphaned'
+          )
+          ORDER BY created_at ASC
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.listNonTerminalExecutions:query",
+            ),
+          ),
+        );
+        return rows.map(rowToExecutionRecord);
+      });
+
+  /**
+   * Ticket 10 owner-loss settlement (T10-AC1/AC5/AC6). One transaction:
+   * dedup (deterministic eventId `orphan_<exec>_<attempt>_gen<gen>` plus the
+   * attempt/generation/sequence key) → execution lookup → journal insert
+   * (band 50, `orphaned`, owner-loss diagnostic) → guarded aggregate UPDATE.
+   *
+   * The aggregate becomes non-terminal `orphaned` and the generation ADVANCES
+   * by one — the reconciliation fence (spec Implementation Decision 27): late
+   * events from the orphaned attempt/generation fail the generation gate,
+   * journal as history only (ignored), and late terminals are additionally
+   * counted through the stale_terminal_events counter (T10-AC5).
+   */
+  const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `orphan_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+          const sequence = 50;
+          const metadataJson = JSON.stringify({
+            phase: "orphaned",
+            priorAttemptId: input.attemptId,
+            priorGeneration: input.generation,
+            reason: "owner_loss",
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordOrphanedEvent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            return {
+              kind: "already_applied" as const,
+              execution,
+            };
+          }
+
+          // The settlement targets the listed attempt/generation only: a
+          // concurrent resume (newer attempt/generation) must never be fenced
+          // by a stale reconciliation decision (T10-AC5 stale guard).
+          if (
+            execution.attemptId !== input.attemptId ||
+            execution.generation !== input.generation
+          ) {
+            return {
+              kind: "stale_generation" as const,
+              execution,
+            };
+          }
+
+          // Already orphaned on the SAME attempt/generation: idempotent
+          // re-reconciliation (e.g. a second sweep) must NOT fence the
+          // generation again — every sweep would otherwise advance the
+          // generation unboundedly and orphan evidence would drift.
+          if (execution.observedState === "orphaned") {
+            return {
+              kind: "already_applied" as const,
+              execution,
+            };
+          }
+
+          // A terminal aggregate can never be orphaned — terminal truth wins
+          // over owner loss (T10-AC1: `running` is never asserted without
+          // evidence; terminal evidence is never reversed).
+          if (TERMINAL_OBSERVED_STATES.has(execution.observedState)) {
+            return {
+              kind: "already_applied" as const,
+              execution,
+            };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence,
+            state: "orphaned",
+            occurredAt: input.occurredAt,
+            diagnosticCode: input.diagnosticCode,
+            diagnosticMessage: input.diagnosticMessage,
+            metadataJson,
+          });
+
+          yield* sql`
+            UPDATE pi_subagent_executions
+            SET
+              observed_state = 'orphaned',
+              generation = ${input.generation + 1},
+              diagnostic_code = ${input.diagnosticCode},
+              rejection_reason = ${input.diagnosticMessage},
+              updated_at = ${input.occurredAt}
+            WHERE execution_id = ${input.executionId}
+              AND attempt_id = ${input.attemptId}
+              AND generation = ${input.generation}
+              AND observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+          `;
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return {
+            kind: "recorded" as const,
+            execution: refreshed,
+          };
+        }),
+      )
+      .pipe(
+        Effect.catch((err) =>
+          Effect.gen(function* () {
+            // Concurrent same-identity settlement raced the insert: replay
+            // the dedup answer instead of surfacing a constraint failure.
+            const eventId = `orphan_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence: 50,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordOrphanedEvent:dedup-recheck",
+                ),
+              ),
+            );
+            const executionRows = yield* getByIdInternal(input.executionId).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordOrphanedEvent:execution-recheck",
+                ),
+              ),
+            );
+            if (existing.length > 0 && executionRows.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                execution: rowToExecutionRecord(executionRows[0]!),
+              };
+            }
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordOrphanedEvent:insert",
+              )(err),
+            );
+          }),
+        ),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordOrphanedEvent:insert"),
+        ),
+      );
+
   return {
     recordAdmission,
     recordLifecycleEvent,
@@ -1794,6 +1996,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     markCompletionAcknowledged,
     markCompletionDeliveryFailed,
     markCompletionSuperseded,
+    listNonTerminalExecutions,
+    recordOrphanedEvent,
   } satisfies PiSubagentExecutionRepositoryShape;
 });
 

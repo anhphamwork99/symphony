@@ -324,6 +324,48 @@ export type PiSubagentCompletionDeliveryTransitionResult =
       readonly entry: PiSubagentCompletionOutboxEntry;
     };
 
+/**
+ * Ticket 10 reconciliation-mode selector (T10-AC7). `restart` reconciles
+ * immediately — server process death is owner-loss proof and no in-process
+ * child can be proven alive after restart. `lease_expiry` additionally
+ * requires the re-derived lease to have been expired for at least the
+ * configured orphan threshold before owner-loss settlement.
+ */
+export type PiSubagentReconciliationMode = "restart" | "lease_expiry";
+
+/**
+ * Ticket 10 owner-loss settlement input (T10-AC1). The orphan event is
+ * journaled (sequence band 50) and the aggregate becomes non-terminal
+ * `orphaned`. The generation advances by one (reconciliation fence, spec
+ * Implementation Decision 27) so late events from the orphaned attempt or
+ * generation are stale and cannot reverse the settled projection (T10-AC5).
+ */
+export interface RecordPiSubagentOrphanedEventInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly occurredAt: string;
+  readonly diagnosticCode: PiSubagentDiagnosticCode;
+  readonly diagnosticMessage: string;
+}
+
+export type PiSubagentOrphanedRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** The aggregate advanced past the listed attempt/generation (e.g. a
+       * concurrent resume admitted a new attempt) — the orphan must not fence
+       * the newer attempt. */
+      readonly kind: "stale_generation";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
@@ -435,10 +477,14 @@ export interface PiSubagentExecutionRepositoryShape {
   /**
    * Ticket 08 recoverable-pending scan (T08-AC4): every entry that may still
    * produce a delivery effect — `pending`, plus `failed_retryable` entries
-   * within the retry budget — oldest first.
+   * within the retry budget — oldest first. Ticket 09 adds the optional
+   * `parentThreadId` filter for the per-thread completion coordinator
+   * (index `idx_pi_subagent_completion_outbox_thread`).
    */
   readonly listRecoverableCompletionOutbox: (options: {
     readonly retryLimit: number;
+    /** Ticket 09 (T09-AC2): restrict the scan to one parent thread. */
+    readonly parentThreadId?: string | undefined;
   }) => Effect.Effect<
     ReadonlyArray<PiSubagentCompletionOutboxEntry>,
     PiSubagentExecutionRepositoryError
@@ -512,6 +558,28 @@ export interface PiSubagentExecutionRepositoryShape {
     PiSubagentCompletionDeliveryTransitionResult,
     PiSubagentExecutionRepositoryError
   >;
+  /**
+   * Ticket 10: every execution whose observed state is non-terminal
+   * (`requested`, `accepted`, `queued`, `running`, `cancelling`,
+   * `orphaned`) — the restart/lease-expiry reconciliation scan set.
+   * `orphaned` is included because it is non-terminal and may still exit
+   * through new evidence (T10-AC1 state machine).
+   */
+  readonly listNonTerminalExecutions: () => Effect.Effect<
+    ReadonlyArray<PiSubagentExecutionRecord>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 10 owner-loss settlement (T10-AC1/AC5/AC6): journals the
+   * `orphaned` event (band 50, deterministic idempotent eventId), sets the
+   * aggregate to non-terminal `orphaned` with the owner-loss diagnostic, and
+   * advances the generation by one as the reconciliation fence so late
+   * events from the orphaned attempt/generation are ignored and counted.
+   * Requires the aggregate to still be on the given attempt/generation.
+   */
+  readonly recordOrphanedEvent: (
+    input: RecordPiSubagentOrphanedEventInput,
+  ) => Effect.Effect<PiSubagentOrphanedRecordResult, PiSubagentExecutionRepositoryError>;
 }
 
 export class PiSubagentExecutionRepository extends ServiceMap.Service<
