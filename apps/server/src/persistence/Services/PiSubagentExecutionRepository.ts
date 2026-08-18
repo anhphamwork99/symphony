@@ -299,7 +299,162 @@ export type PiSubagentCompletionOutboxEntry = {
   readonly acknowledgedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /**
+   * Decision 0016: batch-membership association. NULL outside an active
+   * completion-dispatch batch. Set exactly once by the guarded batch
+   * transitions; NEVER parent-effect acceptance on its own.
+   */
+  readonly dispatchBatchId: string | null;
 };
+
+/**
+ * Decision 0016 durable batch state machine. The BATCH is the durable
+ * recovery authority — `delivered` members carrying `dispatchBatchId` are
+ * membership evidence only.
+ */
+export type PiSubagentCompletionDispatchBatchState =
+  | "awaiting_acceptance"
+  | "retryable"
+  | "accepted"
+  | "acknowledged"
+  | "superseded"
+  | "exhausted";
+
+/** Nonterminal states occupy the one-outstanding active slot (partial unique index). */
+export const PI_SUBAGENT_COMPLETION_DISPATCH_ACTIVE_STATES = [
+  "awaiting_acceptance",
+  "retryable",
+  "accepted",
+] as const satisfies readonly PiSubagentCompletionDispatchBatchState[];
+
+export type PiSubagentCompletionDispatchActiveState =
+  (typeof PI_SUBAGENT_COMPLETION_DISPATCH_ACTIVE_STATES)[number];
+
+/**
+ * Decision 0016 immutable batch ledger row. Frozen content is authored once
+ * at creation and replayed byte-for-byte; identity rotation is forbidden.
+ */
+export interface PiSubagentCompletionDispatchBatch {
+  readonly batchId: string;
+  readonly parentThreadId: string;
+  readonly parentCommandId: string;
+  readonly parentMessageId: string;
+  readonly fingerprintVersion: number;
+  readonly commandFingerprint: string;
+  /** Canonical bounded ordered outbox-ID membership (JSON of string array). */
+  readonly membership: readonly string[];
+  readonly parentMessageText: string;
+  /** Frozen canonical `thread.turn.start` command payload (byte-identical redrive). */
+  readonly commandPayloadJson: string;
+  readonly state: PiSubagentCompletionDispatchBatchState;
+  readonly attemptCount: number;
+  readonly acceptedReceiptSequence: number | null;
+  readonly lastError: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly acceptedAt: string | null;
+  readonly acknowledgedAt: string | null;
+  readonly supersededAt: string | null;
+  readonly exhaustedAt: string | null;
+}
+
+/** Decision 0016 batch-transition outcomes (every batch/member transition is guarded). */
+export type PiSubagentCompletionDispatchTransitionResult =
+  | {
+      readonly kind: "transitioned";
+      readonly batch: PiSubagentCompletionDispatchBatch;
+    }
+  | {
+      readonly kind: "invalid_transition";
+      readonly reason: "already_terminal";
+      readonly batch: PiSubagentCompletionDispatchBatch;
+    }
+  | {
+      readonly kind: "not_found";
+    }
+  | {
+      readonly kind: "receipt_mismatch";
+      readonly reason:
+        | "command_mismatch"
+        | "fingerprint_mismatch"
+        | "message_mismatch"
+        | "already_exhausted";
+      readonly batch: PiSubagentCompletionDispatchBatch;
+    };
+
+/**
+ * Decision 0016 create outcome. `no_members` and `active_batch_exists` are
+ * deferral signals (no retry accounting); `member_collision` and
+ * `content_rejected` fail closed (the whole transaction rolled back).
+ */
+export type PiSubagentCompletionDispatchCreateResult =
+  | { readonly kind: "created"; readonly batch: PiSubagentCompletionDispatchBatch }
+  | { readonly kind: "no_members" }
+  | { readonly kind: "active_batch_exists" }
+  | { readonly kind: "member_collision" }
+  | { readonly kind: "content_rejected"; readonly detail: string }
+  | { readonly kind: "batch_already_present"; readonly batch: PiSubagentCompletionDispatchBatch };
+
+/**
+ * Decision 0016 immutable batch content authored by the coordinator inside
+ * the create transaction (after canonical member selection). The repository
+ * never interprets the command payload — it stores it frozen and validates
+ * identity/membership consistency.
+ */
+export interface PiSubagentCompletionDispatchBatchContent {
+  readonly batchId: string;
+  readonly parentCommandId: string;
+  readonly parentMessageId: string;
+  readonly fingerprintVersion: number;
+  readonly commandFingerprint: string;
+  /** Canonical ordered member outbox ids (must equal the selected members). */
+  readonly membership: readonly string[];
+  readonly parentMessageText: string;
+  readonly commandPayloadJson: string;
+}
+
+/**
+ * Decision 0016 create input. `buildBatchContent` runs INSIDE the create
+ * transaction over the canonically selected, generation-fenced members, so
+ * batch identity and frozen command match the exact durable membership.
+ */
+export interface CreatePiSubagentCompletionDispatchBatchInput {
+  readonly parentThreadId: string;
+  readonly maxBatchEntries: number;
+  readonly retryLimit: number;
+  readonly now: string;
+  readonly buildBatchContent: (
+    members: readonly PiSubagentCompletionOutboxEntry[],
+  ) => PiSubagentCompletionDispatchBatchContent;
+}
+
+/** Decision 0016 transient boundary-failure input (stable identity retry). */
+export interface FailPiSubagentCompletionDispatchBatchInput {
+  readonly batchId: string;
+  readonly now: string;
+  readonly error: string;
+  /** Retry ceiling (Ticket 08 `piSubagentCompletionRetryLimit` policy). */
+  readonly retryLimit: number;
+}
+
+/** Decision 0016 immutable rejection/collision input (no repeated increments). */
+export interface RejectPiSubagentCompletionDispatchBatchInput {
+  readonly batchId: string;
+  readonly now: string;
+  readonly error: string;
+  readonly reason: "rejected" | "collision" | "exhausted";
+}
+
+/** Decision 0016 accepted-receipt recording (exact correlation, guarded). */
+export interface RecordPiSubagentCompletionDispatchAcceptedInput {
+  readonly batchId: string;
+  readonly fingerprintVersion: number;
+  readonly commandFingerprint: string;
+  readonly parentCommandId: string;
+  readonly parentMessageId: string;
+  readonly acceptedReceiptSequence: number;
+  readonly now: string;
+}
 
 /**
  * Ticket 08 delivery-transition outcomes (T08-AC2/AC5/AC6). Every transition
@@ -556,6 +711,100 @@ export interface PiSubagentExecutionRepositoryShape {
     readonly now: string;
   }) => Effect.Effect<
     PiSubagentCompletionDeliveryTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  // -------------------------------------------------------------------
+  // Decision 0016 — completion-dispatch batch ledger (Ticket 09
+  // remediation). All transitions are guarded, replayable, and never mutate
+  // the execution aggregate.
+  // -------------------------------------------------------------------
+  readonly createCompletionDispatchBatch: (input: CreatePiSubagentCompletionDispatchBatchInput) => Effect.Effect<
+    PiSubagentCompletionDispatchCreateResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  readonly getCompletionDispatchBatch: (batchId: string) => Effect.Effect<
+    Option.Option<PiSubagentCompletionDispatchBatch>,
+    PiSubagentExecutionRepositoryError
+  >;
+  readonly getCompletionDispatchBatchByCommandId: (parentCommandId: string) => Effect.Effect<
+    Option.Option<PiSubagentCompletionDispatchBatch>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Durable one-outstanding authority (Decision 0016 §2): the single
+   * nonterminal batch for one parent thread, if any.
+   */
+  readonly getActiveCompletionDispatchBatch: (parentThreadId: string) => Effect.Effect<
+    Option.Option<PiSubagentCompletionDispatchBatch>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Ticket 09 recovery scope: awaiting-acceptance and within-budget retryable
+   * batches, oldest first. Optionally scoped to one parent thread.
+   */
+  readonly listRecoverableCompletionDispatchBatches: (options: {
+    readonly retryLimit: number;
+    readonly parentThreadId?: string | undefined;
+  }) => Effect.Effect<
+    ReadonlyArray<PiSubagentCompletionDispatchBatch>,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Decision 0016 exact acceptance proof: batch → `accepted` only when the
+   * supplied receipt correlation (command id, fingerprint, message id,
+   * sequence) matches the frozen batch exactly. Idempotent; mismatches fail
+   * closed (`receipt_mismatch`) and are never finalized.
+   */
+  readonly recordCompletionDispatchAccepted: (
+    input: RecordPiSubagentCompletionDispatchAcceptedInput,
+  ) => Effect.Effect<
+    PiSubagentCompletionDispatchTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Decision 0016 finalization: marks the batch `acknowledged`, acknowledges
+   * ONLY its exact associated members, and releases the active-thread slot.
+   * Replayable and idempotent; never acknowledges unrelated content.
+   */
+  readonly finalizeCompletionDispatchBatch: (input: {
+    readonly batchId: string;
+    readonly now: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDispatchTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Decision 0016 transient boundary-failure: batch → `retryable` (attempt +1)
+   * or → `exhausted` at the configured ceiling. Stable identity is preserved.
+   */
+  readonly failCompletionDispatchBatch: (
+    input: FailPiSubagentCompletionDispatchBatchInput,
+  ) => Effect.Effect<
+    PiSubagentCompletionDispatchTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Decision 0016 immutable rejection/collision/exhaustion: settles the batch
+   * terminal `exhausted` with bounded evidence, one genuine failure under the
+   * same identity, no repeated increments, and never rewrites child outcomes.
+   */
+  readonly rejectCompletionDispatchBatch: (
+    input: RejectPiSubagentCompletionDispatchBatchInput,
+  ) => Effect.Effect<
+    PiSubagentCompletionDispatchTransitionResult,
+    PiSubagentExecutionRepositoryError
+  >;
+  /**
+   * Decision 0016 stale-before-submission: supersedes the batch (zero parent
+   * effect) and releases the active-thread slot; members remain readable
+   * evidence.
+   */
+  readonly supersedeCompletionDispatchBatch: (input: {
+    readonly batchId: string;
+    readonly now: string;
+    readonly supersededByReason: string;
+  }) => Effect.Effect<
+    PiSubagentCompletionDispatchTransitionResult,
     PiSubagentExecutionRepositoryError
   >;
   /**
