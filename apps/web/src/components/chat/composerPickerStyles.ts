@@ -119,10 +119,9 @@ export const COMPOSER_COLUMN_FRAME_CLASS_NAME = CHAT_COLUMN_FRAME_CLASS_NAME;
  */
 export const COMPOSER_STACKED_HEADER_FRAME_CLASS_NAME = "mx-auto -mb-px w-11/12 min-w-0";
 
-/** Shell around the composer surface. Deliberately has NO background: the composer
- *  floats over the scrolling transcript (see `composerOverlay.ts`) and its frosted
- *  material is meant to reveal and blur the content passing behind it — an opaque
- *  backing here would be the only thing its `backdrop-filter` ever sampled.
+/** Shell around the composer surface. Deliberately has NO background: the opaque
+ *  inner composer surface owns the fill while this wrapper carries positioning and
+ *  interaction chrome.
  *  `relative z-[1]` keeps the full input outline above the inset stacked rail
  *  (`-mb-px`), so the top border is never covered by live-changes / task / queue chrome. */
 export const COMPOSER_INPUT_SHELL_CLASS_NAME =

@@ -2546,14 +2546,15 @@ diffs-container {
   border-top-right-radius: 0;
 }
 
-/* Composer glass — the same material as the floating menus/pickers
-   (`APP_TRANSLUCENT_POPUP_SURFACE_BASE_CLASS_NAME`) and the sidebar.
+/* Composer-family surfaces use the same elevated token as floating menus/pickers
+   (`APP_TRANSLUCENT_POPUP_SURFACE_BASE_CLASS_NAME`) and the sidebar. The primary
+   input is opaque; only the lighter stacked rail keeps the glass treatment.
 
    The blur lives on a `::before` at `z-index: -1` rather than on the element itself,
    exactly like the popup primitive: `backdrop-filter` on the element would make it a
    containing block and clip the composer's anchored pickers (which rely on
-   `overflow-visible`). Painted behind the element's own translucent fill, the layer
-   frosts the transcript scrolling underneath (see composerOverlay.ts).
+   `overflow-visible`). Painted behind the stacked rail's translucent fill, the
+   layer frosts the transcript scrolling underneath (see composerOverlay.ts).
 
    Fill comes from the SAME token the floating menus use (`--popover`, via
    `--app-composer-picker-surface`), not from `--composer-surface`. In dark mode
@@ -2564,7 +2565,7 @@ diffs-container {
    pickers are built from, so the composer now lifts off the transcript exactly the
    way they do.
 
-   `--composer-glass-opacity` keeps every composer-family surface on one knob. */
+   `--composer-glass-opacity` supplies the base used to derive stacked-rail opacity. */
 :root {
   --composer-glass-opacity: 55%;
   --composer-glass-stacked-opacity: calc(var(--composer-glass-opacity) / 2);
