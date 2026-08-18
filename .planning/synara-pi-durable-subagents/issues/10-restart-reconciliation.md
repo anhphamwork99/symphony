@@ -10,7 +10,12 @@ delegation automatically.
 **Blocked by:** 05 — Coalesced progress and heartbeat leases; 07 —
 Journal-first terminal lifecycle.
 
-**Status:** ready-for-agent → implemented (awaiting review)
+**Status:** ready-for-agent → implemented → **complete (accepted)**
+
+**Final acceptance:** Accepted — Decision 0014 (2026-08-18), Symphony
+`e58ff719` + the disclosed Ticket-10 hunks in `98b9e990`; review returned
+PASS with HIGH confidence (five INFO findings, no remediation); F1/F2/F3
+dispositions closed.
 
 - [x] **T10-AC1:** No live-owner or terminal evidence produces `orphaned` with a
       stable owner-loss diagnostic; `running` is never asserted without evidence.
