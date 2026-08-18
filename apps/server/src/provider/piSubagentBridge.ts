@@ -258,6 +258,7 @@ export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
     optionalCapabilities: [
       "coalesced-progress",
       "durable-cancellation",
+      "journal-terminal-lifecycle",
       "terminal-outbox",
       "restart-reconciliation",
       "paginated-transcripts",

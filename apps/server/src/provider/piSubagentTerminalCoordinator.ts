@@ -95,6 +95,26 @@ const truncateSummary = (summary: string, maxChars: number): string => {
   return `${summary.slice(0, Math.max(0, maxChars - 1))}…`;
 };
 
+/**
+ * Review F2 (LOW): bound the remaining producer-supplied strings so no
+ * unbounded payload can reach the durable store even from a misbehaving
+ * producer — the summary cap governs the excerpt; these caps govern the
+ * reference/metadata fields.
+ */
+const MAX_TERMINAL_TRANSCRIPT_REF_CHARS = 1024;
+const MAX_TERMINAL_OUTCOME_STATE_CHARS = 256;
+const MAX_TERMINAL_DIAGNOSTIC_CHARS = 2048;
+
+const boundString = (value: string | undefined, maxChars: number): string | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+};
+
 export const ingestPiSubagentTerminal = (
   input: IngestPiSubagentTerminalInput,
 ): Effect.Effect<IngestPiSubagentTerminalResult, unknown> =>
@@ -107,6 +127,18 @@ export const ingestPiSubagentTerminal = (
         : DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
 
     const boundedSummary = truncateSummary(input.observation.summary, summaryMaxChars);
+    const boundedTranscriptRef = boundString(
+      input.observation.transcriptRef,
+      MAX_TERMINAL_TRANSCRIPT_REF_CHARS,
+    );
+    const boundedOutcomeState = boundString(
+      input.observation.outcomeState,
+      MAX_TERMINAL_OUTCOME_STATE_CHARS,
+    );
+    const boundedDiagnostic = boundString(
+      input.observation.diagnosticMessage,
+      MAX_TERMINAL_DIAGNOSTIC_CHARS,
+    );
 
     const recordEffect = input.repository.recordTerminalEvent({
       executionId: input.observation.executionId,
@@ -116,10 +148,10 @@ export const ingestPiSubagentTerminal = (
       state: input.observation.state,
       occurredAt: input.observation.occurredAt,
       summary: boundedSummary,
-      transcriptRef: input.observation.transcriptRef ?? null,
-      outcomeState: input.observation.outcomeState ?? null,
+      transcriptRef: boundedTranscriptRef ?? null,
+      outcomeState: boundedOutcomeState ?? null,
       diagnosticCode: null,
-      diagnosticMessage: input.observation.diagnosticMessage ?? null,
+      diagnosticMessage: boundedDiagnostic ?? null,
     });
 
     const recordResult = yield* Effect.result(recordEffect);

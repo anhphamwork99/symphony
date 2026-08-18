@@ -40,8 +40,8 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Implementation state:** implemented — report complete pending independent
-review
+**Implementation state:** implemented — independent review complete (PASS),
+remediation applied (F1/F2); awaiting Supervisor final acceptance
 
 ### Delivered scope
 
@@ -180,3 +180,32 @@ fenced, generation guarded).
   green and stable (verified repeatedly for RealExtension 11/11). This is
   harness-environment noise, not a regression; standalone per-file invocation
   in a clean environment is the verification method recorded above.
+
+### Independent review outcome (2026-08-18)
+
+**Verdict:** PASS — T07-AC1..AC7 all pass, confidence High (reviewer
+independently reproduced every verification claim: terminal lifecycle 12/12,
+terminal acceptance 2/2 wallclock, all eight wallclock suites per-file,
+Alfie 31 files/491 tests, migration suites, config/main, full unit project
+with only the 7 pre-existing CursorTextGeneration environment failures, tsc
+exit 0 both repos, provenance hashes recomputed byte-exact). Full report:
+[reviews/07-journal-first-terminal-lifecycle-review.md](../reviews/07-journal-first-terminal-lifecycle-review.md).
+
+Findings F1 (MEDIUM), F2–F4 (LOW), F5 (INFO) — none blocking.
+
+**Review remediation applied:**
+
+- **F1 (MEDIUM, mixed-version skew):** the server handshake now advertises
+  `journal-terminal-lifecycle` in `optionalCapabilities`, and the extension
+  records that advertisement at handshake time and gates ALL terminal
+  reporting (inline, post-detach, background) on it. Old server + new
+  extension degrades to legacy behavior: no terminal observations sent, the
+  inline tool result keeps its success shape (Alfie commit `608c1c57d`, new
+  mixed-version gate test in managed-terminal.test.ts, suite 31/492).
+- **F2 (LOW, unbounded metadata strings):** the coordinator now bounds
+  `transcriptRef` (1024), `outcomeState` (256), and `diagnosticMessage`
+  (2048) server-side in addition to the summary cap; terminal lifecycle and
+  acceptance suites re-run green.
+- **F3 (LOW, coordinator MAX guard asymmetry), F4 (LOW, cancelled-background
+  reporter entry retention), F5 (INFO):** recorded for the Ticket 08/10
+  touchpoints; no correctness effect.
