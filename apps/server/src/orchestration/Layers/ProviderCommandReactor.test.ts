@@ -3907,6 +3907,80 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("review R2: dispatching thread.pi-subagent-execution.cancel reaches the provider service with the exact identities", async () => {
+    const harness = await createHarness();
+    // Establish an active session so provider routing succeeds.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-before-execution-cancel"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-before-execution-cancel"),
+          role: "user",
+          text: "spawn a managed subagent",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.pi-subagent-execution.cancel",
+        commandId: CommandId.makeUnsafe("cmd-execution-cancel-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        executionId: "exec-cancel-1",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(() => harness.cancelPiSubagentExecution.mock.calls.length === 1);
+    expect(harness.cancelPiSubagentExecution.mock.calls[0]?.[0]).toEqual({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      executionId: "exec-cancel-1",
+    });
+  });
+
+  it("review R2: card cancel denial (no active session) appends a visible failure activity without corrupting state", async () => {
+    const harness = await createHarness();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.pi-subagent-execution.cancel",
+        commandId: CommandId.makeUnsafe("cmd-execution-cancel-no-session"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        executionId: "exec-cancel-orphan",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const thread = readModel.threads.find(
+        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      return (
+        thread?.activities.some(
+          (activity) => activity.kind === "provider.subagent-execution.cancel.failed",
+        ) ?? false
+      );
+    });
+    expect(harness.cancelPiSubagentExecution).not.toHaveBeenCalled();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    const failureActivity = thread?.activities.find(
+      (activity) => activity.kind === "provider.subagent-execution.cancel.failed",
+    );
+    expect(failureActivity?.payload).toMatchObject({
+      detail: "No active provider session is bound to this thread.",
+    });
+  });
+
   it("surfaces terminal interrupt rejections as a thread activity", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

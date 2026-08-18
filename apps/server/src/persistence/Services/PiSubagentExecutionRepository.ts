@@ -607,6 +607,15 @@ export interface PiSubagentExecutionRepositoryShape {
     threadId: string,
     limit: number,
   ) => Effect.Effect<ReadonlyArray<PiSubagentExecutionCard>, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 11 by-execution card read (review R1): the exact committed card
+   * for ONE execution identity — identity-scoped, never masked by sibling
+   * executions or the thread window. Returns none only when the execution
+   * row itself is gone.
+   */
+  readonly getExecutionCard: (
+    executionId: string,
+  ) => Effect.Effect<Option.Option<PiSubagentExecutionCard>, PiSubagentExecutionRepositoryError>;
   readonly listJournalEvents: (
     executionId: string,
   ) => Effect.Effect<ReadonlyArray<PiSubagentLifecycleEvent>, PiSubagentExecutionRepositoryError>;

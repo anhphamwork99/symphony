@@ -979,6 +979,57 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         return rows.map(piSubagentExecutionCardRowToCard);
       });
 
+  /**
+   * Ticket 11 by-execution card read (review R1): identity-scoped join so a
+   * lifecycle commit on ANY execution of a thread — not just the
+   * newest-created one — projects its committed card truth.
+   */
+  const getExecutionCard: PiSubagentExecutionRepositoryShape["getExecutionCard"] = (executionId) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<PiSubagentExecutionCardRow>`
+        SELECT
+          base.execution_id AS "executionId",
+          base.attempt_id AS "attemptId",
+          base.generation,
+          base.project_id AS "projectId",
+          base.parent_thread_id AS "parentThreadId",
+          base.parent_turn_id AS "parentTurnId",
+          base.parent_tool_call_id AS "parentToolCallId",
+          base.agent_type AS "agentType",
+          base.mode,
+          base.cancellation_scope AS "cancellationScope",
+          base.desired_state AS "desiredState",
+          base.observed_state AS "observedState",
+          base.diagnostic_code AS "diagnosticCode",
+          base.rejection_reason AS "rejectionReason",
+          base.last_progress_json AS "lastProgressJson",
+          base.last_progress_at AS "lastProgressAt",
+          base.dropped_progress_count AS "droppedProgressCount",
+          base.lease_expires_at AS "leaseExpiresAt",
+          base.terminal_summary AS "terminalSummary",
+          base.terminal_transcript_ref AS "terminalTranscriptRef",
+          outbox.delivery_state AS "deliveryState",
+          base.created_at AS "createdAt",
+          base.updated_at AS "updatedAt"
+        FROM pi_subagent_executions AS base
+        LEFT JOIN pi_subagent_completion_outbox AS outbox
+          ON outbox.execution_id = base.execution_id
+         AND outbox.attempt_id = base.attempt_id
+         AND outbox.generation = base.generation
+        WHERE base.execution_id = ${executionId}
+        LIMIT 1
+      `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getExecutionCard:query"),
+        ),
+      );
+
+      if (rows.length === 0) {
+        return Option.none();
+      }
+      return Option.some(piSubagentExecutionCardRowToCard(rows[0]!));
+    });
+
   // ---------------------------------------------------------------------
   // Ticket 06 durable parent-turn cancellation paths.
   // ---------------------------------------------------------------------
@@ -1852,29 +1903,28 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       return { kind: "superseded_instead" as const, entry: after };
     });
 
-  const markCompletionDelivered: PiSubagentExecutionRepositoryShape["markCompletionDelivered"] = (
-    input,
-  ) =>
-    sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const rows = yield* getOutboxByIdInternal(input.outboxId);
-          if (rows.length === 0) {
-            return { kind: "not_found" as const };
-          }
-          const entry = rows[0]!;
-          if (entry.deliveryState !== "pending" && entry.deliveryState !== "failed_retryable") {
-            return {
-              kind: "invalid_transition" as const,
-              reason: "already_terminal_delivery_state" as const,
-              entry,
-            };
-          }
-          const fence = yield* fenceOrSupersede(entry, input.now);
-          if (fence.kind === "superseded_instead") {
-            return { kind: "superseded_instead" as const, entry: fence.entry };
-          }
-          const updated = yield* sql<OutboxRow>`
+  const markCompletionDeliveredBase: PiSubagentExecutionRepositoryShape["markCompletionDelivered"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getOutboxByIdInternal(input.outboxId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const entry = rows[0]!;
+            if (entry.deliveryState !== "pending" && entry.deliveryState !== "failed_retryable") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal_delivery_state" as const,
+                entry,
+              };
+            }
+            const fence = yield* fenceOrSupersede(entry, input.now);
+            if (fence.kind === "superseded_instead") {
+              return { kind: "superseded_instead" as const, entry: fence.entry };
+            }
+            const updated = yield* sql<OutboxRow>`
               UPDATE pi_subagent_completion_outbox
               SET
                 delivery_state = 'delivered',
@@ -1885,17 +1935,17 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 AND delivery_state IN ('pending', 'failed_retryable')
               RETURNING ${outboxColumns}
             `;
-          const after = updated[0] ?? entry;
-          return { kind: "transitioned" as const, entry: after };
-        }),
-      )
-      .pipe(
-        Effect.mapError(
-          toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionDelivered:update"),
-        ),
-      );
+            const after = updated[0] ?? entry;
+            return { kind: "transitioned" as const, entry: after };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionDelivered:update"),
+          ),
+        );
 
-  const markCompletionAcknowledged: PiSubagentExecutionRepositoryShape["markCompletionAcknowledged"] =
+  const markCompletionAcknowledgedBase: PiSubagentExecutionRepositoryShape["markCompletionAcknowledged"] =
     (input) =>
       sql
         .withTransaction(
@@ -1938,7 +1988,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           ),
         );
 
-  const markCompletionDeliveryFailed: PiSubagentExecutionRepositoryShape["markCompletionDeliveryFailed"] =
+  const markCompletionDeliveryFailedBase: PiSubagentExecutionRepositoryShape["markCompletionDeliveryFailed"] =
     (input) =>
       sql
         .withTransaction(
@@ -1982,25 +2032,24 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           ),
         );
 
-  const markCompletionSuperseded: PiSubagentExecutionRepositoryShape["markCompletionSuperseded"] = (
-    input,
-  ) =>
-    sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const rows = yield* getOutboxByIdInternal(input.outboxId);
-          if (rows.length === 0) {
-            return { kind: "not_found" as const };
-          }
-          const entry = rows[0]!;
-          if (entry.deliveryState === "acknowledged") {
-            return {
-              kind: "invalid_transition" as const,
-              reason: "already_terminal_delivery_state" as const,
-              entry,
-            };
-          }
-          const updated = yield* sql<OutboxRow>`
+  const markCompletionSupersededBase: PiSubagentExecutionRepositoryShape["markCompletionSuperseded"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* getOutboxByIdInternal(input.outboxId);
+            if (rows.length === 0) {
+              return { kind: "not_found" as const };
+            }
+            const entry = rows[0]!;
+            if (entry.deliveryState === "acknowledged") {
+              return {
+                kind: "invalid_transition" as const,
+                reason: "already_terminal_delivery_state" as const,
+                entry,
+              };
+            }
+            const updated = yield* sql<OutboxRow>`
                 UPDATE pi_subagent_completion_outbox
                 SET
                   delivery_state = 'superseded',
@@ -2010,15 +2059,15 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                   AND delivery_state IN ('pending', 'delivered', 'failed_retryable')
                 RETURNING ${outboxColumns}
               `;
-          const after = updated[0] ?? entry;
-          return { kind: "transitioned" as const, entry: after };
-        }),
-      )
-      .pipe(
-        Effect.mapError(
-          toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionSuperseded:update"),
-        ),
-      );
+            const after = updated[0] ?? entry;
+            return { kind: "transitioned" as const, entry: after };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.markCompletionSuperseded:update"),
+          ),
+        );
 
   // ---------------------------------------------------------------------
   // Decision 0016 — completion-dispatch batch ledger (Ticket 09 remediation).
@@ -3297,6 +3346,62 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 50)),
     );
 
+  // Review R4 (informational, closed cheaply): completion-outbox delivery
+  // transitions change the card's `deliveryState`. They journal nothing, so
+  // the notification re-reads the committed aggregate for honest states and
+  // uses journalSequence 0 (delivery-only band; ordering is not meaningful —
+  // the card payload is a full upsert).
+  const notifyDeliveryTransition = (result: {
+    readonly kind: string;
+    readonly entry?: { readonly executionId: string };
+  }): Effect.Effect<void> => {
+    if (result.kind !== "transitioned" || result.entry === undefined) {
+      return Effect.void;
+    }
+    const executionId = result.entry.executionId;
+    return Effect.gen(function* () {
+      const execution = yield* getByIdInternal(executionId);
+      if (execution.length === 0) {
+        return;
+      }
+      yield* notifyExecutionLifecycleCommitted({
+        executionId,
+        parentThreadId: execution[0]!.parentThreadId,
+        attemptId: execution[0]!.attemptId,
+        generation: execution[0]!.generation,
+        journalSequence: 0,
+        observedState: execution[0]!.observedState,
+        desiredState: execution[0]!.desiredState,
+      });
+    }).pipe(Effect.ignore);
+  };
+
+  const markCompletionDelivered: PiSubagentExecutionRepositoryShape["markCompletionDelivered"] = (
+    input,
+  ) =>
+    markCompletionDeliveredBase(input).pipe(
+      Effect.tap((result) => notifyDeliveryTransition(result)),
+    );
+
+  const markCompletionAcknowledged: PiSubagentExecutionRepositoryShape["markCompletionAcknowledged"] =
+    (input) =>
+      markCompletionAcknowledgedBase(input).pipe(
+        Effect.tap((result) => notifyDeliveryTransition(result)),
+      );
+
+  const markCompletionDeliveryFailed: PiSubagentExecutionRepositoryShape["markCompletionDeliveryFailed"] =
+    (input) =>
+      markCompletionDeliveryFailedBase(input).pipe(
+        Effect.tap((result) => notifyDeliveryTransition(result)),
+      );
+
+  const markCompletionSuperseded: PiSubagentExecutionRepositoryShape["markCompletionSuperseded"] = (
+    input,
+  ) =>
+    markCompletionSupersededBase(input).pipe(
+      Effect.tap((result) => notifyDeliveryTransition(result)),
+    );
+
   const repository: PiSubagentExecutionRepositoryShape = {
     recordAdmission,
     recordLifecycleEvent,
@@ -3307,6 +3412,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     getByCommandId,
     listByThreadId,
     listExecutionCardsByThreadId,
+    getExecutionCard,
     listJournalEvents,
     listCancellableByParentTurn,
     recordCancellationIntent,

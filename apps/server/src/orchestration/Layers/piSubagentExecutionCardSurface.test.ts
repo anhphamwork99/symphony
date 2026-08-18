@@ -435,6 +435,64 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
     }
   });
 
+  it("review R1: lifecycle on a NON-newest sibling execution still publishes its own card event; deleted executions publish nothing", async () => {
+    const system = await createEngineSystem();
+    try {
+      await createProjectAndThread(system, "sib");
+      const bridge = makePiSubagentExecutionCardBridge();
+      bridge.bindOnce(system.port);
+      setPiSubagentExecutionLifecycleListener((notification) => {
+        bridge.handleNotification(system.repository, notification);
+      });
+      // Two executions: older created first, newer second.
+      await admitExecution(system, {
+        executionId: "exec-t11-sib-old",
+        threadId: "thread-t11-sib",
+        now: "2026-08-19T00:10:00.000Z",
+      });
+      await admitExecution(system, {
+        executionId: "exec-t11-sib-new",
+        threadId: "thread-t11-sib",
+        now: "2026-08-19T00:10:01.000Z",
+      });
+      // By-execution card read returns each identity regardless of sibling order.
+      const oldCard = await system.run(system.repository.getExecutionCard("exec-t11-sib-old"));
+      expect(oldCard._tag).toBe("Some");
+      if (oldCard._tag === "Some") {
+        expect(oldCard.value.executionId).toBe("exec-t11-sib-old");
+        expect(oldCard.value.parentThreadId).toBe("thread-t11-sib");
+      }
+      const missing = await system.run(system.repository.getExecutionCard("exec-t11-sib-none"));
+      expect(missing._tag).toBe("None");
+
+      // Lifecycle event on the OLDER execution must publish ITS card event.
+      await system.run(
+        system.repository.recordLifecycleEvent({
+          eventId: "evt-t11-sib-old-started",
+          executionId: "exec-t11-sib-old",
+          attemptId: "exec-t11-sib-old_att1",
+          generation: 1,
+          sequence: 2,
+          state: "running",
+          occurredAt: "2026-08-19T00:10:02.000Z",
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const events = await readThreadCardEvents(system, "thread-t11-sib", 0);
+      const oldRunning = events.filter(
+        (event) =>
+          event.type === "thread.pi-subagent-execution-updated" &&
+          event.payload.executionId === "exec-t11-sib-old" &&
+          event.payload.card.observedState === "running",
+      );
+      expect(oldRunning.length).toBeGreaterThan(0);
+    } finally {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await system.dispose();
+    }
+  });
+
   it("T11-AC3: card events ride the thread-detail stream, so replay-window gaps hit the existing resync machinery, not silent loss", async () => {
     // The cursor-safe snapshot live stream replays THREAD_DETAIL_EVENT_TYPES
     // after the client cursor and falls back to a full snapshot + recorded

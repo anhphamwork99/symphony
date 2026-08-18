@@ -1,6 +1,6 @@
 import type { OrchestrationCommand, OrchestrationEvent } from "@synara/contracts";
 import { CommandId, ThreadId } from "@synara/contracts";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 
 import type { PiSubagentExecutionLifecycleNotification } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
@@ -71,15 +71,12 @@ export const makePiSubagentExecutionCardBridge = (): PiSubagentExecutionCardBrid
     );
     void Effect.runPromise(
       Effect.gen(function* () {
-        // Re-read committed truth for THIS execution only. The thread query
-        // is capped at the card window; a cap-evicted execution means the
-        // bounded window no longer shows it and there is nothing to project.
-        const cards = yield* repository.listExecutionCardsByThreadId(
-          notification.parentThreadId,
-          1,
-        );
-        const match = cards.find((card) => card.executionId === notification.executionId);
-        if (match === undefined) {
+        // Review R1 fix: read THIS execution's committed card by identity —
+        // never the thread's newest row. Any sibling execution's lifecycle
+        // truth publishes its own card event. `none` means the execution row
+        // itself is gone (deleted) — nothing to project.
+        const cardOption = yield* repository.getExecutionCard(notification.executionId);
+        if (Option.isNone(cardOption)) {
           return;
         }
         const command: OrchestrationCommand = {
@@ -88,7 +85,7 @@ export const makePiSubagentExecutionCardBridge = (): PiSubagentExecutionCardBrid
           threadId: ThreadId.makeUnsafe(notification.parentThreadId),
           executionId: notification.executionId,
           journalSequence: notification.journalSequence,
-          card: match,
+          card: cardOption.value,
           createdAt: new Date().toISOString(),
         };
         const result = yield* Effect.result(live.dispatch(command));

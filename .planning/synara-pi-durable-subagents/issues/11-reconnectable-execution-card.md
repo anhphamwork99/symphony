@@ -51,8 +51,41 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Status:** implemented — awaiting review.
-**Date:** 2026-08-19 (working tree; commit follows verification).
+**Status:** implemented + review remediation applied — awaiting re-review.
+**Date:** 2026-08-19 (implementation `95b9e169`; remediation of review findings
+R1/R2/R3/R4 follows).
+
+### Review remediation (independent review 2026-08-19: NEEDS REMEDIATION)
+
+Independent review (persisted at
+`reviews/11-reconnectable-execution-card-review.md`) returned PASS for
+AC1/AC3/AC4/AC5/AC7, F1, and ticket-06 refactor equivalence, with four
+findings. All four remediated:
+
+- **R1 (BLOCKING)** — bridge published card events only for a thread's
+  NEWEST execution (thread-scoped `LIMIT 1` read masked siblings). Fix: new
+  identity-scoped repository seam `getExecutionCard(executionId)`; the bridge
+  now reads THIS execution's committed card by identity (`none` only when the
+  row is gone). Regression test: lifecycle on the older of two sibling
+  executions publishes its own card event; `getExecutionCard` returns each
+  identity regardless of sibling order and `None` for unknown ids.
+- **R2 (LOW)** — card-cancel wiring (decider → reactor → ProviderService) had
+  no end-to-end test. Fix: two engine-level reactor tests dispatching
+  `thread.pi-subagent-execution.cancel` — one proves the service receives the
+  exact identities with an active session; one proves the no-session denial
+  appends a visible `provider.subagent-execution.cancel.failed` activity with
+  zero service calls (the reactor now applies the same session-liveness gate
+  as `thread.task.stop`).
+- **R3 (LOW)** — the legacy "Unmanaged (legacy)" label was unreachable (strip
+  mounted only with cards while the flag required zero cards). Fix: strip
+  mounts when cards exist OR the legacy flag is true. Heuristic limitation
+  (provider=pi + running turn + zero cards can mislabel a managed session
+  whose executions are all cap-evicted) noted; a client-visible
+  capability signal would be the honest long-term source.
+- **R4 (INFO)** — outbox delivery transitions never published card updates.
+  Fix: `markCompletionDelivered/Acknowledged/DeliveryFailed/Superseded` now
+  notify post-commit (delivery-only band, journalSequence 0, states re-read
+  from the committed aggregate), so live clients see `deliveryState` changes.
 
 ### Solution shape
 

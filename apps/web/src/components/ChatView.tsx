@@ -11324,7 +11324,8 @@ export default function ChatView({
                   }
                 />
               ) : null}
-              {piSubagentExecutionCards.length > 0 && !planSidebarOpen ? (
+              {(piSubagentExecutionCards.length > 0 || piSubagentLegacyAgentToolActive) &&
+              !planSidebarOpen ? (
                 <PiSubagentExecutionCardStrip
                   cards={piSubagentExecutionCards}
                   legacyAgentToolActive={piSubagentLegacyAgentToolActive}

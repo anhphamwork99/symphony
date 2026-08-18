@@ -2852,10 +2852,24 @@ const make = Effect.gen(function* () {
     event: Extract<ProviderIntentEvent, { type: "thread.pi-subagent-execution-cancel-requested" }>,
   ) {
     // Ticket 11 (T11-AC6): drive the durable single-execution cancel. The
-    // decider already gated thread existence; every execution-scoped denial
-    // (unknown execution, terminal, unsupported provider, inactive runtime)
-    // surfaces as a visible activity without corrupting execution truth —
-    // the card keeps rendering the durable aggregate.
+    // decider already gated thread existence; the reactor adds the same
+    // session-liveness denial as task-stop (visible activity, no service
+    // call), and every remaining execution-scoped denial (unknown execution,
+    // terminal, unsupported provider) surfaces from the provider layer as a
+    // visible failure without corrupting execution truth — the card keeps
+    // rendering the durable aggregate.
+    const providerThread = yield* resolveProviderSessionThread(event.payload.threadId);
+    const hasSession = providerThread?.session && providerThread.session.status !== "stopped";
+    if (!providerThread || !hasSession) {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.subagent-execution.cancel.failed",
+        summary: "Subagent execution cancel failed",
+        detail: "No active provider session is bound to this thread.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+    }
     yield* providerService
       .cancelPiSubagentExecution({
         threadId: event.payload.threadId,
