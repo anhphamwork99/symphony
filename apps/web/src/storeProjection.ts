@@ -48,6 +48,7 @@ import {
   EMPTY_ACTIVITY_IDS_BY_THREAD,
   EMPTY_MESSAGE_BY_THREAD,
   EMPTY_MESSAGE_IDS_BY_THREAD,
+  EMPTY_PI_SUBAGENT_EXECUTIONS_BY_THREAD,
   EMPTY_PROPOSED_PLAN_BY_THREAD,
   EMPTY_PROPOSED_PLAN_IDS_BY_THREAD,
   EMPTY_THREAD_IDS,
@@ -706,6 +707,31 @@ function writeThreadState(state: AppState, nextThread: Thread, previousThread?: 
     };
   }
 
+  if (previousThread?.piSubagentExecutions !== nextThread.piSubagentExecutions) {
+    const previousCards = nextState.piSubagentExecutionsByThreadId?.[nextThread.id];
+    const nextCards = nextThread.piSubagentExecutions ?? [];
+    // Reference-equal slice writes are skipped wholesale; an emptied slice is
+    // removed so evicted/reset detail cannot resurrect stale cards.
+    if (nextCards.length > 0) {
+      if (previousCards !== nextCards) {
+        nextState = {
+          ...nextState,
+          piSubagentExecutionsByThreadId: {
+            ...(nextState.piSubagentExecutionsByThreadId ?? EMPTY_PI_SUBAGENT_EXECUTIONS_BY_THREAD),
+            [nextThread.id]: nextCards,
+          },
+        };
+      }
+    } else if (previousCards !== undefined) {
+      const { [nextThread.id]: _removed, ...rest } =
+        nextState.piSubagentExecutionsByThreadId ?? EMPTY_PI_SUBAGENT_EXECUTIONS_BY_THREAD;
+      nextState = {
+        ...nextState,
+        piSubagentExecutionsByThreadId: rest,
+      };
+    }
+  }
+
   if (previousThread?.messages !== nextThread.messages) {
     const previousIds = nextState.messageIdsByThreadId?.[nextThread.id];
     const previousById = nextState.messageByThreadId?.[nextThread.id];
@@ -861,6 +887,8 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     state.turnDiffSummaryByThreadId ?? EMPTY_TURN_DIFF_BY_THREAD;
   const { [threadId]: _removedSummary, ...sidebarThreadSummaryById } =
     state.sidebarThreadSummaryById;
+  const { [threadId]: _removedDeletedCards, ...piSubagentExecutionsByThreadId } =
+    state.piSubagentExecutionsByThreadId ?? EMPTY_PI_SUBAGENT_EXECUTIONS_BY_THREAD;
   const nextThreadIds = (state.threadIds ?? EMPTY_THREAD_IDS).filter((id) => id !== threadId);
 
   if (
@@ -874,6 +902,7 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     {
       ...state,
       threadIds: nextThreadIds,
+      piSubagentExecutionsByThreadId,
       threadShellById,
       threadSessionById,
       threadTurnStateById,
@@ -1448,6 +1477,10 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
       nextThreadIds,
     ),
     threadDetailSyncById: retainThreadScopedRecord(state.threadDetailSyncById, nextThreadIds),
+    piSubagentExecutionsByThreadId: retainThreadScopedRecord(
+      state.piSubagentExecutionsByThreadId,
+      nextThreadIds,
+    ),
   };
   for (const thread of nextThreads) {
     // Read-model threads carry full detail (messages, activities), so they are synced by definition.
@@ -1489,6 +1522,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     normalizedState.turnDiffIdsByThreadId === state.turnDiffIdsByThreadId &&
     normalizedState.turnDiffSummaryByThreadId === state.turnDiffSummaryByThreadId &&
     normalizedState.threadDetailSyncById === state.threadDetailSyncById &&
+    normalizedState.piSubagentExecutionsByThreadId === state.piSubagentExecutionsByThreadId &&
     state.threadsHydrated
   ) {
     // Nothing to merge, but the snapshot is still authoritative at its own sequence. Recording it

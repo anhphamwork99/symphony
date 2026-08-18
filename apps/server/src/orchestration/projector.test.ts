@@ -174,6 +174,7 @@ describe("orchestration projector", () => {
         createBranchFlowCompleted: false,
         isPinned: false,
         parentThreadId: null,
+        piSubagentExecutions: [],
         creationSource: null,
         sourceThreadId: null,
         sourceTurnId: null,

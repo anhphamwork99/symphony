@@ -400,7 +400,7 @@ export const makePiSubagentCompletionCoordinator = (
             if (accepted.success.kind === "transitioned") {
               emit(batch.parentThreadId, {
                 batchId: batch.batchId,
-                diagnosticCode: "pi_subagent_completion_delivery_failed",
+                diagnosticCode: "pi_subagent_completion_delivery_succeeded",
                 diagnosticMessage: `completion-recovery-correlation-confirmed:${dispatch.receipt.resultSequence}`,
               });
               finalizeAcceptedBatch({ ...batch, state: "accepted" as const });
@@ -547,7 +547,8 @@ export const makePiSubagentCompletionCoordinator = (
         }
         emit(batch.parentThreadId, {
           batchId: batch.batchId,
-          diagnosticCode: "pi_subagent_completion_delivery_failed",
+          // Decision 0018 F1: success literal, never a failure code.
+          diagnosticCode: "pi_subagent_completion_delivery_succeeded",
           diagnosticMessage: `completion follow-up accepted and acknowledged for batch '${batch.batchId}' (receipt-correlated finalization)`,
         });
         scheduleRedrive(batch.parentThreadId);

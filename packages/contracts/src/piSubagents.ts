@@ -57,6 +57,7 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_terminal_persistence_failed",
   "pi_subagent_completion_outbox_persistence_failed",
   "pi_subagent_completion_delivery_failed",
+  "pi_subagent_completion_delivery_succeeded",
   "pi_subagent_completion_superseded",
   "pi_subagent_completion_batch_persistence_failed",
   "pi_subagent_completion_batch_rejected",
@@ -355,6 +356,55 @@ export const PiSubagentCompletionOutboxEntry = Schema.Struct({
   acknowledgedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type PiSubagentCompletionOutboxEntry = typeof PiSubagentCompletionOutboxEntry.Type;
+
+/**
+ * Ticket 11 reconnectable execution card (T11-AC1). Bounded, stable
+ * projection of one managed Pi subagent execution as consumed by the web
+ * execution-card experience over the WebSocket snapshot/replay surface.
+ *
+ * Every field is bounded server-side before it enters this shape: the card
+ * NEVER carries the prompt, raw progress JSON, or full transcript content —
+ * only bounded summaries and opaque references. Terminal evidence
+ * (`terminalSummary`, `transcriptRef`) inherits the Ticket 07/08 bounds and
+ * `deliveryState` exposes the completion-outbox delivery state without ever
+ * conflating delivery failure with execution failure (T08-AC2).
+ */
+export const PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS = 512;
+export const PI_SUBAGENT_EXECUTION_CARD_DIAGNOSTIC_MAX_CHARS = 512;
+export const PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD = 64;
+
+export const PiSubagentExecutionCard = Schema.Struct({
+  executionId: PiSubagentExecutionId,
+  attemptId: PiSubagentAttemptId,
+  generation: PositiveInt,
+  projectId: ProjectId,
+  parentThreadId: ThreadId,
+  parentTurnId: Schema.NullOr(TurnId),
+  parentToolCallId: Schema.NullOr(TrimmedNonEmptyString),
+  agentType: TrimmedNonEmptyString,
+  mode: PiSubagentTransportMode,
+  cancellationScope: PiSubagentCancellationScope,
+  desiredState: PiSubagentLifecycleState,
+  observedState: PiSubagentLifecycleState,
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+  /** Bounded human-facing diagnostic/rejection text (truncated server-side). */
+  diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
+  /** Lease state for the current attempt (null before first heartbeat). */
+  leaseExpiresAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Bounded latest-progress summary (coalesced; never the raw JSON). */
+  lastProgressSummary: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  lastProgressAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  droppedProgressCount: Schema.optional(NonNegativeInt),
+  /** Bounded terminal summary for terminal executions (Ticket 07 bounds). */
+  terminalSummary: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Opaque authorized transcript reference (never transcript content). */
+  transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Completion-outbox delivery state, when a delivery entry exists. */
+  deliveryState: Schema.optional(PiSubagentCompletionDeliveryState),
+  createdAt: TrimmedNonEmptyString,
+  updatedAt: TrimmedNonEmptyString,
+});
+export type PiSubagentExecutionCard = typeof PiSubagentExecutionCard.Type;
 
 /**
  * Ticket 10 restart-reconciliation evidence (T10-AC1/AC2/AC3). Evidence is

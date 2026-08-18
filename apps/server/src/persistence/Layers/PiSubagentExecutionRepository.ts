@@ -1,6 +1,9 @@
 import {
+  PI_SUBAGENT_EXECUTION_CARD_DIAGNOSTIC_MAX_CHARS,
+  PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS,
   type PiSubagentCancellationScope,
   type PiSubagentDiagnosticCode,
+  type PiSubagentExecutionCard,
   type PiSubagentExecutionRecord,
   type PiSubagentLifecycleEvent,
   type PiSubagentLifecycleState,
@@ -12,13 +15,15 @@ import {
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import type { PiSubagentCompletionDeliveryState } from "@synara/contracts";
+
 import { type PersistenceSqlError, toPersistenceSqlError } from "../Errors.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
   type PiSubagentExecutionObservation,
   type PiSubagentCompletionOutboxEntry,
-
+  type PiSubagentExecutionLifecycleNotification,
   type PiSubagentCompletionDispatchBatch,
   type PiSubagentCompletionDispatchBatchContent,
   type PiSubagentCompletionDispatchBatchState,
@@ -180,8 +185,153 @@ interface OutboxRow {
 
 const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
 
+/**
+ * Ticket 11 bounded excerpt helper (T11-AC1): collapses whitespace and
+ * truncates with an ellipsis marker. Never throws on non-string input.
+ */
+const boundExcerpt = (value: string | null | undefined, maxChars: number): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const collapsed = value.trim().replace(/\s+/g, " ");
+  if (collapsed.length === 0) {
+    return null;
+  }
+  if (collapsed.length <= maxChars) {
+    return collapsed;
+  }
+  return `${collapsed.slice(0, Math.max(0, maxChars - 1))}…`;
+};
+
+/**
+ * Ticket 11 progress-summary extraction (T11-AC1). The coalesced progress
+ * JSON is producer-defined; the card exposes only a bounded plain-text
+ * excerpt so no raw JSON or transcript content ever reaches the snapshot.
+ */
+const progressJsonToSummary = (value: string | null | undefined): string | null => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed !== null && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const key of ["summary", "text", "message", "detail", "status"]) {
+        const candidate = record[key];
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+          return boundExcerpt(candidate, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+        }
+      }
+      const stringified = JSON.stringify(parsed);
+      return boundExcerpt(stringified, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+    }
+    if (typeof parsed === "string") {
+      return boundExcerpt(parsed, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+    }
+  } catch {
+    // Fall through to the raw bounded excerpt.
+  }
+  return boundExcerpt(value, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+};
+
 const telemetryMetric = (value: number | undefined): number =>
   Math.max(0, Math.round(Number.isFinite(value) ? (value ?? 0) : 0));
+
+/**
+ * Ticket 11 joined card row (T11-AC1): execution aggregate + observation
+ * columns + terminal evidence + current completion-outbox delivery state.
+ * Module scope so the orchestration snapshot query can reuse the exact
+ * row→card mapping (single source of bounded-card truth).
+ */
+export interface PiSubagentExecutionCardRow {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly projectId: string;
+  readonly parentThreadId: string;
+  readonly parentTurnId: string | null;
+  readonly parentToolCallId: string | null;
+  readonly agentType: string;
+  readonly mode: PiSubagentTransportMode;
+  readonly cancellationScope: PiSubagentCancellationScope;
+  readonly desiredState: PiSubagentLifecycleState;
+  readonly observedState: PiSubagentLifecycleState;
+  readonly diagnosticCode: PiSubagentDiagnosticCode | null;
+  readonly rejectionReason: string | null;
+  readonly lastProgressJson: string | null;
+  readonly lastProgressAt: string | null;
+  readonly droppedProgressCount: number;
+  readonly leaseExpiresAt: string | null;
+  readonly terminalSummary: string | null;
+  readonly terminalTranscriptRef: string | null;
+  readonly deliveryState: PiSubagentCompletionDeliveryState | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Bounded card mapping (T11-AC1): never carries prompt or raw progress JSON. */
+export function piSubagentExecutionCardRowToCard(
+  row: PiSubagentExecutionCardRow,
+): PiSubagentExecutionCard {
+  return {
+    executionId: row.executionId,
+    attemptId: row.attemptId,
+    generation: row.generation,
+    projectId: row.projectId as ProjectId,
+    parentThreadId: row.parentThreadId as ThreadId,
+    parentTurnId: (row.parentTurnId as TurnId) ?? null,
+    parentToolCallId: row.parentToolCallId ?? null,
+    agentType: row.agentType,
+    mode: row.mode,
+    cancellationScope: row.cancellationScope,
+    desiredState: row.desiredState,
+    observedState: row.observedState,
+    ...(row.diagnosticCode !== null ? { diagnosticCode: row.diagnosticCode } : {}),
+    ...(row.rejectionReason !== null || row.diagnosticCode !== null
+      ? {
+          diagnosticMessage:
+            boundExcerpt(row.rejectionReason, PI_SUBAGENT_EXECUTION_CARD_DIAGNOSTIC_MAX_CHARS) ??
+            undefined,
+        }
+      : {}),
+    leaseExpiresAt: row.leaseExpiresAt,
+    ...(row.lastProgressAt !== null || row.lastProgressJson !== null
+      ? {
+          lastProgressSummary: progressJsonToSummary(row.lastProgressJson) ?? null,
+          lastProgressAt: row.lastProgressAt,
+        }
+      : {}),
+    droppedProgressCount: Math.max(0, Number(row.droppedProgressCount ?? 0)),
+    ...(row.terminalSummary !== null || row.terminalTranscriptRef !== null
+      ? {
+          terminalSummary: boundExcerpt(
+            row.terminalSummary,
+            PI_SUBAGENT_EXECUTION_CARD_DIAGNOSTIC_MAX_CHARS,
+          ),
+          transcriptRef: row.terminalTranscriptRef,
+        }
+      : {}),
+    ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * Ticket 11 late-bound lifecycle listener (T11-AC1/AC2). Module-scope slot so
+ * the projection bridge can bind after layer composition without threading a
+ * constructor dependency through every repository consumer. Single consumer
+ * by design (the server bridge); rebinding replaces the previous listener.
+ */
+let onExecutionLifecycleCommittedListener:
+  | ((notification: PiSubagentExecutionLifecycleNotification) => void)
+  | undefined;
+
+export function setPiSubagentExecutionLifecycleListener(
+  listener: ((notification: PiSubagentExecutionLifecycleNotification) => void) | undefined,
+): void {
+  onExecutionLifecycleCommittedListener = listener;
+}
 
 export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -210,7 +360,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       LIMIT 1
     `;
 
-  const recordAdmission: PiSubagentExecutionRepositoryShape["recordAdmission"] = (input) =>
+  const recordAdmissionBase: PiSubagentExecutionRepositoryShape["recordAdmission"] = (input) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -393,7 +543,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         ),
       );
 
-  const recordLifecycleEvent: PiSubagentExecutionRepositoryShape["recordLifecycleEvent"] = (
+  const recordLifecycleEventBase: PiSubagentExecutionRepositoryShape["recordLifecycleEvent"] = (
     input,
   ) =>
     sql
@@ -777,6 +927,58 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       return rows.map(rowToExecutionRecord);
     });
 
+  const listExecutionCardsByThreadId: PiSubagentExecutionRepositoryShape["listExecutionCardsByThreadId"] =
+    (threadId, limit) =>
+      Effect.gen(function* () {
+        const boundedLimit = Math.max(1, Math.floor(Number.isFinite(limit) ? limit : 0));
+        const rows = yield* sql<PiSubagentExecutionCardRow>`
+          SELECT
+            base.execution_id AS "executionId",
+            base.attempt_id AS "attemptId",
+            base.generation,
+            base.project_id AS "projectId",
+            base.parent_thread_id AS "parentThreadId",
+            base.parent_turn_id AS "parentTurnId",
+            base.parent_tool_call_id AS "parentToolCallId",
+            base.agent_type AS "agentType",
+            base.mode,
+            base.cancellation_scope AS "cancellationScope",
+            base.desired_state AS "desiredState",
+            base.observed_state AS "observedState",
+            base.diagnostic_code AS "diagnosticCode",
+            base.rejection_reason AS "rejectionReason",
+            base.last_progress_json AS "lastProgressJson",
+            base.last_progress_at AS "lastProgressAt",
+            base.dropped_progress_count AS "droppedProgressCount",
+            base.lease_expires_at AS "leaseExpiresAt",
+            base.terminal_summary AS "terminalSummary",
+            base.terminal_transcript_ref AS "terminalTranscriptRef",
+            outbox.delivery_state AS "deliveryState",
+            base.created_at AS "createdAt",
+            base.updated_at AS "updatedAt"
+          FROM (
+            SELECT *
+            FROM pi_subagent_executions
+            WHERE parent_thread_id = ${threadId}
+            ORDER BY created_at DESC, execution_id DESC
+            LIMIT ${boundedLimit}
+          ) AS base
+          LEFT JOIN pi_subagent_completion_outbox AS outbox
+            ON outbox.execution_id = base.execution_id
+           AND outbox.attempt_id = base.attempt_id
+           AND outbox.generation = base.generation
+          ORDER BY base.created_at ASC, base.execution_id ASC
+        `.pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "PiSubagentExecutionRepository.listExecutionCardsByThreadId:query",
+            ),
+          ),
+        );
+
+        return rows.map(piSubagentExecutionCardRowToCard);
+      });
+
   // ---------------------------------------------------------------------
   // Ticket 06 durable parent-turn cancellation paths.
   // ---------------------------------------------------------------------
@@ -899,63 +1101,62 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * `cancel_<cancelCommandId>` plus the attempt/generation sequence key, so a
    * replayed cancel command returns already_applied WITHOUT re-dispatching.
    */
-  const recordCancellationIntent: PiSubagentExecutionRepositoryShape["recordCancellationIntent"] = (
-    input,
-  ) =>
-    sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const eventId = `cancel_${input.cancelCommandId}`;
-          const metadataJson = JSON.stringify({
-            phase: "cancelling",
-            cancelCommandId: input.cancelCommandId,
-            reason: input.reason ?? null,
-          });
+  const recordCancellationIntentBase: PiSubagentExecutionRepositoryShape["recordCancellationIntent"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const eventId = `cancel_${input.cancelCommandId}`;
+            const metadataJson = JSON.stringify({
+              phase: "cancelling",
+              cancelCommandId: input.cancelCommandId,
+              reason: input.reason ?? null,
+            });
 
-          const existing = yield* lookupJournalEvent({
-            eventId,
-            executionId: input.executionId,
-            attemptId: input.attemptId,
-            generation: input.generation,
-            sequence: input.sequence,
-          });
-          const executionRows = yield* getByIdInternal(input.executionId);
-          if (executionRows.length === 0) {
-            return yield* Effect.fail(
-              toPersistenceSqlError(
-                "PiSubagentExecutionRepository.recordCancellationIntent:execution-lookup",
-              )(new Error(`Execution '${input.executionId}' not found`)),
-            );
-          }
-          const execution = rowToExecutionRecord(executionRows[0]!);
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence: input.sequence,
+            });
+            const executionRows = yield* getByIdInternal(input.executionId);
+            if (executionRows.length === 0) {
+              return yield* Effect.fail(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordCancellationIntent:execution-lookup",
+                )(new Error(`Execution '${input.executionId}' not found`)),
+              );
+            }
+            const execution = rowToExecutionRecord(executionRows[0]!);
 
-          if (existing.length > 0) {
-            return {
-              kind: "already_applied" as const,
-              event: journalRowToEvent(existing[0]!, execution),
-              execution,
-            };
-          }
+            if (existing.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                event: journalRowToEvent(existing[0]!, execution),
+                execution,
+              };
+            }
 
-          yield* makeJournalInsert({
-            eventId,
-            executionId: input.executionId,
-            attemptId: input.attemptId,
-            generation: input.generation,
-            sequence: input.sequence,
-            state: "cancelling",
-            occurredAt: input.occurredAt,
-            diagnosticCode: null,
-            diagnosticMessage: input.reason ?? null,
-            metadataJson,
-          });
+            yield* makeJournalInsert({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence: input.sequence,
+              state: "cancelling",
+              occurredAt: input.occurredAt,
+              diagnosticCode: null,
+              diagnosticMessage: input.reason ?? null,
+              metadataJson,
+            });
 
-          // Generation-gated aggregate advance: desired → cancelling only
-          // when this intent targets the CURRENT attempt/generation. A stale
-          // intent (older generation) journals as history without touching
-          // the newer attempt's truth (T06-AC3).
-          if (input.generation >= execution.generation) {
-            yield* sql`
+            // Generation-gated aggregate advance: desired → cancelling only
+            // when this intent targets the CURRENT attempt/generation. A stale
+            // intent (older generation) journals as history without touching
+            // the newer attempt's truth (T06-AC3).
+            if (input.generation >= execution.generation) {
+              yield* sql`
                 UPDATE pi_subagent_executions
                 SET
                   desired_state = 'cancelling',
@@ -963,36 +1164,36 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
                 WHERE execution_id = ${input.executionId}
                   AND desired_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
               `;
-          }
+            }
 
-          const refreshedRows = yield* getByIdInternal(input.executionId);
-          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
-          return {
-            kind: "recorded" as const,
-            event: journalRowToEvent(
-              {
-                eventId,
-                executionId: input.executionId,
-                attemptId: input.attemptId,
-                generation: input.generation,
-                sequence: input.sequence,
-                state: "cancelling",
-                occurredAt: input.occurredAt,
-                diagnosticCode: null,
-                diagnosticMessage: input.reason ?? null,
-                metadataJson,
-              },
-              refreshed,
-            ),
-            execution: refreshed,
-          };
-        }),
-      )
-      .pipe(
-        Effect.mapError(
-          toPersistenceSqlError("PiSubagentExecutionRepository.recordCancellationIntent:insert"),
-        ),
-      );
+            const refreshedRows = yield* getByIdInternal(input.executionId);
+            const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+            return {
+              kind: "recorded" as const,
+              event: journalRowToEvent(
+                {
+                  eventId,
+                  executionId: input.executionId,
+                  attemptId: input.attemptId,
+                  generation: input.generation,
+                  sequence: input.sequence,
+                  state: "cancelling",
+                  occurredAt: input.occurredAt,
+                  diagnosticCode: null,
+                  diagnosticMessage: input.reason ?? null,
+                  metadataJson,
+                },
+                refreshed,
+              ),
+              execution: refreshed,
+            };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.recordCancellationIntent:insert"),
+          ),
+        );
 
   /**
    * Ticket 06 terminal cancellation settlement (T06-AC4). Requires the
@@ -1000,7 +1201,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * stale settlement journals as history only and does not regress a newer
    * attempt (T06-AC3).
    */
-  const recordCancelledAck: PiSubagentExecutionRepositoryShape["recordCancelledAck"] = (input) =>
+  const recordCancelledAckBase: PiSubagentExecutionRepositoryShape["recordCancelledAck"] = (
+    input,
+  ) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -1107,7 +1310,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * mutate truth. Sequence gaps are REPORTED (continuity), never repaired,
    * deleted, or delayed (T07-AC3).
    */
-  const recordTerminalEvent: PiSubagentExecutionRepositoryShape["recordTerminalEvent"] = (input) =>
+  const recordTerminalEventBase: PiSubagentExecutionRepositoryShape["recordTerminalEvent"] = (
+    input,
+  ) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -2576,7 +2781,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * journal as history only (ignored), and late terminals are additionally
    * counted through the stale_terminal_events counter (T10-AC5).
    */
-  const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (input) =>
+  const recordOrphanedEventBase: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (
+    input,
+  ) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -3007,7 +3214,90 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       ),
     );
 
-  return {
+  /**
+   * Ticket 11 post-commit lifecycle notification (T11-AC1/AC2). Runs only
+   * AFTER the wrapped transaction succeeds (Effect.tap on the committed
+   * result); listener failures are swallowed — observation must never fail a
+   * committed lifecycle write. The listener slot is late-bound because the
+   * repository object is assembled after its member functions.
+   */
+  const notifyExecutionLifecycleCommitted = (
+    notification: PiSubagentExecutionLifecycleNotification,
+  ): Effect.Effect<void> =>
+    Effect.sync(() => {
+      try {
+        onExecutionLifecycleCommittedListener?.(notification);
+      } catch {
+        // Swallowed: observation is not control (mirrors T23 heartbeat rule).
+      }
+    });
+
+  /** Post-commit tap for result shapes carrying a committed execution. */
+  const notifyIfLifecycleTruthChanged = (
+    result: { readonly kind: string; readonly execution?: PiSubagentExecutionRecord },
+    journalSequence: number,
+  ): Effect.Effect<void> => {
+    if (
+      (result.kind !== "recorded" &&
+        result.kind !== "admitted" &&
+        result.kind !== "transitioned") ||
+      result.execution === undefined
+    ) {
+      return Effect.void;
+    }
+    const execution = result.execution;
+    return notifyExecutionLifecycleCommitted({
+      executionId: execution.executionId,
+      parentThreadId: execution.parentThreadId,
+      attemptId: execution.attemptId,
+      generation: execution.generation,
+      journalSequence,
+      observedState: execution.observedState,
+      desiredState: execution.desiredState,
+    });
+  };
+
+  // ── Ticket 11 post-commit notification wrappers (T11-AC1/AC2) ──────────
+  // Each wrapper taps AFTER the base transaction resolves successfully, so
+  // notifications fire only for committed lifecycle truth. journalSequence
+  // mirrors the deterministic band of the committing event (admission=1,
+  // lifecycle event = input.sequence, cancel intent=90, cancel ack=92
+  // child-ack / 91 owner-death, terminal ingest=40, orphan=50).
+  const recordAdmission: PiSubagentExecutionRepositoryShape["recordAdmission"] = (input) =>
+    recordAdmissionBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 1)),
+    );
+
+  const recordLifecycleEvent: PiSubagentExecutionRepositoryShape["recordLifecycleEvent"] = (
+    input,
+  ) =>
+    recordLifecycleEventBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, input.sequence)),
+    );
+
+  const recordCancellationIntent: PiSubagentExecutionRepositoryShape["recordCancellationIntent"] = (
+    input,
+  ) =>
+    recordCancellationIntentBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 90)),
+    );
+
+  const recordCancelledAck: PiSubagentExecutionRepositoryShape["recordCancelledAck"] = (input) =>
+    recordCancelledAckBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 92)),
+    );
+
+  const recordTerminalEvent: PiSubagentExecutionRepositoryShape["recordTerminalEvent"] = (input) =>
+    recordTerminalEventBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 40)),
+    );
+
+  const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (input) =>
+    recordOrphanedEventBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 50)),
+    );
+
+  const repository: PiSubagentExecutionRepositoryShape = {
     recordAdmission,
     recordLifecycleEvent,
     recordProgressObservation,
@@ -3016,6 +3306,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     getById,
     getByCommandId,
     listByThreadId,
+    listExecutionCardsByThreadId,
     listJournalEvents,
     listCancellableByParentTurn,
     recordCancellationIntent,
@@ -3045,6 +3336,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     recordWallTimeExpiryEvent,
     getTelemetrySnapshot,
   } satisfies PiSubagentExecutionRepositoryShape;
+
+  return repository;
 });
 
 export const PiSubagentExecutionRepositoryLive = Layer.effect(

@@ -10,6 +10,7 @@ import {
   PiModelOptions,
 } from "./model";
 import { ProviderMentionReference, ProviderSkillReference } from "./providerDiscovery";
+import { PiSubagentExecutionCard } from "./piSubagents";
 import { ProjectKind } from "./project";
 import {
   ApprovalRequestId,
@@ -804,6 +805,16 @@ export const OrchestrationThread = Schema.Struct({
   threadMarkers: Schema.optional(ThreadMarkers),
   notes: Schema.optional(ThreadNotes),
   messages: Schema.Array(OrchestrationMessage),
+  /**
+   * Ticket 11 bounded managed-execution cards (T11-AC1). Ordered
+   * oldest-first, capped at `PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD`.
+   * Snapshot-only shape: the web store keeps its own normalized slice fed by
+   * snapshots and `thread.pi-subagent-execution-updated` events; shells never
+   * carry it.
+   */
+  piSubagentExecutions: Schema.optional(Schema.Array(PiSubagentExecutionCard)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
   pendingInteractions: Schema.optional(Schema.Array(OrchestrationPendingInteraction)),
@@ -1460,6 +1471,22 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Ticket 11 card cancel command (client → server, T11-AC6). Cancels ONE
+ * managed Pi subagent execution through the durable cancel path (journal
+ * intent first, visible `cancelling` until acknowledgement). The decider
+ * validates thread existence; execution-scoped applicability (missing,
+ * terminal, wrong thread) is settled by the reactor and surfaced as a denial
+ * diagnostic without corrupting execution state.
+ */
+const ThreadPiSubagentExecutionCancelCommand = Schema.Struct({
+  type: Schema.Literal("thread.pi-subagent-execution.cancel"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   SpaceCreateCommand,
   SpaceMetaUpdateCommand,
@@ -1495,6 +1522,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
+  ThreadPiSubagentExecutionCancelCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1535,6 +1563,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
+  ThreadPiSubagentExecutionCancelCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1619,6 +1648,26 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Ticket 11 internal upsert (server → projection, T11-AC1/AC2). Emitted
+ * post-commit by the repository observation seam when a managed execution's
+ * lifecycle truth (desired/observed state, diagnostics, delivery state)
+ * changes. Deterministic command identity keyed by execution + journal
+ * sequence keeps at-least-once publication replay-safe (idempotent
+ * projection effects, T11-AC2). The payload is the bounded execution card;
+ * progress/heartbeat observations never enter this path.
+ */
+const ThreadPiSubagentExecutionUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.pi-subagent-execution.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  /** Attempt-local journal sequence that produced this card (ordering). */
+  journalSequence: NonNegativeInt,
+  card: PiSubagentExecutionCard,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessagesImportCommand,
@@ -1627,6 +1676,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadPiSubagentExecutionUpsertCommand,
   ThreadRevertCompleteCommand,
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
@@ -1684,6 +1734,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.pi-subagent-execution-updated",
+  "thread.pi-subagent-execution-cancel-requested",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1983,6 +2035,12 @@ export const ThreadTaskStopRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadPiSubagentExecutionCancelRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 export const ThreadTaskBackgroundRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   toolUseId: TrimmedNonEmptyString,
@@ -2078,6 +2136,14 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
+});
+
+export const ThreadPiSubagentExecutionUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  /** Attempt-local journal sequence that produced this card (ordering). */
+  journalSequence: NonNegativeInt,
+  card: PiSubagentExecutionCard,
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
@@ -2244,6 +2310,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.pi-subagent-execution-cancel-requested"),
+    payload: ThreadPiSubagentExecutionCancelRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.task-background-requested"),
     payload: ThreadTaskBackgroundRequestedPayload,
   }),
@@ -2306,6 +2377,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.pi-subagent-execution-updated"),
+    payload: ThreadPiSubagentExecutionUpdatedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

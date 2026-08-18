@@ -19,6 +19,7 @@ import {
   type WsWelcomePayload,
   WS_METHODS,
   OrchestrationSessionStatus,
+  type PiSubagentExecutionCard,
 } from "@synara/contracts";
 import {
   ATTACHMENT_CANCEL_ROUTE_PATH,
@@ -3687,6 +3688,213 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
     } finally {
       restoreScrollTo();
+      await mounted.cleanup();
+    }
+  });
+
+  it("execution-card activity never re-sticks the transcript while real assistant text keeps auto-follow", async () => {
+    // Ticket 11 (T11-AC7): card state, heartbeat-derived lease refreshes, and
+    // nested tool progress update the execution-card slice only — none of them
+    // are transcript messages, so the auto-follow signal must stay unchanged
+    // (zero scroll re-sticks), while a real streaming assistant message
+    // retains the existing live-output behavior.
+    let currentSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-execution-card-follow" as MessageId,
+      targetText: "execution-card follow target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: currentSnapshot,
+    });
+    let restoreScrollTo = () => {};
+
+    const syncActiveThread = (
+      update: (
+        thread: OrchestrationReadModel["threads"][number],
+      ) => OrchestrationReadModel["threads"][number],
+    ) => {
+      currentSnapshot = {
+        ...currentSnapshot,
+        snapshotSequence: currentSnapshot.snapshotSequence + 1,
+        threads: currentSnapshot.threads.map((thread) =>
+          thread.id === THREAD_ID ? update(thread) : thread,
+        ),
+        updatedAt: isoAt(currentSnapshot.snapshotSequence + 2_400),
+      };
+      fixture = { ...fixture, snapshot: currentSnapshot };
+      useStore.getState().syncServerReadModel(currentSnapshot);
+    };
+
+    const makeCardFixture = (
+      observedState: "running" | "cancelling",
+      lastProgressAt: string,
+    ): PiSubagentExecutionCard => ({
+      executionId: `exec-follow-${observedState}`,
+      attemptId: `exec-follow-${observedState}_att1`,
+      generation: 1,
+      projectId: currentSnapshot.projects[0]!.id,
+      parentThreadId: THREAD_ID,
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: observedState,
+      observedState,
+      leaseExpiresAt: isoAt(2_460),
+      lastProgressSummary: `coalesced nested tool progress (${observedState})`,
+      lastProgressAt,
+      droppedProgressCount: 12,
+      createdAt: isoAt(2_400),
+      updatedAt: isoAt(2_401),
+    });
+
+    try {
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-scroll-container='true']"),
+        "Unable to find message scroll container.",
+      );
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      const scrollSpy = installImmediateScrollToSpy(scrollContainer);
+      restoreScrollTo = scrollSpy.restore;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+      await waitForLayout();
+      scrollSpy.calls.length = 0;
+
+      // Card arrival (snapshot-fed execution slice).
+      syncActiveThread((thread) => ({
+        ...thread,
+        piSubagentExecutions: [makeCardFixture("running", isoAt(2_401))],
+        updatedAt: isoAt(2_401),
+      }));
+      await waitForLayout();
+      expect(scrollSpy.calls).toHaveLength(0);
+
+      // Repeated card-state changes: lifecycle transition + progress + lease
+      // heartbeat refresh in one bounded card payload.
+      for (let step = 0; step < 3; step += 1) {
+        syncActiveThread((thread) => ({
+          ...thread,
+          piSubagentExecutions: [makeCardFixture("cancelling", isoAt(2_402 + step))],
+          updatedAt: isoAt(2_402 + step),
+        }));
+        await waitForLayout();
+        expect(scrollSpy.calls).toHaveLength(0);
+      }
+
+      // Control: a real streaming assistant message still re-sticks.
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      scrollSpy.calls.length = 0;
+      const liveAssistantMessage = {
+        ...createAssistantMessage({
+          id: MessageId.makeUnsafe("msg-assistant-execution-card-follow"),
+          text: "A real live assistant tail after card churn",
+          offsetSeconds: 2_410,
+        }),
+        streaming: true,
+      };
+      syncActiveThread((thread) => ({
+        ...thread,
+        messages: [...thread.messages, liveAssistantMessage],
+        updatedAt: isoAt(2_410),
+      }));
+      await vi.waitFor(() => expect(scrollSpy.calls.length).toBeGreaterThan(0), {
+        timeout: 4_000,
+        interval: 16,
+      });
+    } finally {
+      restoreScrollTo();
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders the execution card strip from the snapshot and dispatches the durable cancel command", async () => {
+    // Ticket 11 (T11-AC5/AC6): a snapshot carrying managed execution cards
+    // renders the strip WITHOUT any live parent tool row (reconnect/refresh
+    // restores cards from durable state), and the card's cancel dispatches
+    // the per-execution cancel command through the orchestration seam.
+    const restoreNativeApi = installDeterministicSendNativeApi();
+    let currentSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-execution-card-cancel" as MessageId,
+      targetText: "execution card cancel target",
+    });
+    const executionCard = {
+      executionId: "exec-browser-cancel",
+      attemptId: "exec-browser-cancel_att1",
+      generation: 1,
+      projectId: currentSnapshot.projects[0]!.id,
+      parentThreadId: THREAD_ID,
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: "running",
+      observedState: "running",
+      leaseExpiresAt: isoAt(3_000),
+      lastProgressSummary: "coalesced progress from the durable snapshot",
+      lastProgressAt: isoAt(2_900),
+      droppedProgressCount: 4,
+      createdAt: isoAt(2_800),
+      updatedAt: isoAt(2_900),
+    } as unknown as NonNullable<
+      OrchestrationReadModel["threads"][number]["piSubagentExecutions"]
+    >[number];
+    currentSnapshot = {
+      ...currentSnapshot,
+      threads: currentSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID ? { ...thread, piSubagentExecutions: [executionCard] } : thread,
+      ),
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: currentSnapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Managed subagent executions");
+          expect(document.body.textContent).toContain(
+            "coalesced progress from the durable snapshot",
+          );
+        },
+        { timeout: 8_000, interval: 50 },
+      );
+
+      const cancelButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            "[data-pi-subagent-execution-id='exec-browser-cancel'] button[title='Cancel execution']",
+          ),
+        "Expected the execution card cancel affordance.",
+      );
+      const before = wsRequests.length;
+      cancelButton.click();
+      await vi.waitFor(
+        () => {
+          expect(wsRequests.length).toBeGreaterThan(before);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      const cancelRequest = wsRequests
+        .slice(before)
+        .find(
+          (request) =>
+            "_tag" in request &&
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            (request as { command?: { type?: string } }).command?.type ===
+              "thread.pi-subagent-execution.cancel",
+        ) as { command?: { executionId?: string; threadId?: string } } | undefined;
+      expect(cancelRequest).toBeDefined();
+      expect(cancelRequest!.command!.executionId).toBe("exec-browser-cancel");
+      expect(cancelRequest!.command!.threadId).toBe(THREAD_ID);
+    } finally {
+      restoreNativeApi();
       await mounted.cleanup();
     }
   });

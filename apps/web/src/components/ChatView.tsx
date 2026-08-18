@@ -7,6 +7,7 @@ import {
   MessageId,
   type ModelSelection,
   type NativeApi,
+  type PiSubagentExecutionCard,
   type OrchestrationShellSnapshot,
   type ProjectScript,
   type ModelSlug,
@@ -505,6 +506,7 @@ import { TranscriptSelectionActionLayer } from "./chat/TranscriptSelectionAction
 import { useChatTerminalController } from "./chat/useChatTerminalController";
 import { useChatAutomationSetup } from "./chat/useChatAutomationSetup";
 import { ComposerActiveTaskListCard } from "./chat/ComposerActiveTaskListCard";
+import { PiSubagentExecutionCardStrip } from "./chat/PiSubagentExecutionCardStrip";
 import { ComposerSubagentStrip } from "./chat/ComposerSubagentStrip";
 import {
   collectForegroundRunningSubagentStripItems,
@@ -2904,6 +2906,57 @@ export default function ChatView({
       stripWorkLogEntries,
     ],
   );
+  // Ticket 11 (T11-AC1/AC4/AC5): managed execution cards for the active Pi
+  // thread, fed by thread-detail snapshots and execution-updated events. The
+  // strip renders from durable state, so refresh/reconnect restores it without
+  // the parent tool row staying active.
+  const piSubagentExecutionCards = useMemo(
+    () => activeThread?.piSubagentExecutions ?? [],
+    [activeThread?.piSubagentExecutions],
+  );
+  // A live parent turn on a Pi thread without any managed card = the Agent
+  // tool ran without the managed-execution bridge (legacy session). Label it
+  // in the execution-card experience instead of fabricating a managed record
+  // (T11-AC8).
+  const piSubagentLegacyAgentToolActive =
+    threadProvider === "pi" &&
+    piSubagentExecutionCards.length === 0 &&
+    Boolean(activeLatestTurn && activeLatestTurn.state === "running");
+  const [piSubagentCancelPendingExecutionId, setPiSubagentCancelPendingExecutionId] = useState<
+    string | null
+  >(null);
+  const onCancelPiSubagentExecution = useCallback(
+    (card: PiSubagentExecutionCard) => {
+      const api = readNativeApi();
+      if (!api || !activeThread) return;
+      setPiSubagentCancelPendingExecutionId(card.executionId);
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.pi-subagent-execution.cancel",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          executionId: card.executionId,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((error: unknown) => {
+          // T11-AC6: denial is visible without state corruption — the card
+          // keeps rendering durable truth.
+          toastManager.add({
+            type: "error",
+            title: "Could not cancel the subagent execution",
+            description:
+              error instanceof Error
+                ? error.message
+                : "The cancel request failed. The execution state is unchanged.",
+          });
+        })
+        .finally(() => {
+          setPiSubagentCancelPendingExecutionId(null);
+        });
+    },
+    [activeThread],
+  );
+
   // Links workflow agent rows to their subagent child threads (and models) when the
   // Task tool_use_id produced one; agents spawned without a tool call stay unlinked.
   const workflowSubagentThreadsByToolUseId = useMemo(() => {
@@ -11268,6 +11321,20 @@ export default function ChatView({
                     showComposerLiveChangesHeader ||
                     showComposerActiveTaskListCard ||
                     showComposerWorkflowRunCard
+                  }
+                />
+              ) : null}
+              {piSubagentExecutionCards.length > 0 && !planSidebarOpen ? (
+                <PiSubagentExecutionCardStrip
+                  cards={piSubagentExecutionCards}
+                  legacyAgentToolActive={piSubagentLegacyAgentToolActive}
+                  onCancelExecution={onCancelPiSubagentExecution}
+                  cancelPendingExecutionId={piSubagentCancelPendingExecutionId}
+                  attachedToPrevious={
+                    showComposerLiveChangesHeader ||
+                    showComposerActiveTaskListCard ||
+                    showComposerWorkflowRunCard ||
+                    showComposerSubagentStrip
                   }
                 />
               ) : null}

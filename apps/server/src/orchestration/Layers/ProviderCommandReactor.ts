@@ -722,6 +722,7 @@ const make = Effect.gen(function* () {
       | "provider.turn.interrupt.failed"
       | "provider.task.stop.failed"
       | "provider.task.background.failed"
+      | "provider.subagent-execution.cancel.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
@@ -2847,6 +2848,33 @@ const make = Effect.gen(function* () {
       );
   });
 
+  const processPiSubagentExecutionCancelRequested = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.pi-subagent-execution-cancel-requested" }>,
+  ) {
+    // Ticket 11 (T11-AC6): drive the durable single-execution cancel. The
+    // decider already gated thread existence; every execution-scoped denial
+    // (unknown execution, terminal, unsupported provider, inactive runtime)
+    // surfaces as a visible activity without corrupting execution truth —
+    // the card keeps rendering the durable aggregate.
+    yield* providerService
+      .cancelPiSubagentExecution({
+        threadId: event.payload.threadId,
+        executionId: event.payload.executionId,
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.subagent-execution.cancel.failed",
+            summary: "Subagent execution cancel failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+      );
+  });
+
   const processTaskBackgroundRequested = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.task-background-requested" }>,
   ) {
@@ -3618,6 +3646,9 @@ const make = Effect.gen(function* () {
           return;
         case "thread.task-stop-requested":
           yield* processTaskStopRequested(event);
+          return;
+        case "thread.pi-subagent-execution-cancel-requested":
+          yield* processPiSubagentExecutionCancelRequested(event);
           return;
         case "thread.task-background-requested":
           yield* processTaskBackgroundRequested(event);

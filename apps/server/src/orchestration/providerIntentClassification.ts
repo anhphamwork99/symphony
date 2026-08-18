@@ -14,6 +14,7 @@ export type ProviderIntentEvent = Extract<
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.task-stop-requested"
+      | "thread.pi-subagent-execution-cancel-requested"
       | "thread.task-background-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -34,6 +35,7 @@ const PROVIDER_INTENT_EVENT_TYPES = new Set<ProviderIntentEvent["type"]>([
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.task-stop-requested",
+  "thread.pi-subagent-execution-cancel-requested",
   "thread.task-background-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",

@@ -541,6 +541,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           pendingInteractions: [],
+          piSubagentExecutions: [],
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),

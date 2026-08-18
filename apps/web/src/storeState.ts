@@ -36,6 +36,12 @@ export interface AppState {
   messageByThreadId?: Record<ThreadId, Record<MessageId, ChatMessage>>;
   activityIdsByThreadId?: Record<ThreadId, string[]>;
   activityByThreadId?: Record<ThreadId, Record<string, Thread["activities"][number]>>;
+  /**
+   * Ticket 11 (T11-AC1/AC4): bounded managed-execution cards per thread
+   * (server-derived detail slice; survives refresh via detail snapshots and
+   * execution-updated events, pruned with thread eviction/deletion).
+   */
+  piSubagentExecutionsByThreadId?: Record<ThreadId, Thread["piSubagentExecutions"]>;
   proposedPlanIdsByThreadId?: Record<ThreadId, string[]>;
   proposedPlanByThreadId?: Record<ThreadId, Record<string, Thread["proposedPlans"][number]>>;
   turnDiffIdsByThreadId?: Record<ThreadId, TurnId[]>;
@@ -65,6 +71,10 @@ export const EMPTY_ACTIVITY_IDS_BY_THREAD: Record<ThreadId, string[]> = {};
 export const EMPTY_ACTIVITY_BY_THREAD: Record<
   ThreadId,
   Record<string, Thread["activities"][number]>
+> = {};
+export const EMPTY_PI_SUBAGENT_EXECUTIONS_BY_THREAD: Record<
+  ThreadId,
+  Thread["piSubagentExecutions"]
 > = {};
 export const EMPTY_PROPOSED_PLAN_IDS_BY_THREAD: Record<ThreadId, string[]> = {};
 export const EMPTY_PROPOSED_PLAN_BY_THREAD: Record<

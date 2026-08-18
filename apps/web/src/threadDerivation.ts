@@ -41,6 +41,7 @@ const threadCache = new WeakMap<
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
+    piSubagentExecutions: Thread["piSubagentExecutions"] | undefined;
     thread: Thread;
   }
 >();
@@ -119,6 +120,7 @@ export function getThreadFromState(state: AppState, threadId: ThreadId): Thread 
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
+  const piSubagentExecutions = state.piSubagentExecutionsByThreadId?.[threadId];
   const cached = threadCache.get(shell);
 
   if (
@@ -128,7 +130,8 @@ export function getThreadFromState(state: AppState, threadId: ThreadId): Thread 
     cached.messages === messages &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
-    cached.turnDiffSummaries === turnDiffSummaries
+    cached.turnDiffSummaries === turnDiffSummaries &&
+    cached.piSubagentExecutions === piSubagentExecutions
   ) {
     return cached.thread;
   }
@@ -142,6 +145,9 @@ export function getThreadFromState(state: AppState, threadId: ThreadId): Thread 
     activities,
     proposedPlans,
     turnDiffSummaries,
+    ...(piSubagentExecutions !== undefined && piSubagentExecutions.length > 0
+      ? { piSubagentExecutions }
+      : {}),
   };
 
   threadCache.set(shell, {
@@ -151,6 +157,7 @@ export function getThreadFromState(state: AppState, threadId: ThreadId): Thread 
     activities,
     proposedPlans,
     turnDiffSummaries,
+    piSubagentExecutions,
     thread,
   });
 

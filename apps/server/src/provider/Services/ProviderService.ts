@@ -28,6 +28,7 @@ import type {
   ProviderSteerSubagentInput,
   ProviderStopSessionInput,
   ProviderStopTaskInput,
+  ProviderCancelPiSubagentExecutionInput,
   ThreadId,
   ProviderTurnStartResult,
 } from "@synara/contracts";
@@ -112,6 +113,15 @@ export interface ProviderServiceShape {
    * not support task control.
    */
   readonly stopTask: (input: ProviderStopTaskInput) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Ticket 11 (T11-AC6): cancel ONE managed Pi subagent execution through the
+   * durable cancel path (journal intent first, visible `cancelling` until
+   * acknowledgement). Denials surface as validation errors.
+   */
+  readonly cancelPiSubagentExecution: (
+    input: ProviderCancelPiSubagentExecutionInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Move an in-flight foreground task to the background. No-op when the routed

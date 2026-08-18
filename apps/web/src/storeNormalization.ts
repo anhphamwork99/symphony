@@ -32,6 +32,7 @@ import type {
   ThreadShell,
   ThreadTurnState,
 } from "./types";
+import type { PiSubagentExecutionCard } from "@synara/contracts";
 
 type ReadModelProject = OrchestrationReadModel["projects"][number];
 type ReadModelSpace = OrchestrationReadModel["spaces"][number];
@@ -1471,6 +1472,35 @@ function normalizeLatestTurn(
   };
 }
 
+/**
+ * Ticket 11 (T11-AC2): duplicate event identities must have ONE projection
+ * effect. Card upserts are idempotent by executionId; the identity comparison
+ * compares the bounded card content so a no-change upsert (replayed event or
+ * snapshot with equal truth) preserves the previous array reference.
+ */
+function normalizePiSubagentExecutionCardsEqual(
+  previous: ReadonlyArray<PiSubagentExecutionCard> | undefined,
+  next: ReadonlyArray<PiSubagentExecutionCard> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (previous === undefined || next === undefined) {
+    return (previous ?? []).length === 0 && (next ?? []).length === 0;
+  }
+  if (previous.length !== next.length) {
+    return false;
+  }
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index]!;
+    const right = next[index]!;
+    if (left !== right && !deepEqualJson(left, right)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function normalizeThreadFromReadModel(
   incoming: ReadModelThread,
   previous: Thread | undefined,
@@ -1505,6 +1535,11 @@ export function normalizeThreadFromReadModel(
     previous?.turnDiffSummaries,
   );
   const activities = normalizeActivities(incoming.activities, previous?.activities);
+  // Ticket 11 (T11-AC1): snapshot-fed execution cards. Snapshot slices are
+  // authoritative and replace wholesale (bounded, oldest-first).
+  const piSubagentExecutions = Object.hasOwn(incoming, "piSubagentExecutions")
+    ? [...(incoming.piSubagentExecutions ?? [])]
+    : previous?.piSubagentExecutions;
   const incomingPendingInteractions = Object.hasOwn(incoming, "pendingInteractions")
     ? (incoming.pendingInteractions ?? [])
     : previous?.pendingInteractions;
@@ -1602,7 +1637,8 @@ export function normalizeThreadFromReadModel(
     previous.notes === notes &&
     previous.turnDiffSummaries === turnDiffSummaries &&
     previous.activities === activities &&
-    previous.pendingInteractions === pendingInteractions
+    previous.pendingInteractions === pendingInteractions &&
+    normalizePiSubagentExecutionCardsEqual(previous.piSubagentExecutions, piSubagentExecutions)
   ) {
     return previous;
   }
@@ -1663,6 +1699,9 @@ export function normalizeThreadFromReadModel(
     turnDiffSummaries,
     activities,
     ...(pendingInteractions !== undefined ? { pendingInteractions } : {}),
+    ...(piSubagentExecutions !== undefined && piSubagentExecutions.length > 0
+      ? { piSubagentExecutions }
+      : {}),
   };
 }
 

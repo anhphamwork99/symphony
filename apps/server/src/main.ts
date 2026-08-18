@@ -63,6 +63,7 @@ import { startThreadRetentionJob } from "./threadRetention";
 import { PiSubagentExecutionRepository } from "./persistence/Services/PiSubagentExecutionRepository.ts";
 import { recoverCompletionOutbox } from "./provider/piSubagentCompletionOutbox.ts";
 import { reconcilePiSubagentExecutions } from "./provider/piSubagentRestartReconciliation.ts";
+import { setPiSubagentExecutionLifecycleListener } from "./persistence/Layers/PiSubagentExecutionRepository.ts";
 import {
   pairExternalMcpClient,
   resolveExternalMcpBaseDir,
@@ -492,6 +493,16 @@ const makeServerProgram = (input: CliInput) => {
     // Decision 0016: bind the completion parent-effect dispatcher exactly once
     // when the engine is live (firing the adapter's recovery-trigger callback).
     serverLayers.completionDispatchBridge.bindOnce(orchestrationEngine);
+    // Ticket 11: bind the execution-card projection bridge to the same live
+    // engine, then attach its repository listener. Post-commit lifecycle
+    // notifications now publish deterministic card-upsert commands.
+    serverLayers.piSubagentExecutionCardBridge.bindOnce(orchestrationEngine);
+    {
+      const repository = yield* PiSubagentExecutionRepository;
+      setPiSubagentExecutionLifecycleListener((notification) => {
+        serverLayers.piSubagentExecutionCardBridge.handleNotification(repository, notification);
+      });
+    }
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     // Start the retention loop after the server is live so startup can serve
     // existing history first, then hide inactive threads from the app in the background.

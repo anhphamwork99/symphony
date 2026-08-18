@@ -1,6 +1,7 @@
 import { type PiSubagentCancelCommand, type PiSubagentCancelResult } from "@synara/contracts";
 import { Effect, Option } from "effect";
 
+import type { PiSubagentExecutionRecord } from "@synara/contracts";
 import {
   DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS,
   DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT,
@@ -163,6 +164,308 @@ const dispatchCancelOnce = (input: {
     return dispatched;
   });
 
+interface CancelOneExecutionInput {
+  readonly execution: PiSubagentExecutionRecord;
+  readonly threadId: string;
+  readonly repository: PiSubagentExecutionRepositoryShape;
+  readonly bridge: PiSubagentExtensionBridge | undefined;
+  readonly isOwnerGenerationDead: () => boolean;
+  readonly listActive: () => ReadonlyArray<PiSubagentActiveChild> | undefined;
+  readonly cancelAckTimeoutMs?: number | undefined | undefined;
+  readonly cancelRetryLimit?: number | undefined | undefined;
+  readonly leaseDurationMs?: number | undefined | undefined;
+  readonly now?: (() => number) | undefined;
+  readonly sleep?: ((ms: number) => Effect.Effect<void>) | undefined;
+  readonly onEscalateProviderTurnInterrupt?: ((executionId: string) => void) | undefined;
+  readonly onDiagnostic?:
+    | ((event: {
+        readonly executionId: string;
+        readonly diagnosticCode: string;
+        readonly diagnosticMessage: string;
+      }) => void)
+    | undefined;
+}
+
+const cancelOneExecution = (
+  input: CancelOneExecutionInput,
+): Effect.Effect<PiSubagentCancelExecutionOutcome, unknown> =>
+  Effect.gen(function* () {
+    const execution = input.execution;
+    const threadId = input.threadId;
+    const now = input.now ?? (() => Date.now());
+    const sleep =
+      input.sleep ?? ((ms: number) => Effect.sleep(`${Math.max(0, ms)} millis` as const));
+    const ackTimeoutMs =
+      input.cancelAckTimeoutMs !== undefined && input.cancelAckTimeoutMs > 0
+        ? input.cancelAckTimeoutMs
+        : DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
+    const retryLimit =
+      input.cancelRetryLimit !== undefined && input.cancelRetryLimit >= 0
+        ? input.cancelRetryLimit
+        : DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
+    const leaseDurationMs =
+      input.leaseDurationMs !== undefined && input.leaseDurationMs > 0
+        ? input.leaseDurationMs
+        : 30000;
+
+    const expectedAttemptId = execution.attemptId;
+    const expectedGeneration = execution.generation;
+
+    if (TERMINAL_STATES.has(execution.observedState)) {
+      return {
+        kind: "already_terminal",
+        executionId: execution.executionId,
+        attemptId: execution.attemptId,
+        generation: execution.generation,
+        observedState: execution.observedState,
+      };
+    }
+
+    // T06-AC1: journal-first durable intent with a deterministic
+    // cancelCommandId scoped to (execution, attempt, generation). Replays
+    // dedup to already_applied and never re-dispatch.
+    const cancelCommandId = `cancelcmd_${execution.executionId}_${expectedAttemptId}_gen${expectedGeneration}_${threadId}`;
+    const intentResult = yield* input.repository.recordCancellationIntent({
+      executionId: execution.executionId,
+      attemptId: expectedAttemptId,
+      generation: expectedGeneration,
+      sequence: 90,
+      cancelCommandId,
+      occurredAt: new Date(now()).toISOString(),
+      reason: "parent_turn_stop",
+    });
+
+    // Re-read the aggregate AFTER the intent write: a concurrent terminal
+    // (child completed between the list and the intent) wins.
+    const afterIntent = intentResult.execution;
+    if (TERMINAL_STATES.has(afterIntent.observedState)) {
+      return {
+        kind: "already_terminal",
+        executionId: execution.executionId,
+        attemptId: afterIntent.attemptId,
+        generation: afterIntent.generation,
+        observedState: afterIntent.observedState,
+      };
+    }
+
+    // T06-AC3: the cancel targets the CURRENT attempt/generation only. If
+    // the aggregate advanced past what we listed, this cancel is stale.
+    if (
+      afterIntent.attemptId !== expectedAttemptId ||
+      afterIntent.generation !== expectedGeneration
+    ) {
+      return {
+        kind: "stale_generation",
+        executionId: execution.executionId,
+        expectedAttemptId,
+        expectedGeneration,
+        currentAttemptId: afterIntent.attemptId,
+        currentGeneration: afterIntent.generation,
+      };
+    }
+
+    // Owner-death evidence path (T06-AC4): dead owner generation + expired
+    // re-derived lease + listActive no longer contains the execution.
+    const ownerDead = input.isOwnerGenerationDead();
+    if (ownerDead) {
+      const activeChildren = input.listActive();
+      const stillActive =
+        activeChildren?.some((child) => child.executionId === execution.executionId) ?? false;
+      if (!stillActive) {
+        const observationOption = yield* input.repository.getObservation(execution.executionId);
+        const observation = Option.isSome(observationOption) ? observationOption.value : null;
+        if (observation === null || isLeaseExpired(observation, leaseDurationMs, now())) {
+          yield* input.repository.recordCancelledAck({
+            executionId: execution.executionId,
+            attemptId: expectedAttemptId,
+            generation: expectedGeneration,
+            sequence: 91,
+            occurredAt: new Date(now()).toISOString(),
+            evidenceChannel: "owner_death",
+            diagnosticCode: "pi_subagent_cancel_owner_death",
+            diagnosticMessage:
+              "Cancelled by owner-death evidence: owner process generation dead, lease expired (re-derived server-side), and listActive no longer contains the execution",
+          });
+          return {
+            kind: "cancelled_owner_death",
+            executionId: execution.executionId,
+            attemptId: expectedAttemptId,
+            generation: expectedGeneration,
+          };
+        }
+        // Owner dead + not in listActive but lease not yet expired: no
+        // termination proof yet — remain cancelling with a stable
+        // diagnostic (retry path below still runs bounded dispatch).
+        input.onDiagnostic?.({
+          executionId: execution.executionId,
+          diagnosticCode: "pi_subagent_cancel_ack_timeout",
+          diagnosticMessage:
+            "Owner generation is dead and the execution is no longer active, but the re-derived lease has not expired; cancellation remains pending",
+        });
+      }
+    }
+
+    // T06-AC6: bounded dispatch + acknowledgement wait.
+    const command: PiSubagentCancelCommand = {
+      cancelCommandId,
+      executionId: execution.executionId,
+      expectedAttemptId,
+      expectedGeneration,
+    };
+    let dispatchAttempts = 0;
+    let ack: PiSubagentCancelResult | undefined;
+    let lastFailure: "dispatch_failed" | "ack_timeout" = "ack_timeout";
+    for (let attempt = 0; attempt <= retryLimit && ack === undefined; attempt++) {
+      dispatchAttempts++;
+      const result = yield* dispatchCancelOnce({
+        bridge: input.bridge,
+        command,
+        ackTimeoutMs,
+        sleep,
+      });
+      if (result === undefined) {
+        // Dispatched but no acknowledgement within the bound.
+        lastFailure = "ack_timeout";
+        if (attempt < retryLimit) {
+          yield* sleep(Math.min(250 * (attempt + 1), 1000));
+        }
+        continue;
+      }
+      if (result.status === "cancelled") {
+        if (result.attemptId === expectedAttemptId && result.generation === expectedGeneration) {
+          ack = result;
+          break;
+        }
+        // Ack carried a different attempt/generation: not valid evidence
+        // for this cancel (T06-AC4 requires the same attempt/generation).
+        lastFailure = "ack_timeout";
+        continue;
+      }
+      if (result.status === "already_terminal") {
+        return {
+          kind: "already_terminal",
+          executionId: execution.executionId,
+          attemptId: expectedAttemptId,
+          generation: expectedGeneration,
+          observedState: "cancelled",
+        };
+      }
+      if (result.status === "stale") {
+        return {
+          kind: "stale_generation",
+          executionId: execution.executionId,
+          expectedAttemptId,
+          expectedGeneration,
+          currentAttemptId: result.attemptId,
+          currentGeneration: result.generation,
+        };
+      }
+      // dispatch_failed / missing: retry within bounds.
+      lastFailure = "dispatch_failed";
+      if (attempt < retryLimit) {
+        yield* sleep(Math.min(250 * (attempt + 1), 1000));
+      }
+    }
+
+    if (ack !== undefined) {
+      yield* input.repository.recordCancelledAck({
+        executionId: execution.executionId,
+        attemptId: expectedAttemptId,
+        generation: expectedGeneration,
+        sequence: 92,
+        occurredAt: new Date(now()).toISOString(),
+        evidenceChannel: "child_ack",
+      });
+      return {
+        kind: "cancelled_ack",
+        executionId: execution.executionId,
+        attemptId: expectedAttemptId,
+        generation: expectedGeneration,
+      };
+    }
+
+    // No valid acknowledgement: preserve `cancelling`, stable diagnostic,
+    // escalation stage 1 (provider-turn interrupt) WITHOUT claiming
+    // success (T06-AC6).
+    const diagnosticCode =
+      lastFailure === "dispatch_failed"
+        ? "pi_subagent_cancel_dispatch_failed"
+        : "pi_subagent_cancel_ack_timeout";
+    const diagnosticMessage =
+      lastFailure === "dispatch_failed"
+        ? `Cancellation dispatch failed after ${dispatchAttempts} attempt(s); execution remains cancelling and the child may still be active`
+        : `Cancellation acknowledgement timed out after ${dispatchAttempts} attempt(s); execution remains cancelling and the child may still be active`;
+    input.onDiagnostic?.({
+      executionId: execution.executionId,
+      diagnosticCode,
+      diagnosticMessage,
+    });
+    input.onEscalateProviderTurnInterrupt?.(execution.executionId);
+    return {
+      kind: "still_cancelling",
+      executionId: execution.executionId,
+      attemptId: expectedAttemptId,
+      generation: expectedGeneration,
+      diagnosticCode: diagnosticCode as typeof diagnosticCode,
+      diagnosticMessage,
+      dispatchAttempts,
+      escalated: true,
+    };
+  });
+
+/**
+ * Ticket 11 single-execution durable cancel (T11-AC6). Same journal-first,
+ * fenced, evidence-settled protocol as the parent-turn scope, applied to ONE
+ * execution by identity. `not_found` is returned when the execution does not
+ * exist or is not cancellable in this thread — the caller surfaces a denial
+ * without corrupting execution state.
+ */
+export const cancelSinglePiSubagentExecution = (
+  input: CancelParentTurnScopeInput & {
+    readonly executionId: string;
+  },
+): Effect.Effect<
+  { readonly outcome: PiSubagentCancelExecutionOutcome | { readonly kind: "not_found" } },
+  unknown
+> =>
+  Effect.gen(function* () {
+    const cancellable = yield* input.repository.listCancellableByParentTurn(input.threadId);
+    const execution = cancellable.find((row) => row.executionId === input.executionId);
+    if (execution === undefined) {
+      // Not in the cancellable set: unknown, wrong thread, or already
+      // terminal — read the aggregate to report an honest outcome.
+      const aggregate = yield* input.repository.getById(input.executionId);
+      if (Option.isNone(aggregate)) {
+        return { outcome: { kind: "not_found" } };
+      }
+      return {
+        outcome: {
+          kind: "already_terminal",
+          executionId: aggregate.value.executionId,
+          attemptId: aggregate.value.attemptId,
+          generation: aggregate.value.generation,
+          observedState: aggregate.value.observedState,
+        },
+      };
+    }
+    const outcome = yield* cancelOneExecution({
+      execution,
+      threadId: input.threadId,
+      repository: input.repository,
+      bridge: input.bridge,
+      isOwnerGenerationDead: input.isOwnerGenerationDead,
+      listActive: input.listActive,
+      cancelAckTimeoutMs: input.cancelAckTimeoutMs,
+      cancelRetryLimit: input.cancelRetryLimit,
+      leaseDurationMs: input.leaseDurationMs,
+      now: input.now,
+      sleep: input.sleep,
+      onEscalateProviderTurnInterrupt: input.onEscalateProviderTurnInterrupt,
+      onDiagnostic: input.onDiagnostic,
+    });
+    return { outcome };
+  });
+
 export const cancelParentTurnScope = (
   input: CancelParentTurnScopeInput,
 ): Effect.Effect<CancelParentTurnScopeResult, unknown> =>
@@ -189,216 +492,21 @@ export const cancelParentTurnScope = (
     const outcomes: PiSubagentCancelExecutionOutcome[] = [];
 
     for (const execution of cancellable) {
-      const expectedAttemptId = execution.attemptId;
-      const expectedGeneration = execution.generation;
-
-      if (TERMINAL_STATES.has(execution.observedState)) {
-        outcomes.push({
-          kind: "already_terminal",
-          executionId: execution.executionId,
-          attemptId: execution.attemptId,
-          generation: execution.generation,
-          observedState: execution.observedState,
-        });
-        continue;
-      }
-
-      // T06-AC1: journal-first durable intent with a deterministic
-      // cancelCommandId scoped to (execution, attempt, generation). Replays
-      // dedup to already_applied and never re-dispatch.
-      const cancelCommandId = `cancelcmd_${execution.executionId}_${expectedAttemptId}_gen${expectedGeneration}_${input.threadId}`;
-      const intentResult = yield* input.repository.recordCancellationIntent({
-        executionId: execution.executionId,
-        attemptId: expectedAttemptId,
-        generation: expectedGeneration,
-        sequence: 90,
-        cancelCommandId,
-        occurredAt: new Date(now()).toISOString(),
-        reason: "parent_turn_stop",
-      });
-
-      // Re-read the aggregate AFTER the intent write: a concurrent terminal
-      // (child completed between the list and the intent) wins.
-      const afterIntent = intentResult.execution;
-      if (TERMINAL_STATES.has(afterIntent.observedState)) {
-        outcomes.push({
-          kind: "already_terminal",
-          executionId: execution.executionId,
-          attemptId: afterIntent.attemptId,
-          generation: afterIntent.generation,
-          observedState: afterIntent.observedState,
-        });
-        continue;
-      }
-
-      // T06-AC3: the cancel targets the CURRENT attempt/generation only. If
-      // the aggregate advanced past what we listed, this cancel is stale.
-      if (
-        afterIntent.attemptId !== expectedAttemptId ||
-        afterIntent.generation !== expectedGeneration
-      ) {
-        outcomes.push({
-          kind: "stale_generation",
-          executionId: execution.executionId,
-          expectedAttemptId,
-          expectedGeneration,
-          currentAttemptId: afterIntent.attemptId,
-          currentGeneration: afterIntent.generation,
-        });
-        continue;
-      }
-
-      // Owner-death evidence path (T06-AC4): dead owner generation + expired
-      // re-derived lease + listActive no longer contains the execution.
-      const ownerDead = input.isOwnerGenerationDead();
-      if (ownerDead) {
-        const activeChildren = input.listActive();
-        const stillActive =
-          activeChildren?.some((child) => child.executionId === execution.executionId) ?? false;
-        if (!stillActive) {
-          const observationOption = yield* input.repository.getObservation(execution.executionId);
-          const observation = Option.isSome(observationOption) ? observationOption.value : null;
-          if (observation === null || isLeaseExpired(observation, leaseDurationMs, now())) {
-            yield* input.repository.recordCancelledAck({
-              executionId: execution.executionId,
-              attemptId: expectedAttemptId,
-              generation: expectedGeneration,
-              sequence: 91,
-              occurredAt: new Date(now()).toISOString(),
-              evidenceChannel: "owner_death",
-              diagnosticCode: "pi_subagent_cancel_owner_death",
-              diagnosticMessage:
-                "Cancelled by owner-death evidence: owner process generation dead, lease expired (re-derived server-side), and listActive no longer contains the execution",
-            });
-            outcomes.push({
-              kind: "cancelled_owner_death",
-              executionId: execution.executionId,
-              attemptId: expectedAttemptId,
-              generation: expectedGeneration,
-            });
-            continue;
-          }
-          // Owner dead + not in listActive but lease not yet expired: no
-          // termination proof yet — remain cancelling with a stable
-          // diagnostic (retry path below still runs bounded dispatch).
-          input.onDiagnostic?.({
-            executionId: execution.executionId,
-            diagnosticCode: "pi_subagent_cancel_ack_timeout",
-            diagnosticMessage:
-              "Owner generation is dead and the execution is no longer active, but the re-derived lease has not expired; cancellation remains pending",
-          });
-        }
-      }
-
-      // T06-AC6: bounded dispatch + acknowledgement wait.
-      const command: PiSubagentCancelCommand = {
-        cancelCommandId,
-        executionId: execution.executionId,
-        expectedAttemptId,
-        expectedGeneration,
-      };
-      let dispatchAttempts = 0;
-      let ack: PiSubagentCancelResult | undefined;
-      let lastFailure: "dispatch_failed" | "ack_timeout" = "ack_timeout";
-      for (let attempt = 0; attempt <= retryLimit && ack === undefined; attempt++) {
-        dispatchAttempts++;
-        const result = yield* dispatchCancelOnce({
-          bridge: input.bridge,
-          command,
-          ackTimeoutMs,
-          sleep,
-        });
-        if (result === undefined) {
-          // Dispatched but no acknowledgement within the bound.
-          lastFailure = "ack_timeout";
-          if (attempt < retryLimit) {
-            yield* sleep(Math.min(250 * (attempt + 1), 1000));
-          }
-          continue;
-        }
-        if (result.status === "cancelled") {
-          if (result.attemptId === expectedAttemptId && result.generation === expectedGeneration) {
-            ack = result;
-            break;
-          }
-          // Ack carried a different attempt/generation: not valid evidence
-          // for this cancel (T06-AC4 requires the same attempt/generation).
-          lastFailure = "ack_timeout";
-          continue;
-        }
-        if (result.status === "already_terminal") {
-          outcomes.push({
-            kind: "already_terminal",
-            executionId: execution.executionId,
-            attemptId: expectedAttemptId,
-            generation: expectedGeneration,
-            observedState: "cancelled",
-          });
-          break;
-        }
-        if (result.status === "stale") {
-          outcomes.push({
-            kind: "stale_generation",
-            executionId: execution.executionId,
-            expectedAttemptId,
-            expectedGeneration,
-            currentAttemptId: result.attemptId,
-            currentGeneration: result.generation,
-          });
-          break;
-        }
-        // dispatch_failed / missing: retry within bounds.
-        lastFailure = "dispatch_failed";
-        if (attempt < retryLimit) {
-          yield* sleep(Math.min(250 * (attempt + 1), 1000));
-        }
-      }
-
-      if (ack !== undefined) {
-        yield* input.repository.recordCancelledAck({
-          executionId: execution.executionId,
-          attemptId: expectedAttemptId,
-          generation: expectedGeneration,
-          sequence: 92,
-          occurredAt: new Date(now()).toISOString(),
-          evidenceChannel: "child_ack",
-        });
-        outcomes.push({
-          kind: "cancelled_ack",
-          executionId: execution.executionId,
-          attemptId: expectedAttemptId,
-          generation: expectedGeneration,
-        });
-        continue;
-      }
-
-      // No valid acknowledgement: preserve `cancelling`, stable diagnostic,
-      // escalation stage 1 (provider-turn interrupt) WITHOUT claiming
-      // success (T06-AC6).
-      const diagnosticCode =
-        lastFailure === "dispatch_failed"
-          ? "pi_subagent_cancel_dispatch_failed"
-          : "pi_subagent_cancel_ack_timeout";
-      const diagnosticMessage =
-        lastFailure === "dispatch_failed"
-          ? `Cancellation dispatch failed after ${dispatchAttempts} attempt(s); execution remains cancelling and the child may still be active`
-          : `Cancellation acknowledgement timed out after ${dispatchAttempts} attempt(s); execution remains cancelling and the child may still be active`;
-      input.onDiagnostic?.({
-        executionId: execution.executionId,
-        diagnosticCode,
-        diagnosticMessage,
-      });
-      input.onEscalateProviderTurnInterrupt?.(execution.executionId);
-      outcomes.push({
-        kind: "still_cancelling",
-        executionId: execution.executionId,
-        attemptId: expectedAttemptId,
-        generation: expectedGeneration,
-        diagnosticCode: diagnosticCode as typeof diagnosticCode,
-        diagnosticMessage,
-        dispatchAttempts,
-        escalated: true,
-      });
+      yield* cancelOneExecution({
+        execution,
+        threadId: input.threadId,
+        repository: input.repository,
+        bridge: input.bridge,
+        isOwnerGenerationDead: input.isOwnerGenerationDead,
+        listActive: input.listActive,
+        cancelAckTimeoutMs: input.cancelAckTimeoutMs,
+        cancelRetryLimit: input.cancelRetryLimit,
+        leaseDurationMs: input.leaseDurationMs,
+        now: input.now,
+        sleep: input.sleep,
+        onEscalateProviderTurnInterrupt: input.onEscalateProviderTurnInterrupt,
+        onDiagnostic: input.onDiagnostic,
+      }).pipe(Effect.map((outcome) => outcomes.push(outcome)));
     }
 
     return { outcomes };

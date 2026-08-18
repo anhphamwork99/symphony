@@ -16,6 +16,7 @@ import {
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import {
   cancelParentTurnScope,
+  cancelSinglePiSubagentExecution,
   type CancelParentTurnScopeInput,
 } from "./piSubagentCancellationCoordinator.ts";
 import type { PiSubagentActiveChild, PiSubagentExtensionBridge } from "./piSubagentBridge.ts";
@@ -606,6 +607,153 @@ describe("piSubagentCancellationCoordinator (Ticket 06 state machine)", () => {
         if (Option.isSome(record)) {
           expect(record.value.observedState).not.toBe("cancelled");
         }
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+});
+
+describe("cancelSinglePiSubagentExecution (Ticket 11 card cancel)", () => {
+  it("T11-AC6: cancels exactly the requested execution, leaves siblings untouched, and stays cancelling until ack", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(
+          repository,
+          makeExecution({
+            executionId: "exec_t11_a",
+            attemptId: "att_t11_a",
+            commandId: "cmd_t11_a",
+          }),
+        );
+        yield* admit(
+          repository,
+          makeExecution({
+            executionId: "exec_t11_b",
+            attemptId: "att_t11_b",
+            commandId: "cmd_t11_b",
+          }),
+        );
+        const cancelledIds: string[] = [];
+        let releaseAck: (() => void) | undefined;
+        const ackGate = new Promise<PiSubagentCancelResult>((resolve) => {
+          releaseAck = () =>
+            resolve({
+              status: "cancelled",
+              executionId: "exec_t11_a",
+              attemptId: "att_t11_a",
+              generation: 1,
+            });
+        });
+        const bridge = makeBridge((command) => {
+          cancelledIds.push(command.executionId);
+          // Never acknowledges within the bound → remains cancelling.
+          void releaseAck;
+          return ackGate;
+        });
+
+        const result = yield* cancelSinglePiSubagentExecution({
+          threadId: "th_t06",
+          executionId: "exec_t11_a",
+          repository,
+          bridge,
+          isOwnerGenerationDead: () => false,
+          listActive: () => [],
+          cancelAckTimeoutMs: 30,
+          cancelRetryLimit: 0,
+          now: () => Date.parse("2026-08-19T00:00:00.000Z"),
+          sleep: () => Effect.void,
+        });
+
+        expect(result.outcome.kind).toBe("still_cancelling");
+        // Only the requested execution was dispatched.
+        expect(cancelledIds).toEqual(["exec_t11_a"]);
+        // Durable intent is visible: desiredState cancelling, observed stays non-terminal.
+        const target = yield* repository.getById("exec_t11_a");
+        expect(Option.isSome(target)).toBe(true);
+        if (Option.isSome(target)) {
+          // Journal-first intent: desired flips to cancelling; observed stays
+          // non-terminal until termination evidence (T06-AC1/T11-AC6).
+          expect(target.value.desiredState).toBe("cancelling");
+          expect(target.value.observedState).toBe("accepted");
+        }
+        // The sibling is untouched.
+        const sibling = yield* repository.getById("exec_t11_b");
+        expect(Option.isSome(sibling)).toBe(true);
+        if (Option.isSome(sibling)) {
+          expect(sibling.value.desiredState).toBe("running");
+          expect(sibling.value.observedState).toBe("accepted");
+        }
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T11-AC6: idempotent re-cancel replays already_applied intent and never re-dispatches; unknown execution reports not_found without state writes", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(
+          repository,
+          makeExecution({
+            executionId: "exec_t11_c",
+            attemptId: "att_t11_c",
+            commandId: "cmd_t11_c",
+          }),
+        );
+        let dispatchCount = 0;
+        const bridge = makeBridge(async (command) => {
+          dispatchCount += 1;
+          return {
+            status: "cancelled" as const,
+            executionId: command.executionId,
+            attemptId: command.expectedAttemptId,
+            generation: command.expectedGeneration,
+          };
+        });
+
+        const first = yield* cancelSinglePiSubagentExecution({
+          threadId: "th_t06",
+          executionId: "exec_t11_c",
+          repository,
+          bridge,
+          isOwnerGenerationDead: () => false,
+          listActive: () => [],
+          cancelAckTimeoutMs: 50,
+          cancelRetryLimit: 1,
+          now: () => Date.parse("2026-08-19T00:00:00.000Z"),
+          sleep: () => Effect.void,
+        });
+        expect(first.outcome.kind).toBe("cancelled_ack");
+
+        // Second cancel on the now-terminal execution: already_terminal, no dispatch.
+        const second = yield* cancelSinglePiSubagentExecution({
+          threadId: "th_t06",
+          executionId: "exec_t11_c",
+          repository,
+          bridge,
+          isOwnerGenerationDead: () => false,
+          listActive: () => [],
+          cancelAckTimeoutMs: 50,
+          cancelRetryLimit: 1,
+          now: () => Date.parse("2026-08-19T00:00:01.000Z"),
+          sleep: () => Effect.void,
+        });
+        expect(second.outcome.kind).toBe("already_terminal");
+        expect(dispatchCount).toBe(1);
+
+        // Unknown execution: honest denial, no state writes.
+        const unknown = yield* cancelSinglePiSubagentExecution({
+          threadId: "th_t06",
+          executionId: "exec_t11_missing",
+          repository,
+          bridge,
+          isOwnerGenerationDead: () => false,
+          listActive: () => [],
+          cancelAckTimeoutMs: 50,
+          cancelRetryLimit: 1,
+          now: () => Date.parse("2026-08-19T00:00:02.000Z"),
+          sleep: () => Effect.void,
+        });
+        expect(unknown.outcome.kind).toBe("not_found");
       }).pipe(Effect.provide(repositoryLayer)),
     );
   });

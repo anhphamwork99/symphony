@@ -85,6 +85,7 @@ function createProviderServiceHarness() {
     forkThread: () => Effect.succeed(null),
     interruptTurn: () => unsupported(),
     stopTask: () => unsupported(),
+    cancelPiSubagentExecution: () => unsupported(),
     backgroundTask: () => unsupported(),
     steerSubagent: () => unsupported(),
     respondToRequest: () => unsupported(),

@@ -158,7 +158,10 @@ import {
   admitSubagentSpawn,
   type AdmissionSnapshotQuery,
 } from "../piSubagentAdmissionCoordinator.ts";
-import { cancelParentTurnScope } from "../piSubagentCancellationCoordinator.ts";
+import {
+  cancelParentTurnScope,
+  cancelSinglePiSubagentExecution,
+} from "../piSubagentCancellationCoordinator.ts";
 import { extractPiSubagentBridge } from "../piSubagentBridge.ts";
 import {
   makePiSubagentControlHealth,
@@ -4350,6 +4353,104 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         });
       });
 
+    // Ticket 11 (T11-AC6): per-execution durable cancel driven by the
+    // execution card. The card command is authorization-correlated (thread
+    // existence + provider routing); the coordinator enforces the same
+    // journal-first, fenced, evidence-settled protocol as the parent-turn
+    // scope. Unmanaged sessions surface a denial diagnostic instead of a
+    // silent no-op, and the provider turn is NOT interrupted — the card cancel
+    // targets the child only.
+    const cancelPiSubagentExecution: PiAdapterShape["cancelPiSubagentExecution"] = (
+      threadId,
+      executionId,
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        if (!context.subagentCapability?.isManaged || !piSubagentRepository) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/cancel-execution",
+            detail:
+              "Pi subagent managed execution is not enabled for this session; the execution cannot be cancelled through the durable path.",
+          });
+        }
+        const bridgeForCancel =
+          context.subagentCapability.capabilities?.includes("durable-cancellation") === true
+            ? extractPiSubagentBridge(context.runtime.session)
+            : undefined;
+        const result = yield* cancelSinglePiSubagentExecution({
+          threadId: String(threadId),
+          executionId,
+          repository: piSubagentRepository,
+          bridge: bridgeForCancel,
+          isOwnerGenerationDead: () => false,
+          listActive: () =>
+            typeof bridgeForCancel?.getActiveExecutions === "function"
+              ? bridgeForCancel.getActiveExecutions()
+              : undefined,
+          cancelAckTimeoutMs: serverConfig.piSubagentCancelAckTimeoutMs,
+          cancelRetryLimit: serverConfig.piSubagentCancelRetryLimit,
+          leaseDurationMs: serverConfig.piSubagentLeaseDurationMs,
+          onDiagnostic: (event: {
+            readonly executionId: string;
+            readonly diagnosticCode: string;
+            readonly diagnosticMessage: string;
+          }) => {
+            offerRuntimeEvent({
+              ...makeEventBase(context),
+              type: "runtime.warning",
+              payload: {
+                message: `Pi subagent cancellation remains pending [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                detail: {
+                  executionId: event.executionId,
+                  diagnosticCode: event.diagnosticCode,
+                },
+              },
+              raw: {
+                source: "pi.sdk.event",
+                method: "subagents/cancel-diagnostic",
+                payload: {
+                  executionId: event.executionId,
+                  diagnosticCode: event.diagnosticCode,
+                },
+              },
+            } satisfies ProviderRuntimeEvent);
+          },
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "subagents/cancel-execution",
+                detail: toMessage(cause, "Failed to run durable execution cancellation."),
+                cause,
+              }),
+          ),
+        );
+        const outcome = result.outcome;
+        if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+          offerRuntimeEvent({
+            ...makeEventBase(context),
+            type: "runtime.warning",
+            payload: {
+              message: `Pi subagent execution cancelled with termination evidence [${outcome.executionId}]`,
+              detail: {
+                executionId: outcome.executionId,
+                evidence: outcome.kind,
+              },
+            },
+            raw: {
+              source: "pi.sdk.event",
+              method: "subagents/cancel-settled",
+              payload: {
+                executionId: outcome.executionId,
+                evidence: outcome.kind,
+              },
+            },
+          } satisfies ProviderRuntimeEvent);
+        }
+      });
+
     const respondUnsupported = (threadId: ThreadId, method: string) =>
       Effect.fail(
         new ProviderAdapterRequestError({
@@ -4769,6 +4870,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       sendTurn,
       steerTurn,
       interruptTurn,
+      cancelPiSubagentExecution,
       respondToRequest: (threadId) => respondUnsupported(threadId, "request/respond"),
       respondToUserInput,
       stopSession,

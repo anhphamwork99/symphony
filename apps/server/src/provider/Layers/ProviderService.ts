@@ -18,6 +18,7 @@ import {
   ThreadId,
   ProviderInterruptTurnInput,
   ProviderStopTaskInput,
+  ProviderCancelPiSubagentExecutionInput,
   ProviderBackgroundTaskInput,
   ProviderSteerSubagentInput,
   ProviderRespondToRequestInput,
@@ -2292,6 +2293,46 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         ),
       );
 
+    /**
+     * Ticket 11 (T11-AC6): cancel ONE managed Pi subagent execution via the
+     * durable cancel path. Denials (unknown execution, unsupported provider,
+     * inactive runtime) surface as validation errors — visible without state
+     * corruption; the card keeps rendering durable execution truth.
+     */
+    const cancelPiSubagentExecution: ProviderServiceShape["cancelPiSubagentExecution"] = (
+      rawInput,
+    ) =>
+      decodeInputOrValidationError({
+        operation: "ProviderService.cancelPiSubagentExecution",
+        schema: ProviderCancelPiSubagentExecutionInput,
+        payload: rawInput,
+      }).pipe(
+        Effect.flatMap((input) =>
+          lifecycle.runCurrent(input.threadId, () =>
+            Effect.gen(function* () {
+              const routed = yield* resolveRoutableSession({
+                threadId: input.threadId,
+                operation: "ProviderService.cancelPiSubagentExecution",
+                allowRecovery: false,
+              });
+              if (!routed.isActive) {
+                return yield* toValidationError(
+                  "ProviderService.cancelPiSubagentExecution",
+                  `Cannot cancel subagent execution '${input.executionId}' because the provider runtime is not active.`,
+                );
+              }
+              if (!routed.adapter.cancelPiSubagentExecution) {
+                return yield* toValidationError(
+                  "ProviderService.cancelPiSubagentExecution",
+                  `Provider '${routed.adapter.provider}' does not support cancelling a managed subagent execution.`,
+                );
+              }
+              yield* routed.adapter.cancelPiSubagentExecution(input.threadId, input.executionId);
+            }),
+          ),
+        ),
+      );
+
     const backgroundTask: ProviderServiceShape["backgroundTask"] = (rawInput) =>
       decodeInputOrValidationError({
         operation: "ProviderService.backgroundTask",
@@ -2958,6 +2999,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       startReview,
       interruptTurn,
       stopTask,
+      cancelPiSubagentExecution,
       backgroundTask,
       steerSubagent,
       respondToRequest,

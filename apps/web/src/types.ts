@@ -7,6 +7,7 @@ import type {
   MessageDispatchOrigin,
   OrchestrationMessageSource,
   OrchestrationPendingInteraction,
+  PiSubagentExecutionCard,
   TurnDispatchMode,
   OrchestrationLatestTurn,
   OrchestrationThreadPullRequest,
@@ -263,6 +264,13 @@ export interface Thread extends ThreadWorkspaceState {
   pendingInteractions?: OrchestrationPendingInteraction[];
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  /**
+   * Ticket 11 (T11-AC1/AC4): bounded managed-execution cards for this
+   * thread, oldest-first. Fed by thread-detail snapshots and
+   * `thread.pi-subagent-execution-updated` events; survives refresh and
+   * reconnect through the snapshot path (T11-AC5).
+   */
+  piSubagentExecutions?: PiSubagentExecutionCard[];
 }
 
 export interface ThreadShell extends ThreadWorkspaceState {

@@ -1584,6 +1584,64 @@ function applyOrchestrationEvent(
         },
       );
 
+    case "thread.pi-subagent-execution-updated":
+      // Ticket 11 (T11-AC2/AC4): idempotent card upsert by executionId. A
+      // duplicate/replayed event identity produces ONE projection effect —
+      // the upsert replaces the same execution slot (or is a no-op when the
+      // bounded card content is unchanged). Card rows are NOT transcript
+      // messages, so they never move the auto-follow signal (T11-AC7).
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const card = event.payload.card;
+          const existing = thread.piSubagentExecutions ?? [];
+          const index = existing.findIndex(
+            (candidate) => candidate.executionId === card.executionId,
+          );
+          let changed = index < 0;
+          const next =
+            index >= 0
+              ? existing.map((candidate, position) => {
+                  if (position !== index) {
+                    return candidate;
+                  }
+                  // T11-AC2: a duplicate/replayed event identity has ONE
+                  // projection effect — identical content keeps the previous
+                  // card object (and below, the previous array reference).
+                  if (deepEqualJson(candidate, card)) {
+                    return candidate;
+                  }
+                  changed = true;
+                  return { ...card };
+                })
+              : [...existing, { ...card }];
+          if (!changed) {
+            return thread;
+          }
+          return {
+            ...thread,
+            piSubagentExecutions: next,
+            updatedAt:
+              (thread.updatedAt ?? thread.createdAt) > event.occurredAt
+                ? thread.updatedAt
+                : event.occurredAt,
+          };
+        },
+        {
+          ...options,
+          updateSidebarSummary: false,
+        },
+      );
+
+    case "thread.pi-subagent-execution-cancel-requested":
+      // Ticket 11 (T11-AC6): the request is an intent, NOT a state change —
+      // the card keeps rendering durable execution truth and flips to
+      // `cancelling` only when the server's journal-first intent lands as a
+      // `thread.pi-subagent-execution-updated` event. Same discipline as
+      // `thread.turn-interrupt-requested` (best-effort, no projection).
+      return state;
+
     case "thread.archived":
       return applyThreadUpdate(
         state,

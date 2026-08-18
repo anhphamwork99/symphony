@@ -375,6 +375,9 @@ describe("ProviderCommandReactor", () => {
     );
     const interruptTurn = vi.fn(input?.interruptTurn ?? ((_: unknown) => Effect.void));
     const stopTask = vi.fn<ProviderServiceShape["stopTask"]>(() => Effect.void);
+    const cancelPiSubagentExecution = vi.fn<ProviderServiceShape["cancelPiSubagentExecution"]>(
+      () => Effect.void,
+    );
     const backgroundTask = vi.fn<ProviderServiceShape["backgroundTask"]>(() => Effect.void);
     const hasLiveRuntimeTasks = vi.fn<NonNullable<ProviderServiceShape["hasLiveRuntimeTasks"]>>(
       () => Effect.succeed(false),
@@ -510,6 +513,7 @@ describe("ProviderCommandReactor", () => {
       forkThread,
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       stopTask,
+      cancelPiSubagentExecution,
       backgroundTask,
       hasLiveRuntimeTasks,
       steerSubagent,
@@ -683,6 +687,7 @@ describe("ProviderCommandReactor", () => {
       enableSynaraMcp,
       interruptTurn,
       stopTask,
+      cancelPiSubagentExecution,
       backgroundTask,
       hasLiveRuntimeTasks,
       steerSubagent,

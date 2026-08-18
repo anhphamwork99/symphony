@@ -57,6 +57,7 @@ import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService
 import { PiSubagentExecutionRepositoryLive } from "./persistence/Layers/PiSubagentExecutionRepository";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { makePiSubagentParentEffectDispatcher } from "./provider/piSubagentParentEffectDispatcher";
+import { makePiSubagentExecutionCardBridge } from "./provider/piSubagentExecutionCardBridge";
 import { makeServerProviderLayer } from "./provider/runtimeLayer";
 
 export { makeServerProviderLayer } from "./provider/runtimeLayer";
@@ -270,6 +271,9 @@ export function makeServerApplicationLayers() {
   // ProviderCommandReactor → ProviderService/PiAdapter construction cycle).
   // It is bound exactly once in main.ts when the engine is live.
   const completionDispatchBridge = makePiSubagentParentEffectDispatcher();
+  // Ticket 11: execution-card projection bridge, same composition ownership
+  // (constructed before layers, bound exactly once in main.ts).
+  const piSubagentExecutionCardBridge = makePiSubagentExecutionCardBridge();
   return {
     runtimeServicesLayer: makeServerRuntimeServicesLayer({
       agentGatewayCredentialsLayer,
@@ -279,5 +283,6 @@ export function makeServerApplicationLayers() {
       completionDispatchBridge,
     }),
     completionDispatchBridge,
+    piSubagentExecutionCardBridge,
   } as const;
 }

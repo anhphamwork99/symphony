@@ -34,6 +34,8 @@ import {
   ThreadHandoff,
   ModelSelection,
   ProjectMcpActivationOperation,
+  PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD,
+  type PiSubagentExecutionCard,
 } from "@synara/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -73,6 +75,10 @@ import {
   type ProjectionThreadCheckpointContext,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
+import {
+  piSubagentExecutionCardRowToCard,
+  type PiSubagentExecutionCardRow,
+} from "../../persistence/Layers/PiSubagentExecutionRepository.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
@@ -672,6 +678,8 @@ function toProjectedThread(input: {
   readonly pendingInteractions: ReadonlyArray<PendingInteractionRow>;
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
   readonly session: OrchestrationSession | null;
+  /** Ticket 11 (T11-AC1): bounded managed-execution cards, oldest-first. */
+  readonly piSubagentExecutions?: ReadonlyArray<PiSubagentExecutionCard>;
 }): OrchestrationThread {
   const { threadRow } = input;
   const summary = deriveThreadSummaryMetadata(input);
@@ -722,6 +730,9 @@ function toProjectedThread(input: {
     ...(threadRow.pinnedMessages !== null ? { pinnedMessages: threadRow.pinnedMessages } : {}),
     ...(threadRow.threadMarkers !== null ? { threadMarkers: threadRow.threadMarkers } : {}),
     ...(threadRow.notes !== null ? { notes: threadRow.notes } : {}),
+    ...(input.piSubagentExecutions !== undefined && input.piSubagentExecutions.length > 0
+      ? { piSubagentExecutions: input.piSubagentExecutions }
+      : {}),
     session: input.session,
   };
 }
@@ -775,6 +786,107 @@ function computeSnapshotSequence(
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+
+  // ── Ticket 11 execution-card queries (T11-AC1) ─────────────────────────
+  // Direct SQL over the durable pi_subagent tables (the execution aggregate is
+  // its own source of truth — no projection mirror). The row→card mapping is
+  // shared with the persistence repository so bounds are identical.
+  const PiSubagentExecutionCardLookupInput = Schema.Struct({
+    threadId: Schema.String,
+    maxExecutions: Schema.Number,
+  });
+
+  const listPiSubagentExecutionCardRowsByThread = SqlSchema.findAll({
+    Request: PiSubagentExecutionCardLookupInput,
+    Result: Schema.Unknown,
+    execute: ({ threadId, maxExecutions }) => sql<PiSubagentExecutionCardRow>`
+    SELECT
+      base.execution_id AS "executionId",
+      base.attempt_id AS "attemptId",
+      base.generation,
+      base.project_id AS "projectId",
+      base.parent_thread_id AS "parentThreadId",
+      base.parent_turn_id AS "parentTurnId",
+      base.parent_tool_call_id AS "parentToolCallId",
+      base.agent_type AS "agentType",
+      base.mode,
+      base.cancellation_scope AS "cancellationScope",
+      base.desired_state AS "desiredState",
+      base.observed_state AS "observedState",
+      base.diagnostic_code AS "diagnosticCode",
+      base.rejection_reason AS "rejectionReason",
+      base.last_progress_json AS "lastProgressJson",
+      base.last_progress_at AS "lastProgressAt",
+      base.dropped_progress_count AS "droppedProgressCount",
+      base.lease_expires_at AS "leaseExpiresAt",
+      base.terminal_summary AS "terminalSummary",
+      base.terminal_transcript_ref AS "terminalTranscriptRef",
+      outbox.delivery_state AS "deliveryState",
+      base.created_at AS "createdAt",
+      base.updated_at AS "updatedAt"
+    FROM (
+      SELECT *
+      FROM pi_subagent_executions
+      WHERE parent_thread_id = ${threadId}
+      ORDER BY created_at DESC, execution_id DESC
+      LIMIT ${maxExecutions}
+    ) AS base
+    LEFT JOIN pi_subagent_completion_outbox AS outbox
+      ON outbox.execution_id = base.execution_id
+     AND outbox.attempt_id = base.attempt_id
+     AND outbox.generation = base.generation
+    ORDER BY base.created_at ASC, base.execution_id ASC
+  `,
+  });
+
+  const listPiSubagentExecutionCardRows = SqlSchema.findAll({
+    Request: Schema.Struct({ maxExecutions: Schema.Number }),
+    Result: Schema.Unknown,
+    execute: ({ maxExecutions }) => sql<PiSubagentExecutionCardRow>`
+    SELECT
+      ranked.execution_id AS "executionId",
+      ranked.attempt_id AS "attemptId",
+      ranked.generation,
+      ranked.project_id AS "projectId",
+      ranked.parent_thread_id AS "parentThreadId",
+      ranked.parent_turn_id AS "parentTurnId",
+      ranked.parent_tool_call_id AS "parentToolCallId",
+      ranked.agent_type AS "agentType",
+      ranked.mode,
+      ranked.cancellation_scope AS "cancellationScope",
+      ranked.desired_state AS "desiredState",
+      ranked.observed_state AS "observedState",
+      ranked.diagnostic_code AS "diagnosticCode",
+      ranked.rejection_reason AS "rejectionReason",
+      ranked.last_progress_json AS "lastProgressJson",
+      ranked.last_progress_at AS "lastProgressAt",
+      ranked.dropped_progress_count AS "droppedProgressCount",
+      ranked.lease_expires_at AS "leaseExpiresAt",
+      ranked.terminal_summary AS "terminalSummary",
+      ranked.terminal_transcript_ref AS "terminalTranscriptRef",
+      outbox.delivery_state AS "deliveryState",
+      ranked.created_at AS "createdAt",
+      ranked.updated_at AS "updatedAt"
+    FROM (
+      SELECT *
+      FROM (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY parent_thread_id
+            ORDER BY created_at DESC, execution_id DESC
+          ) AS card_rank
+        FROM pi_subagent_executions
+      )
+      WHERE card_rank <= ${maxExecutions}
+    ) AS ranked
+    LEFT JOIN pi_subagent_completion_outbox AS outbox
+      ON outbox.execution_id = ranked.execution_id
+     AND outbox.attempt_id = ranked.attempt_id
+     AND outbox.generation = ranked.generation
+    ORDER BY ranked.parent_thread_id ASC, ranked.created_at ASC, ranked.execution_id ASC
+  `,
+  });
 
   // Soft-deleted rows can remain while their purge is fenced or deferred. `getSnapshot` is
   // the only reader that hydrates message/activity bodies for the whole database at once,
@@ -1935,6 +2047,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             checkpointRows,
             latestTurnRows,
             stateRows,
+            piSubagentExecutionCardRows,
           ] = yield* Effect.all([
             listSpaceRows(undefined).pipe(
               Effect.mapError(
@@ -2036,6 +2149,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 ),
               ),
             ),
+            listPiSubagentExecutionCardRows({
+              maxExecutions: PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSnapshot:listPiSubagentExecutionCards:query",
+                  "ProjectionSnapshotQuery.getSnapshot:listPiSubagentExecutionCards:decodeRows",
+                ),
+              ),
+            ),
           ]);
 
           const messages = collectProjectedMessages(messageRows);
@@ -2057,6 +2180,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
           const projects: ReadonlyArray<OrchestrationProject> = projectRows.map(toProjectedProject);
 
+          const piSubagentExecutionCardsByThread = new Map<string, PiSubagentExecutionCard[]>();
+          for (const cardRow of piSubagentExecutionCardRows as ReadonlyArray<PiSubagentExecutionCardRow>) {
+            const card = piSubagentExecutionCardRowToCard(cardRow);
+            const bucket = piSubagentExecutionCardsByThread.get(card.parentThreadId);
+            if (bucket === undefined) {
+              piSubagentExecutionCardsByThread.set(card.parentThreadId, [card]);
+            } else {
+              bucket.push(card);
+            }
+          }
+
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) =>
             toProjectedThread({
               threadRow: row,
@@ -2066,6 +2200,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               activities: activities.byThread.get(row.threadId) ?? [],
               pendingInteractions: pendingInteractions.byThread.get(row.threadId) ?? [],
               checkpoints: checkpoints.byThread.get(row.threadId) ?? [],
+              ...(piSubagentExecutionCardsByThread.has(row.threadId)
+                ? {
+                    piSubagentExecutions: piSubagentExecutionCardsByThread.get(row.threadId) ?? [],
+                  }
+                : {}),
               session: sessions.byThread.get(row.threadId) ?? null,
             }),
           );
@@ -2754,6 +2893,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         checkpointRows,
         latestTurnRow,
         sessionRow,
+        piSubagentExecutionCardRows,
       ] = yield* Effect.all([
         listThreadMessageRowsByThread({ threadId, maxMessages: options.messageLimit }).pipe(
           Effect.mapError(
@@ -2811,7 +2951,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
+        listPiSubagentExecutionCardRowsByThread({
+          threadId,
+          maxExecutions: PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD,
+        }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              `${options.tracePrefix}:listPiSubagentExecutionCards:query`,
+              `${options.tracePrefix}:listPiSubagentExecutionCards:decodeRows`,
+            ),
+          ),
+        ),
       ]);
+
+      const piSubagentExecutions = (
+        piSubagentExecutionCardRows as ReadonlyArray<PiSubagentExecutionCardRow>
+      ).map(piSubagentExecutionCardRowToCard);
 
       const thread = toProjectedThread({
         threadRow: threadRow.value,
@@ -2824,6 +2979,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         activities: activityRows.map((row) => toProjectedActivity(row)),
         pendingInteractions: pendingInteractionRows,
         checkpoints: checkpointRows.map((row) => toProjectedCheckpoint(row)),
+        ...(piSubagentExecutions.length > 0 ? { piSubagentExecutions } : {}),
         session: Option.match(sessionRow, {
           onNone: () => null,
           onSome: (row) => toProjectedSession(row),

@@ -173,6 +173,15 @@ export interface ProviderAdapterShape<TError> {
   readonly stopTask?: (threadId: ThreadId, taskId: string) => Effect.Effect<void, TError>;
 
   /**
+   * Ticket 11 (T11-AC6): cancel ONE managed Pi subagent execution through the
+   * durable cancel path. Optional — only the Pi adapter implements it.
+   */
+  readonly cancelPiSubagentExecution?: (
+    threadId: ThreadId,
+    executionId: string,
+  ) => Effect.Effect<void, TError>;
+
+  /**
    * Move one in-flight foreground task to the background when the adapter supports it.
    */
   readonly backgroundTask?: (threadId: ThreadId, toolUseId: string) => Effect.Effect<void, TError>;

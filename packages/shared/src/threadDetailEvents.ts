@@ -19,6 +19,7 @@ export const THREAD_DETAIL_EVENT_TYPES = [
   "thread.marker-label-set",
   "thread.archived",
   "thread.unarchived",
+  "thread.pi-subagent-execution-updated",
 ] as const satisfies ReadonlyArray<OrchestrationEvent["type"]>;
 
 const THREAD_DETAIL_EVENT_TYPE_SET = new Set<OrchestrationEvent["type"]>(THREAD_DETAIL_EVENT_TYPES);

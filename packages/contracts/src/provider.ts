@@ -156,6 +156,19 @@ export const ProviderBackgroundTaskInput = Schema.Struct({
 });
 export type ProviderBackgroundTaskInput = typeof ProviderBackgroundTaskInput.Type;
 
+/**
+ * Ticket 11 card cancel input (T11-AC6). Cancels ONE managed Pi subagent
+ * execution through the durable cancel path. Execution identity is
+ * correlation, not authority: the provider layer resolves the owning thread's
+ * session and the coordinator enforces attempt/generation fencing.
+ */
+export const ProviderCancelPiSubagentExecutionInput = Schema.Struct({
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+});
+export type ProviderCancelPiSubagentExecutionInput =
+  typeof ProviderCancelPiSubagentExecutionInput.Type;
+
 export const ProviderSteerSubagentInput = Schema.Struct({
   threadId: ThreadId,
   providerThreadId: TrimmedNonEmptyString,

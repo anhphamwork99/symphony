@@ -1,6 +1,7 @@
 import {
   type PiSubagentCancellationScope,
   type PiSubagentDiagnosticCode,
+  type PiSubagentExecutionCard,
   type PiSubagentExecutionRecord,
   type PiSubagentLifecycleEvent,
   type PiSubagentLifecycleState,
@@ -593,6 +594,19 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly listByThreadId: (
     threadId: string,
   ) => Effect.Effect<ReadonlyArray<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 11 bounded execution-card read (T11-AC1): every execution of the
+   * thread joined with its observation columns (lease, latest coalesced
+   * progress, drop counter), terminal evidence, and the CURRENT
+   * completion-outbox delivery state — oldest first, capped by the caller
+   * (snapshot uses `PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD`, dropping the
+   * OLDEST rows when the cap is exceeded). Never returns prompts or raw
+   * progress JSON: `lastProgressSummary` is the bounded server-side excerpt.
+   */
+  readonly listExecutionCardsByThreadId: (
+    threadId: string,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<PiSubagentExecutionCard>, PiSubagentExecutionRepositoryError>;
   readonly listJournalEvents: (
     executionId: string,
   ) => Effect.Effect<ReadonlyArray<PiSubagentLifecycleEvent>, PiSubagentExecutionRepositoryError>;
@@ -885,6 +899,23 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly getTelemetrySnapshot: (
     now: string,
   ) => Effect.Effect<ServerDiagnosticsPiSubagents, PiSubagentExecutionRepositoryError>;
+}
+
+/**
+ * Ticket 11 post-commit notification (T11-AC1). `journalSequence` is the
+ * attempt-local journal sequence of the committing event when known (0 for
+ * delivery-only transitions that journal nothing); consumers use it for
+ * deterministic command identity and ordering, never as authority — the
+ * durable aggregate remains the source of truth.
+ */
+export interface PiSubagentExecutionLifecycleNotification {
+  readonly executionId: string;
+  readonly parentThreadId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  readonly journalSequence: number;
+  readonly observedState: PiSubagentLifecycleState;
+  readonly desiredState: PiSubagentLifecycleState;
 }
 
 export class PiSubagentExecutionRepository extends ServiceMap.Service<

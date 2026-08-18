@@ -1850,6 +1850,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.pi-subagent-execution.cancel": {
+      // Ticket 11 (T11-AC6): thread existence is the decider-level gate;
+      // execution-scoped applicability (missing, terminal, wrong thread) is
+      // settled by the reactor against durable execution truth and surfaced
+      // as a denial diagnostic — the card state is never corrupted.
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.pi-subagent-execution-cancel-requested",
+        payload: {
+          threadId: command.threadId,
+          executionId: command.executionId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.task.background": {
       yield* requireThread({
         readModel,
@@ -2411,6 +2437,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           activity: command.activity,
+        },
+      };
+    }
+
+    case "thread.pi-subagent-execution.upsert": {
+      // Ticket 11 (T11-AC1/AC2): server-minted post-commit projection of
+      // committed managed-execution truth. No read-model gate: the durable
+      // execution aggregate (not the projection) is the authority, and a
+      // replayed deterministic command id must stay idempotent at the engine
+      // boundary (accepted receipt replay, Decision 0016 pattern).
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.pi-subagent-execution-updated",
+        payload: {
+          threadId: command.threadId,
+          executionId: command.executionId,
+          journalSequence: command.journalSequence,
+          card: command.card,
         },
       };
     }

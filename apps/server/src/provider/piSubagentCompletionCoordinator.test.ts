@@ -368,6 +368,29 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
     );
   });
 
+  it("Decision 0018 F1: receipt-confirmed finalization emits the SUCCESS diagnostic literal, never the failure code", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const { clock, coordinator, bindRepository, diagnostics } = setupCoordinator();
+        bindRepository(repository);
+        yield* admit(makeExecution());
+        yield* ingestPiSubagentTerminal({ repository, observation: makeObservation() });
+        coordinator.onCompletionPending({ parentThreadId: PARENT_THREAD });
+        yield* triggerAndFlush(coordinator, clock, () => {});
+
+        const member = yield* repository.getCompletionOutboxEntry(outboxIdFor(makeObservation()));
+        expect(Option.isSome(member) && member.value.deliveryState === "acknowledged").toBe(true);
+        // The accepted-and-acknowledged finalization diagnostic uses the
+        // dedicated success literal (Decision 0018 F1 follow-up owner:
+        // Ticket 11). A failure code on the success path would be a
+        // user-visible false failure.
+        expect(diagnostics).toContain("pi_subagent_completion_delivery_succeeded");
+        expect(diagnostics).not.toContain("pi_subagent_completion_delivery_failed");
+      }),
+    );
+  });
+
   it("F1: loss after batch/member commit but before command submission → same batch recovers, one message", async () => {
     await runTest(
       Effect.gen(function* () {
