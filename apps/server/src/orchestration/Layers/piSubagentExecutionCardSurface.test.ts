@@ -493,6 +493,67 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
     }
   });
 
+  it("review R4-N1: every delivery-state transition publishes its own card event (distinct delivery-band identities)", async () => {
+    const system = await createEngineSystem();
+    try {
+      await createProjectAndThread(system, "dlv");
+      const bridge = makePiSubagentExecutionCardBridge();
+      bridge.bindOnce(system.port);
+      setPiSubagentExecutionLifecycleListener((notification) => {
+        bridge.handleNotification(system.repository, notification);
+      });
+      await admitExecution(system, {
+        executionId: "exec-t11-dlv",
+        threadId: "thread-t11-dlv",
+      });
+      // Terminal ingest creates the outbox entry (pending) atomically.
+      await system.run(
+        system.repository.recordTerminalEvent({
+          executionId: "exec-t11-dlv",
+          attemptId: "exec-t11-dlv_att1",
+          generation: 1,
+          sequence: 40,
+          state: "succeeded",
+          occurredAt: "2026-08-19T00:20:00.000Z",
+          summary: "done",
+        }),
+      );
+      const outboxId = `outbox_exec-t11-dlv_exec-t11-dlv_att1_gen1`;
+      await system.run(
+        system.repository.markCompletionDelivered({
+          outboxId,
+          now: "2026-08-19T00:20:01.000Z",
+        }),
+      );
+      await system.run(
+        system.repository.markCompletionAcknowledged({
+          outboxId,
+          now: "2026-08-19T00:20:02.000Z",
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const events = await readThreadCardEvents(system, "thread-t11-dlv", 0);
+      const cardEvents = events.filter(
+        (event) => event.type === "thread.pi-subagent-execution-updated",
+      );
+      const deliveryStates = cardEvents
+        .map((event) =>
+          event.type === "thread.pi-subagent-execution-updated"
+            ? (event.payload.card.deliveryState ?? "absent")
+            : "other",
+        )
+        .filter((state) => state !== "other");
+      // Each committed delivery state reaches the stream: pending (terminal),
+      // delivered, AND acknowledged — no collision drops the second change.
+      expect(deliveryStates).toContain("delivered");
+      expect(deliveryStates).toContain("acknowledged");
+    } finally {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await system.dispose();
+    }
+  });
+
   it("T11-AC3: card events ride the thread-detail stream, so replay-window gaps hit the existing resync machinery, not silent loss", async () => {
     // The cursor-safe snapshot live stream replays THREAD_DETAIL_EVENT_TYPES
     // after the client cursor and falls back to a full snapshot + recorded

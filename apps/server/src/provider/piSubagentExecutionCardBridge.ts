@@ -66,9 +66,6 @@ export const makePiSubagentExecutionCardBridge = (): PiSubagentExecutionCardBrid
       // hydration (T11-AC5); no durable truth is lost by skipping.
       return;
     }
-    const commandId = CommandId.makeUnsafe(
-      `pisubcard_${notification.executionId}_${notification.attemptId}_gen${notification.generation}_seq${notification.journalSequence}`,
-    );
     void Effect.runPromise(
       Effect.gen(function* () {
         // Review R1 fix: read THIS execution's committed card by identity —
@@ -79,9 +76,21 @@ export const makePiSubagentExecutionCardBridge = (): PiSubagentExecutionCardBrid
         if (Option.isNone(cardOption)) {
           return;
         }
+        // Review R4-N1 fix: the delivery-only band (journalSequence 0) fires
+        // once PER delivery-state change; folding the committed delivery
+        // state into the command id gives each change a distinct
+        // deterministic identity (same state → same id → idempotent replay,
+        // new state → new id → no collision). Lifecycle bands keep the pure
+        // journal-sequence identity for replay dedupe.
+        const deliverySuffix =
+          notification.journalSequence === 0
+            ? `_d_${cardOption.value.deliveryState ?? "none"}`
+            : "";
         const command: OrchestrationCommand = {
           type: "thread.pi-subagent-execution.upsert",
-          commandId,
+          commandId: CommandId.makeUnsafe(
+            `pisubcard_${notification.executionId}_${notification.attemptId}_gen${notification.generation}_seq${notification.journalSequence}${deliverySuffix}`,
+          ),
           threadId: ThreadId.makeUnsafe(notification.parentThreadId),
           executionId: notification.executionId,
           journalSequence: notification.journalSequence,
