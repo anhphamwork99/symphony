@@ -1948,9 +1948,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   message: `Pi subagent completion delivery [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
                   detail: {
                     diagnosticCode: event.diagnosticCode,
-                    ...(event.executionId !== undefined
-                      ? { executionId: event.executionId }
-                      : {}),
+                    ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
                   },
                 },
                 raw: {
@@ -1958,9 +1956,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   method: "subagents/completion-delivery-diagnostic",
                   payload: {
                     diagnosticCode: event.diagnosticCode,
-                    ...(event.executionId !== undefined
-                      ? { executionId: event.executionId }
-                      : {}),
+                    ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
                   },
                 },
               } satisfies ProviderRuntimeEvent);

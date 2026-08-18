@@ -1801,9 +1801,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           ORDER BY created_at ASC
         `.pipe(
           Effect.mapError(
-            toPersistenceSqlError(
-              "PiSubagentExecutionRepository.listNonTerminalExecutions:query",
-            ),
+            toPersistenceSqlError("PiSubagentExecutionRepository.listNonTerminalExecutions:query"),
           ),
         );
         return rows.map(rowToExecutionRecord);
@@ -1821,9 +1819,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * journal as history only (ignored), and late terminals are additionally
    * counted through the stale_terminal_events counter (T10-AC5).
    */
-  const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (
-    input,
-  ) =>
+  const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (input) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -1962,9 +1958,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               };
             }
             return yield* Effect.fail(
-              toPersistenceSqlError(
-                "PiSubagentExecutionRepository.recordOrphanedEvent:insert",
-              )(err),
+              toPersistenceSqlError("PiSubagentExecutionRepository.recordOrphanedEvent:insert")(
+                err,
+              ),
             );
           }),
         ),

@@ -66,10 +66,7 @@ export const DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES = 8;
 /** Per-thread scheduler contract (virtual-clock injectable for tests). */
 export interface CompletionCoordinatorScheduler {
   readonly now: () => number;
-  readonly schedule: (
-    delayMs: number,
-    callback: () => void,
-  ) => { readonly cancel: () => void };
+  readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
 }
 
 /** One bounded follow-up entry — the parent-effect dedupe key travels with it. */
@@ -158,7 +155,9 @@ export interface PiSubagentCompletionCoordinator {
   readonly outstandingThreads: () => ReadonlyArray<{ parentThreadId: string; entries: number }>;
 }
 
-const toEntry = (entry: PiSubagentCompletionOutboxEntry): PiSubagentCompletionCoordinatorFollowUpEntry => ({
+const toEntry = (
+  entry: PiSubagentCompletionOutboxEntry,
+): PiSubagentCompletionCoordinatorFollowUpEntry => ({
   dedupeId: entry.outboxId,
   executionId: entry.executionId,
   attemptId: entry.attemptId,
@@ -172,13 +171,13 @@ export const makePiSubagentCompletionCoordinator = (
   input: PiSubagentCompletionCoordinatorInput,
 ): PiSubagentCompletionCoordinator => {
   const batchWindowMs =
-    typeof input.batchWindowMs === "number" && Number.isFinite(input.batchWindowMs) && input.batchWindowMs >= 0
+    typeof input.batchWindowMs === "number" &&
+    Number.isFinite(input.batchWindowMs) &&
+    input.batchWindowMs >= 0
       ? Math.floor(input.batchWindowMs)
       : 0;
   const retryLimit =
-    input.retryLimit !== undefined &&
-    Number.isInteger(input.retryLimit) &&
-    input.retryLimit >= 0
+    input.retryLimit !== undefined && Number.isInteger(input.retryLimit) && input.retryLimit >= 0
       ? input.retryLimit
       : DEFAULT_COMPLETION_COORDINATOR_RETRY_LIMIT;
   const maxBatchEntries =
@@ -188,8 +187,7 @@ export const makePiSubagentCompletionCoordinator = (
       ? input.maxBatchEntries
       : DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
   const now = input.scheduler?.now ?? input.now ?? (() => Date.now());
-  const schedule =
-    input.scheduler?.schedule ?? input.schedule ?? makeDefaultScheduler();
+  const schedule = input.scheduler?.schedule ?? input.schedule ?? makeDefaultScheduler();
 
   const threads = new Map<string, ThreadState>();
   let idleResolvers: Array<() => void> = [];
@@ -481,7 +479,10 @@ export const makePiSubagentCompletionCoordinator = (
   const outstandingThreads = () =>
     [...threads.values()]
       .filter((state) => state.outstanding.length > 0)
-      .map((state) => ({ parentThreadId: state.parentThreadId, entries: state.outstanding.length }));
+      .map((state) => ({
+        parentThreadId: state.parentThreadId,
+        entries: state.outstanding.length,
+      }));
 
   return {
     onCompletionPending,

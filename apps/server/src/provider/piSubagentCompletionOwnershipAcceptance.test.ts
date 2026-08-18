@@ -327,9 +327,7 @@ function materializeLegacyExtensionWorktree(): string {
     !legacyEntry.includes("journal-terminal-lifecycle") ||
     legacyEntry.includes("completion-delivery-ownership")
   ) {
-    throw new Error(
-      "Legacy worktree build failed: emitted extension is not the pre-09 family.",
-    );
+    throw new Error("Legacy worktree build failed: emitted extension is not the pre-09 family.");
   }
   return worktreeDir;
 }

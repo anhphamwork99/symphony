@@ -294,9 +294,7 @@ describe("Pi Subagent per-thread completion coordinator (Issue 09)", () => {
           "exec_t09_2",
         ]);
         expect(dispatch.entries[0]!.summary).toBe("Agent completed: 3 tool uses. Outcome: done.");
-        expect(dispatch.entries[1]!.summary).toBe(
-          "Agent completed: wrote report. Outcome: done.",
-        );
+        expect(dispatch.entries[1]!.summary).toBe("Agent completed: wrote report. Outcome: done.");
         // The stable dedupe identity travels with every entry (Decision
         // 0013 F4: parent-effect key).
         expect(dispatch.entries[0]!.dedupeId).toBe(outboxIdFor(makeObservation()));
@@ -327,7 +325,9 @@ describe("Pi Subagent per-thread completion coordinator (Issue 09)", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({ batchWindowMs: 0 });
+        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({
+          batchWindowMs: 0,
+        });
         bindRepository(repository);
 
         yield* admit(makeExecution());
@@ -435,7 +435,9 @@ describe("Pi Subagent per-thread completion coordinator (Issue 09)", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({ retryLimit: 3 });
+        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({
+          retryLimit: 3,
+        });
         bindRepository(repository);
 
         yield* admit(makeExecution());
@@ -482,7 +484,9 @@ describe("Pi Subagent per-thread completion coordinator (Issue 09)", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({ retryLimit: 1 });
+        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({
+          retryLimit: 1,
+        });
         bindRepository(repository);
 
         yield* admit(makeExecution());
@@ -657,7 +661,9 @@ describe("Pi Subagent per-thread completion coordinator (Issue 09)", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({ maxBatchEntries: 2 });
+        const { boundary, clock, coordinator, bindRepository } = setupCoordinator({
+          maxBatchEntries: 2,
+        });
         bindRepository(repository);
 
         for (let index = 1; index <= 3; index += 1) {
