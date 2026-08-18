@@ -368,7 +368,7 @@ describe("Pi Subagent Progress + Heartbeat Real-Pi Acceptance (Issue 23)", () =>
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.13.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
 
     const modelServer = await startDeterministicModelServer();
 

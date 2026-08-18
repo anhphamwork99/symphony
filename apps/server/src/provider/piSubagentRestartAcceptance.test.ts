@@ -361,7 +361,7 @@ describe("Pi Subagent Restart Reconciliation Real-Pi Acceptance (Issue 10)", () 
     // Real Git provenance first: no synthetic bridge may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.13.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
 
     const modelServer = await startDeterministicModelServer();
 
