@@ -21,6 +21,9 @@ Acceptance applies only if the subsequent completion commit preserves this
 candidate materially unchanged. The completion commit hash must be appended to
 this record or the ticket implementation report after creation.
 
+**Completion commit:** `8465b0fa` — preserves the accepted candidate and
+excludes `apps/server/.pi/notifications.jsonl`.
+
 ## Governing references
 
 - `.planning/synara-pi-durable-subagents/PROJECT.md`

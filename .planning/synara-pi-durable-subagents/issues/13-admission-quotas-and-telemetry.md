@@ -134,3 +134,5 @@ Verification on 2026-08-18:
 
 Binding Project Supervisor Decision 0017 accepts T13-AC1 through T13-AC7.
 Ticket 13 is complete and its blocker on Ticket 15 is satisfied.
+
+Completion commit: `8465b0fa`.
