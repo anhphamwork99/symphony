@@ -31,6 +31,7 @@ import {
   resolvePiSubagentCancelRetryLimit,
   resolvePiSubagentCompletionRetryLimit,
   resolvePiSubagentCompletionBatchWindowMs,
+  resolvePiSubagentOrphanAfterMs,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveStaticDir,
   ServerConfig,
@@ -371,6 +372,9 @@ const ServerConfigLive = (input: CliInput) =>
         ),
         piSubagentCompletionBatchWindowMs: resolvePiSubagentCompletionBatchWindowMs(
           process.env.SYNARA_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
+        ),
+        piSubagentOrphanAfterMs: resolvePiSubagentOrphanAfterMs(
+          process.env.SYNARA_PI_SUBAGENT_ORPHAN_AFTER_MS,
         ),
       } satisfies ServerConfigShape;
 

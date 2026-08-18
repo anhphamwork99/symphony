@@ -43,6 +43,10 @@ import {
   resolvePiSubagentCompletionBatchWindowMs,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   resolvePiSubagentTerminalSummaryMaxChars,
+  DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS,
+  MIN_PI_SUBAGENT_ORPHAN_AFTER_MS,
+  MAX_PI_SUBAGENT_ORPHAN_AFTER_MS,
+  resolvePiSubagentOrphanAfterMs,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
@@ -601,6 +605,28 @@ describe("resolvePiSubagentCompletionBatchWindowMs (Issue 09)", () => {
       expect(resolvePiSubagentCompletionBatchWindowMs(input)).toBe(
         DEFAULT_PI_SUBAGENT_COMPLETION_BATCH_WINDOW_MS,
       );
+    }
+  });
+});
+
+describe("resolvePiSubagentOrphanAfterMs (Issue 10)", () => {
+  it("exports the expected bounds and default constants (~60s initial threshold)", () => {
+    expect(DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS).toBe(60000);
+    expect(MIN_PI_SUBAGENT_ORPHAN_AFTER_MS).toBe(1000);
+    expect(MAX_PI_SUBAGENT_ORPHAN_AFTER_MS).toBe(3600000);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentOrphanAfterMs(undefined)).toBe(60000);
+    expect(resolvePiSubagentOrphanAfterMs(1000)).toBe(1000);
+    expect(resolvePiSubagentOrphanAfterMs("1000")).toBe(1000);
+    expect(resolvePiSubagentOrphanAfterMs(3600000)).toBe(3600000);
+    expect(resolvePiSubagentOrphanAfterMs("120000")).toBe(120000);
+  });
+
+  it("falls back to the default without clamping for invalid inputs", () => {
+    for (const input of [null, "", "abc", "3x", true, {}, Infinity, NaN, 2.5, 999, 3600001]) {
+      expect(resolvePiSubagentOrphanAfterMs(input)).toBe(DEFAULT_PI_SUBAGENT_ORPHAN_AFTER_MS);
     }
   });
 });

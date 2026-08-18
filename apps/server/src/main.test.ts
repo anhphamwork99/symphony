@@ -512,6 +512,56 @@ it.layer(testLayer)("server CLI command", (it) => {
       }),
   );
 
+  it.effect(
+    "resolves the Pi subagent orphan-after threshold knob on the production ServerConfigLive path (issue 10 / T10-AC7)",
+    () =>
+      // Same production resolution site as the other Pi subagent knobs: the
+      // env is mutated directly and always restored.
+      Effect.gen(function* () {
+        const key = "SYNARA_PI_SUBAGENT_ORPHAN_AFTER_MS";
+        const previousValue = process.env[key];
+        const restore = Effect.sync(() => {
+          if (previousValue === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = previousValue;
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            // Valid in-range value is preserved verbatim (no clamping).
+            process.env[key] = "120000";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 120_000);
+
+            // Invalid classes fall back to the ~60s default: non-numeric,
+            // fractional, under-range, and over-range are rejected.
+            process.env[key] = "soon";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 60_000);
+
+            process.env[key] = "60000.5";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 60_000);
+
+            process.env[key] = "999";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 60_000);
+
+            process.env[key] = "3600001";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 60_000);
+
+            // Unset also resolves to the default.
+            delete process.env[key];
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentOrphanAfterMs, 60_000);
+          }),
+          () => restore,
+        );
+      }),
+  );
+
   it.effect("uses safe Antigravity recovery defaults for invalid configuration", () =>
     Effect.gen(function* () {
       const messages: string[] = [];
