@@ -184,7 +184,10 @@
   `owner_unproven` evidence before Ticket-10 owner-loss fencing. Decision
   0028 records the human owner's approval to replace the conditional
   automated real-Pi destructive CI seam with deterministic fixtures plus the
-  isolated manual real-Pi verification recipe.
+  isolated manual real-Pi verification recipe. Decision 0029 records the
+  one final-acceptance consultation's rejection: T16-AC4 remains open until
+  production preserves bounded survivor-PID evidence through
+  `AggregateError`; Ticket 16 remains active and Ticket 17 remains blocked.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer
