@@ -27,6 +27,10 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { makePiSubagentExecutionCardBridge } from "../../provider/piSubagentExecutionCardBridge.ts";
 import {
+  PI_SUBAGENT_WATCHDOG_BAND,
+  runPiSubagentWatchdogEscalation,
+} from "../../provider/piSubagentWatchdogEscalation.ts";
+import {
   isThreadDetailEventFor,
   THREAD_DETAIL_EVENT_TYPES,
 } from "@synara/shared/threadDetailEvents";
@@ -238,6 +242,89 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
       const serialized = JSON.stringify(detail.value.thread.piSubagentExecutions);
       expect(serialized).not.toContain("SECRET PROMPT CONTENT");
       expect(serialized).not.toContain("progressJson");
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("T15-AC5 (projection): timeout-only watchdog progression never surfaces a stopped/cancelled claim", async () => {
+    const system = await createEngineSystem();
+    try {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await createProjectAndThread(system, "wd5");
+      await admitExecution(system, {
+        executionId: "exec-t15-ac5",
+        threadId: "thread-t11-wd5",
+        now: "2026-08-19T00:00:00.000Z",
+      });
+      // Durable wall-time trigger (band 60) for the current attempt.
+      await system.run(
+        system.repository.recordWallTimeExpiryEvent({
+          executionId: "exec-t15-ac5",
+          attemptId: "exec-t15-ac5_att1",
+          generation: 1,
+          occurredAt: "2026-08-19T00:00:10.000Z",
+          wallTimeMs: 60_000,
+        }),
+      );
+
+      // Timeout-only progression: no bridge, no acknowledgement, no terminal
+      // evidence anywhere — the stage controls dispatch but never prove.
+      const result = await system.run(
+        Effect.promise(() =>
+          runPiSubagentWatchdogEscalation({
+            repository: system.repository,
+            resolveBridge: () => undefined,
+            isOwnerGenerationDead: () => false,
+            listActive: () => undefined,
+            interruptProviderTurn: async () => undefined,
+            stopProviderSession: async () => "uncertain" as const,
+            stageTimeoutMs: 100,
+            cancelRetryLimit: 0,
+            leaseDurationMs: 30_000,
+            idleAfterMs: 60_000,
+            now: () => Date.parse("2026-08-19T00:01:00.000Z"),
+          }),
+        ),
+      );
+      expect(result.escalations).toHaveLength(1);
+      expect(result.escalations[0]!.outcome).toMatchObject({ kind: "cleanup_uncertain" });
+
+      // Projection surface (T15-AC5): the card carried by the thread-detail
+      // snapshot keeps honest cancelling — observed stays non-terminal and
+      // desired is cancelling; no stopped/cancelled claim exists.
+      const detail = await system.run(
+        system.snapshotQuery.getThreadDetailSnapshotById(asThreadId("thread-t11-wd5")),
+      );
+      expect(detail._tag).toBe("Some");
+      if (detail._tag !== "Some") {
+        return;
+      }
+      const cards = detail.value.thread.piSubagentExecutions ?? [];
+      expect(cards).toHaveLength(1);
+      const card = cards[0]!;
+      expect(card.executionId).toBe("exec-t15-ac5");
+      expect(card.desiredState).toBe("cancelling");
+      expect(["cancelled", "succeeded", "failed", "rejected"]).not.toContain(card.observedState);
+
+      // The full escalation band is durable evidence (70–74), and NO
+      // terminal journal row was ever written by the watchdog.
+      const journal = await system.run(system.repository.listJournalEvents("exec-t15-ac5"));
+      for (const sequence of [
+        PI_SUBAGENT_WATCHDOG_BAND.escalationStarted,
+        PI_SUBAGENT_WATCHDOG_BAND.childAbortTimeout,
+        PI_SUBAGENT_WATCHDOG_BAND.providerTurnInterrupt,
+        PI_SUBAGENT_WATCHDOG_BAND.providerSessionStop,
+        PI_SUBAGENT_WATCHDOG_BAND.teardownHandoff,
+      ]) {
+        expect(journal.some((event) => event.sequence === sequence)).toBe(true);
+      }
+      expect(
+        journal.some(
+          (event) =>
+            event.state === "cancelled" || event.state === "succeeded" || event.state === "failed",
+        ),
+      ).toBe(false);
     } finally {
       await system.dispose();
     }

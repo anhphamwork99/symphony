@@ -266,6 +266,22 @@ export const ServerDiagnosticsPiSubagents = Schema.Struct({
     dropped: NonNegativeInt,
   }),
   completionRetries: NonNegativeInt,
+  /**
+   * Ticket 15 (T15-AC7): bounded watchdog-escalation observability —
+   * journal-band counters only (60 trigger, 70 start, 71 child-abort
+   * timeout, 72 interrupt, 73 session stop, 74 teardown handoff). No
+   * prompt, result, or transcript content ever enters these aggregates.
+   */
+  watchdog: Schema.Struct({
+    wallTimeTriggers: NonNegativeInt,
+    escalationsStarted: NonNegativeInt,
+    childAbortTimeouts: NonNegativeInt,
+    providerTurnInterrupts: NonNegativeInt,
+    providerSessionStops: NonNegativeInt,
+    teardownHandoffs: NonNegativeInt,
+    /** Escalation-start → teardown-handoff duration percentiles (T15-AC7). */
+    escalationLatencyMs: ServerDiagnosticsLatencyMs,
+  }),
 });
 export type ServerDiagnosticsPiSubagents = typeof ServerDiagnosticsPiSubagents.Type;
 

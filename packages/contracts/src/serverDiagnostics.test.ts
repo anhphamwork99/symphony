@@ -42,12 +42,22 @@ describe("ServerDiagnosticsResult Pi subagent telemetry (Issue 13 / T13-AC4)", (
         cancelLatencyMs: { p50: 150, p95: 195, max: 200 },
         progress: { coalesced: 500, dropped: 500 },
         completionRetries: 7,
+        watchdog: {
+          wallTimeTriggers: 8,
+          escalationsStarted: 9,
+          childAbortTimeouts: 10,
+          providerTurnInterrupts: 11,
+          providerSessionStops: 12,
+          teardownHandoffs: 13,
+          escalationLatencyMs: { p50: 1400, p95: 1500, max: 1600 },
+        },
       },
     });
 
     expect(decoded.piSubagents?.executionCounts.orphaned).toBe(4);
     expect(decoded.piSubagents?.detachLatencyMs.p95).toBe(95);
     expect(decoded.piSubagents?.completionRetries).toBe(7);
+    expect(decoded.piSubagents?.watchdog.teardownHandoffs).toBe(13);
   });
 
   it("keeps the block additive and rejects negative metric values", () => {
@@ -68,6 +78,15 @@ describe("ServerDiagnosticsResult Pi subagent telemetry (Issue 13 / T13-AC4)", (
           cancelLatencyMs: { p50: 0, p95: 0, max: 0 },
           progress: { coalesced: 0, dropped: 0 },
           completionRetries: 0,
+          watchdog: {
+            wallTimeTriggers: 0,
+            escalationsStarted: 0,
+            childAbortTimeouts: 0,
+            providerTurnInterrupts: 0,
+            providerSessionStops: 0,
+            teardownHandoffs: 0,
+            escalationLatencyMs: { p50: 0, p95: 0, max: 0 },
+          },
         },
       }),
     ).toThrow();

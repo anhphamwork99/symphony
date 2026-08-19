@@ -352,6 +352,22 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
     ).toThrow();
   });
 
+  it("exposes the Ticket 15 watchdog-escalation diagnostic codes as first-class literals", () => {
+    for (const code of [
+      "pi_subagent_watchdog_walltime_escalation",
+      "pi_subagent_watchdog_idle_escalation",
+      "pi_subagent_watchdog_stage_timeout",
+      "pi_subagent_watchdog_terminal_evidence",
+      "pi_subagent_watchdog_cleanup_uncertain",
+      "pi_subagent_watchdog_session_stopped",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_watchdog_unknown" as never),
+    ).toThrow();
+  });
+
   it("exposes the Ticket 13 admission-quota and wall-time diagnostic codes as first-class literals", () => {
     for (const code of [
       "pi_subagent_admission_provider_concurrency_exhausted",

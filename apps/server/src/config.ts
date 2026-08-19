@@ -54,6 +54,14 @@ export const DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 2;
 export const MIN_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 0;
 export const MAX_PI_SUBAGENT_CANCEL_RETRY_LIMIT = 5;
 
+// Ticket 15: watchdog escalation per-stage evidence-wait bound. Each stage
+// (child abort acknowledgement, provider-turn interrupt evidence,
+// provider-session stop result) waits at most this long before the bounded
+// chain advances (T15-AC1). Same resolver contract as the ticket 06 knobs.
+export const DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = 10000;
+export const MIN_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = 100;
+export const MAX_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = 60000;
+
 // Ticket 07: terminal payload bounding knob (T07-AC5) — the server truncates
 // any producer-supplied terminal summary to this length before it is stored
 // or emitted. Same resolver contract: nullish → default, range check,
@@ -631,6 +639,44 @@ export function resolvePiSubagentCancelAckTimeoutMs(
   return DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
 }
 
+// Ticket 15 (T15-AC1): watchdog per-stage evidence-wait bound. Invalid or
+// out-of-range input falls back to the default — never clamped.
+export function resolvePiSubagentWatchdogStageTimeoutMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+  }
+  if (typeof rawInput === "number") {
+    if (
+      !Number.isFinite(rawInput) ||
+      !Number.isInteger(rawInput) ||
+      rawInput < MIN_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS ||
+      rawInput > MAX_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+    }
+    return rawInput;
+  }
+  if (typeof rawInput === "string") {
+    const trimmed = rawInput.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
+      return DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS ||
+      parsed > MAX_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS
+    ) {
+      return DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+    }
+    return parsed;
+  }
+  return DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+}
+
 export function resolvePiSubagentCancelRetryLimit(
   rawInput?: string | number | null | undefined | unknown,
 ): number {
@@ -776,6 +822,8 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly piSubagentProjectQueueCap?: number;
   /** Ticket 13: per-execution wall-time budget (default two hours). */
   readonly piSubagentWallTimeMs?: number;
+  /** Ticket 15: watchdog per-stage evidence-wait bound (default 10s). */
+  readonly piSubagentWatchdogStageTimeoutMs?: number;
 }
 
 export function preparePrivateServerPaths(

@@ -67,6 +67,10 @@ import {
   MIN_PI_SUBAGENT_WALL_TIME_MS,
   MAX_PI_SUBAGENT_WALL_TIME_MS,
   resolvePiSubagentWallTimeMs,
+  resolvePiSubagentWatchdogStageTimeoutMs,
+  DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS,
+  MIN_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS,
+  MAX_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS,
   resolveCanonicalWorkspaceRoots,
   resolveDefaultChatWorkspaceRoot,
   resolveDefaultStudioWorkspaceRoot,
@@ -743,6 +747,30 @@ describe("resolvePiSubagentWallTimeMs (Issue 13 / T13-AC3, T13-AC7)", () => {
   it("falls back to the default without clamping for invalid inputs (no unlimited wall time)", () => {
     for (const input of [null, "", "abc", true, {}, Infinity, NaN, 5999.5, 59999, 86400001]) {
       expect(resolvePiSubagentWallTimeMs(input)).toBe(DEFAULT_PI_SUBAGENT_WALL_TIME_MS);
+    }
+  });
+});
+
+describe("resolvePiSubagentWatchdogStageTimeoutMs (Issue 15 / T15-AC1)", () => {
+  it("exports the expected bounds and default constants (10s stage bound)", () => {
+    expect(DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS).toBe(10000);
+    expect(MIN_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS).toBe(100);
+    expect(MAX_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS).toBe(60000);
+  });
+
+  it("resolves valid endpoint and interior values, both input types", () => {
+    expect(resolvePiSubagentWatchdogStageTimeoutMs(undefined)).toBe(10000);
+    expect(resolvePiSubagentWatchdogStageTimeoutMs(100)).toBe(100);
+    expect(resolvePiSubagentWatchdogStageTimeoutMs("100")).toBe(100);
+    expect(resolvePiSubagentWatchdogStageTimeoutMs(60000)).toBe(60000);
+    expect(resolvePiSubagentWatchdogStageTimeoutMs("5000")).toBe(5000);
+  });
+
+  it("falls back to the default without clamping for invalid inputs (bounded stages always)", () => {
+    for (const input of [null, "", "abc", true, {}, Infinity, NaN, 99.5, 99, 60001]) {
+      expect(resolvePiSubagentWatchdogStageTimeoutMs(input)).toBe(
+        DEFAULT_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS,
+      );
     }
   });
 });

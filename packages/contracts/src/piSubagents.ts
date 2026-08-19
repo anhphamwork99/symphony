@@ -70,6 +70,18 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_admission_project_queue_saturated",
   "pi_subagent_admission_quota_unavailable",
   "pi_subagent_walltime_expired",
+  "pi_subagent_watchdog_walltime_escalation",
+  "pi_subagent_watchdog_idle_escalation",
+  "pi_subagent_watchdog_stage_timeout",
+  "pi_subagent_watchdog_terminal_evidence",
+  "pi_subagent_watchdog_cleanup_uncertain",
+  "pi_subagent_watchdog_session_stopped",
+  "pi_subagent_resumed",
+  "pi_subagent_resume_not_found",
+  "pi_subagent_resume_invalid_state",
+  "pi_subagent_resume_stale_generation",
+  "pi_subagent_resume_unavailable",
+  "pi_subagent_resume_persistence_failed",
   "pi_subagent_read_denied",
   "pi_subagent_result_truncated",
   "pi_subagent_transcript_missing",
@@ -194,6 +206,17 @@ export const PiSubagentSpawnCommand = Schema.Struct({
   prompt: TrimmedNonEmptyString,
   mode: Schema.optional(PiSubagentTransportMode),
   cancellationScope: Schema.optional(PiSubagentCancellationScope),
+  /**
+   * Ticket 14: the admission-time delegation triplet, persisted so an
+   * explicit resume can rebuild the exact four-string delegation request
+   * the Agent tool validates. Optional for legacy compatibility; a resume
+   * of a legacy row stamps explicit gap-naming placeholders.
+   */
+  delegationContext: Schema.optional(TrimmedNonEmptyString),
+  delegationLinkReferences: Schema.optional(TrimmedNonEmptyString),
+  delegationExpectedOutcome: Schema.optional(TrimmedNonEmptyString),
+  /** Ticket 14: resolved `provider/modelId` the child attempt ran under. */
+  resolvedModel: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentSpawnCommand = typeof PiSubagentSpawnCommand.Type;
 
@@ -237,6 +260,11 @@ export const PiSubagentExecutionRecord = Schema.Struct({
   parentToolCallId: Schema.NullOr(TrimmedNonEmptyString),
   agentType: TrimmedNonEmptyString,
   prompt: TrimmedNonEmptyString,
+  /** Ticket 14 durable delegation replay fields (NULL on legacy rows). */
+  delegationContext: Schema.optional(TrimmedNonEmptyString),
+  delegationLinkReferences: Schema.optional(TrimmedNonEmptyString),
+  delegationExpectedOutcome: Schema.optional(TrimmedNonEmptyString),
+  resolvedModel: Schema.optional(TrimmedNonEmptyString),
   mode: PiSubagentTransportMode,
   cancellationScope: PiSubagentCancellationScope,
   desiredState: PiSubagentLifecycleState,

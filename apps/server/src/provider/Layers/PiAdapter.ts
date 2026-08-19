@@ -169,6 +169,7 @@ import {
   type PiSubagentControlHealthTransition,
 } from "../piSubagentControlHealth.ts";
 import { startPiSubagentWallTimeSweep } from "../piSubagentWallTimeSweep.ts";
+import { startPiSubagentWatchdogSweep } from "../piSubagentWatchdogSweep.ts";
 import { makePiSubagentSafeCorrelation } from "../piSubagentTelemetrySafety.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
@@ -554,6 +555,17 @@ export interface PiAdapterLiveOptions {
    * inject a manually-driven scheduler.
    */
   readonly piSubagentWallTimeClock?: {
+    readonly now: () => number;
+    readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
+    readonly intervalMs?: number;
+  };
+  /**
+   * Ticket 15 test seam: watchdog escalation clock/scheduler. Production
+   * uses the server clock and a 30-second periodic timer (the same cadence
+   * as the wall-time sweep); deterministic tests inject a manually-driven
+   * scheduler.
+   */
+  readonly piSubagentWatchdogClock?: {
     readonly now: () => number;
     readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
     readonly intervalMs?: number;
@@ -4506,6 +4518,142 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         } satisfies ProviderRuntimeEvent);
       });
 
+    // Ticket 15: one adapter-lifetime watchdog escalation sweep — the
+    // production consumer of the ticket 13 band-60 wall-time triggers and
+    // the production lease-expiry sweep driver Ticket 10 recorded as Ticket
+    // 15 scope. Stage 1 reuses the ticket 06 durable cancel protocol; stage
+    // 2 interrupts the live provider turn; stage 3 stops the provider
+    // session through the adapter's own stop path (which disposes the
+    // runtime and proves its subprocess trees exited). The watchdog never
+    // settles projection: uncertain cleanup journals the teardown-handoff
+    // record owned by Ticket 16.
+    const piSubagentWatchdogSweep =
+      piSubagentRepository === undefined
+        ? undefined
+        : startPiSubagentWatchdogSweep({
+            repository: piSubagentRepository,
+            resolveBridge: (threadId) => {
+              const context = sessions.get(ThreadId.makeUnsafe(threadId));
+              if (
+                context === undefined ||
+                context.stopped ||
+                !context.subagentCapability?.isManaged ||
+                context.subagentCapability.capabilities?.includes("durable-cancellation") !== true
+              ) {
+                return undefined;
+              }
+              return extractPiSubagentBridge(context.runtime.session);
+            },
+            isOwnerGenerationDead: () => false,
+            interruptProviderTurn: async (threadId) => {
+              const context = sessions.get(ThreadId.makeUnsafe(threadId));
+              if (context === undefined || context.stopped) {
+                return;
+              }
+              await context.runtime.session.abort();
+            },
+            stopProviderSession: async (threadId) => {
+              const target = ThreadId.makeUnsafe(threadId);
+              const context = sessions.get(target);
+              if (context === undefined) {
+                // No live session: nothing to stop — cleanup is uncertain and
+                // the teardown stage owns the proof (T15-AC6).
+                return "uncertain" as const;
+              }
+              try {
+                await Effect.runPromise(stopSession(target));
+                return sessions.has(target) ? ("uncertain" as const) : ("stopped" as const);
+              } catch {
+                return "uncertain" as const;
+              }
+            },
+            stageTimeoutMs: serverConfig.piSubagentWatchdogStageTimeoutMs,
+            cancelRetryLimit: serverConfig.piSubagentCancelRetryLimit,
+            leaseDurationMs: serverConfig.piSubagentLeaseDurationMs,
+            idleAfterMs: serverConfig.piSubagentOrphanAfterMs,
+            // AC1 entry/stage diagnostics reach the operator surface through
+            // the same safe-correlation runtime-warning path as the ticket 13
+            // wall-time trigger (fixed vocabulary + correlation only).
+            onDiagnostic: (event) => {
+              const safeCorrelation = makePiSubagentSafeCorrelation({
+                executionId: event.executionId,
+                attemptId: event.attemptId,
+                threadId: event.parentThreadId,
+                generation: event.generation,
+                diagnosticCode: event.diagnosticCode,
+              });
+              const context = sessions.get(ThreadId.makeUnsafe(event.parentThreadId));
+              const logWarning = Effect.logWarning("pi.subagent.watchdog_diagnostic", {
+                ...safeCorrelation,
+                message: event.diagnosticMessage,
+              });
+              void Effect.runPromise(logWarning).catch(() => undefined);
+              if (context !== undefined) {
+                offerRuntimeEvent({
+                  ...makePiRuntimeEventBase(context),
+                  type: "runtime.warning",
+                  payload: {
+                    message: `Pi subagent watchdog [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                    detail: safeCorrelation,
+                  },
+                  raw: {
+                    source: "pi.sdk.event",
+                    method: "subagents/watchdog-diagnostic",
+                    payload: safeCorrelation,
+                  },
+                } satisfies ProviderRuntimeEvent);
+              }
+            },
+            ...(options?.piSubagentWatchdogClock?.now
+              ? { now: options.piSubagentWatchdogClock.now }
+              : {}),
+            ...(options?.piSubagentWatchdogClock?.schedule
+              ? { schedule: options.piSubagentWatchdogClock.schedule }
+              : {}),
+            ...(options?.piSubagentWatchdogClock?.intervalMs !== undefined
+              ? { intervalMs: options.piSubagentWatchdogClock.intervalMs }
+              : {}),
+            onEscalation: (escalation) => {
+              const safeDetail = makePiSubagentSafeCorrelation({
+                executionId: escalation.executionId,
+                attemptId: escalation.attemptId,
+                threadId: escalation.parentThreadId,
+                generation: escalation.generation,
+                diagnosticCode: "pi_subagent_watchdog_stage_timeout",
+              });
+              void Effect.runPromise(
+                Effect.logWarning("pi.subagent.watchdog_escalated", {
+                  ...safeDetail,
+                  trigger: escalation.trigger,
+                  outcome: escalation.outcomeKind,
+                }),
+              ).catch(() => undefined);
+              offerRuntimeEvent({
+                ...makePiRuntimeEventBase(
+                  {
+                    session: { threadId: ThreadId.makeUnsafe(escalation.parentThreadId) },
+                    activeTurnId: undefined,
+                  },
+                  { includeTurnId: false },
+                ),
+                type: "runtime.warning",
+                payload: {
+                  message: `Pi subagent watchdog escalated [${escalation.trigger}] → ${escalation.outcomeKind}`,
+                  detail: {
+                    ...safeDetail,
+                    trigger: escalation.trigger,
+                    outcome: escalation.outcomeKind,
+                  },
+                },
+                raw: {
+                  source: "pi.sdk.event",
+                  method: "subagents/watchdog-escalated",
+                  payload: safeDetail,
+                },
+              } satisfies ProviderRuntimeEvent);
+            },
+          });
+
     const enableSynaraMcp: NonNullable<PiAdapterShape["enableSynaraMcp"]> = (input) =>
       Effect.gen(function* () {
         const context = sessions.get(input.threadId);
@@ -4655,7 +4803,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       );
 
     const stopAll: PiAdapterShape["stopAll"] = () =>
-      Effect.sync(() => piSubagentWallTimeSweep?.stop()).pipe(
+      Effect.sync(() => {
+        piSubagentWallTimeSweep?.stop();
+        piSubagentWatchdogSweep?.stop();
+      }).pipe(
         Effect.andThen(
           Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
             concurrency: "unbounded",

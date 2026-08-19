@@ -985,6 +985,85 @@ describe("PiSubagentExecutionRepository operator telemetry (Issue 13 / T13-AC4)"
             cancelLatencyMs: { p50: 400, p95: 1_200, max: 1_200 },
             progress: { coalesced: 12, dropped: 12 },
             completionRetries: 5,
+            watchdog: {
+              wallTimeTriggers: 0,
+              escalationsStarted: 0,
+              childAbortTimeouts: 0,
+              providerTurnInterrupts: 0,
+              providerSessionStops: 0,
+              teardownHandoffs: 0,
+              escalationLatencyMs: { p50: 0, p95: 0, max: 0 },
+            },
+          });
+        }),
+      );
+    },
+  );
+
+  it.layer(PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)))(
+    "counts watchdog escalation band rows in the telemetry snapshot (Issue 15 / T15-AC7)",
+    (it) => {
+      it.effect("watchdog counters derive from journal band rows", () =>
+        Effect.gen(function* () {
+          const repository = yield* PiSubagentExecutionRepository;
+          const sql = yield* SqlClient.SqlClient;
+
+          yield* repository.recordAdmission({
+            executionId: "exec_wd_metrics",
+            attemptId: "att_wd_metrics",
+            generation: 1,
+            commandId: "cmd_wd_metrics",
+            commandFingerprint: "fp_wd_metrics",
+            projectId: "proj_default",
+            parentThreadId: "thread_metrics",
+            parentTurnId: "turn_metrics",
+            parentToolCallId: null,
+            agentType: "general-purpose",
+            prompt: "metrics",
+            mode: "background",
+            cancellationScope: "parent_turn",
+            state: "accepted",
+            diagnosticCode: "pi_subagent_managed_enabled",
+            now: "2026-08-18T10:00:00.000Z",
+          });
+
+          const insertBand = (sequence: number, eventId: string) => sql`
+          INSERT INTO pi_subagent_lifecycle_journal (
+            event_id, execution_id, attempt_id, generation, sequence,
+            state, occurred_at, diagnostic_code, diagnostic_message, metadata_json
+          ) VALUES (
+            ${eventId}, 'exec_wd_metrics', 'att_wd_metrics', 1, ${sequence},
+            'accepted', '2026-08-18T12:00:00.000Z', 'pi_subagent_watchdog_stage_timeout',
+            'watchdog metrics fixture', '{"phase":"watchdog_escalation"}'
+          )
+        `;
+          yield* insertBand(60, "walltime_exec_wd_metrics");
+          yield* insertBand(70, "watchdog_exec_wd_metrics_att_wd_metrics_gen1_seq70");
+          yield* insertBand(71, "watchdog_exec_wd_metrics_att_wd_metrics_gen1_seq71");
+          yield* insertBand(72, "watchdog_exec_wd_metrics_att_wd_metrics_gen1_seq72");
+          yield* insertBand(73, "watchdog_exec_wd_metrics_att_wd_metrics_gen1_seq73");
+          // Handoff 7 seconds after the escalation start → one 7000ms sample.
+          yield* sql`
+            INSERT INTO pi_subagent_lifecycle_journal (
+              event_id, execution_id, attempt_id, generation, sequence,
+              state, occurred_at, diagnostic_code, diagnostic_message, metadata_json
+            ) VALUES (
+              'watchdog_exec_wd_metrics_att_wd_metrics_gen1_seq74',
+              'exec_wd_metrics', 'att_wd_metrics', 1, 74,
+              'accepted', '2026-08-18T12:00:07.000Z', 'pi_subagent_watchdog_cleanup_uncertain',
+              'watchdog metrics fixture', '{"phase":"watchdog_escalation"}'
+            )
+          `;
+
+          const snapshot = yield* repository.getTelemetrySnapshot("2026-08-18T12:00:30.000Z");
+          expect(snapshot.watchdog).toEqual({
+            wallTimeTriggers: 1,
+            escalationsStarted: 1,
+            childAbortTimeouts: 1,
+            providerTurnInterrupts: 1,
+            providerSessionStops: 1,
+            teardownHandoffs: 1,
+            escalationLatencyMs: { p50: 7000, p95: 7000, max: 7000 },
           });
         }),
       );

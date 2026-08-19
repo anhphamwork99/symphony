@@ -37,6 +37,7 @@ import {
   resolvePiSubagentServerQueueCap,
   resolvePiSubagentProjectQueueCap,
   resolvePiSubagentWallTimeMs,
+  resolvePiSubagentWatchdogStageTimeoutMs,
   resolvePiSubagentTerminalSummaryMaxChars,
   resolveStaticDir,
   ServerConfig,
@@ -396,6 +397,9 @@ const ServerConfigLive = (input: CliInput) =>
         ),
         piSubagentWallTimeMs: resolvePiSubagentWallTimeMs(
           process.env.SYNARA_PI_SUBAGENT_WALL_TIME_MS,
+        ),
+        piSubagentWatchdogStageTimeoutMs: resolvePiSubagentWatchdogStageTimeoutMs(
+          process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS,
         ),
       } satisfies ServerConfigShape;
 

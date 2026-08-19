@@ -387,6 +387,45 @@ it.layer(testLayer)("server CLI command", (it) => {
   );
 
   it.effect(
+    "resolves the Pi subagent watchdog stage-timeout knob on the production ServerConfigLive path (issue 15 / T15-AC1)",
+    () =>
+      Effect.gen(function* () {
+        const previousValue = process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+        const restore = Effect.sync(() => {
+          if (previousValue === undefined) {
+            delete process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+          } else {
+            process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = previousValue;
+          }
+        });
+        yield* Effect.onExit(
+          Effect.gen(function* () {
+            process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = "5000";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentWatchdogStageTimeoutMs, 5_000);
+
+            process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = "abc";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentWatchdogStageTimeoutMs, 10_000);
+
+            process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = "99";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentWatchdogStageTimeoutMs, 10_000);
+
+            process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS = "60001";
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentWatchdogStageTimeoutMs, 10_000);
+
+            delete process.env.SYNARA_PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_MS;
+            yield* runCli([]);
+            assert.equal(resolvedConfig?.piSubagentWatchdogStageTimeoutMs, 10_000);
+          }),
+          () => restore,
+        );
+      }),
+  );
+
+  it.effect(
     "resolves Pi subagent progress/heartbeat/lease knobs on the production ServerConfigLive path (issue 23 / T23-AC7)",
     () =>
       // Same production resolution site as the foreground-wait knob: the env

@@ -33,6 +33,15 @@ describe("serverGetDiagnostics result builder (Issue 13 / T13-AC4/T13-AC5)", () 
         cancelLatencyMs: { p50: 150, p95: 195, max: 200 },
         progress: { coalesced: 500, dropped: 500 },
         completionRetries: 7,
+        watchdog: {
+          wallTimeTriggers: 8,
+          escalationsStarted: 9,
+          childAbortTimeouts: 10,
+          providerTurnInterrupts: 11,
+          providerSessionStops: 12,
+          teardownHandoffs: 13,
+          escalationLatencyMs: { p50: 1400, p95: 1500, max: 1600 },
+        },
       },
       maxChildProcesses: 100,
     });

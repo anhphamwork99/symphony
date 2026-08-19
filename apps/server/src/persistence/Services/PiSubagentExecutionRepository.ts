@@ -540,6 +540,45 @@ export type PiSubagentWallTimeExpiryRecordResult =
       readonly execution: PiSubagentExecutionRecord;
     };
 
+/**
+ * Ticket 15 watchdog escalation stage record (journal-only evidence).
+ * Sequence band 70–74: 70 escalation started, 71 child abort timeout,
+ * 72 provider-turn interrupt (command + observation), 73 provider-session
+ * stop (command + result), 74 teardown handoff. The journal row NEVER
+ * mutates the aggregate: stage records are control evidence, not lifecycle
+ * transitions — settlement flows exclusively through the evidence-settled
+ * paths (recordCancelledAck / recordTerminalEvent).
+ */
+export interface RecordPiSubagentWatchdogStageEventInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  /** Band 70–74 sequence for this stage record. */
+  readonly sequence: number;
+  /** Observed state snapshot at journal time (history, not mutation). */
+  readonly state: PiSubagentLifecycleState;
+  readonly occurredAt: string;
+  readonly diagnosticCode: PiSubagentDiagnosticCode;
+  readonly diagnosticMessage: string;
+  readonly metadata?: Record<string, unknown> | null;
+}
+
+export type PiSubagentWatchdogStageRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** The aggregate advanced past the listed attempt/generation — the
+       * stage record targets the current attempt/generation only. */
+      readonly kind: "stale_generation";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export type PiSubagentOrphanedRecordResult =
   | {
       readonly kind: "recorded";
@@ -901,6 +940,15 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordWallTimeExpiryEvent: (
     input: RecordPiSubagentWallTimeExpiryInput,
   ) => Effect.Effect<PiSubagentWallTimeExpiryRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 15 journal-only watchdog stage record (band 70–74). Appends the
+   * deterministic stage evidence row WITHOUT touching the aggregate —
+   * re-escalation is idempotent (eventId dedupe) and can never overwrite a
+   * terminal truth settled concurrently.
+   */
+  readonly recordWatchdogStageEvent: (
+    input: RecordPiSubagentWatchdogStageEventInput,
+  ) => Effect.Effect<PiSubagentWatchdogStageRecordResult, PiSubagentExecutionRepositoryError>;
   /**
    * Ticket 13 operator snapshot (T13-AC4): bounded SQL aggregates only. The
    * result contains no prompt, result, transcript, summary, or secret content.

@@ -159,6 +159,15 @@ interface TelemetrySnapshotRow {
   readonly cancelMaxMs: number;
   readonly progressCoalesced: number;
   readonly completionRetries: number;
+  readonly watchdogWallTimeTriggers?: number;
+  readonly watchdogEscalationsStarted?: number;
+  readonly watchdogChildAbortTimeouts?: number;
+  readonly watchdogProviderTurnInterrupts?: number;
+  readonly watchdogProviderSessionStops?: number;
+  readonly watchdogTeardownHandoffs?: number;
+  readonly watchdogP50Ms?: number;
+  readonly watchdogP95Ms?: number;
+  readonly watchdogMaxMs?: number;
 }
 
 /** Ticket 08 completion-outbox row (delivery state machine, T08-AC2). */
@@ -3112,6 +3121,76 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         );
 
   /**
+   * Ticket 15 journal-only watchdog stage record (band 70–74). Mirrors the
+   * wall-time trigger pattern: deterministic eventId dedupe, current
+   * attempt/generation guard, and NO aggregate mutation — a stage record is
+   * control evidence, never a lifecycle transition. The UNIQUE(execution,
+   * attempt, generation, sequence) constraint gives exactly one row per
+   * stage per attempt/generation; re-escalation is already_applied.
+   */
+  const recordWatchdogStageEvent: PiSubagentExecutionRepositoryShape["recordWatchdogStageEvent"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `watchdog_${input.executionId}_${input.attemptId}_gen${input.generation}_seq${input.sequence}`;
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordWatchdogStageEvent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            return { kind: "already_applied" as const, execution };
+          }
+
+          // The stage record targets the CURRENT attempt/generation only:
+          // a resumed or reconciled execution must not carry a stale
+          // stage row for a superseded attempt.
+          if (
+            execution.attemptId !== input.attemptId ||
+            execution.generation !== input.generation
+          ) {
+            return { kind: "stale_generation" as const, execution };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence: input.sequence,
+            state: input.state,
+            occurredAt: input.occurredAt,
+            diagnosticCode: input.diagnosticCode,
+            diagnosticMessage: input.diagnosticMessage,
+            metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+          });
+
+          // Aggregate is intentionally untouched: stage records never
+          // settle or regress the projection (T15-AC5).
+          return { kind: "recorded" as const, execution };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordWatchdogStageEvent:insert"),
+        ),
+      );
+
+  /**
    * T13-AC4 bounded operator snapshot. Percentiles are nearest-rank values
    * calculated inside SQLite so diagnostics never materializes an unbounded
    * latency sample array in the Node process.
@@ -3182,6 +3261,41 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           row_number() OVER (ORDER BY value) AS rank,
           count(*) OVER () AS sample_count
         FROM cancel_samples
+      ),
+      watchdog_bands AS (
+        SELECT
+          COALESCE(SUM(CASE WHEN sequence = 60 THEN 1 ELSE 0 END), 0) AS wall_time_triggers,
+          COALESCE(SUM(CASE WHEN sequence = 70 THEN 1 ELSE 0 END), 0) AS escalations_started,
+          COALESCE(SUM(CASE WHEN sequence = 71 THEN 1 ELSE 0 END), 0) AS child_abort_timeouts,
+          COALESCE(SUM(CASE WHEN sequence = 72 THEN 1 ELSE 0 END), 0) AS provider_turn_interrupts,
+          COALESCE(SUM(CASE WHEN sequence = 73 THEN 1 ELSE 0 END), 0) AS provider_session_stops,
+          COALESCE(SUM(CASE WHEN sequence = 74 THEN 1 ELSE 0 END), 0) AS teardown_handoffs
+        FROM pi_subagent_lifecycle_journal
+      ),
+      watchdog_latency_samples AS (
+        SELECT MAX(
+          0,
+          ROUND(
+            (julianday(handoff.occurred_at) - julianday(started.occurred_at))
+            * 86400000.0
+          )
+        ) AS value
+        FROM pi_subagent_lifecycle_journal AS started
+        INNER JOIN pi_subagent_lifecycle_journal AS handoff
+          ON handoff.execution_id = started.execution_id
+         AND handoff.attempt_id = started.attempt_id
+         AND handoff.generation = started.generation
+         AND handoff.sequence = 74
+        WHERE started.sequence = 70
+          AND handoff.occurred_at >= started.occurred_at
+        GROUP BY started.execution_id, started.attempt_id, started.generation
+      ),
+      watchdog_latency_ranked AS (
+        SELECT
+          value,
+          row_number() OVER (ORDER BY value) AS rank,
+          count(*) OVER () AS sample_count
+        FROM watchdog_latency_samples
       )
       SELECT
         COALESCE(SUM(CASE
@@ -3226,7 +3340,36 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         COALESCE(SUM(execution.dropped_progress_count), 0) AS "progressCoalesced",
         COALESCE((
           SELECT SUM(attempt_count) FROM pi_subagent_completion_outbox
-        ), 0) AS "completionRetries"
+        ), 0) AS "completionRetries",
+        COALESCE((
+          SELECT wall_time_triggers FROM watchdog_bands
+        ), 0) AS "watchdogWallTimeTriggers",
+        COALESCE((
+          SELECT escalations_started FROM watchdog_bands
+        ), 0) AS "watchdogEscalationsStarted",
+        COALESCE((
+          SELECT child_abort_timeouts FROM watchdog_bands
+        ), 0) AS "watchdogChildAbortTimeouts",
+        COALESCE((
+          SELECT provider_turn_interrupts FROM watchdog_bands
+        ), 0) AS "watchdogProviderTurnInterrupts",
+        COALESCE((
+          SELECT provider_session_stops FROM watchdog_bands
+        ), 0) AS "watchdogProviderSessionStops",
+        COALESCE((
+          SELECT teardown_handoffs FROM watchdog_bands
+        ), 0) AS "watchdogTeardownHandoffs",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((sample_count + 1) / 2 AS INTEGER) THEN value END)
+          FROM watchdog_latency_ranked
+        ), 0) AS "watchdogP50Ms",
+        COALESCE((
+          SELECT MAX(CASE
+            WHEN rank = CAST((95 * sample_count + 99) / 100 AS INTEGER) THEN value END)
+          FROM watchdog_latency_ranked
+        ), 0) AS "watchdogP95Ms",
+        COALESCE((SELECT MAX(value) FROM watchdog_latency_ranked), 0) AS "watchdogMaxMs"
       FROM pi_subagent_executions AS execution
     `.pipe(
       Effect.map(([row]) => {
@@ -3255,6 +3398,19 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             dropped: coalesced,
           },
           completionRetries: telemetryMetric(row?.completionRetries),
+          watchdog: {
+            wallTimeTriggers: telemetryMetric(row?.watchdogWallTimeTriggers),
+            escalationsStarted: telemetryMetric(row?.watchdogEscalationsStarted),
+            childAbortTimeouts: telemetryMetric(row?.watchdogChildAbortTimeouts),
+            providerTurnInterrupts: telemetryMetric(row?.watchdogProviderTurnInterrupts),
+            providerSessionStops: telemetryMetric(row?.watchdogProviderSessionStops),
+            teardownHandoffs: telemetryMetric(row?.watchdogTeardownHandoffs),
+            escalationLatencyMs: {
+              p50: telemetryMetric(row?.watchdogP50Ms),
+              p95: telemetryMetric(row?.watchdogP95Ms),
+              max: telemetryMetric(row?.watchdogMaxMs),
+            },
+          },
         };
       }),
       Effect.mapError(
@@ -3439,6 +3595,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     listNonTerminalExecutions,
     recordOrphanedEvent,
     recordWallTimeExpiryEvent,
+    recordWatchdogStageEvent,
     getTelemetrySnapshot,
   } satisfies PiSubagentExecutionRepositoryShape;
 
