@@ -8,22 +8,22 @@ execution or reverse its settled projection.
 
 **Blocked by:** 15 — Watchdog escalation through provider-session stop.
 
-**Status:** ready-for-agent
+**Status:** complete — accepted by Decision 0030 at Symphony `9c27a48b`
 
-- [ ] **T16-AC1:** Teardown targets only process groups proven owned by the
+- [x] **T16-AC1:** Teardown targets only process groups proven owned by the
       execution/provider session and cannot kill unrelated Synara or user
       processes.
-- [ ] **T16-AC2:** The final escalation stage requests teardown once,
+- [x] **T16-AC2:** The final escalation stage requests teardown once,
       idempotently, and records request, result, and proof status.
-- [ ] **T16-AC3:** Completion requires process-tree liveness verification, not
+- [x] **T16-AC3:** Completion requires process-tree liveness verification, not
       only a successful kill API return.
-- [ ] **T16-AC4:** Surviving processes produce a stable uncertain-cleanup
+- [x] **T16-AC4:** Surviving processes produce a stable uncertain-cleanup
       diagnostic and remain operationally visible.
-- [ ] **T16-AC5:** Proven teardown fences the attempt and generation before
+- [x] **T16-AC5:** Proven teardown fences the attempt and generation before
       projection settles; late events are ignored and counted.
-- [ ] **T16-AC6:** Graceful cancellation and normal terminal paths never invoke
+- [x] **T16-AC6:** Graceful cancellation and normal terminal paths never invoke
       process-tree teardown.
-- [ ] **T16-AC7:** Server restart performs bounded orphan-process discovery and
+- [x] **T16-AC7:** Server restart performs bounded orphan-process discovery and
       cleanup only where ownership can still be proven.
 
 ## Testing Seams

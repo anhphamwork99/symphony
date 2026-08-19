@@ -176,10 +176,8 @@
     **Ticket 14 is complete** per Decision 0026 at integrated Symphony
     `6d46f221`: explicit authorized resume uses sequence `80`, disjoint from
     watchdog `70–74`, and preserves the no-automatic-replay invariant.
-  **Ticket 16 (owned process-tree teardown) is the active implementation
-  frontier:** its Ticket-15 blocker is cleared; it must preserve
-  proof-before-fence ownership and must not treat the band-74 teardown
-  handoff as termination proof. Decision 0027 binds Ticket 16 to journal
+  **Ticket 16 (owned process-tree teardown) is complete; Ticket 17 is the
+  active implementation frontier.** Decision 0027 binds Ticket 16 to journal
   bands `75–78`, live-supervisor-only kill authority, and restart
   `owner_unproven` evidence before Ticket-10 owner-loss fencing. Decision
   0028 records the human owner's approval to replace the conditional
@@ -187,7 +185,9 @@
   isolated manual real-Pi verification recipe. Decision 0029 records the
   one final-acceptance consultation's rejection: T16-AC4 remains open until
   production preserves bounded survivor-PID evidence through
-  `AggregateError`; Ticket 16 remains active and Ticket 17 remains blocked.
+  `AggregateError`. Decision 0030 supersedes that rejection after verified
+  remediation at Symphony `9c27a48b`: Ticket 16 is complete and Ticket 17 is
+  unblocked; Alfie remains `489acd626` / `0.14.0-alfie.1`.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer
