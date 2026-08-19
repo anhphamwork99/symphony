@@ -88,6 +88,12 @@
     budgets, journal-only wall-time escalation trigger, owner-approved safe
     `serverGetDiagnostics.piSubagents` telemetry, bounded saturation, and
     finite invalid-config fallback; Ticket 15's Ticket-13 blocker is satisfied.
+  - [decisions/0020-t12-paginated-transcript-and-result-final-acceptance.md](decisions/0020-t12-paginated-transcript-and-result-final-acceptance.md) —
+    accepted Ticket 12: Symphony `8473fd96` + remediation `0094eaf9`;
+    T12-AC1..AC7 pass (AC1 reuses the trusted owner/browser transport
+    boundary plus MCP-authority binding; AC6 documents the Alfie
+    orphaned-ref limitation as an accepted residual); Alfie unchanged at
+    `489acd626` / `0.14.0-alfie.1`.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -101,7 +107,7 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–11, 13 are complete. Ticket 09 (per-thread
+- **Frontier track:** tickets 01–13 are complete. Ticket 09 (per-thread
   completion coordinator) was rejected by Decision 0015 (crash window:
   durable `delivered` before the parent effect), remediated under Decision
   0016's crash-safe direction (immutable dispatch batch ledger migration 103,
@@ -114,11 +120,13 @@
 - [decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md](decisions/0018-t09-crash-safe-per-thread-completion-coordinator-final-acceptance.md) —
   accepted the remediated Ticket 09: Decision 0015 superseded, T09-AC1..AC6
   all pass with both T09-AC4 crash positions closed.
-- **Next dependency unlock:** Ticket 11 is implemented at Symphony `95b9e169`
-  with remediation `339fcc04` + R4-N1 follow-up `c3bdbc78`; the remediation
-  re-review returned PASS (appended to the review file). Supervisor final
-  acceptance pending. Ticket 12 remains
-  blocked by Ticket 11 and owns production transcript/result reading.
+- **Next dependency unlock:** Ticket 12 (authorized paginated transcript and
+  result view) is accepted per Decision 0020 at Symphony `8473fd96` +
+  remediation `0094eaf9`; production result/transcript reading has an
+  accepted authorized, bounded, cursor-paginated, read-only fixed point.
+  No ticket declares Ticket 12 as a blocker; Ticket 17's result-retrieval
+  leg may cite Decision 0020 as its read-surface baseline but remains
+  blocked by Tickets 15 and 16.
   Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
   Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe

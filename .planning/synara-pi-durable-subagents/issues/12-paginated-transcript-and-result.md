@@ -8,21 +8,22 @@ surface rather than lifecycle events or WebSocket push.
 
 **Blocked by:** 11 — Reconnectable execution card.
 
-**Status:** implemented — awaiting independent review
+**Status:** ACCEPTED — Decision 0020 (Supervisor final acceptance 2026-08-19,
+fixed point Symphony `8473fd96` + `0094eaf9`); all criteria checked off
 
-- [ ] **T12-AC1:** Result and transcript reads authorize the current user
+- [x] **T12-AC1:** Result and transcript reads authorize the current user
       against the execution's project and thread before returning content.
-- [ ] **T12-AC2:** Unknown-ID knowledge or access to a different project/thread
+- [x] **T12-AC2:** Unknown-ID knowledge or access to a different project/thread
       cannot read metadata, result, transcript, or filesystem references.
-- [ ] **T12-AC3:** Retrieval is cursor/page based with bounded page and response
+- [x] **T12-AC3:** Retrieval is cursor/page based with bounded page and response
       sizes; no unbounded read path is exposed.
-- [ ] **T12-AC4:** A bounded result summary that omits content reports a stable
+- [x] **T12-AC4:** A bounded result summary that omits content reports a stable
       truncation diagnostic and a retrievable continuation.
-- [ ] **T12-AC5:** Full transcript or result content never appears in lifecycle
+- [x] **T12-AC5:** Full transcript or result content never appears in lifecycle
       events, execution snapshots, metrics, default logs, or WebSocket push.
-- [ ] **T12-AC6:** Transcript availability is never interpreted as evidence that
+- [x] **T12-AC6:** Transcript availability is never interpreted as evidence that
       the execution is currently alive.
-- [ ] **T12-AC7:** Missing, expired, corrupt, or unavailable transcript evidence
+- [x] **T12-AC7:** Missing, expired, corrupt, or unavailable transcript evidence
       produces stable diagnostics without changing execution outcome.
 
 ## Testing Seams
