@@ -184,3 +184,82 @@ the final heavyweight verification only when explicitly requested.
 The candidate is ready for the one Supervisor final-acceptance consultation,
 with F1, F2, and F3 presented explicitly. The reviewer grants no final
 acceptance.
+
+---
+
+## Decision 0029 remediation addendum
+
+**Candidate:** `9c27a48b`  
+**Addendum verdict:** **PASS — F1 CLOSED, F2 CLOSED, F3 CLOSED**  
+**Scope:** Reassessment evidence only; this is not a second feature-level
+review and does not claim final acceptance.
+
+### F1 — CLOSED
+
+The production resolver now:
+
+- traverses nested `AggregateError.errors` with cycle protection;
+- collects positive safe-integer `remainingDescendantPids` from every
+  contained `ProviderProcessExitUnprovenError`;
+- deterministically sorts, deduplicates, and caps the result at 16;
+- preserves honest `survivors` uncertainty when no PID evidence is available;
+  and
+- never converts missing evidence into a “zero survivors” claim.
+
+Direct production-boundary coverage proves:
+
+- nested and mixed aggregate members are traversed;
+- invalid and duplicate PIDs are rejected/deduplicated;
+- the deterministic cap is exactly 16;
+- the same bounded `[42, 43]` evidence reaches band-77 metadata and the
+  operator diagnostic;
+- the aggregate stays `cancelling`, generation 1; and
+- the no-evidence diagnostic says “survivor PID evidence is unavailable” and
+  does not contain “0 captured survivors”.
+
+### F2 — CLOSED
+
+- Ticket 16's residual allocation sentence now says bands `75–78`.
+- The production coordinator comment now states proven 76, survivors 77, and
+  owner-unproven 78.
+- A repository-wide allocation audit found no incorrect current allocation
+  descriptions. The manual recipe's band-75/76 wording is intentionally the
+  successful proven path and is allowed by Decision 0029.
+
+### F3 — CLOSED
+
+Independent exact-candidate evidence at `9c27a48b`:
+
+```text
+focused Ticket-16 suite: 7 files / 119 tests passed
+bun lint: 0 errors / 549 warnings
+bun typecheck: 7/7 workspace tasks
+oxfmt --check: clean on every candidate-touched code file
+```
+
+No destructive real-Pi CI test was run or required under Decision 0028.
+
+### Invariant regression check
+
+No regression was found in:
+
+- T16-AC1 owned-only kill;
+- T16-AC3 liveness verification;
+- T16-AC5 proof-before-fence;
+- T16-AC7 bounded no-owner startup discovery;
+- Decision 0027 bands and restart posture; or
+- Decision 0028 deterministic testing substitution.
+
+### Nonblocking information
+
+- Antigravity has a similar top-level-only
+  `ProviderProcessExitUnprovenError` telemetry pattern. It is outside Ticket 16
+  and Decision 0029; consider a future ticket.
+- The `survivorPids` type comment saying “capped by the caller's fixture” is
+  mildly stale because production now also caps it; behavior is correct.
+
+### Reassessment readiness
+
+Decision 0029 reopening evidence items 1–6 are satisfied. This review package,
+candidate `9c27a48b`, Decisions 0027–0029, and Project Home are ready for
+Supervisor Reassessment.
