@@ -151,7 +151,7 @@ Alfie unchanged at `489acd626` / `0.14.0-alfie.1`).
 | T16-AC4   | Coordinator test: `pi_subagent_teardown_survivors` durable band-77 row with the bounded survivor PID list (cap 16 asserted) + exact operator event (stage `teardown_survivors`) + projection stays `cancelling`. Adapter wiring forwards the diagnostic to the `subagents/teardown-diagnostic` runtime-warning path.                                                                                                                                                                                                            | pass   |
 | T16-AC5   | Coordinator + repository seam tests: `proven` settles `cancelled` and advances the generation to 2 in the same transaction (fencedGeneration asserted); a late same-generation terminal through `ingestPiSubagentTerminal` journals history-only without reviving the aggregate; paired exact durable-row (`pi_subagent_teardown_proven`) + operator-event assertions. Boundary test: a terminal landing between handoff and dispatch settles as ordinary lifecycle evidence (no premature fence — Decision 0021 F3 preserved). | pass   |
 | T16-AC6   | Coordinator test: graceful cancellation (seq 90/92) and normal terminal (band 40) executions dispatch NOTHING (no band-74 row → not owned by teardown). The scan's non-terminal filter also skips anything settled between passes.                                                                                                                                                                                                                                                                                              | pass   |
-| T16-AC7   | Integrated `piSubagentStartupRecoveryOrder.test.ts`: current band-74 handoff → outbox-first recovery → no live owned supervisor/no kill → exactly one band-75 request and band-78 `owner_unproven` row while still `cancelling` generation 1 → Ticket-10 `orphaned` generation 2; no band-76/77, `cancelled`, or proven claim; replay adds no rows/fence and a late generation-1 terminal is history-only and counted. Existing coordinator coverage proves bounded scanning. | pass   |
+| T16-AC7   | Integrated `piSubagentStartupRecoveryOrder.test.ts`: current band-74 handoff → outbox-first recovery → no live owned supervisor/no kill → exactly one band-75 request and band-78 `owner_unproven` row while still `cancelling` generation 1 → Ticket-10 `orphaned` generation 2; no band-76/77, `cancelled`, or proven claim; replay adds no rows/fence and a late generation-1 terminal is history-only and counted. Existing coordinator coverage proves bounded scanning.                                                   | pass   |
 
 ### Review remediation (2026-08-19, two-axis /matt-code-review)
 
@@ -208,11 +208,37 @@ accepted Ticket-15 surface), and the 4-field execution-identity object
 inlined at call sites (a named type would be churn without behavior gain
 at this size).
 
+### Decision 0029 final-acceptance remediation
+
+The one final-acceptance consultation rejected T16-AC4 because production
+`PiBashProcessSupervisor.teardownAll()` wraps per-process failures in an
+`AggregateError`, while the adapter resolver previously extracted survivor
+PIDs only from a direct `ProviderProcessExitUnprovenError`. The lifecycle
+outcome stayed honestly uncertain, but known survivor PIDs could be lost and
+the operator diagnostic could misleadingly report zero.
+
+The remediation:
+
+- traverses nested `AggregateError.errors`;
+- collects only positive safe-integer PIDs from every contained
+  `ProviderProcessExitUnprovenError`;
+- deterministically sorts, deduplicates, and caps the evidence at 16;
+- feeds the same bounded PID list to the band-77 durable metadata and operator
+  diagnostic;
+- reports “survivor PID evidence is unavailable” when no safe PID evidence
+  exists, never “0 survivors”; and
+- adds production-boundary and coordinator tests proving nested aggregate
+  extraction, bounding, durable/operator parity, non-terminal settlement, and
+  honest no-evidence wording.
+
+The stale complete allocation descriptions were corrected to request 75,
+proven 76, survivors 77, and owner-unproven 78.
+
 ### Verification on 2026-08-19
 
-- Ticket-focused suites (after review remediation): coordinator/repository
-  17/17, sweep driver 2/2, adapter wiring 2/2 (21 tests across 3 files) —
-  all green.
+- Exact post-Decision-0029 focused candidate: main, PiAdapter production
+  boundary, startup order, teardown coordinator/repository, adapter wiring,
+  restart reconciliation, and sweep driver — 7 files / 119 tests, all green.
 - Regression: watchdog coordinator 16/16, watchdog sweep 4/4, restart
   reconciliation, cancellation coordinator, terminal lifecycle, resume
   coordinator (90 tests across 8 files), repository layers 16/16, main
@@ -220,15 +246,15 @@ at this size).
 - Full server unit suite (`bunx vitest run --project unit`): 391 files,
   4742 passed / 17 skipped.
 - Contracts: 20 files / 231 tests passed.
-- `bun fmt` clean; `bun lint` 0 errors (548 warnings, pre-existing class);
+- `bun fmt` clean; `bun lint` 0 errors (549 warnings, pre-existing class);
   `bun typecheck` 7/7 workspace tasks.
 - Real-Pi destructive boundary: NOT exercised (see the Testing Seams
-  hermeticity finding — substitution pending owner approval; no
-  substituted test written).
+  hermeticity finding). Decision 0028 approved deterministic CI fixtures plus
+  the isolated manual recipe; the manual recipe is not claimed as executed.
 
 ### Invariants and residual risk
 
-- No schema migration: bands 75/76 ride the existing journal table; the
+- No schema migration: bands 75–78 ride the existing journal table; the
   UNIQUE(execution, attempt, generation, sequence) constraint IS the
   one-row-per-identity authority.
 - The teardown coordinator NEVER settles without supervisor proof; a

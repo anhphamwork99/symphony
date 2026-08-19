@@ -25,6 +25,8 @@ import {
   type PiSubagentOwnedTeardownDispatchResult,
   type PiSubagentProcessTeardownInput,
 } from "./piSubagentProcessTeardown.ts";
+import { resolvePiSubagentOwnedTeardown } from "./Layers/PiAdapter.ts";
+import { ProviderProcessExitUnprovenError } from "./supervisedProcessTeardown.ts";
 
 /**
  * Ticket 16 — Owned process-tree teardown and fencing.
@@ -341,6 +343,86 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
         expect((metadata.survivorPids as number[]).length).toBe(
           MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS,
         );
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T16-AC4 / Decision 0029: production AggregateError survivor evidence reaches band 77 and the operator diagnostic", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const execution = makeExecution();
+        yield* admit(repository, execution);
+        yield* driveToCancelling(repository, execution);
+        yield* journalHandoff(repository, execution);
+
+        const productionDispatch = yield* Effect.promise(() =>
+          resolvePiSubagentOwnedTeardown({
+            teardownAll: async () => {
+              throw new AggregateError([
+                new Error("unknown sibling teardown failure"),
+                new AggregateError([
+                  new ProviderProcessExitUnprovenError({
+                    rootPid: 42,
+                    rootExited: false,
+                    remainingDescendantPids: [43, 42, 43],
+                    captureComplete: true,
+                  }),
+                ]),
+              ]);
+            },
+          }),
+        );
+        const fixture = makeTeardownFixture({ result: () => productionDispatch });
+        const diagnostics: DiagnosticEvent[] = [];
+        const result = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture, { diagnostics })),
+        );
+
+        expect(result.outcomes[0]!.outcome).toEqual({
+          kind: "survivors",
+          survivorPids: [42, 43],
+        });
+        const stored = yield* repository.getById(execution.executionId);
+        expect(Option.isSome(stored)).toBe(true);
+        if (Option.isSome(stored)) {
+          expect(stored.value.observedState).toBe("cancelling");
+          expect(stored.value.generation).toBe(1);
+        }
+
+        const journal = yield* repository.listJournalEvents(execution.executionId);
+        const survivors = journal.find(
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors,
+        );
+        expect(survivors?.diagnosticCode).toBe("pi_subagent_teardown_survivors");
+        expect((survivors?.metadata as Record<string, unknown>)?.survivorPids).toEqual([42, 43]);
+        expect(survivors?.diagnosticMessage).toContain("2 captured survivors (42, 43)");
+
+        const operator = diagnostics.find((event) => event.stage === "teardown_survivors");
+        expect(operator?.diagnosticCode).toBe("pi_subagent_teardown_survivors");
+        expect(operator?.diagnosticMessage).toBe(survivors?.diagnosticMessage);
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T16-AC4 / Decision 0029: missing PID evidence is reported as unavailable, never as zero survivors", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const execution = makeExecution();
+        yield* admit(repository, execution);
+        yield* driveToCancelling(repository, execution);
+        yield* journalHandoff(repository, execution);
+
+        const fixture = makeTeardownFixture({ result: () => ({ kind: "survivors" }) });
+        const diagnostics: DiagnosticEvent[] = [];
+        yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture, { diagnostics })),
+        );
+
+        const operator = diagnostics.find((event) => event.stage === "teardown_survivors");
+        expect(operator?.diagnosticMessage).toContain("survivor PID evidence is unavailable");
+        expect(operator?.diagnosticMessage).not.toContain("0 captured survivors");
       }).pipe(Effect.provide(repositoryLayer)),
     );
   });

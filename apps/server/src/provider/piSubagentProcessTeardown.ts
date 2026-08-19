@@ -32,8 +32,10 @@ import { PI_SUBAGENT_WATCHDOG_BAND } from "./piSubagentWatchdogEscalation.ts";
  * - 75 `pi_subagent_teardown_requested` — journal-only request evidence,
  *   recorded BEFORE dispatch (at-least-once dispatch, exactly-once journal
  *   effect; a crashed pass re-requests safely and observes already_applied).
- * - 76 `pi_subagent_teardown_{proven|survivors|owner_unproven}` — the
- *   outcome. PROOF-BEFORE-FENCE (T16-AC5, Decision 0021 F3): only a
+ * - 76 `pi_subagent_teardown_proven`, 77
+ *   `pi_subagent_teardown_survivors`, or 78
+ *   `pi_subagent_teardown_owner_unproven` — per-kind outcomes.
+ *   PROOF-BEFORE-FENCE (T16-AC5, Decision 0021 F3): only a
  *   `proven` outcome settles the aggregate to terminal `cancelled` and
  *   advances the generation (the fence) inside the same repository
  *   transaction — never the band-74 handoff, never a timer. Survivors and
@@ -323,12 +325,12 @@ const teardownOne = async (
     const message =
       dispatchFailure.message !== undefined
         ? `Owned teardown dispatch failed (${dispatchFailure.message}); the teardown did not complete and cleanup remains uncertain — the execution stays cancelling`
-        : `Owned process-tree teardown left ${String(survivorPids?.length ?? 0)} captured survivor` +
-          `${survivorPids?.length === 1 ? "" : "s"}` +
-          (survivorPids !== undefined && survivorPids.length > 0
-            ? ` (${survivorPids.join(", ")})`
-            : "") +
-          "; cleanup remains uncertain and the execution stays cancelling";
+        : survivorPids === undefined
+          ? "Owned process-tree teardown did not prove exit; survivor PID evidence is unavailable, cleanup remains uncertain, and the execution stays cancelling"
+          : `Owned process-tree teardown left ${String(survivorPids.length)} captured survivor` +
+            `${survivorPids.length === 1 ? "" : "s"}` +
+            (survivorPids.length > 0 ? ` (${survivorPids.join(", ")})` : "") +
+            "; cleanup remains uncertain and the execution stays cancelling";
     reportDiagnostic({
       stage: "teardown_survivors",
       diagnosticCode: PI_SUBAGENT_TEARDOWN_SURVIVORS_DIAGNOSTIC,

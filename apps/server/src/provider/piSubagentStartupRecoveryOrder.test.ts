@@ -245,9 +245,7 @@ describe("Pi subagent startup recovery order (Decision 0027)", () => {
           expect(afterReplay.value.observedState).toBe("orphaned");
           expect(afterReplay.value.generation).toBe(2);
         }
-        expect(
-          (yield* repository.listJournalEvents(execution.executionId)).length,
-        ).toBe(rowCount);
+        expect((yield* repository.listJournalEvents(execution.executionId)).length).toBe(rowCount);
 
         // A late terminal from fenced generation 1 is history-only and counted.
         const late = yield* ingestPiSubagentTerminal({

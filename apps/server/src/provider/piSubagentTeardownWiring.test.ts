@@ -284,16 +284,16 @@ describe("PiAdapter owned teardown sweep wiring (Issue 16)", () => {
       yield* Effect.promise(() => clock.advance(30_100));
       yield* Effect.promise(() => settle());
 
-        // The wiring mounted the repository-backed sweep and processed the
-        // handed-off execution: the honest owner_unproven outcome is durable
-        // (band 78 row) and the projection stays cancelling — nothing settled
-        // without proof, and no session-less kill was attempted.
-        const journal = yield* repository.listJournalEvents("exec_t16_wire_1");
-        const outcomeRow = journal.find(
-          (event) =>
-            (event.diagnosticCode ?? "") === "pi_subagent_teardown_owner_unproven" &&
-            event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
-        );
+      // The wiring mounted the repository-backed sweep and processed the
+      // handed-off execution: the honest owner_unproven outcome is durable
+      // (band 78 row) and the projection stays cancelling — nothing settled
+      // without proof, and no session-less kill was attempted.
+      const journal = yield* repository.listJournalEvents("exec_t16_wire_1");
+      const outcomeRow = journal.find(
+        (event) =>
+          (event.diagnosticCode ?? "") === "pi_subagent_teardown_owner_unproven" &&
+          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
+      );
       expect(outcomeRow).toBeDefined();
       const stored = yield* repository.getById("exec_t16_wire_1");
       expect(Option.isSome(stored)).toBe(true);

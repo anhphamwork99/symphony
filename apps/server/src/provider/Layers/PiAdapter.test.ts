@@ -27,8 +27,10 @@ import {
   makePiSessionSynaraMcpCoordinator,
   makePiUserInputOptions,
   PLAIN_PI_EXTENSION_THEME,
+  resolvePiSubagentOwnedTeardown,
   toPiProviderModelDescriptor,
 } from "./PiAdapter";
+import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown";
 import {
   makePiSynaraMcpDormantExtension,
   PI_SYNARA_MCP_DISABLED_REFUSAL,
@@ -1076,6 +1078,45 @@ describe("Pi Bash process supervision", () => {
     proveExit();
     await expect(command).rejects.toThrow("aborted");
     expect(settled).toBe(true);
+  });
+
+  it("preserves bounded survivor PIDs through nested teardown AggregateErrors", async () => {
+    const first = new ProviderProcessExitUnprovenError({
+      rootPid: 70_001,
+      rootExited: false,
+      remainingDescendantPids: [9, 3, 3, -1, Number.NaN],
+      captureComplete: true,
+    });
+    const second = new ProviderProcessExitUnprovenError({
+      rootPid: 70_002,
+      rootExited: false,
+      remainingDescendantPids: Array.from({ length: 20 }, (_, index) => index + 1),
+      captureComplete: true,
+    });
+
+    const result = await resolvePiSubagentOwnedTeardown({
+      teardownAll: async () => {
+        throw new AggregateError(
+          [new Error("unknown teardown failure"), new AggregateError([first, second])],
+          "Failed to prove all Pi subprocess trees exited.",
+        );
+      },
+    });
+
+    expect(result).toEqual({
+      kind: "survivors",
+      survivorPids: Array.from({ length: 16 }, (_, index) => index + 1),
+    });
+  });
+
+  it("reports uncertainty without claiming zero survivors when PID evidence is unavailable", async () => {
+    const result = await resolvePiSubagentOwnedTeardown({
+      teardownAll: async () => {
+        throw new AggregateError([new Error("process state unavailable")]);
+      },
+    });
+
+    expect(result).toEqual({ kind: "survivors" });
   });
 });
 

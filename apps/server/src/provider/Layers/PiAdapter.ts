@@ -172,6 +172,10 @@ import {
 import { startPiSubagentWallTimeSweep } from "../piSubagentWallTimeSweep.ts";
 import { startPiSubagentWatchdogSweep } from "../piSubagentWatchdogSweep.ts";
 import { startPiSubagentProcessTeardownSweep } from "../piSubagentProcessTeardownSweep.ts";
+import {
+  MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS,
+  type PiSubagentOwnedTeardownDispatchResult,
+} from "../piSubagentProcessTeardown.ts";
 import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown.ts";
 import { makePiSubagentSafeCorrelation } from "../piSubagentTelemetrySafety.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -645,6 +649,7 @@ function piGatewayToolResult(result: unknown): AgentToolResult<unknown> {
       : "";
     throw new Error(message || "Synara gateway tool failed.");
   }
+
   const content =
     isRecord(result) && Array.isArray(result.content)
       ? result.content.flatMap((item): Array<TextContent | ImageContent> => {
@@ -670,6 +675,52 @@ function piGatewayToolResult(result: unknown): AgentToolResult<unknown> {
     details: result,
   };
 }
+
+/**
+ * Ticket 16 production boundary: `PiBashProcessSupervisor.teardownAll()`
+ * aggregates failures from every active process tree. Preserve every safely
+ * known survivor PID through nested AggregateErrors; unknown failures remain
+ * honest uncertainty and never become proof of zero survivors.
+ */
+export const resolvePiSubagentOwnedTeardown = async (processSupervisor: {
+  readonly teardownAll: () => Promise<void>;
+}): Promise<PiSubagentOwnedTeardownDispatchResult> => {
+  try {
+    await processSupervisor.teardownAll();
+    return { kind: "proven" };
+  } catch (cause) {
+    const pending: unknown[] = [cause];
+    const visited = new Set<object>();
+    const survivorPids = new Set<number>();
+
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (typeof current === "object" && current !== null) {
+        if (visited.has(current)) continue;
+        visited.add(current);
+      }
+      if (current instanceof AggregateError) {
+        pending.push(...current.errors);
+        continue;
+      }
+      if (current instanceof ProviderProcessExitUnprovenError) {
+        for (const pid of current.remainingDescendantPids ?? []) {
+          if (Number.isSafeInteger(pid) && pid > 0) {
+            survivorPids.add(pid);
+          }
+        }
+      }
+    }
+
+    const boundedSurvivorPids = Array.from(survivorPids)
+      .toSorted((left, right) => left - right)
+      .slice(0, MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS);
+    return {
+      kind: "survivors",
+      ...(boundedSurvivorPids.length > 0 ? { survivorPids: boundedSurvivorPids } : {}),
+    };
+  }
+};
 
 /**
  * Map an already-discovered canonical gateway catalog into Pi's native
@@ -5065,21 +5116,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 // No live session: ownership cannot be proven — no kill.
                 return undefined;
               }
-              try {
-                await context.processSupervisor.teardownAll();
-                return { kind: "proven" as const };
-              } catch (cause) {
-                const survivorPids =
-                  cause instanceof ProviderProcessExitUnprovenError
-                    ? (cause.remainingDescendantPids ?? []).filter(
-                        (pid): pid is number => typeof pid === "number",
-                      )
-                    : [];
-                return {
-                  kind: "survivors" as const,
-                  ...(survivorPids.length > 0 ? { survivorPids } : {}),
-                };
-              }
+              return resolvePiSubagentOwnedTeardown(context.processSupervisor);
             },
             onDiagnostic: (event) => {
               const safeCorrelation = makePiSubagentSafeCorrelation({
