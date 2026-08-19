@@ -10,7 +10,11 @@ import {
   PiModelOptions,
 } from "./model";
 import { ProviderMentionReference, ProviderSkillReference } from "./providerDiscovery";
-import { PiSubagentExecutionCard } from "./piSubagents";
+import {
+  PiSubagentExecutionCard,
+  PiSubagentResultReadResult,
+  PiSubagentTranscriptReadResult,
+} from "./piSubagents";
 import { ProjectKind } from "./project";
 import {
   ApprovalRequestId,
@@ -43,6 +47,8 @@ export const ORCHESTRATION_WS_METHODS = {
   replayEvents: "orchestration.replayEvents",
   listProviderDeliveryBlockers: "orchestration.listProviderDeliveryBlockers",
   reconcileProviderDelivery: "orchestration.reconcileProviderDelivery",
+  readPiSubagentResult: "orchestration.readPiSubagentResult",
+  readPiSubagentTranscript: "orchestration.readPiSubagentTranscript",
   subscribeShell: "orchestration.subscribeShell",
   unsubscribeShell: "orchestration.unsubscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2611,6 +2617,32 @@ export const OrchestrationUnsubscribeThreadInput = Schema.Struct({
 });
 export type OrchestrationUnsubscribeThreadInput = typeof OrchestrationUnsubscribeThreadInput.Type;
 
+/**
+ * Ticket 12 authorized bounded result read (T12-AC1..AC4). The execution
+ * identity is correlation, not authority: the server resolves the execution
+ * against its project/thread before any content is returned. The response
+ * carries only bounded evidence (`PiSubagentResultReadResult`).
+ */
+export const OrchestrationReadPiSubagentResultInput = Schema.Struct({
+  executionId: TrimmedNonEmptyString,
+});
+export type OrchestrationReadPiSubagentResultInput =
+  typeof OrchestrationReadPiSubagentResultInput.Type;
+
+/**
+ * Ticket 12 authorized paginated transcript read (T12-AC1..AC3). Cursor is
+ * the exclusive zero-based entry index into the extension-owned JSONL
+ * transcript artifact; `limit` is clamped server-side to the bounded page
+ * size — no unbounded read path exists.
+ */
+export const OrchestrationReadPiSubagentTranscriptInput = Schema.Struct({
+  executionId: TrimmedNonEmptyString,
+  cursor: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(PositiveInt),
+});
+export type OrchestrationReadPiSubagentTranscriptInput =
+  typeof OrchestrationReadPiSubagentTranscriptInput.Type;
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -2655,6 +2687,14 @@ export const OrchestrationRpcSchemas = {
   reconcileProviderDelivery: {
     input: OrchestrationReconcileProviderDeliveryInput,
     output: OrchestrationReconcileProviderDeliveryResult,
+  },
+  readPiSubagentResult: {
+    input: OrchestrationReadPiSubagentResultInput,
+    output: PiSubagentResultReadResult,
+  },
+  readPiSubagentTranscript: {
+    input: OrchestrationReadPiSubagentTranscriptInput,
+    output: PiSubagentTranscriptReadResult,
   },
   subscribeShell: {
     input: OrchestrationSubscribeShellInput,

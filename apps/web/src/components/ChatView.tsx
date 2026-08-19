@@ -507,6 +507,7 @@ import { useChatTerminalController } from "./chat/useChatTerminalController";
 import { useChatAutomationSetup } from "./chat/useChatAutomationSetup";
 import { ComposerActiveTaskListCard } from "./chat/ComposerActiveTaskListCard";
 import { PiSubagentExecutionCardStrip } from "./chat/PiSubagentExecutionCardStrip";
+import { PiSubagentResultTranscriptDialog } from "./chat/PiSubagentResultTranscriptDialog";
 import { ComposerSubagentStrip } from "./chat/ComposerSubagentStrip";
 import {
   collectForegroundRunningSubagentStripItems,
@@ -2925,6 +2926,34 @@ export default function ChatView({
   const [piSubagentCancelPendingExecutionId, setPiSubagentCancelPendingExecutionId] = useState<
     string | null
   >(null);
+  // Ticket 12 (T12-AC3/AC4): the authorized result/transcript view opens per
+  // execution from the card strip; null = closed.
+  const [piSubagentDetailsCard, setPiSubagentDetailsCard] =
+    useState<PiSubagentExecutionCard | null>(null);
+  const onOpenPiSubagentExecutionDetails = useCallback((card: PiSubagentExecutionCard) => {
+    setPiSubagentDetailsCard(card);
+  }, []);
+  const readPiSubagentResultForDialog = useCallback((input: { readonly executionId: string }) => {
+    const api = readNativeApi();
+    if (!api) {
+      return Promise.reject(new Error("Native API is not available."));
+    }
+    return api.orchestration.readPiSubagentResult(input);
+  }, []);
+  const readPiSubagentTranscriptForDialog = useCallback(
+    (input: {
+      readonly executionId: string;
+      readonly cursor?: number;
+      readonly limit?: number;
+    }) => {
+      const api = readNativeApi();
+      if (!api) {
+        return Promise.reject(new Error("Native API is not available."));
+      }
+      return api.orchestration.readPiSubagentTranscript(input);
+    },
+    [],
+  );
   const onCancelPiSubagentExecution = useCallback(
     (card: PiSubagentExecutionCard) => {
       const api = readNativeApi();
@@ -11331,6 +11360,7 @@ export default function ChatView({
                   legacyAgentToolActive={piSubagentLegacyAgentToolActive}
                   onCancelExecution={onCancelPiSubagentExecution}
                   cancelPendingExecutionId={piSubagentCancelPendingExecutionId}
+                  onOpenExecutionDetails={onOpenPiSubagentExecutionDetails}
                   attachedToPrevious={
                     showComposerLiveChangesHeader ||
                     showComposerActiveTaskListCard ||
@@ -11947,6 +11977,17 @@ export default function ChatView({
         currentTitle={activeThread.title}
         onOpenChange={setRenameDialogOpen}
         onSave={handleRenameActiveThread}
+      />
+      <PiSubagentResultTranscriptDialog
+        card={piSubagentDetailsCard}
+        open={piSubagentDetailsCard !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPiSubagentDetailsCard(null);
+          }
+        }}
+        readResult={readPiSubagentResultForDialog}
+        readTranscriptPage={readPiSubagentTranscriptForDialog}
       />
       {automationDraftForm ? (
         <AutomationDialog

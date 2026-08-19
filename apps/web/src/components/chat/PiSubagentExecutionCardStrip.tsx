@@ -14,7 +14,7 @@
 import type { PiSubagentExecutionCard } from "@synara/contracts";
 import { useEffect, useState } from "react";
 
-import { LoaderIcon, StopIcon } from "~/lib/icons";
+import { FileIcon, LoaderIcon, StopIcon } from "~/lib/icons";
 import {
   PI_SUBAGENT_LEGACY_UNMANAGED_LABEL,
   piSubagentExecutionStatePresentation,
@@ -54,6 +54,8 @@ interface ExecutionRowProps {
   readonly expanded: boolean;
   readonly onCancel: (card: PiSubagentExecutionCard) => void;
   readonly cancelPending: boolean;
+  /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
+  readonly onOpenDetails: (card: PiSubagentExecutionCard) => void;
 }
 
 function ExecutionRow({
@@ -62,6 +64,7 @@ function ExecutionRow({
   expanded,
   onCancel,
   cancelPending,
+  onOpenDetails,
 }: ExecutionRowProps) {
   const presentation = piSubagentExecutionStatePresentation(card.observedState);
   const diagnostic =
@@ -118,6 +121,17 @@ function ExecutionRow({
             )}
           </Button>
         ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="size-6 shrink-0"
+          title="View result and transcript"
+          aria-label={`View result and transcript for execution ${card.executionId}`}
+          onClick={() => onOpenDetails(card)}
+        >
+          <FileIcon className="size-3" />
+        </Button>
         {hasDetails ? (
           <button
             type="button"
@@ -178,6 +192,8 @@ export interface PiSubagentExecutionCardStripProps {
   readonly legacyAgentToolActive: boolean;
   readonly onCancelExecution: (card: PiSubagentExecutionCard) => void;
   readonly cancelPendingExecutionId: string | null;
+  /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
+  readonly onOpenExecutionDetails?: (card: PiSubagentExecutionCard) => void;
   readonly attachedToPrevious?: boolean;
 }
 
@@ -186,6 +202,7 @@ export function PiSubagentExecutionCardStrip({
   legacyAgentToolActive,
   onCancelExecution,
   cancelPendingExecutionId,
+  onOpenExecutionDetails,
   attachedToPrevious: attachedToPreviousProp,
 }: PiSubagentExecutionCardStripProps) {
   const attachedToPrevious = attachedToPreviousProp ?? false;
@@ -249,6 +266,7 @@ export function PiSubagentExecutionCardStrip({
             }
             onCancel={onCancelExecution}
             cancelPending={cancelPendingExecutionId === card.executionId}
+            onOpenDetails={onOpenExecutionDetails ?? (() => undefined)}
           />
         ))}
       </div>

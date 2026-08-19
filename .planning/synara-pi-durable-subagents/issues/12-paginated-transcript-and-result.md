@@ -8,7 +8,7 @@ surface rather than lifecycle events or WebSocket push.
 
 **Blocked by:** 11 — Reconnectable execution card.
 
-**Status:** ready-for-agent
+**Status:** implemented — awaiting independent review
 
 - [ ] **T12-AC1:** Result and transcript reads authorize the current user
       against the execution's project and thread before returning content.
@@ -38,3 +38,101 @@ on 2026-08-16.
   content fields are excluded.
 - **T12-AC6:** Execution state mapping test using an available transcript for
   an orphaned execution.
+
+## Implementation Report
+
+**Status:** implemented; awaiting independent review.
+**Date:** 2026-08-19.
+
+### Solution shape
+
+Ticket 12 adds a production authorized read surface over the durable
+managed-execution aggregate and the extension-owned JSONL transcript
+artifact. No new decider commands, lifecycle events, projection tables, or
+WebSocket push channels — the reads are RPC replies on the existing WS
+feature surface:
+
+1. **Contracts** (`packages/contracts/src/piSubagents.ts`, `orchestration.ts`,
+   `ws.ts`, `rpc.ts`, `ipc.ts`): two new orchestration WS methods —
+   `orchestration.readPiSubagentResult` and
+   `orchestration.readPiSubagentTranscript` — with bounded response schemas
+   `PiSubagentResultReadResult` (bounded summary excerpt ≤4000 chars,
+   `summaryTruncated`, `pi_subagent_result_truncated` diagnostic,
+   `transcriptRef` continuation pointer) and `PiSubagentTranscriptReadResult`
+   (bounded `PiSubagentTranscriptEntry[]`, `nextCursor`, `hasMore`,
+   `skippedCorruptEntries`, stable diagnostics). Page bounds:
+   `PI_SUBAGENT_TRANSCRIPT_PAGE_DEFAULT_ENTRIES = 50`, `MAX = 200`, per-entry
+   excerpt cap 4000 chars, per-page byte ceiling 1 MiB. New diagnostic
+   literals: `pi_subagent_read_denied`, `pi_subagent_result_truncated`,
+   `pi_subagent_transcript_missing`, `pi_subagent_transcript_unavailable`,
+   `pi_subagent_transcript_corrupt`, `pi_subagent_transcript_entry_truncated`.
+2. **Transcript reader** (`apps/server/src/provider/piSubagentTranscriptReader.ts`):
+   file-backed JSONL page reader behind the opaque `transcriptRef`. Cursor =
+   zero-based entry (line) index; reads one lookahead line to detect
+   `hasMore`; corrupt lines are skipped, counted, and index-stable; byte
+   ceiling bounds every file read; missing/unavailable artifacts map to
+   stable failure kinds. Injectable `readLines` seam for deterministic tests.
+3. **Authorized read boundary** (`apps/server/src/provider/piSubagentExecutionReadService.ts`):
+   every read resolves the execution from durable truth, then verifies the
+   parent thread EXISTS in the projection read model AND its trusted
+   `projectId` matches the execution row. Unknown id → `not_found`; missing
+   thread or project mismatch → `denied` — both payload-indistinguishable,
+   no metadata/result/transcript/filesystem reference is returned (AC2).
+   Reads never write execution state; `observedState` is echoed verbatim from
+   the durable aggregate (AC6). Transcript read failures are STABLE READ
+   DIAGNOSTICS on empty pages (`pi_subagent_transcript_missing`/
+   `_unavailable`), never outcome changes (AC7). A stored summary whose
+   length meets the ingest cap reports `summaryTruncated` +
+   `pi_subagent_result_truncated` with the transcript continuation (AC4).
+4. **WS wiring** (`apps/server/src/wsRpc.ts`, `wsRequestAdmission.ts`):
+   both methods mount on `AdmittedWsFeatureRpcGroup` mapping denials to
+   `WsRpcError` codes `PI_SUBAGENT_EXECUTION_NOT_FOUND` /
+   `PI_SUBAGENT_READ_DENIED`, classified `expensive-read` (bounded 2-concurrent
+   admission). Wired into `NativeApi.orchestration` + `wsNativeApi.ts`.
+5. **Web view** (`apps/web/src/components/chat/PiSubagentResultTranscriptDialog.tsx`):
+   per-execution dialog opened from the execution card's new "View result and
+   transcript" affordance (composer strip stays chrome; the dialog is a
+   modal). Cursor-paged "Load more", truncation/unavailable diagnostics, and
+   the durable observed-state label rendered verbatim — availability is
+   never liveness copy (AC6).
+
+### Criterion evidence
+
+| Criterion | Evidence                                                                                                                                                                                                                                                                                        | Status |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T12-AC1   | `piSubagentExecutionReadBoundary.test.ts`: authorized read resolves the execution from the REAL repository and verifies thread existence + trusted projectId before returning the bounded result                                                                                                | pass   |
+| T12-AC2   | Same suite: unknown id → `not_found`; thread missing from read model → `denied`; thread under a different project → `denied` with `pi_subagent_read_denied`; no payload leak in either case                                                                                                     | pass   |
+| T12-AC3   | `piSubagentTranscriptReader.test.ts`: cursor paging (7 entries / pages of 3), limit clamping (1,000,000 → 200), per-entry excerpt bound; boundary suite pages through the authorized service; dialog browser test loads pages and continues via Load more                                       | pass   |
+| T12-AC4   | Boundary suite: summary stored at the ingest cap (2000) → `summaryTruncated: true`, `pi_subagent_result_truncated`, transcript continuation retrievable; dialog browser test renders the truncation diagnostic + continuation                                                                   | pass   |
+| T12-AC5   | `piSubagentExecutionCardSurface.test.ts` T12-AC5 test: snapshot + thread-detail events exclude prompt/entries/resultContent; contracts suite pins card/event schemas carry no content fields; the read responses are the ONLY content-bearing surface and are bounded                           | pass   |
+| T12-AC6   | Boundary suite state-mapping test: orphaned execution reads stable `pi_subagent_transcript_missing` and stays `orphaned`; succeeded execution reads its available transcript and stays `succeeded`; dialog echoes the durable state verbatim ("Orphaned", never "Running")                      | pass   |
+| T12-AC7   | Reader + boundary suites: missing artifact → `pi_subagent_transcript_missing`; non-file/directory ref → `pi_subagent_transcript_unavailable`; corrupt lines skipped + counted (`pi_subagent_transcript_corrupt`) with stable indices; durable observed state unchanged after every failure read | pass   |
+
+### Verification commands
+
+- `bun run vitest run src/provider/piSubagentExecutionReadBoundary.test.ts src/provider/piSubagentTranscriptReader.test.ts` (apps/server) — 15 pass
+- `bun run vitest run src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts src/wsRequestAdmission.test.ts src/provider/piSubagentTerminalLifecycle.test.ts src/provider/piSubagentRestartReconciliation.test.ts` (apps/server) — 37 pass
+- `bun run vitest run` (packages/contracts) — 229 pass
+- `bun run vitest run --config vitest.browser.config.ts src/components/chat/PiSubagentResultTranscriptDialog.browser.tsx` (apps/web) — 4 pass
+- `bun run vitest run src/components/chat/PiSubagentExecutionCardStrip.test.tsx src/piSubagentExecutionCardStore.test.ts src/storeEventReducer.test.ts` (apps/web) — 64 pass
+- Full suites + typecheck + fmt + lint: see review evidence
+
+### Known notes / limitations
+
+- **Orphaned executions have no persisted transcript reference.** The
+  extension reports `transcriptRef` only in the terminal observation
+  (Ticket 07); progress/heartbeat observations do not carry the artifact
+  path. A restart-orphaned running execution therefore reads the stable
+  `pi_subagent_transcript_missing` diagnostic even when its artifact still
+  exists on disk — the server honestly cannot address it. Making the
+  artifact addressable for non-terminal executions would require an Alfie
+  extension change (observation payload carrying the output path) and is out
+  of scope while Alfie is pinned at `489acd626` / `0.14.0-alfie.1`.
+  Candidate follow-up for a future ticket.
+- Authorization boundary reuse: the read gate reuses the repository's trusted
+  project/thread columns and the projection read model, mirroring the T11
+  card-boundary pattern (same trust model as `getThreadDetailSnapshot`). No
+  per-thread principal model exists in wsRpc today; this ticket does not
+  introduce one (consistent with the Decision 0019 assumption record).
+- The dialog is projection-only; cancel still flows through the T11 durable
+  command path.

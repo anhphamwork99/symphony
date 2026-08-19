@@ -764,6 +764,10 @@ export function createWsNativeApi(): NativeApi {
         }),
       listProviderDeliveryBlockers: (input = {}) =>
         transport.request(ORCHESTRATION_WS_METHODS.listProviderDeliveryBlockers, input),
+      readPiSubagentResult: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.readPiSubagentResult, input),
+      readPiSubagentTranscript: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.readPiSubagentTranscript, input),
       reconcileProviderDelivery: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.reconcileProviderDelivery, input),
       subscribeShell: () => transport.request<void>(ORCHESTRATION_WS_METHODS.subscribeShell, {}),

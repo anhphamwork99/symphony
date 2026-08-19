@@ -336,6 +336,24 @@ export const WsOrchestrationReconcileProviderDeliveryRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationReadPiSubagentResultRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.readPiSubagentResult,
+  {
+    payload: OrchestrationRpcSchemas.readPiSubagentResult.input,
+    success: OrchestrationRpcSchemas.readPiSubagentResult.output,
+    error: WsRpcError,
+  },
+);
+
+export const WsOrchestrationReadPiSubagentTranscriptRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.readPiSubagentTranscript,
+  {
+    payload: OrchestrationRpcSchemas.readPiSubagentTranscript.input,
+    success: OrchestrationRpcSchemas.readPiSubagentTranscript.output,
+    error: WsRpcError,
+  },
+);
+
 export const WsOrchestrationSubscribeShellRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeShell, {
   payload: OrchestrationRpcSchemas.subscribeShell.input,
   success: OrchestrationShellStreamItem,
@@ -1213,6 +1231,8 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationListProviderDeliveryBlockersRpc,
   WsOrchestrationReconcileProviderDeliveryRpc,
+  WsOrchestrationReadPiSubagentResultRpc,
+  WsOrchestrationReadPiSubagentTranscriptRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationUnsubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,

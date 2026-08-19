@@ -32,6 +32,8 @@ import {
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
+  OrchestrationReadPiSubagentResultInput,
+  OrchestrationReadPiSubagentTranscriptInput,
   OrchestrationReplayEventsInput,
 } from "./orchestration";
 import {
@@ -333,6 +335,14 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.readPiSubagentResult,
+    OrchestrationReadPiSubagentResultInput,
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.readPiSubagentTranscript,
+    OrchestrationReadPiSubagentTranscriptInput,
+  ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.subscribeShell, OrchestrationSubscribeShellInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.unsubscribeShell, OrchestrationUnsubscribeShellInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.subscribeThread, OrchestrationSubscribeThreadInput),

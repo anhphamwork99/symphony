@@ -70,6 +70,13 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_admission_project_queue_saturated",
   "pi_subagent_admission_quota_unavailable",
   "pi_subagent_walltime_expired",
+  "pi_subagent_read_denied",
+  "pi_subagent_result_truncated",
+  "pi_subagent_transcript_missing",
+  "pi_subagent_transcript_unavailable",
+  "pi_subagent_transcript_corrupt",
+  "pi_subagent_transcript_entry_truncated",
+  "pi_subagent_transcript_page_truncated",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 
@@ -486,3 +493,72 @@ export const PiSubagentReconciliationOutcome = Schema.Union([
   }),
 ]);
 export type PiSubagentReconciliationOutcome = typeof PiSubagentReconciliationOutcome.Type;
+
+/**
+ * Ticket 12 authorized result read (T12-AC3/AC4). Returns the bounded
+ * terminal summary the durable aggregate already holds — never raw
+ * unbounded output — with a stable truncation diagnostic when the stored
+ * summary hit the ingest cap, plus the continuation pointer for reading the
+ * full content through the paginated transcript surface.
+ */
+export const PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS = 4000;
+export const PI_SUBAGENT_TRANSCRIPT_PAGE_DEFAULT_ENTRIES = 50;
+export const PI_SUBAGENT_TRANSCRIPT_PAGE_MAX_ENTRIES = 200;
+
+export const PiSubagentResultReadResult = Schema.Struct({
+  executionId: PiSubagentExecutionId,
+  /** Durable observed state at read time; a read is never liveness proof. */
+  observedState: PiSubagentLifecycleState,
+  /** Terminal label when the execution is terminal (null otherwise). */
+  terminalState: Schema.optional(
+    Schema.NullOr(Schema.Literals(["succeeded", "failed", "cancelled"])),
+  ),
+  /** Bounded terminal summary excerpt (≤ PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS). */
+  summary: Schema.NullOr(TrimmedNonEmptyString),
+  /** True when the stored summary hit the ingest cap (content was omitted). */
+  summaryTruncated: Schema.Boolean,
+  /** Stable diagnostic code for the truncation (T12-AC4). */
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+  /** Continuation pointer when transcript evidence exists (T12-AC4). */
+  transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+export type PiSubagentResultReadResult = typeof PiSubagentResultReadResult.Type;
+
+/**
+ * Ticket 12 authorized paginated transcript entry (T12-AC3/AC5). One bounded
+ * entry of the extension-owned JSONL transcript artifact: identity-bearing
+ * metadata plus a bounded content excerpt. The raw JSONL line is never
+ * returned; per-entry excerpts carry their own truncation diagnostic.
+ */
+export const PiSubagentTranscriptEntry = Schema.Struct({
+  /** Zero-based entry index inside the transcript artifact (the cursor unit). */
+  index: NonNegativeInt,
+  type: Schema.Literals(["user", "assistant", "toolResult", "outcome"]),
+  /** Bounded content excerpt of the entry's message content. */
+  content: Schema.String,
+  /** True when this entry's excerpt was truncated at the per-entry cap. */
+  truncated: Schema.Boolean,
+  timestamp: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+export type PiSubagentTranscriptEntry = typeof PiSubagentTranscriptEntry.Type;
+
+/**
+ * Ticket 12 authorized paginated transcript page (T12-AC3). Cursor is the
+ * exclusive entry index; `nextCursor` is null exactly when the artifact is
+ * exhausted. `skippedCorruptEntries` counts lines that failed to parse so a
+ * corrupt artifact degrades to stable diagnostics without changing the
+ * execution outcome (T12-AC7).
+ */
+export const PiSubagentTranscriptReadResult = Schema.Struct({
+  executionId: PiSubagentExecutionId,
+  /** Durable observed state at read time; a read is never liveness proof. */
+  observedState: PiSubagentLifecycleState,
+  entries: Schema.Array(PiSubagentTranscriptEntry),
+  /** Exclusive cursor for the next page; null when exhausted. */
+  nextCursor: Schema.NullOr(NonNegativeInt),
+  /** Entries omitted from this page because the page was full. */
+  hasMore: Schema.Boolean,
+  skippedCorruptEntries: NonNegativeInt,
+  diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
+});
+export type PiSubagentTranscriptReadResult = typeof PiSubagentTranscriptReadResult.Type;

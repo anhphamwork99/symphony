@@ -32,6 +32,8 @@ const EXPENSIVE_READ_METHODS = new Set<string>([
   ORCHESTRATION_WS_METHODS.getFullThreadDiff,
   ORCHESTRATION_WS_METHODS.replayEvents,
   ORCHESTRATION_WS_METHODS.listProviderDeliveryBlockers,
+  ORCHESTRATION_WS_METHODS.readPiSubagentResult,
+  ORCHESTRATION_WS_METHODS.readPiSubagentTranscript,
   WS_METHODS.projectsSearchEntries,
   WS_METHODS.projectsSearchLocalEntries,
   WS_METHODS.projectsSearchContent,

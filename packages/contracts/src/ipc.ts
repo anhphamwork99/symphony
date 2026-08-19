@@ -216,6 +216,8 @@ import type {
   OrchestrationListProviderDeliveryBlockersResult,
   OrchestrationReconcileProviderDeliveryInput,
   OrchestrationReconcileProviderDeliveryResult,
+  OrchestrationReadPiSubagentResultInput,
+  OrchestrationReadPiSubagentTranscriptInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -226,6 +228,7 @@ import type {
   OrchestrationThreadStreamItem,
   OrchestrationUnsubscribeThreadInput,
 } from "./orchestration";
+import type { PiSubagentResultReadResult, PiSubagentTranscriptReadResult } from "./piSubagents";
 import type { EditorId } from "./editor";
 import type { ThreadId } from "./baseSchemas";
 import type {
@@ -813,6 +816,18 @@ export interface NativeApi {
     reconcileProviderDelivery: (
       input: OrchestrationReconcileProviderDeliveryInput,
     ) => Promise<OrchestrationReconcileProviderDeliveryResult>;
+    /**
+     * Ticket 12 authorized bounded result read. The execution identity is
+     * correlation, not authority — the server authorizes the read against
+     * the execution's project/thread before returning bounded content.
+     */
+    readPiSubagentResult: (
+      input: OrchestrationReadPiSubagentResultInput,
+    ) => Promise<PiSubagentResultReadResult>;
+    /** Ticket 12 authorized paginated transcript read (bounded pages). */
+    readPiSubagentTranscript: (
+      input: OrchestrationReadPiSubagentTranscriptInput,
+    ) => Promise<PiSubagentTranscriptReadResult>;
     subscribeShell: () => Promise<void>;
     unsubscribeShell: () => Promise<void>;
     subscribeThread: (input: OrchestrationSubscribeThreadInput) => Promise<void>;

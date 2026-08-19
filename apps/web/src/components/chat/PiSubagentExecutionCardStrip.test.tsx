@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PiSubagentExecutionCardStrip } from "./PiSubagentExecutionCardStrip";
 
 vi.mock("~/lib/icons", () => ({
+  FileIcon: () => null,
   LoaderIcon: () => null,
   StopIcon: () => null,
 }));

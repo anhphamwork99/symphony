@@ -8,6 +8,7 @@ import {
   PiSubagentCompletionDeliveryState,
   PiSubagentCompletionOutboxEntry,
   PiSubagentDiagnosticCode,
+  PiSubagentExecutionCard,
   PiSubagentExecutionRecord,
   PiSubagentHandshakeFailureResponse,
   PiSubagentHandshakeRequest,
@@ -15,8 +16,11 @@ import {
   PiSubagentHandshakeSuccessResponse,
   PiSubagentLifecycleEvent,
   PiSubagentNegotiatedCapability,
+  PiSubagentResultReadResult,
   PiSubagentSpawnCommand,
   PiSubagentSpawnResult,
+  PiSubagentTranscriptEntry,
+  PiSubagentTranscriptReadResult,
 } from "./piSubagents";
 
 describe("Pi subagent handshake contract schemas (Issue 19)", () => {
@@ -368,5 +372,113 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
     ] as const) {
       expect(() => Schema.decodeSync(PiSubagentDiagnosticCode)(invalid as never)).toThrow();
     }
+  });
+});
+
+describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () => {
+  it("decodes a valid bounded result read with truncation diagnostic (T12-AC4)", () => {
+    const decoded = Schema.decodeSync(PiSubagentResultReadResult)({
+      executionId: "exec-t12-1",
+      observedState: "succeeded",
+      terminalState: "succeeded",
+      summary: "Done: 3 files changed",
+      summaryTruncated: true,
+      diagnosticCode: "pi_subagent_result_truncated",
+      transcriptRef: "/tmp/pi-subagents-501/x/tasks/agent.output",
+    });
+    expect(decoded.summaryTruncated).toBe(true);
+    expect(decoded.diagnosticCode).toBe("pi_subagent_result_truncated");
+  });
+
+  it("rejects result reads with empty identity or invalid lifecycle state", () => {
+    expect(() =>
+      Schema.decodeSync(PiSubagentResultReadResult)({
+        executionId: "  ",
+        observedState: "exploded" as never,
+        summary: null,
+        summaryTruncated: false,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentResultReadResult)({
+        executionId: "exec-t12-1",
+        observedState: "running",
+        terminalState: "weird" as never,
+        summary: null,
+        summaryTruncated: false,
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a valid bounded transcript page with cursor continuation (T12-AC3)", () => {
+    const decoded = Schema.decodeSync(PiSubagentTranscriptReadResult)({
+      executionId: "exec-t12-1",
+      observedState: "succeeded",
+      entries: [
+        { index: 0, type: "user", content: "Fix the flaky test", truncated: false },
+        {
+          index: 1,
+          type: "assistant",
+          content: "x".repeat(4000),
+          truncated: true,
+          timestamp: "2026-08-19T00:00:00.000Z",
+        },
+      ],
+      nextCursor: 2,
+      hasMore: true,
+      skippedCorruptEntries: 0,
+    });
+    expect(decoded.nextCursor).toBe(2);
+    expect(decoded.entries[1]?.truncated).toBe(true);
+  });
+
+  it("rejects transcript pages with negative cursors or invalid entry types", () => {
+    expect(() =>
+      Schema.decodeSync(PiSubagentTranscriptReadResult)({
+        executionId: "exec-t12-1",
+        observedState: "succeeded",
+        entries: [],
+        nextCursor: -1,
+        hasMore: false,
+        skippedCorruptEntries: 0,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTranscriptEntry)({
+        index: 0,
+        type: "system" as never,
+        content: "x",
+        truncated: false,
+      }),
+    ).toThrow();
+  });
+
+  it("exposes the Ticket 12 read/truncation/corruption diagnostic codes as first-class literals (T12-AC7)", () => {
+    for (const code of [
+      "pi_subagent_read_denied",
+      "pi_subagent_result_truncated",
+      "pi_subagent_transcript_missing",
+      "pi_subagent_transcript_unavailable",
+      "pi_subagent_transcript_corrupt",
+      "pi_subagent_transcript_entry_truncated",
+      "pi_subagent_transcript_page_truncated",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_transcript_weird" as never),
+    ).toThrow();
+  });
+
+  it("keeps full result/transcript content out of lifecycle events, execution cards, and outbox entries (T12-AC5)", () => {
+    // The three durable/public payload shapes must never grow raw content
+    // fields; the only content-bearing surface is the authorized read result.
+    const cardFields = Object.keys(PiSubagentExecutionCard.fields);
+    expect(cardFields).not.toContain("resultContent");
+    expect(cardFields).not.toContain("transcriptContent");
+    expect(cardFields).not.toContain("entries");
+    const eventFields = Object.keys(PiSubagentLifecycleEvent.fields);
+    expect(eventFields).not.toContain("resultContent");
+    expect(eventFields).not.toContain("transcriptContent");
   });
 });

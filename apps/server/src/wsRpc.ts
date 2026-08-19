@@ -131,6 +131,7 @@ import {
   type ProviderEnableSynaraMcpResult,
 } from "./provider/Services/ProviderService";
 import { listProviderUsage } from "./providerUsage";
+import { makePiSubagentExecutionReadService } from "./provider/piSubagentExecutionReadService";
 import { getProviderUsageSnapshot } from "./providerUsageSnapshot";
 import { ProfileStatsQuery } from "./profileStats";
 import { redactSensitiveProcessArgs } from "./processArgumentRedaction";
@@ -436,6 +437,15 @@ const makeWsRpcHandlersLayer = () =>
       const profileStatsQuery = yield* ProfileStatsQuery;
       const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
       const piSubagentExecutionRepository = yield* PiSubagentExecutionRepository;
+      // Ticket 12: authorized bounded result/transcript reads. The execution
+      // identity is correlation, not authority — the service resolves the
+      // execution from durable truth and verifies its project/thread binding
+      // before any content is returned (T12-AC1/AC2).
+      const piSubagentReadService = makePiSubagentExecutionReadService({
+        repository: piSubagentExecutionRepository,
+        snapshotQuery: projectionReadModelQuery,
+        summaryMaxChars: config.piSubagentTerminalSummaryMaxChars,
+      });
       const providerAdapterRegistry = yield* ProviderAdapterRegistry;
       const providerDiscoveryService = yield* ProviderDiscoveryService;
       const providerHealth = yield* ProviderHealth;
@@ -1180,6 +1190,46 @@ const makeWsRpcHandlersLayer = () =>
               limit: input.limit ?? 50,
             }),
             "Failed to load provider delivery blockers",
+          ),
+        [ORCHESTRATION_WS_METHODS.readPiSubagentResult]: (input) =>
+          rpcEffect(
+            piSubagentReadService.readResult(input).pipe(
+              Effect.mapError(
+                (denial) =>
+                  new WsRpcError({
+                    message:
+                      denial.kind === "not_found"
+                        ? "Subagent execution not found."
+                        : "Not authorized to read this subagent execution.",
+                    code:
+                      denial.kind === "not_found"
+                        ? "PI_SUBAGENT_EXECUTION_NOT_FOUND"
+                        : "PI_SUBAGENT_READ_DENIED",
+                    retryable: false,
+                  }),
+              ),
+            ),
+            "Failed to read subagent execution result",
+          ),
+        [ORCHESTRATION_WS_METHODS.readPiSubagentTranscript]: (input) =>
+          rpcEffect(
+            piSubagentReadService.readTranscriptPage(input).pipe(
+              Effect.mapError(
+                (denial) =>
+                  new WsRpcError({
+                    message:
+                      denial.kind === "not_found"
+                        ? "Subagent execution not found."
+                        : "Not authorized to read this subagent execution.",
+                    code:
+                      denial.kind === "not_found"
+                        ? "PI_SUBAGENT_EXECUTION_NOT_FOUND"
+                        : "PI_SUBAGENT_READ_DENIED",
+                    retryable: false,
+                  }),
+              ),
+            ),
+            "Failed to read subagent execution transcript",
           ),
         [ORCHESTRATION_WS_METHODS.reconcileProviderDelivery]: (input) =>
           rpcEffect(

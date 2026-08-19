@@ -572,4 +572,67 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
     // A different thread's filter must not match (per-thread isolation).
     expect(isThreadDetailEventFor(cardEvent, asThreadId("thread-t11-other"))).toBe(false);
   });
+
+  it("T12-AC5: full result/transcript content never enters lifecycle events, snapshots, or the WS push payload", async () => {
+    // Ticket 12: the authorized read surface is the ONLY content-bearing
+    // path. Snapshots, lifecycle events, and the deterministic card push
+    // stay bounded — the card carries the bounded summary excerpt and the
+    // opaque reference, never transcript entries or raw result content.
+    const system = await createEngineSystem();
+    try {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await createProjectAndThread(system, "t12ac5");
+      await admitExecution(system, {
+        executionId: "exec-t12-ac5",
+        threadId: "thread-t11-t12ac5",
+        prompt: "SECRET T12 PROMPT THAT MUST NEVER LEAVE THE SERVER",
+        now: "2026-08-19T00:00:00.000Z",
+      });
+      // A terminal with content-shaped markers that must NOT survive into
+      // any public surface beyond the bounded summary the aggregate keeps.
+      const FULL_RESULT_SENTINEL = "FULL-TRANSCRIPT-CONTENT-MARKER-THAT-MUST-NEVER-BE-PUSHED";
+      await system.run(
+        system.repository.recordTerminalEvent({
+          executionId: "exec-t12-ac5",
+          attemptId: "exec-t12-ac5_att1",
+          generation: 1,
+          sequence: 40,
+          state: "succeeded",
+          occurredAt: "2026-08-19T00:01:00.000Z",
+          summary: `Bounded summary ${FULL_RESULT_SENTINEL}`.slice(0, 120),
+          transcriptRef: "/tmp/pi-subagents-x/tasks/exec-t12-ac5.output",
+        }),
+      );
+
+      const detail = await system.run(
+        system.snapshotQuery.getThreadDetailSnapshotById(asThreadId("thread-t11-t12ac5")),
+      );
+      expect(detail._tag).toBe("Some");
+      if (detail._tag === "Some") {
+        const serializedSnapshot = JSON.stringify(detail.value.thread.piSubagentExecutions);
+        expect(serializedSnapshot).not.toContain("SECRET T12 PROMPT");
+        expect(serializedSnapshot).not.toContain("entries");
+        expect(serializedSnapshot).not.toContain("resultContent");
+      }
+
+      // Lifecycle/WS push payload: the bounded card only. No transcript
+      // entries, no unbounded content fields on the event schema.
+      const events = await readThreadCardEvents(system, "thread-t11-t12ac5", 0);
+      const serializedEvents = JSON.stringify(events);
+      expect(serializedEvents).not.toContain("SECRET T12 PROMPT");
+      // The transcript PATH is stored as the opaque reference in durable
+      // truth (bounded, T07-AC5 inheritance) — but entry content never rides
+      // events: the card event payload schema has no entries/content fields.
+      for (const event of events) {
+        if (event.type === "thread.pi-subagent-execution-updated") {
+          expect(Object.hasOwn(event.payload, "entries")).toBe(false);
+          expect(Object.hasOwn(event.payload, "resultContent")).toBe(false);
+          expect(Object.hasOwn(event.payload, "transcriptContent")).toBe(false);
+        }
+      }
+    } finally {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await system.dispose();
+    }
+  });
 });
