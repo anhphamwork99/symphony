@@ -6,6 +6,7 @@ import {
   MAX_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
 } from "../config.ts";
+import { boundedOptionalString, truncateWithEllipsis } from "./piSubagentBoundedText.ts";
 import type {
   PiSubagentExecutionRepositoryShape,
   PiSubagentSequenceContinuity,
@@ -89,12 +90,8 @@ export type IngestPiSubagentTerminalResult =
   | { readonly outcome: "persisted" | "already_applied" | "ignored_stale" }
   | { readonly outcome: "failed" };
 
-const truncateSummary = (summary: string, maxChars: number): string => {
-  if (summary.length <= maxChars) {
-    return summary;
-  }
-  return `${summary.slice(0, Math.max(0, maxChars - 1))}…`;
-};
+const truncateSummary = (summary: string, maxChars: number): string =>
+  truncateWithEllipsis(summary, maxChars);
 
 /**
  * Review F2 (LOW): bound the remaining producer-supplied strings so no
@@ -106,15 +103,8 @@ const MAX_TERMINAL_TRANSCRIPT_REF_CHARS = 1024;
 const MAX_TERMINAL_OUTCOME_STATE_CHARS = 256;
 const MAX_TERMINAL_DIAGNOSTIC_CHARS = 2048;
 
-const boundString = (value: string | undefined, maxChars: number): string | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
-};
+const boundString = (value: string | undefined, maxChars: number): string | undefined =>
+  boundedOptionalString(value, maxChars);
 
 export const ingestPiSubagentTerminal = (
   input: IngestPiSubagentTerminalInput,

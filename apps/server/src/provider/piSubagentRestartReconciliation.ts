@@ -17,6 +17,7 @@ import type {
   PiSubagentReconciliationMode,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { PI_SUBAGENT_TERMINAL_SEQUENCE } from "./piSubagentTerminalCoordinator.ts";
+import { truncateWithEllipsis } from "./piSubagentBoundedText.ts";
 import type { PiSubagentActiveChild } from "./piSubagentBridge.ts";
 
 /**
@@ -128,12 +129,8 @@ export interface ReconcilePiSubagentExecutionsResult {
 
 const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
 
-const truncateSummary = (summary: string, maxChars: number): string => {
-  if (summary.length <= maxChars) {
-    return summary;
-  }
-  return `${summary.slice(0, Math.max(0, maxChars - 1))}…`;
-};
+const truncateSummary = (summary: string, maxChars: number): string =>
+  truncateWithEllipsis(summary, maxChars);
 
 /**
  * Server-side lease re-derivation (Decisions 0009–0013 standing obligation):

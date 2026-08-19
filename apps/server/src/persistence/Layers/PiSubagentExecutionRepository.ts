@@ -18,6 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { PiSubagentCompletionDeliveryState } from "@synara/contracts";
 
 import { type PersistenceSqlError, toPersistenceSqlError } from "../Errors.ts";
+import { truncateWithEllipsis } from "../../provider/piSubagentBoundedText.ts";
 import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
@@ -187,7 +188,8 @@ const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "r
 
 /**
  * Ticket 11 bounded excerpt helper (T11-AC1): collapses whitespace and
- * truncates with an ellipsis marker. Never throws on non-string input.
+ * truncates with the shared ellipsis helper. Never throws on non-string
+ * input.
  */
 const boundExcerpt = (value: string | null | undefined, maxChars: number): string | null => {
   if (typeof value !== "string") {
@@ -197,10 +199,7 @@ const boundExcerpt = (value: string | null | undefined, maxChars: number): strin
   if (collapsed.length === 0) {
     return null;
   }
-  if (collapsed.length <= maxChars) {
-    return collapsed;
-  }
-  return `${collapsed.slice(0, Math.max(0, maxChars - 1))}…`;
+  return truncateWithEllipsis(collapsed, maxChars);
 };
 
 /**

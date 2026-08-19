@@ -15,7 +15,10 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ingestPiSubagentTerminal } from "./piSubagentTerminalCoordinator.ts";
-import { makePiSubagentExecutionReadService } from "./piSubagentExecutionReadService.ts";
+import {
+  makePiSubagentExecutionReadService,
+  piSubagentReadDenialToWsRpcError,
+} from "./piSubagentExecutionReadService.ts";
 import { reconcilePiSubagentExecutions } from "./piSubagentRestartReconciliation.ts";
 
 /**
@@ -283,7 +286,7 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
     const harness = makeSnapshotHarness();
     const transcriptRef = join(artifactDir, "truncated-summary.output");
     await writeFile(transcriptRef, transcriptLines(2), "utf-8");
-    const cappedSummary = "y".repeat(SUMMARY_MAX_CHARS);
+    const cappedSummary = "y".repeat(SUMMARY_MAX_CHARS + 500);
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -453,5 +456,71 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
         expect(Option.getOrNull(succeededAfter)?.observedState).toBe("succeeded");
       }).pipe(Effect.provide(repositoryLayer)),
     );
+  });
+
+  it("T12-AC1: a caller whose authority does not own the parent thread is denied; an owning authority may read", async () => {
+    const harness = makeSnapshotHarness();
+    const transcriptRef = join(artifactDir, "authority.output");
+    await writeFile(transcriptRef, transcriptLines(1), "utf-8");
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+        yield* ingestPiSubagentTerminal({
+          repository,
+          observation: terminal({ transcriptRef }),
+        });
+
+        // Simulate the production caller-authorization hook shape (the WS
+        // handler wires McpSessionAuthority.resolveForThread the same way:
+        // a connection holding an authority may only read executions whose
+        // parent thread is bound to the SAME authority).
+        const owningAuthority = "auth-owner-1";
+        const makeHook =
+          (connectionAuthorityId: string | null) => (input: { readonly parentThreadId: string }) =>
+            Effect.succeed(
+              connectionAuthorityId !== null && connectionAuthorityId !== owningAuthority
+                ? ({ kind: "denied", diagnosticCode: "pi_subagent_read_denied" } as const)
+                : ({ kind: "authorized" } as const),
+            );
+
+        const ownedService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+          authorizeCaller: makeHook(owningAuthority),
+        });
+        const owned = yield* ownedService.readResult({ executionId: "exec_t12_1" });
+        expect(owned.observedState).toBe("succeeded");
+
+        const foreignService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+          authorizeCaller: makeHook("auth-other-2"),
+        });
+        const foreign = yield* foreignService
+          .readTranscriptPage({
+            executionId: "exec_t12_1",
+          })
+          .pipe(Effect.flip);
+        expect(foreign.kind).toBe("denied");
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T12-AC1/AC2: WS denial mapping is stable for unknown and unauthorized reads", () => {
+    const notFound = piSubagentReadDenialToWsRpcError({ kind: "not_found" });
+    expect(notFound.code).toBe("PI_SUBAGENT_EXECUTION_NOT_FOUND");
+    expect(notFound.retryable).toBe(false);
+    expect(notFound.message).not.toContain("transcript");
+
+    const denied = piSubagentReadDenialToWsRpcError({
+      kind: "denied",
+      diagnosticCode: "pi_subagent_read_denied",
+    });
+    expect(denied.code).toBe("PI_SUBAGENT_READ_DENIED");
+    expect(denied.retryable).toBe(false);
   });
 });

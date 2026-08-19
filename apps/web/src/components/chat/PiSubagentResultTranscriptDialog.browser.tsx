@@ -198,4 +198,55 @@ describe("Pi subagent result/transcript dialog", () => {
     await expect.element(page.getByText("Subagent execution not found.")).toBeInTheDocument();
     await mounted.unmount();
   });
+
+  it("stops continuing after a page that returns zero entries (all-corrupt stretch guard)", async () => {
+    const readResult = vi.fn().mockResolvedValue({
+      executionId: "exec-t12-ui",
+      observedState: "succeeded",
+      terminalState: "succeeded",
+      summary: "done",
+      summaryTruncated: false,
+      transcriptRef: "/tmp/pi-subagents-x/tasks/exec.output",
+    } satisfies PiSubagentResultReadResult);
+    const readTranscriptPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        entries: [makeEntry(0, "first entry")],
+        nextCursor: 1,
+        hasMore: true,
+        skippedCorruptEntries: 0,
+        observedState: "succeeded",
+      })
+      // An all-corrupt stretch: the server claims more but returns nothing.
+      .mockResolvedValueOnce({
+        entries: [],
+        nextCursor: 5,
+        hasMore: true,
+        skippedCorruptEntries: 4,
+        observedState: "succeeded",
+        diagnosticCode: "pi_subagent_transcript_corrupt",
+      });
+
+    const mounted = await render(
+      <PiSubagentResultTranscriptDialog
+        card={makeCard()}
+        open
+        onOpenChange={() => undefined}
+        readResult={readResult}
+        readTranscriptPage={readTranscriptPage}
+      />,
+    );
+
+    await expect.element(page.getByText("first entry")).toBeInTheDocument();
+    const loadMore = page.getByTestId("pi-subagent-transcript-load-more");
+    await loadMore.click();
+
+    // The empty-but-hasMore page must NOT keep the continuation affordance
+    // alive — that would loop empty fetches forever.
+    await vi.waitFor(() => {
+      expect(page.getByTestId("pi-subagent-transcript-load-more").elements()).toHaveLength(0);
+    });
+    expect(readTranscriptPage).toHaveBeenCalledTimes(2);
+    await mounted.unmount();
+  });
 });

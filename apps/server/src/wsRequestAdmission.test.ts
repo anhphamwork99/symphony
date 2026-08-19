@@ -5,6 +5,15 @@ import { describe, expect, it } from "vitest";
 import { classifyWsRequest, makeWsRequestAdmission } from "./wsRequestAdmission";
 
 describe("WsRequestAdmission", () => {
+  it("classifies the ticket-12 result/transcript reads as expensive reads", () => {
+    // Bounded 2-concurrent lane: transcript paging must not compete with
+    // lightweight control traffic (T12-AC3 bounded read path).
+    expect(classifyWsRequest(ORCHESTRATION_WS_METHODS.readPiSubagentResult)).toBe("expensive-read");
+    expect(classifyWsRequest(ORCHESTRATION_WS_METHODS.readPiSubagentTranscript)).toBe(
+      "expensive-read",
+    );
+  });
+
   it("keeps lightweight shell reads out of the expensive lane", () => {
     expect(classifyWsRequest(ORCHESTRATION_WS_METHODS.getShellSnapshot)).toBe("standard");
     expect(classifyWsRequest(ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot)).toBe(

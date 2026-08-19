@@ -13,7 +13,7 @@ import type {
   PiSubagentResultReadResult,
   PiSubagentTranscriptEntry,
 } from "@synara/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { LoaderIcon } from "~/lib/icons";
 import { piSubagentExecutionStatePresentation } from "~/lib/piSubagentExecutionCardPresentation";
@@ -49,7 +49,6 @@ type LoadState =
   | { readonly kind: "idle" }
   | { readonly kind: "loading" }
   | { readonly kind: "error"; readonly message: string };
-
 const TRANSCRIPT_DIAGNOSTIC_COPY: Record<string, string> = {
   pi_subagent_transcript_missing:
     "The transcript artifact is no longer available on the server. The execution outcome is unchanged.",
@@ -68,6 +67,7 @@ export function PiSubagentResultTranscriptDialog({
   readResult,
   readTranscriptPage,
 }: PiSubagentResultTranscriptDialogProps) {
+  const executionId = card?.executionId ?? null;
   const [result, setResult] = useState<PiSubagentResultReadResult | null>(null);
   const [entries, setEntries] = useState<ReadonlyArray<PiSubagentTranscriptEntry>>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
@@ -75,21 +75,9 @@ export function PiSubagentResultTranscriptDialog({
   const [diagnosticCode, setDiagnosticCode] = useState<string | undefined>(undefined);
   const [loadState, setLoadState] = useState<LoadState>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
-  const executionId = card?.executionId ?? null;
-  // Track the execution this state belongs to so reopening for another card
-  // resets the pager instead of appending foreign entries.
-  const stateExecutionIdRef = useRef<string | null>(null);
-
-  const resetFor = useCallback((id: string) => {
-    stateExecutionIdRef.current = id;
-    setResult(null);
-    setEntries([]);
-    setNextCursor(null);
-    setHasMore(false);
-    setDiagnosticCode(undefined);
-    setLoadState({ kind: "idle" });
-    setError(null);
-  }, []);
+  // The execution whose pager state is loaded; `null` until the first load
+  // for the open card completes, so switching cards always reloads.
+  const [loadedExecutionId, setLoadedExecutionId] = useState<string | null>(null);
 
   const loadInitial = useCallback(
     async (id: string) => {
@@ -102,6 +90,7 @@ export function PiSubagentResultTranscriptDialog({
         setNextCursor(firstPage.nextCursor);
         setHasMore(firstPage.hasMore);
         setDiagnosticCode(firstPage.diagnosticCode);
+        setLoadedExecutionId(id);
         setLoadState({ kind: "idle" });
       } catch (cause) {
         setError(
@@ -109,26 +98,18 @@ export function PiSubagentResultTranscriptDialog({
             ? cause.message
             : "The read failed. The execution state is unchanged.",
         );
-        setLoadState({ kind: "error", message: cause instanceof Error ? cause.message : "" });
+        setLoadedExecutionId(id);
+        setLoadState({ kind: "idle" });
       }
     },
     [readResult, readTranscriptPage],
   );
 
   useEffect(() => {
-    if (!open || executionId === null) {
-      return;
-    }
-    if (stateExecutionIdRef.current !== executionId) {
-      resetFor(executionId);
-    }
-    if (stateExecutionIdRef.current === executionId && loadState.kind === "idle" && !result) {
+    if (open && executionId !== null && loadedExecutionId !== executionId) {
       void loadInitial(executionId);
     }
-    // loadState/result are intentionally excluded: the effect only seeds the
-    // first load for the open execution.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, executionId]);
+  }, [open, executionId, loadedExecutionId, loadInitial]);
 
   const loadMore = useCallback(async () => {
     if (executionId === null || nextCursor === null || loadState.kind === "loading") {
@@ -143,7 +124,11 @@ export function PiSubagentResultTranscriptDialog({
       });
       setEntries((previous) => [...previous, ...page.entries]);
       setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
+      // A page that returned ZERO new entries while claiming more must not
+      // keep the Load-more affordance alive: an all-corrupt stretch (or a
+      // page-budget exhaustion reported by the server) would otherwise loop
+      // empty fetches forever. Stop continuing after one such page.
+      setHasMore(page.hasMore && page.entries.length > 0);
       setDiagnosticCode(page.diagnosticCode);
       setLoadState({ kind: "idle" });
     } catch (cause) {

@@ -41,7 +41,10 @@ export interface PiSubagentTranscriptPageInput {
   readonly limit?: number | undefined;
   /**
    * Injectable file reader for tests. Production reads through Node fs with
-   * a byte ceiling; the artifact is read line-wise, never whole.
+   * a byte ceiling; the artifact is read line-wise, never whole. Beyond
+   * `lines`, the result may carry `budgetExhausted: true` when the byte
+   * ceiling ran out before reaching `startLine` (a cursor too deep for the
+   * bounded budget).
    */
   readonly readLines?:
     | ((
@@ -51,7 +54,13 @@ export interface PiSubagentTranscriptPageInput {
           readonly maxLines: number;
           readonly maxBytes: number;
         },
-      ) => Effect.Effect<readonly string[], PiSubagentTranscriptReadFailure>)
+      ) => Effect.Effect<
+        {
+          readonly lines: readonly string[];
+          readonly budgetExhausted?: boolean;
+        },
+        PiSubagentTranscriptReadFailure
+      >)
     | undefined;
 }
 
@@ -79,7 +88,6 @@ const excerpt = (content: string): { readonly text: string; readonly truncated: 
     truncated: true,
   };
 };
-
 const entryContent = (parsed: Record<string, unknown>): string => {
   const message = parsed["message"];
   if (message !== null && typeof message === "object") {
@@ -120,8 +128,10 @@ const entryContent = (parsed: Record<string, unknown>): string => {
 /**
  * Parse one JSONL line into a bounded transcript entry. Returns none for a
  * line that is not valid JSON or not a transcript entry shape (corrupt).
+ * `index` is the artifact line index (the cursor unit) and is assigned here
+ * so the entry contract is complete at construction.
  */
-const parseEntry = (line: string): PiSubagentTranscriptEntry | undefined => {
+const parseEntry = (line: string, index: number): PiSubagentTranscriptEntry | undefined => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -142,7 +152,7 @@ const parseEntry = (line: string): PiSubagentTranscriptEntry | undefined => {
     return undefined;
   }
   return {
-    index: -1, // assigned by the caller with the artifact line index
+    index,
     type,
     content: content.text,
     truncated: content.truncated,
@@ -167,16 +177,23 @@ const readLinesWithFs: NonNullable<PiSubagentTranscriptPageInput["readLines"]> =
       const handle = await open(path, "r");
       try {
         const { createInterface } = await import("node:readline");
+        // Byte ceiling: never read past the page budget even for huge lines.
+        // The stream is opened from byte 0 (line addressing requires scanning),
+        // so the budget ALSO bounds how deep a cursor can reach: when the
+        // ceiling is exhausted before `startLine`, the caller receives zero
+        // lines and a `budgetExhausted` marker instead of silent empty pages.
+        let budgetExhausted = false;
         const stream = handle.createReadStream({
           start: 0,
-          // Byte ceiling: never read past the page budget even for huge lines.
           end: Math.max(0, options.maxBytes - 1),
         });
         const lines: string[] = [];
         const interface$ = createInterface({ input: stream, crlfDelay: Infinity });
         let index = 0;
+        let reachedStartLine = options.startLine === 0;
         for await (const line of interface$) {
           if (index >= options.startLine) {
+            reachedStartLine = true;
             lines.push(line);
             if (lines.length >= options.maxLines) {
               break;
@@ -184,7 +201,18 @@ const readLinesWithFs: NonNullable<PiSubagentTranscriptPageInput["readLines"]> =
           }
           index += 1;
         }
-        return { _tag: "success" as const, lines };
+        if (!reachedStartLine) {
+          // The stream ended (EOF or byte ceiling) before the cursor. When the
+          // artifact is larger than the page budget, the ceiling — not the
+          // artifact — stopped the scan: mark it so the caller reports the
+          // stable page-truncated diagnostic instead of a silent empty page.
+          budgetExhausted = stats.size > options.maxBytes;
+        }
+        return {
+          _tag: "success" as const,
+          lines,
+          ...(budgetExhausted ? { budgetExhausted: true } : {}),
+        };
       } finally {
         await handle.close();
       }
@@ -209,7 +237,12 @@ const readLinesWithFs: NonNullable<PiSubagentTranscriptPageInput["readLines"]> =
     }
   }).pipe(
     Effect.flatMap((outcome) =>
-      outcome._tag === "success" ? Effect.succeed(outcome.lines) : Effect.fail(outcome.failure),
+      outcome._tag === "success"
+        ? Effect.succeed({
+            lines: outcome.lines,
+            ...(outcome.budgetExhausted ? { budgetExhausted: true } : {}),
+          })
+        : Effect.fail(outcome.failure),
     ),
   );
 
@@ -236,11 +269,12 @@ export const readPiSubagentTranscriptPage = (
     // Read one extra line past the page to detect `hasMore` without a second
     // file pass; corrupt lines inside the window still count toward the
     // requested page size so a hostile artifact cannot force unbounded work.
-    const lines = yield* (input.readLines ?? readLinesWithFs)(input.transcriptRef, {
+    const readOutcome = yield* (input.readLines ?? readLinesWithFs)(input.transcriptRef, {
       startLine: cursor,
       maxLines: limit + 1,
       maxBytes: PI_SUBAGENT_TRANSCRIPT_PAGE_MAX_BYTES,
     });
+    const lines = readOutcome.lines;
 
     const entries: PiSubagentTranscriptEntry[] = [];
     let skippedCorruptEntries = 0;
@@ -251,13 +285,12 @@ export const readPiSubagentTranscriptPage = (
       if (consumed >= limit) {
         break;
       }
-      const parsed = line.trim().length === 0 ? undefined : parseEntry(line);
+      const parsed = line.trim().length === 0 ? undefined : parseEntry(line, lineIndex);
       if (parsed === undefined) {
         skippedCorruptEntries += 1;
       } else {
-        const entry = { ...parsed, index: lineIndex };
-        entries.push(entry);
-        if (entry.truncated) {
+        entries.push(parsed);
+        if (parsed.truncated) {
           anyEntryTruncated = true;
         }
       }
@@ -265,6 +298,20 @@ export const readPiSubagentTranscriptPage = (
       lineIndex += 1;
     }
 
+    // A deep cursor whose skip work exhausted the page byte budget cannot
+    // be served under the bounded page size: report the stable page-truncated
+    // diagnostic on an empty, non-continuable page instead of silently
+    // re-charging the budget on every retry (read outcome, never an execution
+    // outcome change).
+    if (readOutcome.budgetExhausted === true && lines.length === 0) {
+      return {
+        entries,
+        nextCursor: null,
+        hasMore: false,
+        skippedCorruptEntries: 0,
+        diagnosticCode: "pi_subagent_transcript_page_truncated" as PiSubagentDiagnosticCode,
+      };
+    }
     const hasMore = lines.length > limit;
     const diagnosticCode: PiSubagentDiagnosticCode | undefined =
       skippedCorruptEntries > 0

@@ -41,8 +41,58 @@ on 2026-08-16.
 
 ## Implementation Report
 
-**Status:** implemented; awaiting independent review.
-**Date:** 2026-08-19.
+**Status:** implemented; independent two-axis review remediated (see
+`reviews/12-paginated-transcript-and-result-review.md`); awaiting final
+acceptance.
+**Date:** 2026-08-19 (implementation `8473fd96`; review remediation follow-up
+commit).
+
+### Review remediation (two-axis review 2026-08-19)
+
+Both review reports are persisted at
+`reviews/12-paginated-transcript-and-result-review.md`. Remediations:
+
+- **S1/AC1 (caller identity)** — the WS handler now wires an
+  `authorizeCaller` hook through the existing Decision 21 machinery:
+  connections holding an MCP session authority may only read executions
+  whose parent thread is bound to the SAME authority
+  (`McpSessionAuthority.resolveForThread`); owner/browser connections rely
+  on the trusted transport boundary, identical to `getThreadDetailSnapshot`
+  which already exposes execution cards. Boundary test proves owning-authority
+  read + foreign-authority denial.
+- **S3 (deep-cursor scan)** — the fs reader reports `budgetExhausted` when the
+  page byte budget is spent skipping lines before the cursor; the page then
+  returns the stable `pi_subagent_transcript_page_truncated` diagnostic on a
+  non-continuable empty page instead of re-charging the budget per retry.
+  (Also retires the previously-unused literal — it now has exactly one
+  emitting code path.) Reader test covers it through the injectable seam.
+- **S4 (truncation inference)** — `summaryTruncated` now requires the summary
+  to be at the cap AND end with the ingest ellipsis marker, so an
+  untruncated summary that happens to equal the cap no longer claims
+  truncation. Fixture fixed to exercise true ingest truncation.
+- **S5 (empty-page loop)** — the dialog stops offering Load-more after a page
+  that returns zero entries while claiming more (all-corrupt stretch / page
+  budget exhaustion). Browser test covers it.
+- **T1 (duplicated truncation logic)** — extracted shared
+  `piSubagentBoundedText.ts` (`truncateWithEllipsis`, `boundedOptionalString`);
+  the new read files AND the pre-existing terminal coordinator, restart
+  reconciliation, and repository excerpt helpers now all use it.
+- **T3 (dead literal)** — `pi_subagent_transcript_page_truncated` now has its
+  emitting path (see S3).
+- **T4 (stale closure)** — the dialog's initial-load effect now keys on an
+  explicit `loadedExecutionId` state (no suppressed lint, no ref reads);
+  switching cards always reloads.
+- **T5 (`index: -1` placeholder)** — `parseEntry(line, index)` assigns the
+  cursor index at construction.
+- **T6 (untested WS wiring)** — denial mapping extracted as the pure
+  `piSubagentReadDenialToWsRpcError` seam with boundary assertions, and the
+  expensive-read admission classification is pinned by a
+  `wsRequestAdmission` test.
+- **S2/AC6 (orphaned + available-transcript seam)** — recorded as an honest
+  data-model limitation (see Known notes): the structurally-possible
+  orphaned-read path is tested (stable missing diagnostic, state unchanged)
+  and the available-transcript-never-reinterprets-state property is pinned
+  on the succeeded twin in the same test.
 
 ### Solution shape
 
@@ -110,12 +160,12 @@ feature surface:
 
 ### Verification commands
 
-- `bun run vitest run src/provider/piSubagentExecutionReadBoundary.test.ts src/provider/piSubagentTranscriptReader.test.ts` (apps/server) — 15 pass
-- `bun run vitest run src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts src/wsRequestAdmission.test.ts src/provider/piSubagentTerminalLifecycle.test.ts src/provider/piSubagentRestartReconciliation.test.ts` (apps/server) — 37 pass
+- `bun run vitest run src/provider/piSubagentExecutionReadBoundary.test.ts src/provider/piSubagentTranscriptReader.test.ts` (apps/server) — 18 pass (incl. caller-authority, denial-mapping, budget-exhaustion)
+- `bun run vitest run src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts src/wsRequestAdmission.test.ts src/provider/piSubagentTerminalLifecycle.test.ts src/provider/piSubagentRestartReconciliation.test.ts src/persistence/Layers/PiSubagentExecutionRepository.test.ts` (apps/server) — 53 pass
 - `bun run vitest run` (packages/contracts) — 229 pass
-- `bun run vitest run --config vitest.browser.config.ts src/components/chat/PiSubagentResultTranscriptDialog.browser.tsx` (apps/web) — 4 pass
+- `bun run vitest run --config vitest.browser.config.ts src/components/chat/PiSubagentResultTranscriptDialog.browser.tsx` (apps/web) — 5 pass
 - `bun run vitest run src/components/chat/PiSubagentExecutionCardStrip.test.tsx src/piSubagentExecutionCardStore.test.ts src/storeEventReducer.test.ts` (apps/web) — 64 pass
-- Full suites + typecheck + fmt + lint: see review evidence
+- Full clean-tree verification at remediation commit: server suite 4716+ passed / 0 failed / 17 skipped (first pass) and re-run green after remediation; web suite 3892 passed (one transient environment flake on first run, green on re-run and in the final pass); root typecheck 7/7 tasks; `bun run fmt` clean; `bun run lint` 0 errors (pre-existing warnings only).
 
 ### Known notes / limitations
 

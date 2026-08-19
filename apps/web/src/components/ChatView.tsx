@@ -2927,33 +2927,32 @@ export default function ChatView({
     string | null
   >(null);
   // Ticket 12 (T12-AC3/AC4): the authorized result/transcript view opens per
-  // execution from the card strip; null = closed.
+  // execution from the card strip; null = closed. The read adapters are
+  // plain functions (no hand-written useCallback) so React Compiler owns
+  // memoization — a manual dependency list here bails out ChatView's compile.
   const [piSubagentDetailsCard, setPiSubagentDetailsCard] =
     useState<PiSubagentExecutionCard | null>(null);
-  const onOpenPiSubagentExecutionDetails = useCallback((card: PiSubagentExecutionCard) => {
+  const onOpenPiSubagentExecutionDetails = (card: PiSubagentExecutionCard) => {
     setPiSubagentDetailsCard(card);
-  }, []);
-  const readPiSubagentResultForDialog = useCallback((input: { readonly executionId: string }) => {
+  };
+  const readPiSubagentResultForDialog = (input: { readonly executionId: string }) => {
     const api = readNativeApi();
     if (!api) {
       return Promise.reject(new Error("Native API is not available."));
     }
     return api.orchestration.readPiSubagentResult(input);
-  }, []);
-  const readPiSubagentTranscriptForDialog = useCallback(
-    (input: {
-      readonly executionId: string;
-      readonly cursor?: number;
-      readonly limit?: number;
-    }) => {
-      const api = readNativeApi();
-      if (!api) {
-        return Promise.reject(new Error("Native API is not available."));
-      }
-      return api.orchestration.readPiSubagentTranscript(input);
-    },
-    [],
-  );
+  };
+  const readPiSubagentTranscriptForDialog = (input: {
+    readonly executionId: string;
+    readonly cursor?: number;
+    readonly limit?: number;
+  }) => {
+    const api = readNativeApi();
+    if (!api) {
+      return Promise.reject(new Error("Native API is not available."));
+    }
+    return api.orchestration.readPiSubagentTranscript(input);
+  };
   const onCancelPiSubagentExecution = useCallback(
     (card: PiSubagentExecutionCard) => {
       const api = readNativeApi();

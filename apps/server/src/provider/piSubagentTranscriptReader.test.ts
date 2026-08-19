@@ -187,4 +187,22 @@ describe("Pi subagent paginated transcript reader (Issue 12)", () => {
     expect(failure.kind).toBe("unavailable");
     expect(failure.diagnosticCode).toBe("pi_subagent_transcript_unavailable");
   });
+
+  it("T12-AC3: a cursor deeper than the page byte budget reports the page-truncated diagnostic and stops", async () => {
+    // Injectable reader seam: the budget was spent skipping lines before the
+    // cursor — the production fs reader reports this marker instead of
+    // silently returning an empty page (bounded work per request).
+    const page = await Effect.runPromise(
+      readPiSubagentTranscriptPage({
+        transcriptRef: join(artifactDir, "large.output"),
+        cursor: 10_000_000,
+        limit: 10,
+        readLines: () => Effect.succeed({ lines: [], budgetExhausted: true }),
+      }),
+    );
+    expect(page.entries).toHaveLength(0);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
+    expect(page.diagnosticCode).toBe("pi_subagent_transcript_page_truncated");
+  });
 });

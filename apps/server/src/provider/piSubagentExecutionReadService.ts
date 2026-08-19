@@ -3,6 +3,7 @@ import type {
   PiSubagentResultReadResult,
   PiSubagentTranscriptReadResult,
 } from "@synara/contracts";
+import { WsRpcError } from "@synara/contracts";
 import { PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS } from "@synara/contracts";
 import { Effect, Option } from "effect";
 
@@ -19,6 +20,7 @@ import {
   type PiSubagentTranscriptPageInput,
   type PiSubagentTranscriptReadFailure,
 } from "./piSubagentTranscriptReader.ts";
+import { truncateWithEllipsis } from "./piSubagentBoundedText.ts";
 
 /**
  * Ticket 12 — Authorized paginated result/transcript read boundary
@@ -46,9 +48,45 @@ export type PiSubagentReadDenied =
   | { readonly kind: "not_found" }
   | { readonly kind: "denied"; readonly diagnosticCode: PiSubagentDiagnosticCode };
 
+/**
+ * Stable WS denial mapping shared by both ticket-12 read handlers: unknown
+ * ids and authorization denials surface as distinct, non-retryable RPC
+ * errors, and the mapping itself is a pure seam the boundary tests pin
+ * (T12-AC1/AC2).
+ */
+export const piSubagentReadDenialToWsRpcError = (denial: PiSubagentReadDenied): WsRpcError =>
+  new WsRpcError({
+    message:
+      denial.kind === "not_found"
+        ? "Subagent execution not found."
+        : "Not authorized to read this subagent execution.",
+    code:
+      denial.kind === "not_found" ? "PI_SUBAGENT_EXECUTION_NOT_FOUND" : "PI_SUBAGENT_READ_DENIED",
+    retryable: false,
+  });
+
 export interface PiSubagentExecutionReadServiceInput {
   readonly repository: PiSubagentExecutionRepositoryShape;
   readonly snapshotQuery: Pick<ProjectionSnapshotQueryShape, "getThreadShellById">;
+  /**
+   * Optional caller-authorization hook (T12-AC1): invoked AFTER the
+   * execution resolves and its project/thread binding verifies, with the
+   * durable record's parent thread. Production wires the MCP session
+   * authority thread binding (Decision 21): a connection holding an
+   * authority may only read executions whose parent thread is bound to the
+   * SAME authority. Connections without an authority (owner/browser) rely
+   * on the trusted transport boundary, exactly like thread-detail snapshots.
+   */
+  readonly authorizeCaller?:
+    | ((input: {
+        readonly executionId: string;
+        readonly parentThreadId: string;
+      }) => Effect.Effect<
+        | { readonly kind: "authorized" }
+        | { readonly kind: "denied"; readonly diagnosticCode: PiSubagentDiagnosticCode },
+        never
+      >)
+    | undefined;
   /** Injectable transcript reader (defaults to the file-backed reader). */
   readonly transcriptReader?:
     | ((
@@ -75,12 +113,8 @@ export interface PiSubagentExecutionReadService {
   }) => Effect.Effect<PiSubagentTranscriptReadResult, PiSubagentReadDenied>;
 }
 
-const summaryExcerpt = (summary: string): string => {
-  if (summary.length <= PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS) {
-    return summary;
-  }
-  return `${summary.slice(0, Math.max(0, PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS - 1))}…`;
-};
+const summaryExcerpt = (summary: string): string =>
+  truncateWithEllipsis(summary, PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS);
 
 export const makePiSubagentExecutionReadService = (
   input: PiSubagentExecutionReadServiceInput,
@@ -130,6 +164,21 @@ export const makePiSubagentExecutionReadService = (
           diagnosticCode: "pi_subagent_read_denied",
         });
       }
+      // Caller authorization (T12-AC1): after the durable binding verifies,
+      // the transport-supplied caller hook decides. Absent hook = the trusted
+      // transport boundary (tests, local service use).
+      if (input.authorizeCaller !== undefined) {
+        const caller = yield* input.authorizeCaller({
+          executionId: execution.executionId,
+          parentThreadId: execution.parentThreadId,
+        });
+        if (caller.kind === "denied") {
+          return yield* Effect.fail<PiSubagentReadDenied>({
+            kind: "denied",
+            diagnosticCode: caller.diagnosticCode,
+          });
+        }
+      }
       return { execution };
     });
 
@@ -148,11 +197,18 @@ export const makePiSubagentExecutionReadService = (
       const transcriptRefStored = Option.isSome(evidence)
         ? evidence.value.terminalTranscriptRef
         : null;
-      // The stored summary was bounded at ingest by the SAME config knob; a
-      // summary that meets the cap means content was omitted at ingest —
-      // report the stable truncation diagnostic and the retrievable
-      // continuation (T12-AC4).
-      const summaryTruncated = storedSummary !== null && storedSummary.length >= summaryMaxChars;
+      // The stored summary was bounded at ingest by the SAME config knob; the
+      // ingest path appends an ellipsis marker when it truncates, so "at the
+      // cap AND ending in the marker" is the honest truncation signal for
+      // the stable diagnostic + retrievable continuation (T12-AC4). An
+      // untruncated summary that happens to be exactly the cap length does
+      // not claim truncation; a config change since ingest can only make the
+      // signal conservative (never fabricates truncation for short
+      // summaries).
+      const summaryTruncated =
+        storedSummary !== null &&
+        storedSummary.length >= summaryMaxChars &&
+        storedSummary.endsWith("…");
       const terminalState =
         execution.observedState === "succeeded" ||
         execution.observedState === "failed" ||
