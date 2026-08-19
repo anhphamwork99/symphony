@@ -12,6 +12,7 @@ import type {
   PiSubagentExecutionRepositoryShape,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { PiSubagentActiveChild, PiSubagentExtensionBridge } from "./piSubagentBridge.ts";
+import { isTerminalPiSubagentState } from "./piSubagentLifecycleStates.ts";
 
 /**
  * Ticket 06 — Durable parent-turn cancellation coordinator.
@@ -91,8 +92,6 @@ export interface CancelParentTurnScopeInput {
 export interface CancelParentTurnScopeResult {
   readonly outcomes: ReadonlyArray<PiSubagentCancelExecutionOutcome>;
 }
-
-const TERMINAL_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
 
 /**
  * Re-derive lease expiry server-side (Decisions 0009/0010 standing
@@ -211,7 +210,7 @@ const cancelOneExecution = (
     const expectedAttemptId = execution.attemptId;
     const expectedGeneration = execution.generation;
 
-    if (TERMINAL_STATES.has(execution.observedState)) {
+    if (isTerminalPiSubagentState(execution.observedState)) {
       return {
         kind: "already_terminal",
         executionId: execution.executionId,
@@ -238,7 +237,7 @@ const cancelOneExecution = (
     // Re-read the aggregate AFTER the intent write: a concurrent terminal
     // (child completed between the list and the intent) wins.
     const afterIntent = intentResult.execution;
-    if (TERMINAL_STATES.has(afterIntent.observedState)) {
+    if (isTerminalPiSubagentState(afterIntent.observedState)) {
       return {
         kind: "already_terminal",
         executionId: execution.executionId,

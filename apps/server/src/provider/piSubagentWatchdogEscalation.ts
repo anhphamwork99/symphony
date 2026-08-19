@@ -6,6 +6,7 @@ import { DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT } from "../config.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { PiSubagentActiveChild, PiSubagentExtensionBridge } from "./piSubagentBridge.ts";
 import { cancelParentTurnScope } from "./piSubagentCancellationCoordinator.ts";
+import { isTerminalPiSubagentState } from "./piSubagentLifecycleStates.ts";
 
 /**
  * Ticket 15 — Watchdog escalation through provider-session stop.
@@ -183,8 +184,6 @@ interface WatchdogCandidate {
   readonly trigger: "wall_time" | "idle";
 }
 
-const TERMINAL_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
-
 const DEFAULT_STAGE_TIMEOUT_MS = 10000;
 const DEFAULT_IDLE_AFTER_MS = 60000;
 const DEFAULT_LEASE_DURATION_MS = 30000;
@@ -318,7 +317,8 @@ const escalateOne = async ({
       return false;
     }
     return (
-      Option.isSome(current.success) && TERMINAL_STATES.has(current.success.value.observedState)
+      Option.isSome(current.success) &&
+      isTerminalPiSubagentState(current.success.value.observedState)
     );
   };
 

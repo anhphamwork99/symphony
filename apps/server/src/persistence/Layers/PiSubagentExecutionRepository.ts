@@ -3501,7 +3501,13 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       .withTransaction(
         Effect.gen(function* () {
           const eventId = `teardown_${input.executionId}_${input.attemptId}_gen${input.generation}_${input.outcome}`;
-          const sequence = 76;
+          // Each outcome kind has its OWN band (76 proven, 77 survivors,
+          // 78 owner_unproven) under the journal UNIQUE constraint, so a
+          // later pass CAN escalate an earlier uncertain outcome to proven —
+          // a survivors/owner_unproven row must never block the proven
+          // settlement (review remediation: outcome retry must actually retry).
+          const sequence =
+            input.outcome === "proven" ? 76 : input.outcome === "survivors" ? 77 : 78;
           const diagnosticCode: PiSubagentDiagnosticCode =
             input.outcome === "proven"
               ? "pi_subagent_teardown_proven"
@@ -3635,7 +3641,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               executionId: input.executionId,
               attemptId: input.attemptId,
               generation: input.generation,
-              sequence: 76,
+              sequence: input.outcome === "proven" ? 76 : input.outcome === "survivors" ? 77 : 78,
             }).pipe(
               Effect.mapError(
                 toPersistenceSqlError(
@@ -3980,13 +3986,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 80)),
     );
 
-  // Ticket 16: the teardown request (75) is journal-only (no notification —
-  // no lifecycle truth changed); only a PROVEN teardown outcome changes
-  // observed/desired state (cancelled + fence), so it notifies on band 76.
-  const recordTeardownRequested: PiSubagentExecutionRepositoryShape["recordTeardownRequested"] = (
-    input,
-  ) => recordTeardownRequestedBase(input);
-
+  // Ticket 16: the teardown request (75) is journal-only — no notification
+  // (no lifecycle truth changed) — so the repository object wires the base
+  // seam directly. Only a PROVEN teardown outcome changes observed/desired
+  // state (cancelled + fence), so it notifies on its band (76).
   const recordTeardownOutcome: PiSubagentExecutionRepositoryShape["recordTeardownOutcome"] = (
     input,
   ) =>
@@ -4095,7 +4098,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     recordResumeEvent,
     recordWallTimeExpiryEvent,
     recordWatchdogStageEvent,
-    recordTeardownRequested,
+    recordTeardownRequested: recordTeardownRequestedBase,
     recordTeardownOutcome,
     getTelemetrySnapshot,
   } satisfies PiSubagentExecutionRepositoryShape;

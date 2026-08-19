@@ -290,8 +290,8 @@ describe("PiAdapter owned teardown sweep wiring (Issue 16)", () => {
       const journal = yield* repository.listJournalEvents("exec_t16_wire_1");
       const outcomeRow = journal.find(
         (event) =>
-          event.sequence === 76 &&
-          (event.diagnosticCode ?? "") === "pi_subagent_teardown_owner_unproven",
+          (event.diagnosticCode ?? "") === "pi_subagent_teardown_owner_unproven" &&
+          [76, 77, 78].includes(event.sequence),
       );
       expect(outcomeRow).toBeDefined();
       const stored = yield* repository.getById("exec_t16_wire_1");

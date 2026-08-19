@@ -19,6 +19,7 @@ import type {
 import { PI_SUBAGENT_TERMINAL_SEQUENCE } from "./piSubagentTerminalCoordinator.ts";
 import { truncateWithEllipsis } from "./piSubagentBoundedText.ts";
 import type { PiSubagentActiveChild } from "./piSubagentBridge.ts";
+import { isTerminalPiSubagentState } from "./piSubagentLifecycleStates.ts";
 
 /**
  * Ticket 10 — Restart / lease-expiry reconciliation to terminal or orphaned.
@@ -126,8 +127,6 @@ export interface ReconcilePiSubagentExecutionsResult {
   /** Executions whose settlement write failed (fail-closed diagnostic). */
   readonly failures: ReadonlyArray<{ readonly executionId: string; readonly error: string }>;
 }
-
-const TERMINAL_OBSERVED_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
 
 const truncateSummary = (summary: string, maxChars: number): string =>
   truncateWithEllipsis(summary, maxChars);
@@ -470,7 +469,7 @@ export const reconcilePiSubagentExecutions = (
       }
       if (
         settled.kind === "already_applied" &&
-        TERMINAL_OBSERVED_STATES.has(settled.execution.observedState)
+        isTerminalPiSubagentState(settled.execution.observedState)
       ) {
         outcomes.push({
           kind: "already_terminal",

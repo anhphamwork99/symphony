@@ -55,7 +55,9 @@ export interface PiSubagentProcessTeardownSweepOptions {
     | undefined;
   /**
    * Safe operator observation for pass outcomes (fixed correlation
-   * metadata only — never prompt, result, or transcript content).
+   * metadata only — never prompt, result, or transcript content). The
+   * diagnostic code is derived from the outcome kind so the operator log
+   * never asserts a proof that did not happen.
    */
   readonly onOutcome?: (outcome: {
     readonly executionId: string;
@@ -63,6 +65,7 @@ export interface PiSubagentProcessTeardownSweepOptions {
     readonly generation: number;
     readonly parentThreadId: string;
     readonly outcomeKind: string;
+    readonly diagnosticCode: PiSubagentDiagnosticCode;
   }) => void;
 }
 
@@ -88,6 +91,16 @@ export const sweepPiSubagentProcessTeardown = async (
       generation: outcome.generation,
       parentThreadId: outcome.parentThreadId,
       outcomeKind: outcome.outcome.kind,
+      // Truthful per-outcome operator vocabulary (review remediation):
+      // survivors/owner_unproven must never log under the proven literal.
+      diagnosticCode:
+        outcome.outcome.kind === "settled_proven"
+          ? "pi_subagent_teardown_proven"
+          : outcome.outcome.kind === "survivors"
+            ? "pi_subagent_teardown_survivors"
+            : outcome.outcome.kind === "owner_unproven"
+              ? "pi_subagent_teardown_owner_unproven"
+              : "pi_subagent_lifecycle_persistence_failed",
     });
   }
   return { processed: result.outcomes.length };

@@ -250,16 +250,14 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
           (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.request,
         );
         const outcomes = journal.filter(
-          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.outcome,
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven,
         );
         // Exactly one request row and one outcome row — deterministic
         // idempotent identities under the journal UNIQUE constraint.
         expect(requests).toHaveLength(1);
         expect(outcomes).toHaveLength(1);
-        expect(
-          requests[0]!.diagnosticCode === "pi_subagent_teardown_requested" ||
-            (requests[0]!.diagnosticCode ?? "").length > 0,
-        ).toBe(true);
+        expect(requests[0]!.diagnosticCode ?? "").toBe("pi_subagent_teardown_requested");
+        expect(outcomes[0]!.diagnosticCode ?? "").toBe("pi_subagent_teardown_proven");
 
         // The execution settled terminal `cancelled`, so the second pass's
         // non-terminal scan skips it entirely (no new dispatch).
@@ -300,7 +298,7 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
         // and reported to the operator surface, with the bounded PID list.
         const journal = yield* repository.listJournalEvents("exec_td_1");
         const outcomeRow = journal.find(
-          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.outcome,
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors,
         );
         expect(outcomeRow).toBeDefined();
         expect(outcomeRow!.diagnosticCode ?? "").toBe("pi_subagent_teardown_survivors");
@@ -337,7 +335,7 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
 
         const journal = yield* repository.listJournalEvents("exec_td_1");
         const outcomeRow = journal.find(
-          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.outcome,
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors,
         );
         const metadata = (outcomeRow!.metadata ?? {}) as Record<string, unknown>;
         expect((metadata.survivorPids as number[]).length).toBe(
@@ -409,6 +407,114 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
           expect(after.value.observedState).toBe("cancelled");
           expect(after.value.generation).toBe(2);
         }
+        // "Ignored AND COUNTED": the stale-terminal counter durably
+        // incremented for the fenced generation (review remediation —
+        // the count is proven, not assumed).
+        const evidenceAfter = yield* repository.getTerminalEvidence("exec_td_1");
+        expect(Option.isSome(evidenceAfter)).toBe(true);
+        if (Option.isSome(evidenceAfter)) {
+          expect(evidenceAfter.value.staleTerminalEvents).toBeGreaterThanOrEqual(1);
+        }
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T16-AC2/AC3 (review remediation): a survivors outcome does NOT block a later proven outcome — the next pass escalates and settles with the fence", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const execution = makeExecution();
+        yield* admit(repository, execution);
+        yield* driveToCancelling(repository, execution);
+        yield* journalHandoff(repository, execution);
+
+        // Pass 1: teardown ran but could not prove exit (survivors).
+        const fixture = makeTeardownFixture({
+          result: () => ({ kind: "survivors", survivorPids: [777] }),
+        });
+        const first = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture)),
+        );
+        expect(first.outcomes[0]!.outcome.kind).toBe("survivors");
+        let stored = yield* repository.getById("exec_td_1");
+        expect(Option.isSome(stored)).toBe(true);
+        if (Option.isSome(stored)) {
+          expect(stored.value.observedState).toBe("cancelling");
+        }
+
+        // Pass 2: the supervisor NOW proves exit. The band-77 survivors row
+        // must not block the band-76 proven settlement under the journal
+        // UNIQUE constraint (distinct outcome kinds, distinct sequences).
+        fixture.result = () => ({ kind: "proven" });
+        const second = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture)),
+        );
+        expect(second.outcomes[0]!.outcome.kind).toBe("settled_proven");
+        if (second.outcomes[0]!.outcome.kind !== "settled_proven") return;
+        expect(second.outcomes[0]!.outcome.fencedGeneration).toBe(2);
+
+        stored = yield* repository.getById("exec_td_1");
+        expect(Option.isSome(stored)).toBe(true);
+        if (Option.isSome(stored)) {
+          expect(stored.value.observedState).toBe("cancelled");
+          expect(stored.value.generation).toBe(2);
+          expect(stored.value.diagnosticCode).toBe("pi_subagent_teardown_proven");
+        }
+
+        // Both outcome rows coexist as distinct durable evidence.
+        const journal = yield* repository.listJournalEvents("exec_td_1");
+        expect(
+          journal.some(
+            (event) =>
+              event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors &&
+              (event.diagnosticCode ?? "") === "pi_subagent_teardown_survivors",
+          ),
+        ).toBe(true);
+        expect(
+          journal.some(
+            (event) =>
+              event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven &&
+              (event.diagnosticCode ?? "") === "pi_subagent_teardown_proven",
+          ),
+        ).toBe(true);
+        // Exactly ONE request row across both passes.
+        expect(
+          journal.filter((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.request),
+        ).toHaveLength(1);
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T16-AC2 (truthful replay): a proven replay onto an already-fenced aggregate reports the existing fence without claiming a new one", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        const execution = makeExecution();
+        yield* admit(repository, execution);
+        yield* driveToCancelling(repository, execution);
+        yield* journalHandoff(repository, execution);
+
+        const fixture = makeTeardownFixture({ result: () => ({ kind: "proven" }) });
+        const first = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture)),
+        );
+        expect(first.outcomes[0]!.outcome.kind).toBe("settled_proven");
+
+        // The aggregate is terminal now: the non-terminal scan skips it, so
+        // a coordinator replay can only happen through a direct stale call —
+        // prove the repository seam reports already_applied WITHOUT a
+        // second fence (generation stays 2).
+        const replay = yield* repository.recordTeardownOutcome({
+          executionId: "exec_td_1",
+          attemptId: "att_td_1",
+          generation: 1,
+          outcome: "proven",
+          occurredAt: T0,
+          diagnosticMessage: "proven (replay test)",
+        });
+        expect(replay.kind).toBe("already_applied");
+        expect(replay.execution.observedState).toBe("cancelled");
+        expect(replay.execution.generation).toBe(2);
       }).pipe(Effect.provide(repositoryLayer)),
     );
   });
@@ -541,7 +647,7 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
         }
         const journal = yield* repository.listJournalEvents("exec_td_1");
         const outcomeRow = journal.find(
-          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.outcome,
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
         );
         expect(outcomeRow!.diagnosticCode ?? "").toBe("pi_subagent_teardown_owner_unproven");
         expect(
@@ -570,29 +676,52 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
     );
   });
 
-  it("T16-AC7: the pass is bounded — at most maxPerPass handed-off executions dispatch per sweep", async () => {
+  it("T16-AC7: the pass is bounded — at most maxPerPass executions are scanned per sweep, handed-off or not", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
-        for (let i = 1; i <= 3; i += 1) {
-          const execution = makeExecution({
-            executionId: `exec_td_b${i}`,
-            attemptId: `att_td_b${i}`,
-            commandId: `cmd_td_b${i}`,
-            parentThreadId: `th_td_b${i}` as ThreadId,
-            parentToolCallId: `call_b${i}`,
+        // Two NON-handed-off executions occupy the scan budget first
+        // (created_at ASC ordering), then one handed-off execution follows.
+        for (let i = 1; i <= 2; i += 1) {
+          const noise = makeExecution({
+            executionId: `exec_td_n${i}`,
+            attemptId: `att_td_n${i}`,
+            commandId: `cmd_td_n${i}`,
+            parentThreadId: `th_td_n${i}` as ThreadId,
+            parentToolCallId: `call_n${i}`,
           });
-          yield* admit(repository, execution);
-          yield* driveToCancelling(repository, execution);
-          yield* journalHandoff(repository, execution);
+          yield* admit(repository, noise);
+          yield* driveToCancelling(repository, noise);
         }
+        const handedOff = makeExecution({
+          executionId: "exec_td_b1",
+          attemptId: "att_td_b1",
+          commandId: "cmd_td_b1",
+          parentThreadId: "th_td_b1" as ThreadId,
+          parentToolCallId: "call_b1",
+        });
+        yield* admit(repository, handedOff);
+        yield* driveToCancelling(repository, handedOff);
+        yield* journalHandoff(repository, handedOff);
 
         const fixture = makeTeardownFixture({ result: () => ({ kind: "proven" }) });
         const result = yield* Effect.promise(() =>
           runPiSubagentProcessTeardown(baseInput(repository, fixture, { maxPerPass: 2 })),
         );
-        expect(result.outcomes).toHaveLength(2);
-        expect(fixture.requests).toHaveLength(2);
+        // The scan budget (2) was consumed by the noise executions BEFORE
+        // the handed-off one — nothing dispatched, and the pass stays
+        // bounded regardless of the non-terminal table size (review
+        // remediation).
+        expect(result.outcomes).toHaveLength(0);
+        expect(fixture.requests).toHaveLength(0);
+
+        // A full-budget pass still processes the handed-off execution it
+        // reaches (one here).
+        const result2 = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown(baseInput(repository, fixture)),
+        );
+        expect(result2.outcomes).toHaveLength(1);
+        expect(fixture.requests).toHaveLength(1);
       }).pipe(Effect.provide(repositoryLayer)),
     );
   });

@@ -5,6 +5,7 @@ import type {
   PiSubagentExecutionRepositoryShape,
   PiSubagentWatchdogStageRecordResult,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import { isTerminalPiSubagentState } from "./piSubagentLifecycleStates.ts";
 import { PI_SUBAGENT_WATCHDOG_BAND } from "./piSubagentWatchdogEscalation.ts";
 
 /**
@@ -53,14 +54,45 @@ import { PI_SUBAGENT_WATCHDOG_BAND } from "./piSubagentWatchdogEscalation.ts";
  * only for sessions that are STILL live with a provable supervisor.
  */
 
-/** Attempt-local journal band for teardown evidence (75 request, 76 outcome). */
+/**
+ * Attempt-local journal band for teardown evidence. Request = 75. Each
+ * outcome kind has its OWN sequence (76 proven, 77 survivors, 78
+ * owner_unproven) under the journal's UNIQUE(execution, attempt,
+ * generation, sequence) constraint: a later pass CAN escalate an earlier
+ * uncertain outcome to proven — a survivors/owner_unproven row at 77/78
+ * must never block the proven settlement at 76 (review remediation:
+ * outcome retry must actually retry).
+ */
 export const PI_SUBAGENT_TEARDOWN_BAND = {
   request: 75,
-  outcome: 76,
+  proven: 76,
+  survivors: 77,
+  ownerUnproven: 78,
 } as const;
 
-/** Lowest sequence of the teardown band (test/telemetry filter anchor). */
+/** Sequence of the teardown request row (test/telemetry filter anchor). */
 export const PI_SUBAGENT_TEARDOWN_SEQUENCE = PI_SUBAGENT_TEARDOWN_BAND.request;
+
+/** Maps an outcome kind onto its journal band and diagnostic code. */
+const TEARDOWN_OUTCOME_RECORDS: Readonly<
+  Record<
+    "proven" | "survivors" | "owner_unproven",
+    { readonly sequence: number; readonly diagnosticCode: PiSubagentDiagnosticCode }
+  >
+> = {
+  proven: {
+    sequence: PI_SUBAGENT_TEARDOWN_BAND.proven,
+    diagnosticCode: "pi_subagent_teardown_proven",
+  },
+  survivors: {
+    sequence: PI_SUBAGENT_TEARDOWN_BAND.survivors,
+    diagnosticCode: "pi_subagent_teardown_survivors",
+  },
+  owner_unproven: {
+    sequence: PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
+    diagnosticCode: "pi_subagent_teardown_owner_unproven",
+  },
+};
 
 export const PI_SUBAGENT_TEARDOWN_REQUESTED_DIAGNOSTIC: PiSubagentDiagnosticCode =
   "pi_subagent_teardown_requested";
@@ -78,26 +110,12 @@ export const MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS = 16;
 export const MAX_PI_SUBAGENT_TEARDOWN_PASS_EXECUTIONS = 64;
 
 /**
- * The owned-process kill authority (T16-AC1). Production resolves the
- * provider session's own supervisor — the only component that knows which
- * processes it spawned. Resolves `undefined` when no live owned supervisor
- * exists (session stopped / server restarted): teardown is then NOT
- * dispatched and the outcome is `owner_unproven`.
+ * Result of the owned-supervisor teardown dispatch (T16-AC1/AC3).
+ * `proven` — every owned process tree proved exit (liveness-verified, not
+ * just a kill API return). `survivors` — teardown ran but at least one
+ * owned process remained alive past the escalation bounds.
  */
-export type PiSubagentOwnedTeardownDispatch = (input: {
-  readonly executionId: string;
-  readonly attemptId: string;
-  readonly generation: number;
-  readonly parentThreadId: string;
-}) => Promise<PiSubagentOwnedTeardownDispatchResult>;
-
 export interface PiSubagentOwnedTeardownDispatchResult {
-  /**
-   * `proven` — every owned process tree proved exit (liveness-verified, not
-   * just a kill API return; T16-AC3).
-   * `survivors` — teardown ran but at least one owned process remained
-   * alive past the escalation bounds (survivorPids, bounded).
-   */
   readonly kind: "proven" | "survivors";
   /** Present for `survivors` only; already capped by the caller's fixture. */
   readonly survivorPids?: ReadonlyArray<number>;
@@ -162,14 +180,10 @@ export interface PiSubagentProcessTeardownResult {
   }>;
 }
 
-const TERMINAL_STATES = new Set(["cancelled", "succeeded", "failed", "rejected"]);
-
 const capSurvivorPids = (
   pids: ReadonlyArray<number> | undefined,
 ): ReadonlyArray<number> | undefined =>
   pids === undefined ? undefined : pids.slice(0, MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS);
-
-const isTerminalState = (state: string): boolean => TERMINAL_STATES.has(state);
 
 const teardownOne = async (
   input: PiSubagentProcessTeardownInput,
@@ -237,7 +251,7 @@ const teardownOne = async (
   if (request.kind === "stale_generation") {
     return finished({ kind: "stale_generation" });
   }
-  if (isTerminalState(request.execution.observedState)) {
+  if (isTerminalPiSubagentState(request.execution.observedState)) {
     // Settled between the scan and the request: terminal truth wins.
     return finished({ kind: "already_terminal" });
   }
@@ -253,6 +267,7 @@ const teardownOne = async (
   // T16-AC1: resolve the OWNED supervisor. No live owned supervisor → no
   // kill, honest owner_unproven outcome (also the bounded restart case,
   // T16-AC7).
+  const dispatchFailure = { message: undefined as string | undefined };
   const dispatch = await input
     .dispatchOwnedTeardown({
       executionId: execution.executionId,
@@ -261,11 +276,15 @@ const teardownOne = async (
       parentThreadId: threadId,
     })
     .catch((cause: unknown) => {
-      const message = cause instanceof Error ? cause.message : String(cause);
+      // A dispatch crash never claims teardown ran: the honest outcome is
+      // uncertain cleanup with a message that says the dispatch itself
+      // failed — not "0 survivors" (review remediation: truthful
+      // diagnostics, Decision 0001/0022 vocabulary principle).
+      dispatchFailure.message = cause instanceof Error ? cause.message : String(cause);
       reportDiagnostic({
         stage: "failure",
         diagnosticCode: PI_SUBAGENT_TEARDOWN_SURVIVORS_DIAGNOSTIC,
-        diagnosticMessage: `Owned teardown dispatch failed: ${message}`,
+        diagnosticMessage: `Owned teardown dispatch failed: ${dispatchFailure.message}`,
       });
       return { kind: "survivors" as const, survivorPids: [] };
     });
@@ -302,12 +321,14 @@ const teardownOne = async (
     // remain operationally visible; the projection stays `cancelling`.
     const survivorPids = capSurvivorPids(dispatch.survivorPids);
     const message =
-      `Owned process-tree teardown left ${String(survivorPids?.length ?? 0)} captured survivor` +
-      `${survivorPids?.length === 1 ? "" : "s"}` +
-      (survivorPids !== undefined && survivorPids.length > 0
-        ? ` (${survivorPids.join(", ")})`
-        : "") +
-      "; cleanup remains uncertain and the execution stays cancelling";
+      dispatchFailure.message !== undefined
+        ? `Owned teardown dispatch failed (${dispatchFailure.message}); the teardown did not complete and cleanup remains uncertain — the execution stays cancelling`
+        : `Owned process-tree teardown left ${String(survivorPids?.length ?? 0)} captured survivor` +
+          `${survivorPids?.length === 1 ? "" : "s"}` +
+          (survivorPids !== undefined && survivorPids.length > 0
+            ? ` (${survivorPids.join(", ")})`
+            : "") +
+          "; cleanup remains uncertain and the execution stays cancelling";
     reportDiagnostic({
       stage: "teardown_survivors",
       diagnosticCode: PI_SUBAGENT_TEARDOWN_SURVIVORS_DIAGNOSTIC,
@@ -323,12 +344,20 @@ const teardownOne = async (
           occurredAt: nowIso(),
           ...(survivorPids !== undefined ? { survivorPids } : {}),
           diagnosticMessage: message,
-          metadata: { reason: "survivors_after_escalation" },
+          metadata: {
+            reason:
+              dispatchFailure.message !== undefined
+                ? "dispatch_failed"
+                : "survivors_after_escalation",
+          },
         }),
       ),
     );
     if (outcome._tag === "Failure") {
       return finished({ kind: "failed", error: "survivors outcome journal write failed" });
+    }
+    if (outcome.success.kind === "stale_generation") {
+      return finished({ kind: "stale_generation" });
     }
     return finished({
       kind: "survivors",
@@ -338,14 +367,12 @@ const teardownOne = async (
 
   // dispatch.kind === "proven": T16-AC3 (liveness-verified) → T16-AC5
   // (proof-before-fence settle): the repository settles `cancelled` AND
-  // advances the generation in the same transaction.
-  const message =
+  // advances the generation in the same transaction. The proven operator
+  // diagnostic is emitted ONLY after the commit succeeds — a
+  // stale-generation or terminal-race replay must not tell the operator a
+  // fence that did not happen (review remediation: truthful sequencing).
+  const provenMessage =
     "Owned process-tree teardown proven: every process tree owned by the execution's provider session verified dead (exit + identity-matched descendants gone); the terminated generation is fenced and late events will be ignored and counted";
-  reportDiagnostic({
-    stage: "teardown_proven",
-    diagnosticCode: PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC,
-    diagnosticMessage: message,
-  });
   const outcome = await Effect.runPromise(
     Effect.result(
       input.repository.recordTeardownOutcome({
@@ -354,7 +381,7 @@ const teardownOne = async (
         generation: execution.generation,
         outcome: "proven",
         occurredAt: nowIso(),
-        diagnosticMessage: message,
+        diagnosticMessage: provenMessage,
         metadata: { reason: "owned_supervisor_proof" },
       }),
     ),
@@ -362,19 +389,51 @@ const teardownOne = async (
   if (outcome._tag === "Failure") {
     const cause = outcome.failure;
     const failureMessage = cause instanceof Error ? cause.message : String(cause);
+    reportDiagnostic({
+      stage: "failure",
+      diagnosticCode: "pi_subagent_lifecycle_persistence_failed",
+      diagnosticMessage: `Proven teardown outcome journal write failed: ${failureMessage}`,
+    });
     return finished({ kind: "failed", error: failureMessage });
   }
   if (outcome.success.kind === "stale_generation") {
     return finished({ kind: "stale_generation" });
   }
   const settled = outcome.success.execution;
-  if (isTerminalState(settled.observedState) && settled.observedState !== "cancelled") {
-    // Terminal truth won the race inside the transaction.
+  if (settled.observedState === "cancelled" && settled.generation === execution.generation + 1) {
+    // The fence committed in this transaction (first proven outcome).
+    reportDiagnostic({
+      stage: "teardown_proven",
+      diagnosticCode: PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC,
+      diagnosticMessage: provenMessage,
+    });
+    return finished({
+      kind: "settled_proven",
+      fencedGeneration: settled.generation,
+    });
+  }
+  if (settled.observedState === "cancelled") {
+    // A prior pass already fenced this attempt/generation (idempotent
+    // replay of the proven outcome): report the already-settled fence
+    // honestly — nothing new was claimed.
+    reportDiagnostic({
+      stage: "teardown_proven",
+      diagnosticCode: PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC,
+      diagnosticMessage:
+        "Owned process-tree teardown was already proven and fenced for this attempt/generation; the replay changed nothing",
+    });
+    return finished({ kind: "settled_proven", fencedGeneration: settled.generation });
+  }
+  // already_applied onto a DIFFERENT terminal truth, or a non-settled
+  // replay that lost a race inside the transaction: never claim proven
+  // settlement — report what the aggregate actually says.
+  if (isTerminalPiSubagentState(settled.observedState)) {
     return finished({ kind: "already_terminal" });
   }
   return finished({
-    kind: "settled_proven",
-    fencedGeneration: settled.generation,
+    kind: "failed",
+    error:
+      "Proven teardown outcome did not settle the aggregate (lost an intra-transaction race); the projection stays cancelling",
   });
 };
 
@@ -412,10 +471,16 @@ export const runPiSubagentProcessTeardown = async (
   }
 
   const outcomes: TeardownOneResult[] = [];
+  // Bounded discovery (T16-AC7): the pass scans at most maxPerPass
+  // executions REGARDLESS of how many qualify — an unbounded non-terminal
+  // table cannot turn the restart scan into an unbounded query loop
+  // (review remediation).
+  let scanned = 0;
   for (const execution of listed.success) {
-    if (outcomes.length >= maxPerPass) {
+    if (scanned >= maxPerPass) {
       break;
     }
+    scanned += 1;
     const journal = await Effect.runPromise(
       Effect.result(input.repository.listJournalEvents(execution.executionId)),
     );

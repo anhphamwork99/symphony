@@ -79,7 +79,11 @@ describe("sweepPiSubagentProcessTeardown (Issue 16 driver)", () => {
           });
 
           const dispatched: string[] = [];
-          const outcomes: Array<{ executionId: string; outcomeKind: string }> = [];
+          const outcomes: Array<{
+            executionId: string;
+            outcomeKind: string;
+            diagnosticCode: string;
+          }> = [];
           const diagnostics: Array<{ diagnosticCode: string; parentThreadId: string }> = [];
 
           const result = yield* Effect.promise(() =>
@@ -100,6 +104,7 @@ describe("sweepPiSubagentProcessTeardown (Issue 16 driver)", () => {
                 outcomes.push({
                   executionId: outcome.executionId,
                   outcomeKind: outcome.outcomeKind,
+                  diagnosticCode: outcome.diagnosticCode,
                 });
               },
             }),
@@ -107,7 +112,15 @@ describe("sweepPiSubagentProcessTeardown (Issue 16 driver)", () => {
 
           expect(result.processed).toBe(1);
           expect(dispatched).toEqual(["thread_tds"]);
-          expect(outcomes).toEqual([{ executionId: "exec_tds_1", outcomeKind: "settled_proven" }]);
+          expect(outcomes).toEqual([
+            {
+              executionId: "exec_tds_1",
+              outcomeKind: "settled_proven",
+              // Truthful operator vocabulary: the outcome's diagnostic code
+              // matches the outcome kind (never a hardcoded proven literal).
+              diagnosticCode: "pi_subagent_teardown_proven",
+            },
+          ]);
           // The driver forwards the operator diagnostics with the safe
           // correlation identity (thread/execution), fixed vocabulary only.
           expect(

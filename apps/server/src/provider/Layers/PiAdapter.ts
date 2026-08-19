@@ -5126,7 +5126,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 attemptId: outcome.attemptId,
                 threadId: outcome.parentThreadId,
                 generation: outcome.generation,
-                diagnosticCode: "pi_subagent_teardown_proven",
+                // Truthful per-outcome code from the sweep driver — never a
+                // hardcoded proof literal (review remediation).
+                diagnosticCode: outcome.diagnosticCode,
               });
               void Effect.runPromise(
                 Effect.logWarning("pi.subagent.teardown_outcome", {
