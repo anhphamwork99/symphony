@@ -29,6 +29,7 @@ import type {
   ProviderStopSessionInput,
   ProviderStopTaskInput,
   ProviderCancelPiSubagentExecutionInput,
+  ProviderResumePiSubagentExecutionInput,
   ThreadId,
   ProviderTurnStartResult,
 } from "@synara/contracts";
@@ -121,6 +122,18 @@ export interface ProviderServiceShape {
    */
   readonly cancelPiSubagentExecution: (
     input: ProviderCancelPiSubagentExecutionInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Ticket 14 (T14-AC1/AC4/AC6): explicitly resume ONE orphaned managed Pi
+   * subagent execution — same executionId, new attemptId, advanced
+   * generation, re-running the same authorization and admission gates as a
+   * fresh spawn before any child starts. Denials (unknown execution,
+   * non-orphaned state, gate refusal, unsupported provider, inactive runtime)
+   * surface as validation errors without corrupting execution state.
+   */
+  readonly resumePiSubagentExecution: (
+    input: ProviderResumePiSubagentExecutionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**

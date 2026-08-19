@@ -118,6 +118,7 @@ function createProviderServiceHarness(
     interruptTurn: () => unsupported(),
     stopTask: () => unsupported(),
     cancelPiSubagentExecution: () => unsupported(),
+    resumePiSubagentExecution: () => unsupported(),
     backgroundTask: () => unsupported(),
     steerSubagent: () => unsupported(),
     respondToRequest: () => unsupported(),

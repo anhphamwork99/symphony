@@ -117,6 +117,34 @@ describe("Ticket 11 execution-card store reducer", () => {
     expect(getThreadFromState(state, threadId)!.piSubagentExecutions).toHaveLength(1);
   });
 
+  it("T14-AC6: resume-request events project NOTHING — durable truth arrives only through card updates", () => {
+    const state = applyOrchestrationEvents(
+      applyOrchestrationEvents(makeState(makeThread({ id: threadId })), [
+        executionUpdatedEvent(makeCard({ observedState: "orphaned", desiredState: "running" }), {
+          sequence: 5,
+        }),
+      ]),
+      [
+        makeDomainEvent(
+          "thread.pi-subagent-execution-resume-requested",
+          {
+            threadId,
+            executionId: "exec-1",
+            createdAt: "2026-08-19T00:00:02.000Z",
+          },
+          { sequence: 7 },
+        ),
+      ],
+    );
+    const after = getThreadFromState(state, threadId) as {
+      piSubagentExecutions?: PiSubagentExecutionCard[];
+    };
+    // The orphaned card keeps rendering durable truth: the new attempt lands
+    // only via the server's journal-first execution-updated event.
+    expect(after.piSubagentExecutions).toHaveLength(1);
+    expect(after.piSubagentExecutions![0]!.observedState).toBe("orphaned");
+  });
+
   it("T11-AC6: cancel-request events project NOTHING — durable truth arrives only through card updates", () => {
     const state = applyOrchestrationEvents(makeState(makeThread({ id: threadId })), [
       makeDomainEvent(

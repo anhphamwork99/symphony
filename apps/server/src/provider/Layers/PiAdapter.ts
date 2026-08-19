@@ -162,6 +162,7 @@ import {
   cancelParentTurnScope,
   cancelSinglePiSubagentExecution,
 } from "../piSubagentCancellationCoordinator.ts";
+import { resumePiSubagentExecution as resumePiSubagentExecutionCoordinator } from "../piSubagentResumeCoordinator.ts";
 import { extractPiSubagentBridge } from "../piSubagentBridge.ts";
 import {
   makePiSubagentControlHealth,
@@ -441,9 +442,36 @@ interface PiSessionContext {
   pendingUserInputs: Map<ApprovalRequestId, PiPendingUserInput>;
   stopped: boolean;
   subagentCapability?: PiSubagentNegotiatedCapability;
+  /**
+   * Ticket 14: session-start subject authority binding (Decision 21). The
+   * explicit resume path re-runs the shared admission gates, which
+   * re-validate this binding live; absent fails closed at gate time.
+   */
+  mcpAuthority?: McpAuthorityBinding | null;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   /** Ticket 23: session-scoped progress observation coalescer, when managed. */
   subagentProgressCoalescer?: PiSubagentProgressCoalescer;
+  /**
+   * Ticket 14: captured managed Agent-tool launcher for explicit resume.
+   * Present only when the session wrapped a managed Agent tool; resume
+   * re-enters the SAME tool execute path with resumed identities after the
+   * durable resume committed (never re-running admission — the shared gates
+   * and the resume journal write already ran in the resume coordinator).
+   */
+  piSubagentResumeLauncher?: (attempt: {
+    readonly executionId: string;
+    readonly attemptId: string;
+    readonly generation: number;
+    readonly agentType: string;
+    readonly prompt: string;
+    readonly mode: "foreground" | "background";
+    /** Ticket 14: durable delegation triplet for exact-request replay. */
+    readonly delegationContext?: string;
+    readonly delegationLinkReferences?: string;
+    readonly delegationExpectedOutcome?: string;
+    /** Ticket 14: resolved `provider/modelId` for same-provider replay. */
+    readonly resolvedModel?: string;
+  }) => Promise<void>;
 
   unsubscribe: (() => void) | undefined;
 }
@@ -3141,6 +3169,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           stopped: false,
           lastKnownTokenUsage: undefined,
           unsubscribe: undefined,
+          ...(input.mcpAuthority !== undefined ? { mcpAuthority: input.mcpAuthority } : {}),
         };
         context.unsubscribe = runtime.session.subscribe((event) =>
           handleSessionEvent(context, event),
@@ -3320,6 +3349,384 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           });
           context.subagentProgressCoalescer = subagentProgressCoalescer;
 
+          // Ticket 14: per-attempt observation runtime factory — shared by the
+          // spawn path (post-admission identities) and the explicit resume
+          // launcher (resumed identities). One code path journals every
+          // observation (started/detached seq 2/3, coalesced progress,
+          // heartbeat lease refresh, terminal ingest + outbox).
+          const makeAttemptObservationRuntime = (
+            identities: { executionId: string; attemptId: string; generation: number },
+            correlationToolCallId: string,
+            foregroundWaitMs: number,
+          ) => {
+            let startedPromise: Promise<void> | undefined;
+            let detachedPromise: Promise<void> | undefined;
+
+            const recordHeartbeatObservation = (occurredAt: string): void => {
+              // Fire-and-forget lease refresh (T23-AC3): heartbeat is
+              // observation, not control — failures are swallowed and never
+              // degrade control health, never reject the producer.
+              const leaseExpiresAt = new Date(
+                Date.parse(occurredAt) + leaseDurationMs,
+              ).toISOString();
+              void Effect.runPromise(
+                piSubagentRepository.recordHeartbeatObservation({
+                  executionId: identities.executionId,
+                  occurredAt,
+                  leaseExpiresAt,
+                }),
+              ).catch(() => {
+                // Swallowed: observation is not control.
+              });
+            };
+
+            const reportObservation = async (
+              obsInput: PiSubagentObservationInput,
+            ): Promise<void> => {
+              if (
+                !obsInput ||
+                (obsInput.kind !== "started" &&
+                  obsInput.kind !== "detached" &&
+                  obsInput.kind !== "progress" &&
+                  obsInput.kind !== "heartbeat" &&
+                  obsInput.kind !== "terminal")
+              ) {
+                throw new Error(
+                  "Invalid observation kind: expected 'started', 'detached', 'progress', 'heartbeat', or 'terminal'",
+                );
+              }
+
+              const occurredAt =
+                typeof obsInput.occurredAt === "string" && obsInput.occurredAt.trim().length > 0
+                  ? obsInput.occurredAt.trim()
+                  : new Date().toISOString();
+
+              // Ticket 07 terminal path (T07-AC1..AC7): terminal evidence
+              // is control truth — it NEVER enters the progress coalescer
+              // (T07-AC6) and is journaled first; notification happens
+              // strictly post-commit. Unlike progress/heartbeat, a failed
+              // terminal write degrades control health and rejects the
+              // producer: an undurable terminal must never be swallowed
+              // into a silent success-shaped handle.
+              if (obsInput.kind === "terminal") {
+                const payload = obsInput.terminal;
+                if (
+                  !payload ||
+                  (payload.state !== "succeeded" && payload.state !== "failed") ||
+                  typeof payload.summary !== "string"
+                ) {
+                  throw new Error(
+                    "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
+                  );
+                }
+                const ingest = await Effect.runPromise(
+                  Effect.result(
+                    ingestPiSubagentTerminal({
+                      repository: piSubagentRepository,
+                      summaryMaxChars: serverConfig.piSubagentTerminalSummaryMaxChars,
+                      observation: {
+                        executionId: identities.executionId,
+                        attemptId: identities.attemptId,
+                        generation: identities.generation,
+                        state: payload.state,
+                        occurredAt,
+                        summary: payload.summary,
+                        transcriptRef:
+                          typeof payload.transcriptRef === "string" &&
+                          payload.transcriptRef.trim().length > 0
+                            ? payload.transcriptRef.trim()
+                            : undefined,
+                        outcomeState:
+                          typeof payload.outcomeState === "string" &&
+                          payload.outcomeState.trim().length > 0
+                            ? payload.outcomeState.trim()
+                            : undefined,
+                        diagnosticMessage:
+                          typeof payload.diagnosticMessage === "string" &&
+                          payload.diagnosticMessage.trim().length > 0
+                            ? payload.diagnosticMessage.trim()
+                            : undefined,
+                      },
+                      onTerminalPersisted: (event) => {
+                        // T07-AC1: completion delivery may begin only now
+                        // (journal + aggregate are committed). Ticket 08:
+                        // the durable completion-outbox entry was created
+                        // in the SAME transaction — announce the pending
+                        // completion on the operator runtime-event surface
+                        // (bounded payload only). Ticket 09 owns the
+                        // parent follow-up-turn consumer.
+                        offerRuntimeEvent({
+                          ...makeEventBase(context),
+                          type: "runtime.warning",
+                          payload: {
+                            message: `Pi subagent execution ${event.result.execution.observedState} with durable terminal evidence [${event.result.execution.executionId}]`,
+                            detail: {
+                              executionId: event.result.execution.executionId,
+                              observedState: event.result.execution.observedState,
+                            },
+                          },
+                          raw: {
+                            source: "pi.sdk.event",
+                            method: "subagents/terminal-settled",
+                            payload: {
+                              executionId: event.result.execution.executionId,
+                              observedState: event.result.execution.observedState,
+                              attemptId: event.result.execution.attemptId,
+                              generation: event.result.execution.generation,
+                            },
+                          },
+                        } satisfies ProviderRuntimeEvent);
+                        if (event.result.kind === "recorded") {
+                          // Ticket 09: the durable pending entry now has a
+                          // production consumer. When the session's
+                          // extension acknowledged completion-delivery
+                          // ownership (capability handshake), drive the
+                          // per-thread coordinator (batching + safe
+                          // boundary + follow-up). Otherwise the legacy
+                          // extension nudge owns delivery: disposition the
+                          // entry as legacy-delivered so it never
+                          // accumulates and Synara never double-notifies
+                          // (T09-AC5 mixed-version boundary).
+                          const ownsDelivery =
+                            subagentCapability.capabilities?.includes(
+                              "completion-delivery-ownership",
+                            ) === true;
+                          if (ownsDelivery && piSubagentCompletionCoordinator) {
+                            piSubagentCompletionCoordinator.onCompletionPending({
+                              parentThreadId: String(input.threadId),
+                            });
+                          } else {
+                            const outboxId = `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`;
+                            const now = new Date().toISOString();
+                            void Effect.runPromise(
+                              Effect.gen(function* () {
+                                yield* piSubagentRepository.markCompletionDelivered({
+                                  outboxId,
+                                  now,
+                                });
+                                yield* piSubagentRepository.markCompletionAcknowledged({
+                                  outboxId,
+                                  now,
+                                });
+                              }),
+                            ).catch(() => {
+                              // The entry stays recoverable-pending; Ticket
+                              // 10 startup recovery re-dispositions it.
+                            });
+                            offerRuntimeEvent({
+                              ...makeEventBase(context),
+                              type: "runtime.warning",
+                              payload: {
+                                message: `Pi subagent completion delivery owned by legacy extension [${event.result.execution.executionId}]`,
+                                detail: {
+                                  executionId: event.result.execution.executionId,
+                                  ownership: "legacy",
+                                },
+                              },
+                              raw: {
+                                source: "pi.sdk.event",
+                                method: "subagents/completion-legacy-owned",
+                                payload: {
+                                  executionId: event.result.execution.executionId,
+                                  attemptId: event.result.execution.attemptId,
+                                  generation: event.result.execution.generation,
+                                  outboxId,
+                                },
+                              },
+                            } satisfies ProviderRuntimeEvent);
+                          }
+                          offerRuntimeEvent({
+                            ...makeEventBase(context),
+                            type: "runtime.warning",
+                            payload: {
+                              message: `Pi subagent completion outbox pending [${event.result.execution.executionId}]`,
+                              detail: {
+                                executionId: event.result.execution.executionId,
+                                attemptId: event.result.execution.attemptId,
+                                generation: event.result.execution.generation,
+                                deliveryState: "pending",
+                              },
+                            },
+                            raw: {
+                              source: "pi.sdk.event",
+                              method: "subagents/completion-outbox-pending",
+                              payload: {
+                                executionId: event.result.execution.executionId,
+                                attemptId: event.result.execution.attemptId,
+                                generation: event.result.execution.generation,
+                                outboxId: `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`,
+                                terminalState: event.result.execution.observedState,
+                              },
+                            },
+                          } satisfies ProviderRuntimeEvent);
+                        }
+                      },
+                      onDiagnostic: (event) => {
+                        offerRuntimeEvent({
+                          ...makeEventBase(context),
+                          type: "runtime.warning",
+                          payload: {
+                            message: `Pi subagent terminal diagnostic [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                            detail: {
+                              executionId: event.executionId,
+                              diagnosticCode: event.diagnosticCode,
+                            },
+                          },
+                          raw: {
+                            source: "pi.sdk.event",
+                            method: "subagents/terminal-diagnostic",
+                            payload: {
+                              executionId: event.executionId,
+                              diagnosticCode: event.diagnosticCode,
+                            },
+                          },
+                        } satisfies ProviderRuntimeEvent);
+                      },
+                      onTerminalPersistenceFailed: (event) => {
+                        if (adapterControlHealth) {
+                          void Effect.runPromise(
+                            adapterControlHealth.markDegraded(
+                              `Failed to persist terminal evidence: ${event.diagnosticMessage}`,
+                              "pi_subagent_terminal_persistence_failed",
+                              { threadId: input.threadId },
+                            ),
+                          ).then((transition) => {
+                            if (transition) {
+                              offerSubagentControlHealthWarning(transition);
+                            }
+                          });
+                        }
+                      },
+                    }),
+                  ),
+                );
+                if (ingest._tag === "Failure") {
+                  const err = new Error("pi_subagent_terminal_persistence_failed");
+                  (err as any).diagnosticCode = "pi_subagent_terminal_persistence_failed";
+                  throw err;
+                }
+                return;
+              }
+
+              // Ticket 23 observation kinds take the coalescing/UPDATE-only
+              // paths — they never journal and never touch desired/observed
+              // state. Only started/detached keep the ticket-22 lifecycle
+              // journal semantics (T23-AC5: lifecycle is never discarded by
+              // the progress queue because it never enters it).
+              if (obsInput.kind === "progress") {
+                const progressJson =
+                  typeof obsInput.progressJson === "string" ? obsInput.progressJson : "";
+                await subagentProgressCoalescer.recordProgress(
+                  identities.executionId,
+                  progressJson,
+                  correlationToolCallId,
+                );
+                return;
+              }
+              if (obsInput.kind === "heartbeat") {
+                recordHeartbeatObservation(occurredAt);
+                return;
+              }
+
+              if (obsInput.kind === "started") {
+                if (startedPromise) {
+                  return startedPromise;
+                }
+                startedPromise = (async () => {
+                  const eventId = `evt_${identities.executionId}_${identities.attemptId}_gen${identities.generation}_seq2_started`;
+                  const metadata = {
+                    phase: "started",
+                    occurredAt,
+                    attachmentMode: "foreground",
+                    foregroundWaitMs,
+                  };
+                  const recordEffect = piSubagentRepository.recordLifecycleEvent({
+                    eventId,
+                    executionId: identities.executionId,
+                    attemptId: identities.attemptId,
+                    generation: identities.generation,
+                    sequence: 2,
+                    state: "running",
+                    occurredAt,
+                    metadataJson: JSON.stringify(metadata),
+                  });
+                  const result = await Effect.runPromise(Effect.result(recordEffect));
+                  if (result._tag === "Failure") {
+                    const error = result.failure;
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    if (adapterControlHealth) {
+                      const transition = await Effect.runPromise(
+                        adapterControlHealth.markDegraded(
+                          `Failed to persist execution lifecycle truth: ${errorMessage}`,
+                          "pi_subagent_lifecycle_persistence_failed",
+                          { threadId: input.threadId },
+                        ),
+                      );
+                      if (transition) {
+                        offerSubagentControlHealthWarning(transition);
+                      }
+                    }
+                    const err = new Error("pi_subagent_lifecycle_persistence_failed");
+                    (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
+                    throw err;
+                  }
+                })();
+                return startedPromise;
+              }
+
+              // detached observation
+              if (detachedPromise) {
+                return detachedPromise;
+              }
+              if (!startedPromise) {
+                throw new Error("Cannot record detached before started observation");
+              }
+              detachedPromise = (async () => {
+                // Sequence 2 must settle before sequence 3
+                await startedPromise;
+                const eventId = `evt_${identities.executionId}_${identities.attemptId}_gen${identities.generation}_seq3_detached`;
+                const metadata = {
+                  phase: "detached",
+                  occurredAt,
+                  attachmentMode: "foreground",
+                  foregroundWaitMs,
+                };
+                const recordEffect = piSubagentRepository.recordLifecycleEvent({
+                  eventId,
+                  executionId: identities.executionId,
+                  attemptId: identities.attemptId,
+                  generation: identities.generation,
+                  sequence: 3,
+                  state: "running",
+                  occurredAt,
+                  metadataJson: JSON.stringify(metadata),
+                });
+                const result = await Effect.runPromise(Effect.result(recordEffect));
+                if (result._tag === "Failure") {
+                  const error = result.failure;
+                  const errorMessage = error instanceof Error ? error.message : String(error);
+                  if (adapterControlHealth) {
+                    const transition = await Effect.runPromise(
+                      adapterControlHealth.markDegraded(
+                        `Failed to persist execution lifecycle truth: ${errorMessage}`,
+                        "pi_subagent_lifecycle_persistence_failed",
+                        { threadId: input.threadId },
+                      ),
+                    );
+                    if (transition) {
+                      offerSubagentControlHealthWarning(transition);
+                    }
+                  }
+                  const err = new Error("pi_subagent_lifecycle_persistence_failed");
+                  (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
+                  throw err;
+                }
+              })();
+              return detachedPromise;
+            };
+            return { reportObservation };
+          };
+
           const wrapAgentTool = (target: any) => {
             if (!target || target.__synaraAdmissionWrapped) {
               return;
@@ -3331,6 +3738,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             }
             const targetObj = typeof target.execute === "function" ? target : target.definition;
             const originalExecute = exec.bind(targetObj);
+            // Ticket 14: expose the ORIGINAL (pre-wrap) execute for the
+            // explicit-resume launcher — resume must not re-run admission.
+            (targetObj as any).__synaraOriginalExecute = originalExecute;
             target.__synaraAdmissionWrapped = true;
             targetObj.__synaraAdmissionWrapped = true;
             targetObj.execute = async (
@@ -3418,6 +3828,30 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 };
               }
 
+              // Ticket 14: persist the admission-time delegation triplet so
+              // an explicit resume can rebuild the exact four-string
+              // delegation request the Agent tool validates.
+              const delegationContext =
+                typeof params.context === "string" && params.context.trim().length > 0
+                  ? params.context.trim()
+                  : undefined;
+              const delegationLinkReferences =
+                typeof params.link_references === "string" &&
+                params.link_references.trim().length > 0
+                  ? params.link_references.trim()
+                  : undefined;
+              const delegationExpectedOutcome =
+                typeof params.expected_outcome === "string" &&
+                params.expected_outcome.trim().length > 0
+                  ? params.expected_outcome.trim()
+                  : undefined;
+              // Ticket 14: the resolved child model at tool-call time, so an
+              // explicit resume runs the new attempt on the SAME provider.
+              const ctxModel = ctx?.model;
+              const resolvedModel =
+                ctxModel && typeof ctxModel.provider === "string" && typeof ctxModel.id === "string"
+                  ? `${ctxModel.provider}/${ctxModel.id}`
+                  : undefined;
               const command: PiSubagentSpawnCommand = {
                 commandId: mintedCommandId,
                 clientCommandId: clientCommandKey,
@@ -3427,6 +3861,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 parentToolCallId: toolCallId,
                 agentType,
                 prompt,
+                ...(delegationContext === undefined ? {} : { delegationContext }),
+                ...(delegationLinkReferences === undefined ? {} : { delegationLinkReferences }),
+                ...(delegationExpectedOutcome === undefined ? {} : { delegationExpectedOutcome }),
+                ...(resolvedModel === undefined ? {} : { resolvedModel }),
                 mode,
                 cancellationScope: "parent_turn",
               };
@@ -3549,371 +3987,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               const foregroundWaitMs =
                 serverConfig.piSubagentForegroundWaitMs ?? DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
 
-              let startedPromise: Promise<void> | undefined;
-              let detachedPromise: Promise<void> | undefined;
-
-              const recordHeartbeatObservation = (occurredAt: string): void => {
-                // Fire-and-forget lease refresh (T23-AC3): heartbeat is
-                // observation, not control — failures are swallowed and never
-                // degrade control health, never reject the producer.
-                const leaseExpiresAt = new Date(
-                  Date.parse(occurredAt) + leaseDurationMs,
-                ).toISOString();
-                void Effect.runPromise(
-                  piSubagentRepository.recordHeartbeatObservation({
-                    executionId: admissionResult.executionId,
-                    occurredAt,
-                    leaseExpiresAt,
-                  }),
-                ).catch(() => {
-                  // Swallowed: observation is not control.
-                });
-              };
-
-              const reportObservation = async (
-                obsInput: PiSubagentObservationInput,
-              ): Promise<void> => {
-                if (
-                  !obsInput ||
-                  (obsInput.kind !== "started" &&
-                    obsInput.kind !== "detached" &&
-                    obsInput.kind !== "progress" &&
-                    obsInput.kind !== "heartbeat" &&
-                    obsInput.kind !== "terminal")
-                ) {
-                  throw new Error(
-                    "Invalid observation kind: expected 'started', 'detached', 'progress', 'heartbeat', or 'terminal'",
-                  );
-                }
-
-                const occurredAt =
-                  typeof obsInput.occurredAt === "string" && obsInput.occurredAt.trim().length > 0
-                    ? obsInput.occurredAt.trim()
-                    : new Date().toISOString();
-
-                // Ticket 07 terminal path (T07-AC1..AC7): terminal evidence
-                // is control truth — it NEVER enters the progress coalescer
-                // (T07-AC6) and is journaled first; notification happens
-                // strictly post-commit. Unlike progress/heartbeat, a failed
-                // terminal write degrades control health and rejects the
-                // producer: an undurable terminal must never be swallowed
-                // into a silent success-shaped handle.
-                if (obsInput.kind === "terminal") {
-                  const payload = obsInput.terminal;
-                  if (
-                    !payload ||
-                    (payload.state !== "succeeded" && payload.state !== "failed") ||
-                    typeof payload.summary !== "string"
-                  ) {
-                    throw new Error(
-                      "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
-                    );
-                  }
-                  const ingest = await Effect.runPromise(
-                    Effect.result(
-                      ingestPiSubagentTerminal({
-                        repository: piSubagentRepository,
-                        summaryMaxChars: serverConfig.piSubagentTerminalSummaryMaxChars,
-                        observation: {
-                          executionId: admissionResult.executionId,
-                          attemptId: admissionResult.attemptId,
-                          generation: admissionResult.generation,
-                          state: payload.state,
-                          occurredAt,
-                          summary: payload.summary,
-                          transcriptRef:
-                            typeof payload.transcriptRef === "string" &&
-                            payload.transcriptRef.trim().length > 0
-                              ? payload.transcriptRef.trim()
-                              : undefined,
-                          outcomeState:
-                            typeof payload.outcomeState === "string" &&
-                            payload.outcomeState.trim().length > 0
-                              ? payload.outcomeState.trim()
-                              : undefined,
-                          diagnosticMessage:
-                            typeof payload.diagnosticMessage === "string" &&
-                            payload.diagnosticMessage.trim().length > 0
-                              ? payload.diagnosticMessage.trim()
-                              : undefined,
-                        },
-                        onTerminalPersisted: (event) => {
-                          // T07-AC1: completion delivery may begin only now
-                          // (journal + aggregate are committed). Ticket 08:
-                          // the durable completion-outbox entry was created
-                          // in the SAME transaction — announce the pending
-                          // completion on the operator runtime-event surface
-                          // (bounded payload only). Ticket 09 owns the
-                          // parent follow-up-turn consumer.
-                          offerRuntimeEvent({
-                            ...makeEventBase(context),
-                            type: "runtime.warning",
-                            payload: {
-                              message: `Pi subagent execution ${event.result.execution.observedState} with durable terminal evidence [${event.result.execution.executionId}]`,
-                              detail: {
-                                executionId: event.result.execution.executionId,
-                                observedState: event.result.execution.observedState,
-                              },
-                            },
-                            raw: {
-                              source: "pi.sdk.event",
-                              method: "subagents/terminal-settled",
-                              payload: {
-                                executionId: event.result.execution.executionId,
-                                observedState: event.result.execution.observedState,
-                                attemptId: event.result.execution.attemptId,
-                                generation: event.result.execution.generation,
-                              },
-                            },
-                          } satisfies ProviderRuntimeEvent);
-                          if (event.result.kind === "recorded") {
-                            // Ticket 09: the durable pending entry now has a
-                            // production consumer. When the session's
-                            // extension acknowledged completion-delivery
-                            // ownership (capability handshake), drive the
-                            // per-thread coordinator (batching + safe
-                            // boundary + follow-up). Otherwise the legacy
-                            // extension nudge owns delivery: disposition the
-                            // entry as legacy-delivered so it never
-                            // accumulates and Synara never double-notifies
-                            // (T09-AC5 mixed-version boundary).
-                            const ownsDelivery =
-                              subagentCapability.capabilities?.includes(
-                                "completion-delivery-ownership",
-                              ) === true;
-                            if (ownsDelivery && piSubagentCompletionCoordinator) {
-                              piSubagentCompletionCoordinator.onCompletionPending({
-                                parentThreadId: String(input.threadId),
-                              });
-                            } else {
-                              const outboxId = `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`;
-                              const now = new Date().toISOString();
-                              void Effect.runPromise(
-                                Effect.gen(function* () {
-                                  yield* piSubagentRepository.markCompletionDelivered({
-                                    outboxId,
-                                    now,
-                                  });
-                                  yield* piSubagentRepository.markCompletionAcknowledged({
-                                    outboxId,
-                                    now,
-                                  });
-                                }),
-                              ).catch(() => {
-                                // The entry stays recoverable-pending; Ticket
-                                // 10 startup recovery re-dispositions it.
-                              });
-                              offerRuntimeEvent({
-                                ...makeEventBase(context),
-                                type: "runtime.warning",
-                                payload: {
-                                  message: `Pi subagent completion delivery owned by legacy extension [${event.result.execution.executionId}]`,
-                                  detail: {
-                                    executionId: event.result.execution.executionId,
-                                    ownership: "legacy",
-                                  },
-                                },
-                                raw: {
-                                  source: "pi.sdk.event",
-                                  method: "subagents/completion-legacy-owned",
-                                  payload: {
-                                    executionId: event.result.execution.executionId,
-                                    attemptId: event.result.execution.attemptId,
-                                    generation: event.result.execution.generation,
-                                    outboxId,
-                                  },
-                                },
-                              } satisfies ProviderRuntimeEvent);
-                            }
-                            offerRuntimeEvent({
-                              ...makeEventBase(context),
-                              type: "runtime.warning",
-                              payload: {
-                                message: `Pi subagent completion outbox pending [${event.result.execution.executionId}]`,
-                                detail: {
-                                  executionId: event.result.execution.executionId,
-                                  attemptId: event.result.execution.attemptId,
-                                  generation: event.result.execution.generation,
-                                  deliveryState: "pending",
-                                },
-                              },
-                              raw: {
-                                source: "pi.sdk.event",
-                                method: "subagents/completion-outbox-pending",
-                                payload: {
-                                  executionId: event.result.execution.executionId,
-                                  attemptId: event.result.execution.attemptId,
-                                  generation: event.result.execution.generation,
-                                  outboxId: `outbox_${event.result.execution.executionId}_${event.result.execution.attemptId}_gen${event.result.execution.generation}`,
-                                  terminalState: event.result.execution.observedState,
-                                },
-                              },
-                            } satisfies ProviderRuntimeEvent);
-                          }
-                        },
-                        onDiagnostic: (event) => {
-                          offerRuntimeEvent({
-                            ...makeEventBase(context),
-                            type: "runtime.warning",
-                            payload: {
-                              message: `Pi subagent terminal diagnostic [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
-                              detail: {
-                                executionId: event.executionId,
-                                diagnosticCode: event.diagnosticCode,
-                              },
-                            },
-                            raw: {
-                              source: "pi.sdk.event",
-                              method: "subagents/terminal-diagnostic",
-                              payload: {
-                                executionId: event.executionId,
-                                diagnosticCode: event.diagnosticCode,
-                              },
-                            },
-                          } satisfies ProviderRuntimeEvent);
-                        },
-                        onTerminalPersistenceFailed: (event) => {
-                          if (adapterControlHealth) {
-                            void Effect.runPromise(
-                              adapterControlHealth.markDegraded(
-                                `Failed to persist terminal evidence: ${event.diagnosticMessage}`,
-                                "pi_subagent_terminal_persistence_failed",
-                                { threadId: input.threadId },
-                              ),
-                            ).then((transition) => {
-                              if (transition) {
-                                offerSubagentControlHealthWarning(transition);
-                              }
-                            });
-                          }
-                        },
-                      }),
-                    ),
-                  );
-                  if (ingest._tag === "Failure") {
-                    const err = new Error("pi_subagent_terminal_persistence_failed");
-                    (err as any).diagnosticCode = "pi_subagent_terminal_persistence_failed";
-                    throw err;
-                  }
-                  return;
-                }
-
-                // Ticket 23 observation kinds take the coalescing/UPDATE-only
-                // paths — they never journal and never touch desired/observed
-                // state. Only started/detached keep the ticket-22 lifecycle
-                // journal semantics (T23-AC5: lifecycle is never discarded by
-                // the progress queue because it never enters it).
-                if (obsInput.kind === "progress") {
-                  const progressJson =
-                    typeof obsInput.progressJson === "string" ? obsInput.progressJson : "";
-                  await subagentProgressCoalescer.recordProgress(
-                    admissionResult.executionId,
-                    progressJson,
-                    toolCallId,
-                  );
-                  return;
-                }
-                if (obsInput.kind === "heartbeat") {
-                  recordHeartbeatObservation(occurredAt);
-                  return;
-                }
-
-                if (obsInput.kind === "started") {
-                  if (startedPromise) {
-                    return startedPromise;
-                  }
-                  startedPromise = (async () => {
-                    const eventId = `evt_${admissionResult.executionId}_${admissionResult.attemptId}_gen${admissionResult.generation}_seq2_started`;
-                    const metadata = {
-                      phase: "started",
-                      occurredAt,
-                      attachmentMode: "foreground",
-                      foregroundWaitMs,
-                    };
-                    const recordEffect = piSubagentRepository.recordLifecycleEvent({
-                      eventId,
-                      executionId: admissionResult.executionId,
-                      attemptId: admissionResult.attemptId,
-                      generation: admissionResult.generation,
-                      sequence: 2,
-                      state: "running",
-                      occurredAt,
-                      metadataJson: JSON.stringify(metadata),
-                    });
-                    const result = await Effect.runPromise(Effect.result(recordEffect));
-                    if (result._tag === "Failure") {
-                      const error = result.failure;
-                      const errorMessage = error instanceof Error ? error.message : String(error);
-                      if (adapterControlHealth) {
-                        const transition = await Effect.runPromise(
-                          adapterControlHealth.markDegraded(
-                            `Failed to persist execution lifecycle truth: ${errorMessage}`,
-                            "pi_subagent_lifecycle_persistence_failed",
-                            { threadId: input.threadId },
-                          ),
-                        );
-                        if (transition) {
-                          offerSubagentControlHealthWarning(transition);
-                        }
-                      }
-                      const err = new Error("pi_subagent_lifecycle_persistence_failed");
-                      (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
-                      throw err;
-                    }
-                  })();
-                  return startedPromise;
-                }
-
-                // detached observation
-                if (detachedPromise) {
-                  return detachedPromise;
-                }
-                if (!startedPromise) {
-                  throw new Error("Cannot record detached before started observation");
-                }
-                detachedPromise = (async () => {
-                  // Sequence 2 must settle before sequence 3
-                  await startedPromise;
-                  const eventId = `evt_${admissionResult.executionId}_${admissionResult.attemptId}_gen${admissionResult.generation}_seq3_detached`;
-                  const metadata = {
-                    phase: "detached",
-                    occurredAt,
-                    attachmentMode: "foreground",
-                    foregroundWaitMs,
-                  };
-                  const recordEffect = piSubagentRepository.recordLifecycleEvent({
-                    eventId,
-                    executionId: admissionResult.executionId,
-                    attemptId: admissionResult.attemptId,
-                    generation: admissionResult.generation,
-                    sequence: 3,
-                    state: "running",
-                    occurredAt,
-                    metadataJson: JSON.stringify(metadata),
-                  });
-                  const result = await Effect.runPromise(Effect.result(recordEffect));
-                  if (result._tag === "Failure") {
-                    const error = result.failure;
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    if (adapterControlHealth) {
-                      const transition = await Effect.runPromise(
-                        adapterControlHealth.markDegraded(
-                          `Failed to persist execution lifecycle truth: ${errorMessage}`,
-                          "pi_subagent_lifecycle_persistence_failed",
-                          { threadId: input.threadId },
-                        ),
-                      );
-                      if (transition) {
-                        offerSubagentControlHealthWarning(transition);
-                      }
-                    }
-                    const err = new Error("pi_subagent_lifecycle_persistence_failed");
-                    (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
-                    throw err;
-                  }
-                })();
-                return detachedPromise;
-              };
+              // Ticket 14: the shared per-attempt observation runtime (spawn
+              // path — post-admission identities; the explicit resume launcher
+              // re-enters the same factory with resumed identities).
+              const { reportObservation } = makeAttemptObservationRuntime(
+                {
+                  executionId: admissionResult.executionId,
+                  attemptId: admissionResult.attemptId,
+                  generation: admissionResult.generation,
+                },
+                toolCallId,
+                foregroundWaitMs,
+              );
 
               const binding: PiSubagentManagedForegroundBinding = Object.freeze({
                 executionId: admissionResult.executionId,
@@ -3974,6 +4059,125 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           const sessionAgentTool = allTools.find((t: any) => t.name === "Agent");
           if (sessionAgentTool) {
             wrapAgentTool(sessionAgentTool);
+          }
+
+          // Ticket 14 (T14-AC1/AC6): capture the ORIGINAL (unwrapped) Agent
+          // tool execute plus this session's per-attempt runtime for explicit
+          // resume. The resume coordinator has ALREADY run the shared
+          // admission gates and durably committed the new attempt (queued,
+          // advanced generation) — so the launcher must NOT re-enter the
+          // wrapped path (which mints a fresh admission) and instead starts
+          // the child exactly like a spawn post-admission: identities in
+          // params, observation/binding machinery attached, one child start.
+          // getAllTools() returns name/description snapshots (no execute); the
+          // wrap itself targeted the extension registry entry (or its
+          // `definition`), so the resume launcher resolves the original from
+          // exactly those objects.
+          const resumeToolEntry = loadedExtensions
+            .filter((ext: any) => ext && ext.tools instanceof Map && ext.tools.has("Agent"))
+            .map((ext: any) => ext.tools.get("Agent"))
+            .map((entry: any) => (typeof entry?.execute === "function" ? entry : entry?.definition))
+            .find((entry: any) => entry?.__synaraOriginalExecute !== undefined);
+          const originalAgentExecute =
+            typeof (resumeToolEntry as any)?.__synaraOriginalExecute === "function"
+              ? ((resumeToolEntry as any).__synaraOriginalExecute as (
+                  toolCallId: string,
+                  params: any,
+                  signal?: any,
+                  onUpdate?: any,
+                  ctx?: any,
+                ) => Promise<unknown>)
+              : undefined;
+          if (originalAgentExecute) {
+            context.piSubagentResumeLauncher = async (attempt) => {
+              // Ticket 14: rebuild the four-string delegation request from
+              // the durable admission triplet. Legacy rows (NULL columns)
+              // stamp explicit gap-naming placeholders — the resume never
+              // fabricates the original context silently.
+              const delegationContext =
+                attempt.delegationContext ??
+                "Original context was not persisted before resume support; this explicit resume replays the original task only.";
+              const delegationLinkReferences = attempt.delegationLinkReferences ?? "None";
+              const delegationExpectedOutcome =
+                attempt.delegationExpectedOutcome ??
+                "Outcome was not persisted before resume support; complete the original task.";
+              const childParams = {
+                subagent_type: attempt.agentType,
+                task: attempt.prompt,
+                context: delegationContext,
+                link_references: delegationLinkReferences,
+                expected_outcome: delegationExpectedOutcome,
+                run_in_background: attempt.mode === "background",
+                mode: attempt.mode,
+                executionId: attempt.executionId,
+                attemptId: attempt.attemptId,
+                generation: attempt.generation,
+              };
+              // Mirror the spawn path EXACTLY (post-admission): attach the
+              // per-attempt observation runtime + managed foreground binding
+              // so the resumed child reports started/running/progress/
+              // terminal through the same durable machinery as a fresh
+              // spawn. Without this the attempt stays `queued` forever —
+              // the durable journal never sees the child truth.
+              const foregroundWaitMs =
+                serverConfig.piSubagentForegroundWaitMs ?? DEFAULT_PI_SUBAGENT_FOREGROUND_WAIT_MS;
+              const { reportObservation } = makeAttemptObservationRuntime(
+                {
+                  executionId: attempt.executionId,
+                  attemptId: attempt.attemptId,
+                  generation: attempt.generation,
+                },
+                `resume_${attempt.executionId}_${attempt.attemptId}`,
+                foregroundWaitMs,
+              );
+              const binding: PiSubagentManagedForegroundBinding = Object.freeze({
+                executionId: attempt.executionId,
+                attemptId: attempt.attemptId,
+                generation: attempt.generation,
+                cancellationScope: "parent_turn" as const,
+                foregroundWaitMs,
+                reportObservation,
+                progress: { rateHz: progressRateHz },
+                heartbeat: { intervalMs: heartbeatIntervalMs, leaseMs: leaseDurationMs },
+              });
+              // The Agent tool execute contract expects an ExtensionContext-
+              // shaped object. The runner's live context is not exposed to
+              // adapters, so rebuild the exact fields the subagent runner
+              // consumes (agent-runner: cwd, sessionManager identity,
+              // system prompt, model + registry resolution, UI bridge) from
+              // the production session context.
+              // Same-provider replay: resolve the STORED model selection
+              // through the session registry; fall back to the current
+              // session model only when the stored selection is missing
+              // (legacy row) or no longer installed.
+              let replayModel =
+                attempt.resolvedModel !== undefined ? undefined : context.runtime.session.model;
+              if (attempt.resolvedModel !== undefined) {
+                const slash = attempt.resolvedModel.indexOf("/");
+                if (slash > 0) {
+                  replayModel =
+                    context.modelRegistry.find(
+                      attempt.resolvedModel.slice(0, slash),
+                      attempt.resolvedModel.slice(slash + 1),
+                    ) ?? context.runtime.session.model;
+                }
+              }
+              const baseCtx = {
+                ui: makePiExtensionUIContext(context),
+                cwd: context.session.cwd,
+                sessionManager: context.runtime.session.sessionManager,
+                modelRegistry: context.modelRegistry,
+                model: replayModel,
+                getSystemPrompt: () => "",
+              };
+              await originalAgentExecute(
+                `resume_${attempt.executionId}_${attempt.attemptId}`,
+                childParams,
+                undefined,
+                undefined,
+                attachPiSubagentManagedForegroundBinding(baseCtx, binding),
+              );
+            };
           }
         }
 
@@ -4363,6 +4567,163 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               cause,
             }),
         });
+      });
+
+    // Ticket 14 (T14-AC1..AC6): per-execution explicit resume driven by the
+    // orphaned execution card. The card command is authorization-correlated
+    // (thread existence + provider routing); the resume coordinator re-runs
+    // the SAME shared admission gates as a fresh spawn, durably commits the
+    // new attempt (queued, advanced generation) BEFORE any child start, then
+    // launches exactly one child attempt through this session's captured
+    // launcher. Unmanaged sessions or missing launchers surface a denial
+    // diagnostic instead of a silent no-op.
+    const resumePiSubagentExecution: PiAdapterShape["resumePiSubagentExecution"] = (
+      threadId,
+      executionId,
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        if (!context.subagentCapability?.isManaged || !piSubagentRepository) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail:
+              "Pi subagent managed execution is not enabled for this session; the execution cannot be resumed through the explicit path.",
+          });
+        }
+        const launcher = context.piSubagentResumeLauncher;
+        if (launcher === undefined) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail:
+              "No managed Agent tool launcher is available for this session; the execution cannot be resumed.",
+          });
+        }
+        if (adapterSnapshotQuery === undefined) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail: "Server projection snapshot is unavailable; resume cannot be authorized.",
+          });
+        }
+        // Server truth only: the trusted project derives from the orchestration
+        // snapshot thread — never from the command or the execution row.
+        const snapshotForResume = yield* Effect.result(adapterSnapshotQuery.getSnapshot());
+        if (snapshotForResume._tag === "Failure") {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail: "Server projection snapshot failed to load; resume cannot be authorized.",
+          });
+        }
+        const resumeThread = snapshotForResume.success.threads.find((t) => t.id === threadId);
+        if (!resumeThread) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail: `Parent thread '${threadId}' not found in server projection.`,
+          });
+        }
+        const trustedProjectId = resumeThread.projectId;
+        const outcome = yield* resumePiSubagentExecutionCoordinator({
+          executionId,
+          threadId: String(threadId),
+          sessionCapability: context.subagentCapability,
+          snapshotQuery: adapterSnapshotQuery,
+          repository: piSubagentRepository,
+          ...(adapterControlHealth === undefined ? {} : { controlHealth: adapterControlHealth }),
+          onHealthTransition: (transition) => {
+            offerSubagentControlHealthWarning(transition);
+          },
+          trustedContext: {
+            trustedThreadId: threadId,
+            trustedProjectId,
+            trustedActiveTurnId: context.activeTurnId ?? null,
+            trustedProvider: PROVIDER,
+            mcpAuthority: context.mcpAuthority ?? null,
+          },
+          ...(mcpSessionAuthority === undefined ? {} : { authorityRegistry: mcpSessionAuthority }),
+          admissionPolicy: {
+            providerConcurrency:
+              serverConfig.piSubagentProviderConcurrency ??
+              DEFAULT_PI_SUBAGENT_PROVIDER_CONCURRENCY,
+            serverQueueCap:
+              serverConfig.piSubagentServerQueueCap ?? DEFAULT_PI_SUBAGENT_SERVER_QUEUE_CAP,
+            projectQueueCap:
+              serverConfig.piSubagentProjectQueueCap ?? DEFAULT_PI_SUBAGENT_PROJECT_QUEUE_CAP,
+          },
+          launchChildAttempt: (attempt) =>
+            launcher({
+              executionId: attempt.executionId,
+              attemptId: attempt.attemptId,
+              generation: attempt.generation,
+              agentType: attempt.execution.agentType,
+              prompt: attempt.execution.prompt,
+              mode: attempt.execution.mode,
+              ...(attempt.execution.delegationContext === undefined
+                ? {}
+                : { delegationContext: attempt.execution.delegationContext }),
+              ...(attempt.execution.delegationLinkReferences === undefined
+                ? {}
+                : { delegationLinkReferences: attempt.execution.delegationLinkReferences }),
+              ...(attempt.execution.delegationExpectedOutcome === undefined
+                ? {}
+                : { delegationExpectedOutcome: attempt.execution.delegationExpectedOutcome }),
+              ...(attempt.execution.resolvedModel === undefined
+                ? {}
+                : { resolvedModel: attempt.execution.resolvedModel }),
+            }),
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "subagents/resume-execution",
+                detail: toMessage(cause, "Failed to run the explicit subagent execution resume."),
+                cause,
+              }),
+          ),
+        );
+        offerRuntimeEvent({
+          ...makeEventBase(context),
+          type: "runtime.warning",
+          payload: {
+            message: `Pi subagent execution resume settled [${outcome.kind}]: ${outcome.executionId}`,
+            detail: {
+              executionId: outcome.executionId,
+              outcome: outcome.kind,
+              ...("attemptId" in outcome ? { attemptId: outcome.attemptId } : {}),
+              ...("diagnosticCode" in outcome ? { diagnosticCode: outcome.diagnosticCode } : {}),
+            },
+          },
+          raw: {
+            source: "pi.sdk.event",
+            method: "subagents/resume-settled",
+            payload: {
+              executionId: outcome.executionId,
+              outcome: outcome.kind,
+              ...("attemptId" in outcome ? { attemptId: outcome.attemptId } : {}),
+              ...("generation" in outcome ? { generation: outcome.generation } : {}),
+              ...("diagnosticCode" in outcome ? { diagnosticCode: outcome.diagnosticCode } : {}),
+            },
+          },
+        } satisfies ProviderRuntimeEvent);
+        if (outcome.kind !== "resumed" && outcome.kind !== "already_applied") {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "subagents/resume-execution",
+            detail: `Pi subagent resume denied [${outcome.kind}]: ${
+              "rejectionReason" in outcome && typeof outcome.rejectionReason === "string"
+                ? outcome.rejectionReason
+                : "diagnosticMessage" in outcome && typeof outcome.diagnosticMessage === "string"
+                  ? outcome.diagnosticMessage
+                  : "error" in outcome && typeof outcome.error === "string"
+                    ? outcome.error
+                    : `execution ${outcome.executionId}`
+            }`,
+          });
+        }
       });
 
     // Ticket 11 (T11-AC6): per-execution durable cancel driven by the
@@ -5022,6 +5383,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       steerTurn,
       interruptTurn,
       cancelPiSubagentExecution,
+      resumePiSubagentExecution,
       respondToRequest: (threadId) => respondUnsupported(threadId, "request/respond"),
       respondToUserInput,
       stopSession,

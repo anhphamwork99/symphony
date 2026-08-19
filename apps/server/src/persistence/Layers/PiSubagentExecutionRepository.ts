@@ -56,6 +56,10 @@ interface ExecutionRow {
   readonly parentToolCallId: string | null;
   readonly agentType: string;
   readonly prompt: string;
+  readonly delegationContext: string | null;
+  readonly delegationLinkReferences: string | null;
+  readonly delegationExpectedOutcome: string | null;
+  readonly resolvedModel: string | null;
   readonly mode: PiSubagentTransportMode;
   readonly cancellationScope: PiSubagentCancellationScope;
   readonly desiredState: PiSubagentLifecycleState;
@@ -93,6 +97,18 @@ function rowToExecutionRecord(row: ExecutionRow): PiSubagentExecutionRecord {
     parentToolCallId: row.parentToolCallId ?? null,
     agentType: row.agentType,
     prompt: row.prompt,
+    ...(row.delegationContext === null || row.delegationContext === undefined
+      ? {}
+      : { delegationContext: row.delegationContext }),
+    ...(row.delegationLinkReferences === null || row.delegationLinkReferences === undefined
+      ? {}
+      : { delegationLinkReferences: row.delegationLinkReferences }),
+    ...(row.delegationExpectedOutcome === null || row.delegationExpectedOutcome === undefined
+      ? {}
+      : { delegationExpectedOutcome: row.delegationExpectedOutcome }),
+    ...(row.resolvedModel === null || row.resolvedModel === undefined
+      ? {}
+      : { resolvedModel: row.resolvedModel }),
     mode: row.mode,
     cancellationScope: row.cancellationScope,
     desiredState: row.desiredState,
@@ -118,6 +134,10 @@ const executionColumns = (sql: SqlClient.SqlClient) => sql`
   parent_tool_call_id AS "parentToolCallId",
   agent_type AS "agentType",
   prompt,
+  delegation_context AS "delegationContext",
+  delegation_link_references AS "delegationLinkReferences",
+  delegation_expected_outcome AS "delegationExpectedOutcome",
+  resolved_model AS "resolvedModel",
   mode,
   cancellation_scope AS "cancellationScope",
   desired_state AS "desiredState",
@@ -395,6 +415,12 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           const rejectionReason = input.rejectionReason ?? null;
           const clientCommandId = input.clientCommandId ?? null;
           const subject = input.subject ?? null;
+          // Ticket 14 durable delegation replay triplet (NULL on legacy or
+          // when the caller did not capture the delegation fields).
+          const delegationContext = input.delegationContext ?? null;
+          const delegationLinkReferences = input.delegationLinkReferences ?? null;
+          const delegationExpectedOutcome = input.delegationExpectedOutcome ?? null;
+          const resolvedModel = input.resolvedModel ?? null;
 
           // Atomic insert into lifecycle journal and executions: either both
           // the sequence-1 journal event and the execution aggregate commit,
@@ -440,6 +466,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               parent_tool_call_id,
               agent_type,
               prompt,
+              delegation_context,
+              delegation_link_references,
+              delegation_expected_outcome,
+              resolved_model,
               mode,
               cancellation_scope,
               desired_state,
@@ -464,6 +494,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
               ${parentToolCallId},
               ${input.agentType},
               ${input.prompt},
+              ${delegationContext},
+              ${delegationLinkReferences},
+              ${delegationExpectedOutcome},
+              ${resolvedModel},
               ${mode},
               ${cancellationScope},
               ${desiredState},
@@ -488,6 +522,16 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             parentToolCallId,
             agentType: input.agentType,
             prompt: input.prompt,
+            ...(delegationContext === null
+              ? {}
+              : { delegationContext: delegationContext as string }),
+            ...(delegationLinkReferences === null
+              ? {}
+              : { delegationLinkReferences: delegationLinkReferences as string }),
+            ...(delegationExpectedOutcome === null
+              ? {}
+              : { delegationExpectedOutcome: delegationExpectedOutcome as string }),
+            ...(resolvedModel === null ? {} : { resolvedModel: resolvedModel as string }),
             mode,
             cancellationScope,
             desiredState,
@@ -2991,6 +3035,180 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       );
 
   /**
+   * Ticket 14 explicit resume settlement (T14-AC1/AC2/AC5). One transaction:
+   * dedup (deterministic eventId
+   * `resume_<exec>_<expectedAttempt>_gen<expectedGen>` scoped to the SOURCE
+   * attempt/generation plus the sequence key) -> execution lookup -> fence
+   * (stale_generation when the aggregate advanced) -> state guard (only
+   * `orphaned` resumes) -> journal insert (band 80, disjoint from watchdog
+   * band 70–74 and recorded under the NEW
+   * attempt/generation) -> guarded aggregate UPDATE onto the new attempt
+   * BEFORE any child starts.
+   *
+   * The new attempt begins its own journal sequence space (migration 100:
+   * `UNIQUE(execution_id, attempt_id, generation, sequence)`), resets the
+   * observation columns (heartbeat/lease/progress - no stale evidence from
+   * the superseded attempt), and re-binds the parent turn so parent-turn Stop
+   * covers the resumed child. Late events from the superseded attempt remain
+   * generation-fenced by `recordLifecycleEvent`'s gate: journaled as history,
+   * never mutating the new aggregate (T14-AC2).
+   */
+  const recordResumeEventBase: PiSubagentExecutionRepositoryShape["recordResumeEvent"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          // Deterministic per SOURCE attempt/generation: replaying the same
+          // resume (retry, double dispatch) hits the dedup and returns the
+          // already-created attempt instead of minting a second one.
+          const eventId = `resume_${input.executionId}_${input.expectedAttemptId}_gen${input.expectedGeneration}`;
+            // Ticket 14 owns sequence 80. Ticket 15 reserves 70–74 for
+            // watchdog stages that may run on this newly resumed attempt.
+            const sequence = 80;
+          const metadataJson = JSON.stringify({
+            phase: "resumed",
+            priorAttemptId: input.expectedAttemptId,
+            priorGeneration: input.expectedGeneration,
+            newAttemptId: input.newAttemptId,
+            newGeneration: input.expectedGeneration + 1,
+            parentTurnId: input.parentTurnId,
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.expectedAttemptId,
+            generation: input.expectedGeneration,
+            sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordResumeEvent:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            // Idempotent replay: the new attempt already exists - return the
+            // committed aggregate; NO second attempt, NO child.
+            return {
+              kind: "already_applied" as const,
+              execution,
+            };
+          }
+
+          // The resume targets the listed attempt/generation only: a
+          // concurrent resume or reconciliation that already advanced the
+          // aggregate is never overwritten (fence, T14-AC2).
+          if (
+            execution.attemptId !== input.expectedAttemptId ||
+            execution.generation !== input.expectedGeneration
+          ) {
+            return {
+              kind: "stale_generation" as const,
+              execution,
+            };
+          }
+
+          // Only an orphaned execution is resumable: running/cancelling have
+          // a live owner path, and terminal truth is never reversed
+          // (T14-AC4 denial creates no child - refused without mutation).
+          if (execution.observedState !== "orphaned") {
+            return {
+              kind: "invalid_state" as const,
+              execution,
+            };
+          }
+
+          // Journal FIRST, under the NEW attempt/generation, with its own
+            // sequence space (sequence 80 = the resume band).
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.newAttemptId,
+            generation: input.expectedGeneration + 1,
+            sequence,
+            state: "queued",
+            occurredAt: input.occurredAt,
+            diagnosticCode: "pi_subagent_resumed",
+            diagnosticMessage: input.diagnosticMessage ?? null,
+            metadataJson,
+          });
+
+          yield* sql`
+            UPDATE pi_subagent_executions
+            SET
+              attempt_id = ${input.newAttemptId},
+              generation = ${input.expectedGeneration + 1},
+              parent_turn_id = ${input.parentTurnId},
+              desired_state = 'running',
+              observed_state = 'queued',
+              diagnostic_code = 'pi_subagent_resumed',
+              rejection_reason = ${input.diagnosticMessage ?? null},
+              last_heartbeat_at = NULL,
+              lease_expires_at = NULL,
+              last_progress_json = NULL,
+              last_progress_at = NULL,
+              updated_at = ${input.occurredAt}
+            WHERE execution_id = ${input.executionId}
+              AND attempt_id = ${input.expectedAttemptId}
+              AND generation = ${input.expectedGeneration}
+              AND observed_state = 'orphaned'
+          `;
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return {
+            kind: "recorded" as const,
+            execution: refreshed,
+          };
+        }),
+      )
+      .pipe(
+        Effect.catch((err) =>
+          Effect.gen(function* () {
+            // Concurrent same-identity resume raced the insert: replay the
+            // dedup answer instead of surfacing a constraint failure.
+            const eventId = `resume_${input.executionId}_${input.expectedAttemptId}_gen${input.expectedGeneration}`;
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.expectedAttemptId,
+              generation: input.expectedGeneration,
+              sequence: 80,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordResumeEvent:dedup-recheck",
+                ),
+              ),
+            );
+            const executionRows = yield* getByIdInternal(input.executionId).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordResumeEvent:execution-recheck",
+                ),
+              ),
+            );
+            if (existing.length > 0 && executionRows.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                execution: rowToExecutionRecord(executionRows[0]!),
+              };
+            }
+            return yield* Effect.fail(
+              toPersistenceSqlError("PiSubagentExecutionRepository.recordResumeEvent:insert")(err),
+            );
+          }),
+        ),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordResumeEvent:insert"),
+        ),
+      );
+
+  /**
    * Ticket 13 wall-time expiry trigger (T13-AC3). Journal-only transaction:
    * dedup (deterministic eventId `walltime_<exec>_<attempt>_gen<gen>`, band
    * 60) → execution lookup → attempt/generation fence → journal insert with
@@ -3466,7 +3684,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   // notifications fire only for committed lifecycle truth. journalSequence
   // mirrors the deterministic band of the committing event (admission=1,
   // lifecycle event = input.sequence, cancel intent=90, cancel ack=92
-  // child-ack / 91 owner-death, terminal ingest=40, orphan=50).
+  // child-ack / 91 owner-death, terminal ingest=40, orphan=50, resume=80).
   const recordAdmission: PiSubagentExecutionRepositoryShape["recordAdmission"] = (input) =>
     recordAdmissionBase(input).pipe(
       Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 1)),
@@ -3499,6 +3717,11 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   const recordOrphanedEvent: PiSubagentExecutionRepositoryShape["recordOrphanedEvent"] = (input) =>
     recordOrphanedEventBase(input).pipe(
       Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 50)),
+    );
+
+  const recordResumeEvent: PiSubagentExecutionRepositoryShape["recordResumeEvent"] = (input) =>
+    recordResumeEventBase(input).pipe(
+      Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 80)),
     );
 
   // Review R4 (informational, closed cheaply): completion-outbox delivery
@@ -3594,6 +3817,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     supersedeCompletionDispatchBatch,
     listNonTerminalExecutions,
     recordOrphanedEvent,
+    recordResumeEvent,
     recordWallTimeExpiryEvent,
     recordWatchdogStageEvent,
     getTelemetrySnapshot,

@@ -19,6 +19,7 @@ import {
   ProviderInterruptTurnInput,
   ProviderStopTaskInput,
   ProviderCancelPiSubagentExecutionInput,
+  ProviderResumePiSubagentExecutionInput,
   ProviderBackgroundTaskInput,
   ProviderSteerSubagentInput,
   ProviderRespondToRequestInput,
@@ -2333,6 +2334,47 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         ),
       );
 
+    /**
+     * Ticket 14 (T14-AC1/AC4/AC6): explicitly resume ONE orphaned managed Pi
+     * subagent execution via the explicit-only resume path. Denials (unknown
+     * execution, non-orphaned state, gate refusal, unsupported provider,
+     * inactive runtime) surface as validation errors — visible without state
+     * corruption; the card keeps rendering durable execution truth.
+     */
+    const resumePiSubagentExecution: ProviderServiceShape["resumePiSubagentExecution"] = (
+      rawInput,
+    ) =>
+      decodeInputOrValidationError({
+        operation: "ProviderService.resumePiSubagentExecution",
+        schema: ProviderResumePiSubagentExecutionInput,
+        payload: rawInput,
+      }).pipe(
+        Effect.flatMap((input) =>
+          lifecycle.runCurrent(input.threadId, () =>
+            Effect.gen(function* () {
+              const routed = yield* resolveRoutableSession({
+                threadId: input.threadId,
+                operation: "ProviderService.resumePiSubagentExecution",
+                allowRecovery: false,
+              });
+              if (!routed.isActive) {
+                return yield* toValidationError(
+                  "ProviderService.resumePiSubagentExecution",
+                  `Cannot resume subagent execution '${input.executionId}' because the provider runtime is not active.`,
+                );
+              }
+              if (!routed.adapter.resumePiSubagentExecution) {
+                return yield* toValidationError(
+                  "ProviderService.resumePiSubagentExecution",
+                  `Provider '${routed.adapter.provider}' does not support resuming a managed subagent execution.`,
+                );
+              }
+              yield* routed.adapter.resumePiSubagentExecution(input.threadId, input.executionId);
+            }),
+          ),
+        ),
+      );
+
     const backgroundTask: ProviderServiceShape["backgroundTask"] = (rawInput) =>
       decodeInputOrValidationError({
         operation: "ProviderService.backgroundTask",
@@ -3000,6 +3042,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       interruptTurn,
       stopTask,
       cancelPiSubagentExecution,
+      resumePiSubagentExecution,
       backgroundTask,
       steerSubagent,
       respondToRequest,

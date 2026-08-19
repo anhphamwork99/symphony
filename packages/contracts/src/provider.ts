@@ -169,6 +169,20 @@ export const ProviderCancelPiSubagentExecutionInput = Schema.Struct({
 export type ProviderCancelPiSubagentExecutionInput =
   typeof ProviderCancelPiSubagentExecutionInput.Type;
 
+/**
+ * Ticket 14 explicit resume input (T14-AC1/AC4/AC6). Resumes ONE orphaned
+ * managed Pi subagent execution: the logical executionId is kept, a new
+ * attemptId is minted, the generation advances, and the same authorization,
+ * active-turn, quota, and admission gates as a fresh spawn run before any
+ * child starts. Execution identity is correlation, not authority.
+ */
+export const ProviderResumePiSubagentExecutionInput = Schema.Struct({
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+});
+export type ProviderResumePiSubagentExecutionInput =
+  typeof ProviderResumePiSubagentExecutionInput.Type;
+
 export const ProviderSteerSubagentInput = Schema.Struct({
   threadId: ThreadId,
   providerThreadId: TrimmedNonEmptyString,

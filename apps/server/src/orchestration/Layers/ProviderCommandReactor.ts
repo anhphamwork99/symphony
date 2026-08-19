@@ -723,6 +723,7 @@ const make = Effect.gen(function* () {
       | "provider.task.stop.failed"
       | "provider.task.background.failed"
       | "provider.subagent-execution.cancel.failed"
+      | "provider.subagent-execution.resume.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
@@ -2889,6 +2890,48 @@ const make = Effect.gen(function* () {
       );
   });
 
+  const processPiSubagentExecutionResumeRequested = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.pi-subagent-execution-resume-requested" }>,
+  ) {
+    // Ticket 14 (T14-AC1/AC4/AC6): drive the explicit-only resume. The
+    // decider already gated thread existence; the reactor adds the same
+    // session-liveness denial as cancel, and every remaining denial
+    // (unknown execution, non-orphaned state, gate refusal, unsupported
+    // provider) surfaces from the provider layer as a visible failure
+    // without corrupting execution truth — the card keeps rendering the
+    // durable aggregate. This event is produced ONLY by the explicit user
+    // resume command; no startup/reconciliation path can emit it.
+    const providerThread = yield* resolveProviderSessionThread(event.payload.threadId);
+    const hasSession = providerThread?.session && providerThread.session.status !== "stopped";
+    if (!providerThread || !hasSession) {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.subagent-execution.resume.failed",
+        summary: "Subagent execution resume failed",
+        detail: "No active provider session is bound to this thread.",
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+    }
+    yield* providerService
+      .resumePiSubagentExecution({
+        threadId: event.payload.threadId,
+        executionId: event.payload.executionId,
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.subagent-execution.resume.failed",
+            summary: "Subagent execution resume failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+      );
+  });
+
   const processTaskBackgroundRequested = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.task-background-requested" }>,
   ) {
@@ -3663,6 +3706,9 @@ const make = Effect.gen(function* () {
           return;
         case "thread.pi-subagent-execution-cancel-requested":
           yield* processPiSubagentExecutionCancelRequested(event);
+          return;
+        case "thread.pi-subagent-execution-resume-requested":
+          yield* processPiSubagentExecutionResumeRequested(event);
           return;
         case "thread.task-background-requested":
           yield* processTaskBackgroundRequested(event);

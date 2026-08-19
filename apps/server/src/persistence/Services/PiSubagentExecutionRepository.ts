@@ -37,6 +37,11 @@ export interface RecordPiSubagentAdmissionInput {
   readonly parentToolCallId?: string | null;
   readonly agentType: string;
   readonly prompt: string;
+  /** Ticket 14 durable delegation replay triplet (optional for legacy rows). */
+  readonly delegationContext?: string;
+  readonly delegationLinkReferences?: string;
+  readonly delegationExpectedOutcome?: string;
+  readonly resolvedModel?: string;
   readonly mode?: PiSubagentTransportMode;
   readonly cancellationScope?: PiSubagentCancellationScope;
   readonly state: "accepted" | "rejected";
@@ -596,6 +601,56 @@ export type PiSubagentOrphanedRecordResult =
       readonly execution: PiSubagentExecutionRecord;
     };
 
+/**
+ * Ticket 14 explicit resume input (T14-AC1). One transaction journals the
+ * resume event (sequence band 80, disjoint from watchdog band 70–74, with a
+ * deterministic idempotent eventId scoped to
+ * the CURRENT attempt/generation) and moves the aggregate onto the new
+ * attempt BEFORE any child starts: `attempt_id` = newAttemptId,
+ * `generation` = expectedGeneration + 1, observed `queued`, desired
+ * `running`. Prior-attempt evidence stays in the journal; the new attempt's
+ * lease/progress observation columns are reset (no stale heartbeat, lease, or
+ * progress from the superseded attempt). The parent turn is re-bound to the
+ * turn that authorized the resume so parent-turn Stop covers the new child.
+ */
+export interface RecordPiSubagentResumeEventInput {
+  readonly executionId: string;
+  /** Attempt the resume targets (must match the current aggregate). */
+  readonly expectedAttemptId: string;
+  /** Generation the resume targets (must match the current aggregate). */
+  readonly expectedGeneration: number;
+  /** Freshly minted attempt identity for the new attempt. */
+  readonly newAttemptId: string;
+  /** Current active parent turn that authorized the resume (re-binds scope). */
+  readonly parentTurnId: string | null;
+  readonly occurredAt: string;
+  /** Stable diagnostic message for the resume journal event (optional). */
+  readonly diagnosticMessage?: string | undefined;
+}
+
+export type PiSubagentResumeRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** Replayed resume identity: the same source attempt/generation already
+       * resumed — the existing (new) aggregate is returned and NO second
+       * attempt is created. */
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "stale_generation";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** The execution is not in the resumable `orphaned` state (running,
+       * cancelling, or terminal) — resume is refused without mutation. */
+      readonly kind: "invalid_state";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export interface PiSubagentExecutionRepositoryShape {
   readonly recordAdmission: (
     input: RecordPiSubagentAdmissionInput,
@@ -931,6 +986,19 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordOrphanedEvent: (
     input: RecordPiSubagentOrphanedEventInput,
   ) => Effect.Effect<PiSubagentOrphanedRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 14 explicit resume settlement (T14-AC1/AC2/AC5): journals the
+   * resume event (band 80, disjoint from watchdog band 70–74, with a
+   * deterministic idempotent eventId scoped to the
+   * current attempt/generation) and moves the aggregate onto the new attempt
+   * with observed `queued` BEFORE any child starts. Prior-attempt evidence
+   * stays in the journal; late events from the superseded attempt remain
+   * generation-fenced (ignored, counted). Requires the aggregate to still be
+   * on the given attempt/generation and observed `orphaned`.
+   */
+  readonly recordResumeEvent: (
+    input: RecordPiSubagentResumeEventInput,
+  ) => Effect.Effect<PiSubagentResumeRecordResult, PiSubagentExecutionRepositoryError>;
   /**
    * Ticket 13 wall-time expiry trigger (T13-AC3): journal-only insert
    * (band 60, deterministic idempotent eventId, `pi_subagent_walltime_expired`

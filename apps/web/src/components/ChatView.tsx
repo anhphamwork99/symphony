@@ -2926,6 +2926,12 @@ export default function ChatView({
   const [piSubagentCancelPendingExecutionId, setPiSubagentCancelPendingExecutionId] = useState<
     string | null
   >(null);
+  // Ticket 14 (T14-AC6): explicit resume of ONE orphaned execution. The
+  // button dispatches the durable resume command — the ONLY resume trigger;
+  // no reconnect/refresh path replays it.
+  const [piSubagentResumePendingExecutionId, setPiSubagentResumePendingExecutionId] = useState<
+    string | null
+  >(null);
   // Ticket 12 (T12-AC3/AC4): the authorized result/transcript view opens per
   // execution from the card strip; null = closed. The read adapters are
   // plain functions (no hand-written useCallback) so React Compiler owns
@@ -2980,6 +2986,39 @@ export default function ChatView({
         })
         .finally(() => {
           setPiSubagentCancelPendingExecutionId(null);
+        });
+    },
+    [activeThread],
+  );
+  // Ticket 14 (T14-AC6): dispatch the explicit resume command. Denial is
+  // visible without state corruption — the card keeps rendering durable
+  // truth and flips only when the server's journal-first resume lands as a
+  // `thread.pi-subagent-execution-updated` event.
+  const onResumePiSubagentExecution = useCallback(
+    (card: PiSubagentExecutionCard) => {
+      const api = readNativeApi();
+      if (!api || !activeThread) return;
+      setPiSubagentResumePendingExecutionId(card.executionId);
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.pi-subagent-execution.resume",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          executionId: card.executionId,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not resume the subagent execution",
+            description:
+              error instanceof Error
+                ? error.message
+                : "The resume request failed. The execution state is unchanged.",
+          });
+        })
+        .finally(() => {
+          setPiSubagentResumePendingExecutionId(null);
         });
     },
     [activeThread],
@@ -11359,6 +11398,8 @@ export default function ChatView({
                   legacyAgentToolActive={piSubagentLegacyAgentToolActive}
                   onCancelExecution={onCancelPiSubagentExecution}
                   cancelPendingExecutionId={piSubagentCancelPendingExecutionId}
+                  onResumeExecution={onResumePiSubagentExecution}
+                  resumePendingExecutionId={piSubagentResumePendingExecutionId}
                   onOpenExecutionDetails={onOpenPiSubagentExecutionDetails}
                   attachedToPrevious={
                     showComposerLiveChangesHeader ||

@@ -14,7 +14,7 @@
 import type { PiSubagentExecutionCard } from "@synara/contracts";
 import { useEffect, useState } from "react";
 
-import { FileIcon, LoaderIcon, StopIcon } from "~/lib/icons";
+import { FileIcon, LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
 import {
   PI_SUBAGENT_LEGACY_UNMANAGED_LABEL,
   piSubagentExecutionStatePresentation,
@@ -54,6 +54,9 @@ interface ExecutionRowProps {
   readonly expanded: boolean;
   readonly onCancel: (card: PiSubagentExecutionCard) => void;
   readonly cancelPending: boolean;
+  /** Ticket 14 (T14-AC6): explicit resume of ONE orphaned execution. */
+  readonly onResume?: (card: PiSubagentExecutionCard) => void;
+  readonly resumePending?: boolean;
   /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
   readonly onOpenDetails: (card: PiSubagentExecutionCard) => void;
 }
@@ -64,6 +67,8 @@ function ExecutionRow({
   expanded,
   onCancel,
   cancelPending,
+  onResume,
+  resumePending,
   onOpenDetails,
 }: ExecutionRowProps) {
   const presentation = piSubagentExecutionStatePresentation(card.observedState);
@@ -118,6 +123,27 @@ function ExecutionRow({
               <LoaderIcon className="size-3 animate-spin" />
             ) : (
               <StopIcon className="size-3" />
+            )}
+          </Button>
+        ) : null}
+        {/* Ticket 14 (T14-AC6): explicit resume affordance — ONLY an orphaned
+            execution offers it. The dispatch is the explicit user action; no
+            automatic path produces the resume command. */}
+        {card.observedState === "orphaned" && onResume ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="size-6 shrink-0"
+            disabled={resumePending === true}
+            title="Resume execution with a new attempt"
+            aria-label={`Resume execution ${card.executionId}`}
+            onClick={() => onResume(card)}
+          >
+            {resumePending === true ? (
+              <LoaderIcon className="size-3 animate-spin" />
+            ) : (
+              <RotateCcwIcon className="size-3" />
             )}
           </Button>
         ) : null}
@@ -192,6 +218,9 @@ export interface PiSubagentExecutionCardStripProps {
   readonly legacyAgentToolActive: boolean;
   readonly onCancelExecution: (card: PiSubagentExecutionCard) => void;
   readonly cancelPendingExecutionId: string | null;
+  /** Ticket 14 (T14-AC6): explicit resume dispatcher (orphaned cards only). */
+  readonly onResumeExecution?: (card: PiSubagentExecutionCard) => void;
+  readonly resumePendingExecutionId?: string | null;
   /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
   readonly onOpenExecutionDetails?: (card: PiSubagentExecutionCard) => void;
   readonly attachedToPrevious?: boolean;
@@ -202,6 +231,8 @@ export function PiSubagentExecutionCardStrip({
   legacyAgentToolActive,
   onCancelExecution,
   cancelPendingExecutionId,
+  onResumeExecution,
+  resumePendingExecutionId,
   onOpenExecutionDetails,
   attachedToPrevious: attachedToPreviousProp,
 }: PiSubagentExecutionCardStripProps) {
@@ -266,6 +297,8 @@ export function PiSubagentExecutionCardStrip({
             }
             onCancel={onCancelExecution}
             cancelPending={cancelPendingExecutionId === card.executionId}
+            {...(onResumeExecution !== undefined ? { onResume: onResumeExecution } : {})}
+            resumePending={resumePendingExecutionId === card.executionId}
             onOpenDetails={onOpenExecutionDetails ?? (() => undefined)}
           />
         ))}

@@ -3812,6 +3812,95 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("dispatches the explicit resume command for an orphaned execution card (T14-AC6)", async () => {
+    // Ticket 14: only the explicit user action (the resume button) produces
+    // the resume command — an orphaned snapshot alone dispatches nothing.
+    const restoreNativeApi = installDeterministicSendNativeApi();
+    let currentSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-execution-card-resume" as MessageId,
+      targetText: "execution card resume target",
+    });
+    const executionCard = {
+      executionId: "exec-browser-resume",
+      attemptId: "exec-browser-resume_att1",
+      generation: 2,
+      projectId: currentSnapshot.projects[0]!.id,
+      parentThreadId: THREAD_ID,
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: "running",
+      observedState: "orphaned",
+      createdAt: isoAt(2_800),
+      updatedAt: isoAt(2_900),
+    } as unknown as NonNullable<
+      OrchestrationReadModel["threads"][number]["piSubagentExecutions"]
+    >[number];
+    currentSnapshot = {
+      ...currentSnapshot,
+      threads: currentSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID ? { ...thread, piSubagentExecutions: [executionCard] } : thread,
+      ),
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: currentSnapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Managed subagent executions");
+          expect(document.body.textContent).toContain("Orphaned");
+        },
+        { timeout: 8_000, interval: 50 },
+      );
+
+      // Snapshot alone must NOT have dispatched any resume command.
+      const dispatchedBefore = wsRequests.filter(
+        (request) =>
+          "_tag" in request &&
+          request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+          (request as { command?: { type?: string } }).command?.type ===
+            "thread.pi-subagent-execution.resume",
+      );
+      expect(dispatchedBefore).toHaveLength(0);
+
+      const resumeButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            "[data-pi-subagent-execution-id='exec-browser-resume'] button[title='Resume execution with a new attempt']",
+          ),
+        "Expected the orphaned execution card resume affordance.",
+      );
+      const before = wsRequests.length;
+      resumeButton.click();
+      await vi.waitFor(
+        () => {
+          expect(wsRequests.length).toBeGreaterThan(before);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      const resumeRequest = wsRequests
+        .slice(before)
+        .find(
+          (request) =>
+            "_tag" in request &&
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            (request as { command?: { type?: string } }).command?.type ===
+              "thread.pi-subagent-execution.resume",
+        ) as { command?: { executionId?: string; threadId?: string } } | undefined;
+      expect(resumeRequest).toBeDefined();
+      expect(resumeRequest!.command!.executionId).toBe("exec-browser-resume");
+      expect(resumeRequest!.command!.threadId).toBe(THREAD_ID);
+    } finally {
+      restoreNativeApi();
+      await mounted.cleanup();
+    }
+  });
+
   it("renders the execution card strip from the snapshot and dispatches the durable cancel command", async () => {
     // Ticket 11 (T11-AC5/AC6): a snapshot carrying managed execution cards
     // renders the strip WITHOUT any live parent tool row (reconnect/refresh

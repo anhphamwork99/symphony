@@ -16,6 +16,7 @@ import { PiSubagentExecutionCardStrip } from "./PiSubagentExecutionCardStrip";
 vi.mock("~/lib/icons", () => ({
   FileIcon: () => null,
   LoaderIcon: () => null,
+  RotateCcwIcon: () => null,
   StopIcon: () => null,
 }));
 
@@ -165,6 +166,52 @@ describe("PiSubagentExecutionCardStrip (Ticket 11 component boundary)", () => {
     });
     expect(managedMarkup).not.toContain("Unmanaged (legacy)");
     expect(managedMarkup).toContain("data-pi-subagent-execution-id");
+  });
+
+  it("T14-AC6: explicit resume affordance renders ONLY for orphaned cards", () => {
+    const orphanedMarkup = render({
+      cards: [makeCard({ observedState: "orphaned", desiredState: "running" })],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+      onResumeExecution: () => {},
+      resumePendingExecutionId: null,
+    });
+    expect(orphanedMarkup).toContain("Resume execution with a new attempt");
+
+    // A running card never offers resume (it has a live owner path).
+    const runningMarkup = render({
+      cards: [makeCard({ observedState: "running" })],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+      onResumeExecution: () => {},
+      resumePendingExecutionId: null,
+    });
+    expect(runningMarkup).not.toContain("Resume execution with a new attempt");
+
+    // Terminal cards never offer resume.
+    const terminalMarkup = render({
+      cards: [makeCard({ observedState: "failed", desiredState: "failed" })],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+      onResumeExecution: () => {},
+      resumePendingExecutionId: null,
+    });
+    expect(terminalMarkup).not.toContain("Resume execution with a new attempt");
+  });
+
+  it("T14-AC6: resume pending keeps the affordance disabled while the explicit command is in flight", () => {
+    const markup = render({
+      cards: [makeCard({ observedState: "orphaned", desiredState: "running" })],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+      onResumeExecution: () => {},
+      resumePendingExecutionId: "exec-ui-1",
+    });
+    expect(markup).toContain('disabled=""');
   });
 
   it("renders nothing without cards and without a legacy session", () => {

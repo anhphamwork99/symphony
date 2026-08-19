@@ -1642,6 +1642,13 @@ function applyOrchestrationEvent(
       // `thread.turn-interrupt-requested` (best-effort, no projection).
       return state;
 
+    case "thread.pi-subagent-execution-resume-requested":
+      // Ticket 14 (T14-AC6): same intent discipline — the resume command is
+      // the explicit user action, but the card state changes ONLY when the
+      // server's durable resume (new attempt, queued) lands as an
+      // execution-updated event. A denial never mutates the card.
+      return state;
+
     case "thread.archived":
       return applyThreadUpdate(
         state,

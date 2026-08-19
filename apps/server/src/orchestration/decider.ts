@@ -1876,6 +1876,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.pi-subagent-execution.resume": {
+      // Ticket 14 (T14-AC4/AC6): thread existence is the decider-level gate;
+      // the SAME authorization/admission gates as a fresh spawn run in the
+      // provider layer against durable execution truth. Every denial
+      // (missing, non-orphaned, wrong thread, quota, authorization) surfaces
+      // as a visible diagnostic without corrupting execution state — and no
+      // automatic path can produce this event; it is explicit-only.
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.pi-subagent-execution-resume-requested",
+        payload: {
+          threadId: command.threadId,
+          executionId: command.executionId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.task.background": {
       yield* requireThread({
         readModel,

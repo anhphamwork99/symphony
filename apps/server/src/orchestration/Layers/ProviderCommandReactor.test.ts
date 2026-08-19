@@ -378,6 +378,9 @@ describe("ProviderCommandReactor", () => {
     const cancelPiSubagentExecution = vi.fn<ProviderServiceShape["cancelPiSubagentExecution"]>(
       () => Effect.void,
     );
+    const resumePiSubagentExecution = vi.fn<ProviderServiceShape["resumePiSubagentExecution"]>(
+      () => Effect.void,
+    );
     const backgroundTask = vi.fn<ProviderServiceShape["backgroundTask"]>(() => Effect.void);
     const hasLiveRuntimeTasks = vi.fn<NonNullable<ProviderServiceShape["hasLiveRuntimeTasks"]>>(
       () => Effect.succeed(false),
@@ -514,6 +517,7 @@ describe("ProviderCommandReactor", () => {
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       stopTask,
       cancelPiSubagentExecution,
+      resumePiSubagentExecution,
       backgroundTask,
       hasLiveRuntimeTasks,
       steerSubagent,
@@ -688,6 +692,7 @@ describe("ProviderCommandReactor", () => {
       interruptTurn,
       stopTask,
       cancelPiSubagentExecution,
+      resumePiSubagentExecution,
       backgroundTask,
       hasLiveRuntimeTasks,
       steerSubagent,

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   type OrchestrationReadModel,
+  type PiSubagentExecutionRecord,
   type PiSubagentNegotiatedCapability,
   type PiSubagentSpawnCommand,
   type PiSubagentSpawnResult,
@@ -200,6 +201,18 @@ const rejectedResult = (
         parentToolCallId: input.command.parentToolCallId ?? null,
         agentType: input.command.agentType,
         prompt: input.command.prompt,
+        ...(input.command.delegationContext === undefined
+          ? {}
+          : { delegationContext: input.command.delegationContext }),
+        ...(input.command.delegationLinkReferences === undefined
+          ? {}
+          : { delegationLinkReferences: input.command.delegationLinkReferences }),
+        ...(input.command.delegationExpectedOutcome === undefined
+          ? {}
+          : { delegationExpectedOutcome: input.command.delegationExpectedOutcome }),
+        ...(input.command.resolvedModel === undefined
+          ? {}
+          : { resolvedModel: input.command.resolvedModel }),
         ...(input.command.mode !== undefined ? { mode: input.command.mode } : {}),
         ...(input.command.cancellationScope !== undefined
           ? { cancellationScope: input.command.cancellationScope }
@@ -288,6 +301,258 @@ const runManagedAdmission = (
     runManagedAdmissionUnlocked(input, probeOptions),
   );
 
+/**
+ * Shared admission authorization gates (Ticket 14, T14-AC4): the exact
+ * provider-authority, ownership cross-check, projection-truth, approval,
+ * subject-authority, and resource-quota gates a fresh managed spawn runs —
+ * extracted so an explicit resume re-runs the SAME gates as a new spawn
+ * (spec Implementation Decision 32/33: authorization and resource admission
+ * apply to every control path). Pure with respect to durable state: a denial
+ * here persists nothing; the spawn path layers its durable rejected audit
+ * record on top, the resume path surfaces the denial without mutation
+ * (denial creates no child).
+ */
+export type PiSubagentAdmissionGateRejection = {
+  readonly ok: false;
+  readonly diagnosticCode: PiSubagentSpawnResult["diagnosticCode"];
+  readonly rejectionReason: string;
+};
+
+export type PiSubagentAdmissionGateOutcome =
+  | { readonly ok: true }
+  | PiSubagentAdmissionGateRejection;
+
+export interface AdmissionGateDeps {
+  readonly command: PiSubagentSpawnCommand;
+  readonly snapshotQuery: AdmissionSnapshotQuery;
+  readonly repository: PiSubagentExecutionRepositoryShape;
+  readonly trustedContext: TrustedAdmissionContext;
+  readonly authorityRegistry?: Pick<McpSessionAuthorityShape, "assertAdmittable"> | undefined;
+  readonly admissionPolicy?: PiSubagentAdmissionPolicy | null | undefined;
+}
+
+export const runAdmissionAuthorizationGates = (
+  deps: AdmissionGateDeps,
+): Effect.Effect<PiSubagentAdmissionGateOutcome, unknown> =>
+  Effect.gen(function* () {
+    const command = deps.command;
+    const trusted = deps.trustedContext;
+
+    // 3. Provider authority (server-minted adapter constant)
+    if (trusted.trustedProvider !== "pi") {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_provider_mismatch",
+        rejectionReason: `Provider mismatch: expected 'pi', received '${trusted.trustedProvider}'`,
+      };
+    }
+
+    // 4. Server-minted ownership cross-checks (defense in depth; identifiers
+    //    supplied by the extension never grant authority)
+    if (command.parentThreadId !== trusted.trustedThreadId) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason: `Thread authorization mismatch: command specified '${command.parentThreadId}', trusted context is '${trusted.trustedThreadId}'`,
+      };
+    }
+
+    if (command.projectId !== trusted.trustedProjectId) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_project_mismatch",
+        rejectionReason: `Project authorization mismatch: command specified '${command.projectId}', trusted context is '${trusted.trustedProjectId}'`,
+      };
+    }
+
+    if (
+      trusted.trustedActiveTurnId !== null &&
+      command.parentTurnId !== null &&
+      command.parentTurnId !== trusted.trustedActiveTurnId
+    ) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_active_turn_required",
+        rejectionReason: `Active turn mismatch: command specified '${command.parentTurnId}', trusted active turn is '${trusted.trustedActiveTurnId}'`,
+      };
+    }
+
+    // 5. Load server projection truth (thread/project/active-turn/approval).
+    //    A snapshot failure is a terminal denial: authority cannot be proven
+    //    from server truth.
+    const snapshotResult = yield* Effect.result(deps.snapshotQuery.getSnapshot());
+    if (snapshotResult._tag === "Failure") {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason:
+          "Server projection snapshot is unavailable; admission cannot be authorized",
+      };
+    }
+    const snapshot = snapshotResult.success;
+    const thread = snapshot.threads.find((t) => t.id === command.parentThreadId);
+
+    if (!thread) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason: `Parent thread '${command.parentThreadId}' not found in server projection`,
+      };
+    }
+
+    if (thread.archivedAt != null) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason: `Parent thread '${command.parentThreadId}' is archived`,
+      };
+    }
+
+    if (thread.projectId !== command.projectId) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_project_mismatch",
+        rejectionReason: `Project mismatch: thread belongs to '${thread.projectId}', command specified '${command.projectId}'`,
+      };
+    }
+
+    if (command.parentTurnId) {
+      // The test read-model fixture exposes the latest turn under `id` while
+      // the OrchestrationLatestTurn contract names it `turnId`; read both
+      // shapes so the parent-turn liveness check stays behavior-identical.
+      const latestTurnId = thread.latestTurn as unknown as {
+        readonly turnId?: TurnId;
+        readonly id?: TurnId;
+      } | null;
+      const hasActiveTurn =
+        thread.session?.activeTurnId === command.parentTurnId ||
+        (latestTurnId?.turnId === command.parentTurnId && thread.latestTurn?.state === "running") ||
+        (latestTurnId?.id === command.parentTurnId && thread.latestTurn?.state === "running");
+
+      if (!hasActiveTurn) {
+        return {
+          ok: false,
+          diagnosticCode: "pi_subagent_admission_active_turn_required",
+          rejectionReason: `Parent thread '${command.parentThreadId}' has no active turn matching '${command.parentTurnId}'`,
+        };
+      }
+    }
+
+    // 6. Approval gate (server truth, fail closed). The Pi provider session has
+    //    no approval gate (PiAdapter.respondToRequest is unsupported), so an
+    //    approval-required thread can never produce an approval receipt. Per
+    //    the existing gateless-provider precedent (BrowserDownloadApprovalRequired
+    //    / DeviceApprovalRequired), the work is refused before it runs rather
+    //    than silently auto-approved.
+    if (thread.runtimeMode === "approval-required") {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason:
+          "Managed subagent work requires explicit user approval, but this Pi provider session has no approval gate; the request was refused before it ran. Ask the user to approve the action or switch the thread out of approval-required mode.",
+      };
+    }
+
+    // 7. Subject authority via the live server registry (Decision 21). The
+    //    binding is re-validated at admission time: missing, revoked, expired
+    //    (auth or credential), stale-generation, or mismatched bindings all
+    //    fail closed with the registry's deterministic reason.
+    if (trusted.mcpAuthority === null) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason:
+          "No server-minted subject authority binding is bound to this Pi session; managed work is refused (missing-binding)",
+      };
+    }
+
+    if (deps.authorityRegistry === undefined) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason:
+          "MCP session authority registry is unavailable; the binding cannot be re-validated and managed work is refused",
+      };
+    }
+
+    const authorityFailure = deps.authorityRegistry.assertAdmittable(trusted.mcpAuthority, {
+      projectId: thread.projectId,
+      lifecycleGeneration: null,
+    });
+    if (authorityFailure !== null) {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_unauthorized",
+        rejectionReason: `Subject authority admission failed (${authorityFailure}): the server-minted MCP authority binding is not currently admittable`,
+      };
+    }
+
+    // 7b. Ticket 13 resource admission (T13-AC1/AC2/AC7): bounded
+    //     concurrency and queue caps, enforced before any child spawn and
+    //     after authorization so an exhausted budget is never confused with
+    //     an authorization diagnostic. The count is derived from durable
+    //     repository truth (restart-safe): every non-terminal execution
+    //     holding an admission slot. A counting failure fails closed — no
+    //     budget proof, no child.
+    const policy = normalizeAdmissionPolicy(deps.admissionPolicy);
+    const replayLookup = yield* Effect.result(deps.repository.getByCommandId(command.commandId));
+    if (replayLookup._tag === "Failure") {
+      return {
+        ok: false,
+        diagnosticCode: "pi_subagent_admission_quota_unavailable",
+        rejectionReason:
+          "Admission replay lookup is unavailable; quota cannot be proven and managed work is refused (fail-closed)",
+      };
+    }
+    // Exact/mismatched command replays must reach recordAdmission's identity
+    // logic even while the budget is full: replays start no child, so quota
+    // must not replace `already_applied` / identity-mismatch semantics.
+    const isReplay = Option.isSome(replayLookup.success);
+    if (!isReplay) {
+      const budgetRows = yield* Effect.result(deps.repository.listNonTerminalExecutions());
+      if (budgetRows._tag === "Failure") {
+        return {
+          ok: false,
+          diagnosticCode: "pi_subagent_admission_quota_unavailable",
+          rejectionReason:
+            "Admission budget count is unavailable; quota cannot be proven and managed work is refused (fail-closed)",
+        };
+      }
+      const admittedExecutions = budgetRows.success.filter((row) =>
+        ADMITTED_BUDGET_STATES.has(row.observedState),
+      );
+      const providerSessionAdmitted = admittedExecutions.filter(
+        (row) => row.parentThreadId === command.parentThreadId,
+      );
+      const projectAdmitted = admittedExecutions.filter(
+        (row) => row.projectId === command.projectId,
+      );
+      if (projectAdmitted.length >= policy.projectQueueCap) {
+        return {
+          ok: false,
+          diagnosticCode: "pi_subagent_admission_project_queue_saturated",
+          rejectionReason: `Project queue saturated: ${projectAdmitted.length} admitted executions for project '${command.projectId}' meet the configured cap ${policy.projectQueueCap}`,
+        };
+      }
+      if (admittedExecutions.length >= policy.serverQueueCap) {
+        return {
+          ok: false,
+          diagnosticCode: "pi_subagent_admission_server_queue_saturated",
+          rejectionReason: `Server queue saturated: ${admittedExecutions.length} admitted executions meet the server-wide cap ${policy.serverQueueCap}`,
+        };
+      }
+      if (providerSessionAdmitted.length >= policy.providerConcurrency) {
+        return {
+          ok: false,
+          diagnosticCode: "pi_subagent_admission_provider_concurrency_exhausted",
+          rejectionReason: `Provider-session concurrency exhausted: ${providerSessionAdmitted.length} admitted executions for thread '${command.parentThreadId}' meet the configured cap ${policy.providerConcurrency}`,
+        };
+      }
+    }
+
+    return { ok: true };
+  });
+
 const runManagedAdmissionUnlocked = (
   input: AdmitSubagentSpawnInput,
   probeOptions: { readonly recoveryProbe: boolean },
@@ -306,237 +571,44 @@ const runManagedAdmissionUnlocked = (
       threadId: command.parentThreadId,
     };
 
-    // 3. Provider authority (server-minted adapter constant)
-    if (trusted.trustedProvider !== "pi") {
-      return {
-        status: "rejected",
-        executionId: `exec_rejected_${randomUUID()}`,
-        attemptId: `att_rejected_${randomUUID()}`,
-        generation: 1,
-        state: "rejected",
-        diagnosticCode: "pi_subagent_admission_provider_mismatch",
-        rejectionReason: `Provider mismatch: expected 'pi', received '${trusted.trustedProvider}'`,
-      } satisfies PiSubagentSpawnResult;
-    }
-
-    // 4. Server-minted ownership cross-checks (defense in depth; identifiers
-    //    supplied by the extension never grant authority)
-    if (command.parentThreadId !== trusted.trustedThreadId) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        `Thread authorization mismatch: command specified '${command.parentThreadId}', trusted context is '${trusted.trustedThreadId}'`,
-      );
-    }
-
-    if (command.projectId !== trusted.trustedProjectId) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_project_mismatch",
-        `Project authorization mismatch: command specified '${command.projectId}', trusted context is '${trusted.trustedProjectId}'`,
-      );
-    }
-
-    if (
-      trusted.trustedActiveTurnId !== null &&
-      command.parentTurnId !== null &&
-      command.parentTurnId !== trusted.trustedActiveTurnId
-    ) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_active_turn_required",
-        `Active turn mismatch: command specified '${command.parentTurnId}', trusted active turn is '${trusted.trustedActiveTurnId}'`,
-      );
-    }
-
-    // 5. Load server projection truth (thread/project/active-turn/approval).
-    //    A snapshot failure is a terminal rejection: authority cannot be
-    //    proven from server truth.
-    const snapshotResult = yield* Effect.result(input.snapshotQuery.getSnapshot());
-    if (snapshotResult._tag === "Failure") {
-      return {
-        status: "rejected",
-        executionId: `exec_rejected_${randomUUID()}`,
-        attemptId: `att_rejected_${randomUUID()}`,
-        generation: 1,
-        state: "rejected",
-        diagnosticCode: "pi_subagent_admission_unauthorized",
-        rejectionReason:
-          "Server projection snapshot is unavailable; admission cannot be authorized",
-      } satisfies PiSubagentSpawnResult;
-    }
-    const snapshot = snapshotResult.success;
-    const thread = snapshot.threads.find((t) => t.id === command.parentThreadId);
-
-    if (!thread) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        `Parent thread '${command.parentThreadId}' not found in server projection`,
-      );
-    }
-
-    if (thread.archivedAt != null) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        `Parent thread '${command.parentThreadId}' is archived`,
-      );
-    }
-
-    if (thread.projectId !== command.projectId) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_project_mismatch",
-        `Project mismatch: thread belongs to '${thread.projectId}', command specified '${command.projectId}'`,
-      );
-    }
-
-    if (command.parentTurnId) {
-      // The test read-model fixture exposes the latest turn under `id` while
-      // the OrchestrationLatestTurn contract names it `turnId`; read both
-      // shapes so the parent-turn liveness check stays behavior-identical.
-      const latestTurnId = thread.latestTurn as unknown as {
-        readonly turnId?: TurnId;
-        readonly id?: TurnId;
-      } | null;
-      const hasActiveTurn =
-        thread.session?.activeTurnId === command.parentTurnId ||
-        (latestTurnId?.turnId === command.parentTurnId && thread.latestTurn?.state === "running") ||
-        (latestTurnId?.id === command.parentTurnId && thread.latestTurn?.state === "running");
-
-      if (!hasActiveTurn) {
-        return yield* rejectedResult(
-          input,
-          computeCommandFingerprint({
-            subject: trusted.mcpAuthority?.subject,
-            projectId: command.projectId,
-            parentThreadId: command.parentThreadId,
-            parentTurnId: command.parentTurnId,
-            parentToolCallId: command.parentToolCallId,
-          }),
-          now,
-          "pi_subagent_admission_active_turn_required",
-          `Parent thread '${command.parentThreadId}' has no active turn matching '${command.parentTurnId}'`,
-        );
-      }
-    }
-
-    // 6. Approval gate (server truth, fail closed). The Pi provider session has
-    //    no approval gate (PiAdapter.respondToRequest is unsupported), so an
-    //    approval-required thread can never produce an approval receipt. Per
-    //    the existing gateless-provider precedent (BrowserDownloadApprovalRequired
-    //    / DeviceApprovalRequired), the spawn is refused before it runs rather
-    //    than silently auto-approved.
-    if (thread.runtimeMode === "approval-required") {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority?.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        "Managed subagent spawn requires explicit user approval, but this Pi provider session has no approval gate; the spawn was refused before it ran. Ask the user to approve the action or switch the thread out of approval-required mode.",
-      );
-    }
-
-    // 7. Subject authority via the live server registry (Decision 21). The
-    //    binding is re-validated at admission time: missing, revoked, expired
-    //    (auth or credential), stale-generation, or mismatched bindings all
-    //    fail closed with the registry's deterministic reason.
-    if (trusted.mcpAuthority === null) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: null,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        "No server-minted subject authority binding is bound to this Pi session; managed spawn is refused (missing-binding)",
-      );
-    }
-
-    if (input.authorityRegistry === undefined) {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_unauthorized",
-        "MCP session authority registry is unavailable; the binding cannot be re-validated and managed spawn is refused",
-      );
-    }
-
-    const authorityFailure = input.authorityRegistry.assertAdmittable(trusted.mcpAuthority, {
-      projectId: thread.projectId,
-      lifecycleGeneration: null,
+    // Gates 3-7b (Ticket 14): the shared authorization + quota gates that an
+    // explicit resume re-runs identically. A denial here persists the
+    // durable rejected audit record through the spawn's rejectedResult
+    // (spawn commands own a fresh execution row); resume persists nothing.
+    const gateOutcome = yield* runAdmissionAuthorizationGates({
+      command,
+      snapshotQuery: input.snapshotQuery,
+      repository: input.repository,
+      trustedContext: trusted,
+      authorityRegistry: input.authorityRegistry,
+      admissionPolicy: input.admissionPolicy,
     });
-    if (authorityFailure !== null) {
+    if (!gateOutcome.ok) {
       return yield* rejectedResult(
         input,
         computeCommandFingerprint({
-          subject: trusted.mcpAuthority.subject,
+          subject: trusted.mcpAuthority?.subject,
+          projectId: command.projectId,
+          parentThreadId: command.parentThreadId,
+          parentTurnId: command.parentTurnId,
+          parentToolCallId: command.parentToolCallId,
+        }),
+        now,
+        gateOutcome.diagnosticCode,
+        gateOutcome.rejectionReason,
+      );
+    }
+
+    // Narrowing the gates already proved (TS cannot see through the
+    // extracted gate chain): a passed gate run guarantees a live subject
+    // binding and a present authority registry.
+    const mcpAuthority = trusted.mcpAuthority;
+    const authorityRegistry = input.authorityRegistry;
+    if (mcpAuthority === null || authorityRegistry === undefined) {
+      return yield* rejectedResult(
+        input,
+        computeCommandFingerprint({
+          subject: trusted.mcpAuthority?.subject,
           projectId: command.projectId,
           parentThreadId: command.parentThreadId,
           parentTurnId: command.parentTurnId,
@@ -544,115 +616,14 @@ const runManagedAdmissionUnlocked = (
         }),
         now,
         "pi_subagent_admission_unauthorized",
-        `Subject authority admission failed (${authorityFailure}): the server-minted MCP authority binding is not currently admittable`,
+        "Admission gates passed without a provable subject authority binding; refusing (fail-closed)",
       );
-    }
-
-    // 7b. Ticket 13 resource admission (T13-AC1/AC2/AC7): bounded
-    //     concurrency and queue caps, enforced before any child spawn and
-    //     after authorization so an exhausted budget is never confused with
-    //     an authorization diagnostic. The count is derived from durable
-    //     repository truth (restart-safe): every non-terminal execution
-    //     holding an admission slot. A counting failure fails closed — no
-    //     budget proof, no child.
-    const policy = normalizeAdmissionPolicy(input.admissionPolicy);
-    const replayLookup = yield* Effect.result(input.repository.getByCommandId(command.commandId));
-    if (replayLookup._tag === "Failure") {
-      return yield* rejectedResult(
-        input,
-        computeCommandFingerprint({
-          subject: trusted.mcpAuthority.subject,
-          projectId: command.projectId,
-          parentThreadId: command.parentThreadId,
-          parentTurnId: command.parentTurnId,
-          parentToolCallId: command.parentToolCallId,
-        }),
-        now,
-        "pi_subagent_admission_quota_unavailable",
-        "Admission replay lookup is unavailable; quota cannot be proven and managed spawn is refused (fail-closed)",
-      );
-    }
-    // Exact/mismatched command replays must reach recordAdmission's identity
-    // logic even while the budget is full: replays start no child, so quota
-    // must not replace `already_applied` / identity-mismatch semantics.
-    const isReplay = Option.isSome(replayLookup.success);
-    if (!isReplay) {
-      const budgetRows = yield* Effect.result(input.repository.listNonTerminalExecutions());
-      if (budgetRows._tag === "Failure") {
-        return yield* rejectedResult(
-          input,
-          computeCommandFingerprint({
-            subject: trusted.mcpAuthority.subject,
-            projectId: command.projectId,
-            parentThreadId: command.parentThreadId,
-            parentTurnId: command.parentTurnId,
-            parentToolCallId: command.parentToolCallId,
-          }),
-          now,
-          "pi_subagent_admission_quota_unavailable",
-          "Admission budget count is unavailable; quota cannot be proven and managed spawn is refused (fail-closed)",
-        );
-      }
-      const admittedExecutions = budgetRows.success.filter((row) =>
-        ADMITTED_BUDGET_STATES.has(row.observedState),
-      );
-      const providerSessionAdmitted = admittedExecutions.filter(
-        (row) => row.parentThreadId === command.parentThreadId,
-      );
-      const projectAdmitted = admittedExecutions.filter(
-        (row) => row.projectId === command.projectId,
-      );
-      if (projectAdmitted.length >= policy.projectQueueCap) {
-        return yield* rejectedResult(
-          input,
-          computeCommandFingerprint({
-            subject: trusted.mcpAuthority.subject,
-            projectId: command.projectId,
-            parentThreadId: command.parentThreadId,
-            parentTurnId: command.parentTurnId,
-            parentToolCallId: command.parentToolCallId,
-          }),
-          now,
-          "pi_subagent_admission_project_queue_saturated",
-          `Project queue saturated: ${projectAdmitted.length} admitted executions for project '${command.projectId}' meet the configured cap ${policy.projectQueueCap}`,
-        );
-      }
-      if (admittedExecutions.length >= policy.serverQueueCap) {
-        return yield* rejectedResult(
-          input,
-          computeCommandFingerprint({
-            subject: trusted.mcpAuthority.subject,
-            projectId: command.projectId,
-            parentThreadId: command.parentThreadId,
-            parentTurnId: command.parentTurnId,
-            parentToolCallId: command.parentToolCallId,
-          }),
-          now,
-          "pi_subagent_admission_server_queue_saturated",
-          `Server queue saturated: ${admittedExecutions.length} admitted executions meet the configured server-wide cap ${policy.serverQueueCap}`,
-        );
-      }
-      if (providerSessionAdmitted.length >= policy.providerConcurrency) {
-        return yield* rejectedResult(
-          input,
-          computeCommandFingerprint({
-            subject: trusted.mcpAuthority.subject,
-            projectId: command.projectId,
-            parentThreadId: command.parentThreadId,
-            parentTurnId: command.parentTurnId,
-            parentToolCallId: command.parentToolCallId,
-          }),
-          now,
-          "pi_subagent_admission_provider_concurrency_exhausted",
-          `Provider-session concurrency exhausted: ${providerSessionAdmitted.length} admitted executions for thread '${command.parentThreadId}' meet the configured cap ${policy.providerConcurrency}`,
-        );
-      }
     }
 
     // 8. Authorized: mint identities and durably record the execution, first
     //    attempt, and accepted lifecycle truth atomically (T20-AC2).
     const fingerprint = computeCommandFingerprint({
-      subject: trusted.mcpAuthority.subject,
+      subject: mcpAuthority.subject,
       projectId: command.projectId,
       parentThreadId: command.parentThreadId,
       parentTurnId: command.parentTurnId,
@@ -669,13 +640,23 @@ const runManagedAdmissionUnlocked = (
         commandId: command.commandId,
         commandFingerprint: fingerprint,
         clientCommandId: command.clientCommandId ?? null,
-        subject: trusted.mcpAuthority.subject,
+        subject: mcpAuthority.subject,
         projectId: command.projectId,
         parentThreadId: command.parentThreadId,
         parentTurnId: command.parentTurnId,
         parentToolCallId: command.parentToolCallId ?? null,
         agentType: command.agentType,
         prompt: command.prompt,
+        ...(command.delegationContext === undefined
+          ? {}
+          : { delegationContext: command.delegationContext }),
+        ...(command.delegationLinkReferences === undefined
+          ? {}
+          : { delegationLinkReferences: command.delegationLinkReferences }),
+        ...(command.delegationExpectedOutcome === undefined
+          ? {}
+          : { delegationExpectedOutcome: command.delegationExpectedOutcome }),
+        ...(command.resolvedModel === undefined ? {} : { resolvedModel: command.resolvedModel }),
         ...(command.mode !== undefined ? { mode: command.mode } : {}),
         ...(command.cancellationScope !== undefined
           ? { cancellationScope: command.cancellationScope }

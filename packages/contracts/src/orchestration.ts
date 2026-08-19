@@ -1493,6 +1493,25 @@ const ThreadPiSubagentExecutionCancelCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Ticket 14 explicit resume command (client → server, T14-AC1/AC4/AC6).
+ * Resumes ONE orphaned managed Pi subagent execution through the explicit
+ * user-action path: same executionId, a new attemptId, an advanced
+ * generation, and the same authorization/admission gates as a fresh spawn.
+ * The decider validates thread existence; execution-scoped applicability
+ * (missing, non-orphaned, wrong thread, gate denial) is settled by the
+ * reactor/provider layer and surfaced as a denial diagnostic without
+ * corrupting execution state. Nothing resumes automatically — this command
+ * is the ONLY resume trigger.
+ */
+const ThreadPiSubagentExecutionResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.pi-subagent-execution.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   SpaceCreateCommand,
   SpaceMetaUpdateCommand,
@@ -1529,6 +1548,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadPiSubagentExecutionCancelCommand,
+  ThreadPiSubagentExecutionResumeCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1570,6 +1590,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadPiSubagentExecutionCancelCommand,
+  ThreadPiSubagentExecutionResumeCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1742,6 +1763,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.activity-appended",
   "thread.pi-subagent-execution-updated",
   "thread.pi-subagent-execution-cancel-requested",
+  "thread.pi-subagent-execution-resume-requested",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -2047,6 +2069,12 @@ export const ThreadPiSubagentExecutionCancelRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadPiSubagentExecutionResumeRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  executionId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 export const ThreadTaskBackgroundRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   toolUseId: TrimmedNonEmptyString,
@@ -2318,6 +2346,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.pi-subagent-execution-cancel-requested"),
     payload: ThreadPiSubagentExecutionCancelRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.pi-subagent-execution-resume-requested"),
+    payload: ThreadPiSubagentExecutionResumeRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -182,6 +182,17 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<void, TError>;
 
   /**
+   * Ticket 14 (T14-AC1/AC4/AC6): explicitly resume ONE orphaned managed Pi
+   * subagent execution — same executionId, a new attemptId, an advanced
+   * generation, the same admission gates as a fresh spawn, then exactly one
+   * new child attempt. Optional — only the Pi adapter implements it.
+   */
+  readonly resumePiSubagentExecution?: (
+    threadId: ThreadId,
+    executionId: string,
+  ) => Effect.Effect<void, TError>;
+
+  /**
    * Move one in-flight foreground task to the background when the adapter supports it.
    */
   readonly backgroundTask?: (threadId: ThreadId, toolUseId: string) => Effect.Effect<void, TError>;
