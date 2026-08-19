@@ -603,8 +603,9 @@ export interface RecordPiSubagentTeardownRequestedInput {
 }
 
 /**
- * Ticket 16 teardown outcome (T16-AC2/AC3/AC5, band 76). `proven` is the
- * ONLY outcome that settles and fences: one guarded transaction journals
+ * Ticket 16 teardown outcome (T16-AC2/AC3/AC5): band 76 `proven`, band 77
+ * `survivors`, or band 78 `owner_unproven`. `proven` is the ONLY outcome
+ * that settles and fences: one guarded transaction journals
  * the outcome row and moves the aggregate to terminal `cancelled` while
  * ADVANCING the generation by one (the teardown fence, Decision 0021 F3 —
  * late events from the fenced attempt/generation are ignored and counted).
@@ -1085,9 +1086,10 @@ export interface PiSubagentExecutionRepositoryShape {
     input: RecordPiSubagentTeardownRequestedInput,
   ) => Effect.Effect<PiSubagentWatchdogStageRecordResult, PiSubagentExecutionRepositoryError>;
   /**
-   * Ticket 16 teardown outcome (T16-AC2/AC3/AC5, band 76). `proven` settles
-   * `cancelled` AND advances the generation (the teardown fence) in the same
-   * transaction; `survivors` / `owner_unproven` journal-only — the honest
+   * Ticket 16 teardown outcome (T16-AC2/AC3/AC5): band 76 `proven`, band 77
+   * `survivors`, or band 78 `owner_unproven`. `proven` settles `cancelled`
+   * AND advances the generation (the teardown fence) in the same transaction;
+   * `survivors` / `owner_unproven` journal-only — the honest
    * uncertain-cleanup projection stays `cancelling`.
    */
   readonly recordTeardownOutcome: (

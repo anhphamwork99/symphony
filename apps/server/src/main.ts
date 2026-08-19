@@ -512,46 +512,25 @@ const makeServerProgram = (input: CliInput) => {
     // Start the retention loop after the server is live so startup can serve
     // existing history first, then hide inactive threads from the app in the background.
     yield* startThreadRetentionJob(orchestrationEngine, projectionSnapshotQuery);
-    // Ticket 10: startup reconciliation for managed Pi subagent executions.
-    // Runs AFTER the server is live (history is served first) and BEFORE any
-    // new Pi session can exist — at boot no in-process Pi child can be proven
-    // alive, so this pass restores terminal outcomes from durable journal
-    // truth and orphans every remaining non-terminal execution with the
-    // owner-loss diagnostic (Decision 0013 F3: journal-first outbox recovery
-    // is invoked here and its recovered pending entries enter the fenced
-    // delivery path owned by Ticket 09's consumer).
-    yield* Effect.forkChild(
-      Effect.gen(function* () {
-        const repository = yield* PiSubagentExecutionRepository;
-        const outbox = yield* recoverCompletionOutbox({ repository });
-        const reconciliation = yield* reconcilePiSubagentExecutions({
-          repository,
-          mode: "restart",
-          summaryMaxChars: config.piSubagentTerminalSummaryMaxChars,
-        });
-        if (
-          outbox.recovered > 0 ||
-          outbox.failures > 0 ||
-          reconciliation.outcomes.length > 0 ||
-          reconciliation.failures.length > 0
-        ) {
-          yield* Effect.logInfo("pi.subagent.startup-reconciliation", {
-            outboxRecovered: outbox.recovered,
-            outboxFailures: outbox.failures,
-            reconciled: reconciliation.outcomes.length,
-            settlementFailures: reconciliation.failures.length,
-            outcomes: reconciliation.outcomes.map((outcome) => outcome.kind),
-          });
-        }
-        // Ticket 16: bounded restart-side orphan-process discovery for
-        // teardown-handoff executions (T16-AC7). At boot no live owned
-        // process supervisor can exist, so ownership cannot be proven for
-        // any surviving process — nothing is killed; the pass records the
-        // bounded `owner_unproven` evidence once per handed-off execution
-        // and surfaces the uncertain-cleanup diagnostic to the operator log.
-        const teardown = yield* Effect.tryPromise(() =>
-          runPiSubagentProcessTeardown({
-            repository,
+      // Startup recovery runs AFTER the server is live (history is served
+      // first) and BEFORE any new Pi session can exist. Decision 0013 F3 keeps
+      // journal-first outbox recovery first. Decision 0027 then requires
+      // Ticket 16 to record honest no-owner teardown evidence while the
+      // band-74 attempt/generation is still current; Ticket 10 owner-loss
+      // reconciliation follows and retains its accepted orphan fence.
+      yield* Effect.forkChild(
+        Effect.gen(function* () {
+          const repository = yield* PiSubagentExecutionRepository;
+          const outbox = yield* recoverCompletionOutbox({ repository });
+          // Ticket 16: bounded restart-side orphan-process discovery for
+          // teardown-handoff executions (T16-AC7). At boot no live owned
+          // process supervisor can exist, so ownership cannot be proven for
+          // any surviving process — nothing is killed. This MUST run before
+          // Ticket 10 advances the generation, otherwise the current band-74
+          // handoff becomes stale and band-78 evidence is unreachable.
+          const teardown = yield* Effect.tryPromise(() =>
+            runPiSubagentProcessTeardown({
+              repository,
             dispatchOwnedTeardown: () => Promise.resolve(undefined),
             onDiagnostic: (event) =>
               Effect.runFork(
@@ -569,11 +548,34 @@ const makeServerProgram = (input: CliInput) => {
         if (Option.isSome(teardown) && teardown.value.outcomes.length > 0) {
           yield* Effect.logInfo("pi.subagent.startup-teardown-discovery", {
             processed: teardown.value.outcomes.length,
-            outcomes: teardown.value.outcomes.map((outcome) => outcome.outcome.kind),
+              outcomes: teardown.value.outcomes.map((outcome) => outcome.outcome.kind),
+            });
+          }
+          // Ticket 10: restore terminal outcomes from durable journal truth,
+          // then orphan every remaining non-terminal execution with the
+          // owner-loss diagnostic. The owner-loss fence intentionally follows
+          // Ticket 16's journal-only no-owner evidence (Decision 0027).
+          const reconciliation = yield* reconcilePiSubagentExecutions({
+            repository,
+            mode: "restart",
+            summaryMaxChars: config.piSubagentTerminalSummaryMaxChars,
           });
-        }
-      }),
-    );
+          if (
+            outbox.recovered > 0 ||
+            outbox.failures > 0 ||
+            reconciliation.outcomes.length > 0 ||
+            reconciliation.failures.length > 0
+          ) {
+            yield* Effect.logInfo("pi.subagent.startup-reconciliation", {
+              outboxRecovered: outbox.recovered,
+              outboxFailures: outbox.failures,
+              reconciled: reconciliation.outcomes.length,
+              settlementFailures: reconciliation.failures.length,
+              outcomes: reconciliation.outcomes.map((outcome) => outcome.kind),
+            });
+          }
+        }),
+      );
     // Optional Claude OAuth keepalive. Disabled by default because it touches
     // Claude Code auth data in the background; users can opt in with
     // SYNARA_CLAUDE_KEEPALIVE=1.

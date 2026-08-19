@@ -3480,7 +3480,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         );
 
   /**
-   * Ticket 16 teardown outcome (T16-AC2/AC3/AC4/AC5, band 76). One guarded
+   * Ticket 16 teardown outcome (T16-AC2/AC3/AC4/AC5): band 76 `proven`,
+   * band 77 `survivors`, or band 78 `owner_unproven`. One guarded
    * transaction: dedup (deterministic eventId
    * `teardown_<exec>_<attempt>_gen<gen>_<outcome>` plus the
    * attempt/generation/sequence key) → execution lookup → journal insert →

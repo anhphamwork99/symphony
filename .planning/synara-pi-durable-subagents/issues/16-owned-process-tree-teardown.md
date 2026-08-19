@@ -28,7 +28,10 @@ execution or reverse its settled projection.
 
 ## Testing Seams
 
-**Approval status:** Pending (conditional real-Pi bullet under owner review) —
+**Approval status:** Approved — the deterministic seam bullets were approved
+on 2026-08-16; Decision 0028 records the human owner's 2026-08-19 approval
+of deterministic CI fixtures plus the isolated manual real-Pi recipe in place
+of an automated destructive real-Pi CI test.
 
 - The two deterministic seam bullets below are **Approved** (owner,
   ticket-breakdown review 2026-08-16) and are implemented:
@@ -37,6 +40,7 @@ execution or reverse its settled projection.
     `piSubagentProcessTeardown.test.ts` (coordinator + repository seams),
     `piSubagentProcessTeardownSweep.test.ts` (driver),
     `piSubagentTeardownWiring.test.ts` (adapter wiring),
+    `piSubagentStartupRecoveryOrder.test.ts` (integrated startup order),
     plus the pre-existing deterministic
     `supervisedProcessTeardown.test.ts` (TERM-ignored escalation,
     PID-reuse identity guard) and `PiAdapter.test.ts` "Pi Bash process
@@ -48,9 +52,9 @@ execution or reverse its settled projection.
     revival), paired with the exact band-76 durable row and the exact
     `teardown_proven` operator event.
 - The third bullet — _isolated real-Pi destructive boundary_ — is **NOT
-  proven hermetic and deterministic in CI** (finding below) and is
-  **awaiting owner approval of the deterministic-fixture substitution**
-  before any substituted destructive test may be written.
+  proven hermetic and deterministic in CI** (finding below). Decision 0028
+  therefore approves the deterministic fixtures as CI acceptance evidence and
+  retains the real-Pi boundary as an explicitly manual, isolated recipe.
 
 **Hermeticity finding (2026-08-19, `/matt-implement` investigation):**
 driving the real-Pi chain to a teardown handoff requires the watchdog's
@@ -64,7 +68,7 @@ test would also dispatch real OS signals into a shared CI machine. This
 matches the class of wall-clock sensitivity Decision 0008 solved with
 per-file standalone invocation, but the proven/survivors flip is inherent
 to the destructive boundary rather than the harness. **Proposed
-substitution (pending owner approval):** the deterministic
+substitution (approved by Decision 0028):** the deterministic
 process-supervisor fixtures above carry the AC1–AC7 evidence; retain an
 **isolated manual real-Pi verification recipe** instead of a CI wallclock
 file: (1) start a Synara dev instance with a managed Pi session whose
@@ -72,7 +76,8 @@ child runs `bash -c "trap '' TERM; sleep 300"`; (2) force the watchdog
 chain (idle trigger) to the teardown handoff; (3) observe band-75/76 rows
 and the supervisor's TERM→KILL escalation in the process table; (4)
 confirm the execution card settles `cancelled` with generation advanced.
-No substituted test has been written pending this approval.
+This manual recipe is supporting operational evidence and must not be reported
+as executed unless an operator records an actual isolated run.
 
 ### Implementation Report
 
@@ -121,11 +126,13 @@ Alfie unchanged at `489acd626` / `0.14.0-alfie.1`).
   safe-correlation path, and stops in `stopAll`. New test seams:
   `piSubagentTeardownClock` and `piSubagentTeardownResolver`.
 - `apps/server/src/main.ts` — T16-AC7 startup wiring inside the ticket-10
-  startup reconciliation fork: a bounded teardown-discovery pass with
-  `dispatchOwnedTeardown: () => undefined` (at boot no live owned
-  supervisor can exist — nothing is killed; the `owner_unproven` evidence
-  is journaled once per handed-off execution and surfaced to the operator
-  log).
+  startup reconciliation fork. Decision 0027 binds the order to outbox
+  recovery → bounded teardown discovery → Ticket-10 reconciliation. The
+  discovery pass uses `dispatchOwnedTeardown: () => undefined` (at boot no
+  live owned supervisor can exist — nothing is killed), so band-78
+  `owner_unproven` evidence is journaled while the band-74 generation is
+  still current; Ticket 10 then records the non-terminal owner-loss orphan
+  fence.
 - `apps/server/src/provider/piSubagentLifecycleStates.ts` — new shared
   terminal-state vocabulary (`isTerminalPiSubagentState`); the teardown,
   cancellation, restart-reconciliation, and watchdog coordinators now use
@@ -141,10 +148,10 @@ Alfie unchanged at `489acd626` / `0.14.0-alfie.1`).
 | T16-AC1   | Coordinator test (owned-only): exactly the handed-off execution dispatches; the unrelated live execution in the same scan set is never signalled. Adapter wiring test: dispatch resolves through the owning session's supervisor (`piSubagentTeardownResolver` / `processSupervisor.teardownAll`); no live session → `undefined` → no kill. Pre-existing deterministic `supervisedProcessTeardown.test.ts` proves the supervisor's TERM→KILL escalation with PID-reuse identity guards.                                         | pass   |
 | T16-AC2   | Coordinator test (idempotent request): exactly one band-75 row and one band-76 row (deterministic eventIds under the journal UNIQUE constraint); request journaled BEFORE dispatch; a second pass re-dispatches nothing. Repository seam test: `recordTeardownRequested` replay → `already_applied`, superseded generation → `stale_generation`.                                                                                                                                                                                | pass   |
 | T16-AC3   | Coordinator test: `survivors` (kill ran, exit unproven) NEVER settles — projection stays `cancelling`; only the liveness-verified `proven` dispatch settles. `PiAdapter.test.ts` "Pi Bash process supervision" proves an aborted command stays pending until process-tree exit is proven.                                                                                                                                                                                                                                       | pass   |
-| T16-AC4   | Coordinator test: `pi_subagent_teardown_survivors` durable band-76 row with the bounded survivor PID list (cap 16 asserted) + exact operator event (stage `teardown_survivors`) + projection stays `cancelling`. Adapter wiring forwards the diagnostic to the `subagents/teardown-diagnostic` runtime-warning path.                                                                                                                                                                                                            | pass   |
+| T16-AC4   | Coordinator test: `pi_subagent_teardown_survivors` durable band-77 row with the bounded survivor PID list (cap 16 asserted) + exact operator event (stage `teardown_survivors`) + projection stays `cancelling`. Adapter wiring forwards the diagnostic to the `subagents/teardown-diagnostic` runtime-warning path.                                                                                                                                                                                                            | pass   |
 | T16-AC5   | Coordinator + repository seam tests: `proven` settles `cancelled` and advances the generation to 2 in the same transaction (fencedGeneration asserted); a late same-generation terminal through `ingestPiSubagentTerminal` journals history-only without reviving the aggregate; paired exact durable-row (`pi_subagent_teardown_proven`) + operator-event assertions. Boundary test: a terminal landing between handoff and dispatch settles as ordinary lifecycle evidence (no premature fence — Decision 0021 F3 preserved). | pass   |
 | T16-AC6   | Coordinator test: graceful cancellation (seq 90/92) and normal terminal (band 40) executions dispatch NOTHING (no band-74 row → not owned by teardown). The scan's non-terminal filter also skips anything settled between passes.                                                                                                                                                                                                                                                                                              | pass   |
-| T16-AC7   | Coordinator restart fixture: no live owned supervisor → nothing killed, `pi_subagent_teardown_owner_unproven` journaled once (second pass adds zero rows — deterministic identity dedupe), projection stays `cancelling`; bounded pass (maxPerPass=2 of 3 handed-off executions). Adapter wiring test (session-less production path) + `main.ts` startup discovery pass with the same never-kill resolver.                                                                                                                      | pass   |
+| T16-AC7   | Integrated `piSubagentStartupRecoveryOrder.test.ts`: current band-74 handoff → outbox-first recovery → no live owned supervisor/no kill → exactly one band-75 request and band-78 `owner_unproven` row while still `cancelling` generation 1 → Ticket-10 `orphaned` generation 2; no band-76/77, `cancelled`, or proven claim; replay adds no rows/fence and a late generation-1 terminal is history-only and counted. Existing coordinator coverage proves bounded scanning. | pass   |
 
 ### Review remediation (2026-08-19, two-axis /matt-code-review)
 
