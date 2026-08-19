@@ -584,6 +584,65 @@ export type PiSubagentWatchdogStageRecordResult =
       readonly execution: PiSubagentExecutionRecord;
     };
 
+/**
+ * Ticket 16 teardown request record (journal-only, band 75). Records that
+ * the owned process-tree teardown was requested for the CURRENT
+ * attempt/generation BEFORE dispatch. Journal-only by design: the request
+ * is control evidence, never a settlement — at-least-once dispatch with
+ * exactly-once journal effects (deterministic eventId dedupe under the
+ * journal UNIQUE constraint makes a second request idempotent).
+ */
+export interface RecordPiSubagentTeardownRequestedInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  /** Observed state snapshot at journal time (history, not mutation). */
+  readonly state: PiSubagentLifecycleState;
+  readonly occurredAt: string;
+  readonly metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * Ticket 16 teardown outcome (T16-AC2/AC3/AC5, band 76). `proven` is the
+ * ONLY outcome that settles and fences: one guarded transaction journals
+ * the outcome row and moves the aggregate to terminal `cancelled` while
+ * ADVANCING the generation by one (the teardown fence, Decision 0021 F3 —
+ * late events from the fenced attempt/generation are ignored and counted).
+ * `survivors` / `owner_unproven` journal the honest uncertain-cleanup
+ * evidence WITHOUT touching the aggregate: the projection stays
+ * `cancelling` with the stable diagnostic until a later pass proves or the
+ * normal lifecycle settles it.
+ */
+export interface RecordPiSubagentTeardownOutcomeInput {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+  /** `proven` | `survivors` | `owner_unproven` — dispatch result kind. */
+  readonly outcome: "proven" | "survivors" | "owner_unproven";
+  readonly occurredAt: string;
+  /** Bounded survivor PID list (already capped by the caller). */
+  readonly survivorPids?: ReadonlyArray<number>;
+  readonly diagnosticMessage: string;
+  readonly metadata?: Record<string, unknown> | null;
+}
+
+export type PiSubagentTeardownOutcomeRecordResult =
+  | {
+      readonly kind: "recorded";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      readonly kind: "already_applied";
+      readonly execution: PiSubagentExecutionRecord;
+    }
+  | {
+      /** The aggregate advanced past the listed attempt/generation (e.g. a
+       * concurrent resume or terminal settlement) — the outcome journals as
+       * history only and must not fence the newer attempt. */
+      readonly kind: "stale_generation";
+      readonly execution: PiSubagentExecutionRecord;
+    };
+
 export type PiSubagentOrphanedRecordResult =
   | {
       readonly kind: "recorded";
@@ -1017,6 +1076,23 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly recordWatchdogStageEvent: (
     input: RecordPiSubagentWatchdogStageEventInput,
   ) => Effect.Effect<PiSubagentWatchdogStageRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 16 teardown request record (T16-AC2, band 75): journal-only
+   * idempotent evidence that owned process-tree teardown was requested for
+   * the current attempt/generation before dispatch.
+   */
+  readonly recordTeardownRequested: (
+    input: RecordPiSubagentTeardownRequestedInput,
+  ) => Effect.Effect<PiSubagentWatchdogStageRecordResult, PiSubagentExecutionRepositoryError>;
+  /**
+   * Ticket 16 teardown outcome (T16-AC2/AC3/AC5, band 76). `proven` settles
+   * `cancelled` AND advances the generation (the teardown fence) in the same
+   * transaction; `survivors` / `owner_unproven` journal-only — the honest
+   * uncertain-cleanup projection stays `cancelling`.
+   */
+  readonly recordTeardownOutcome: (
+    input: RecordPiSubagentTeardownOutcomeInput,
+  ) => Effect.Effect<PiSubagentTeardownOutcomeRecordResult, PiSubagentExecutionRepositoryError>;
   /**
    * Ticket 13 operator snapshot (T13-AC4): bounded SQL aggregates only. The
    * result contains no prompt, result, transcript, summary, or secret content.

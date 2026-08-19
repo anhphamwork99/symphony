@@ -3061,9 +3061,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           // resume (retry, double dispatch) hits the dedup and returns the
           // already-created attempt instead of minting a second one.
           const eventId = `resume_${input.executionId}_${input.expectedAttemptId}_gen${input.expectedGeneration}`;
-            // Ticket 14 owns sequence 80. Ticket 15 reserves 70–74 for
-            // watchdog stages that may run on this newly resumed attempt.
-            const sequence = 80;
+          // Ticket 14 owns sequence 80. Ticket 15 reserves 70–74 for
+          // watchdog stages that may run on this newly resumed attempt.
+          const sequence = 80;
           const metadataJson = JSON.stringify({
             phase: "resumed",
             priorAttemptId: input.expectedAttemptId,
@@ -3123,7 +3123,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           }
 
           // Journal FIRST, under the NEW attempt/generation, with its own
-            // sequence space (sequence 80 = the resume band).
+          // sequence space (sequence 80 = the resume band).
           yield* makeJournalInsert({
             eventId,
             executionId: input.executionId,
@@ -3405,6 +3405,262 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       .pipe(
         Effect.mapError(
           toPersistenceSqlError("PiSubagentExecutionRepository.recordWatchdogStageEvent:insert"),
+        ),
+      );
+
+  /**
+   * Ticket 16 teardown request record (T16-AC2, band 75). Mirrors the
+   * journal-only stage pattern: deterministic eventId
+   * `teardownreq_<exec>_<attempt>_gen<gen>` dedupe, current
+   * attempt/generation guard, and NO aggregate mutation — the request is
+   * control evidence proving teardown was dispatched at-least-once for
+   * exactly this attempt/generation; a crashed pass re-requests safely and
+   * observes already_applied (exactly-once journal effect).
+   */
+  const recordTeardownRequestedBase: PiSubagentExecutionRepositoryShape["recordTeardownRequested"] =
+    (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const eventId = `teardownreq_${input.executionId}_${input.attemptId}_gen${input.generation}`;
+            const sequence = 75;
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+            });
+            const executionRows = yield* getByIdInternal(input.executionId);
+            if (executionRows.length === 0) {
+              return yield* Effect.fail(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordTeardownRequested:execution-lookup",
+                )(new Error(`Execution '${input.executionId}' not found`)),
+              );
+            }
+            const execution = rowToExecutionRecord(executionRows[0]!);
+
+            if (existing.length > 0) {
+              return { kind: "already_applied" as const, execution };
+            }
+
+            // The request targets the CURRENT attempt/generation only: a
+            // resumed execution must not carry a stale teardown request for
+            // a superseded attempt.
+            if (
+              execution.attemptId !== input.attemptId ||
+              execution.generation !== input.generation
+            ) {
+              return { kind: "stale_generation" as const, execution };
+            }
+
+            yield* makeJournalInsert({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+              state: input.state,
+              occurredAt: input.occurredAt,
+              diagnosticCode: "pi_subagent_teardown_requested",
+              diagnosticMessage: `Owned process-tree teardown requested (execution ${input.executionId}, attempt ${input.attemptId}, generation ${input.generation})`,
+              metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+            });
+
+            // Aggregate is intentionally untouched: a teardown request is
+            // never settlement (proof-before-fence, T16-AC5).
+            return { kind: "recorded" as const, execution };
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError("PiSubagentExecutionRepository.recordTeardownRequested:insert"),
+          ),
+        );
+
+  /**
+   * Ticket 16 teardown outcome (T16-AC2/AC3/AC4/AC5, band 76). One guarded
+   * transaction: dedup (deterministic eventId
+   * `teardown_<exec>_<attempt>_gen<gen>_<outcome>` plus the
+   * attempt/generation/sequence key) → execution lookup → journal insert →
+   * for `proven` ONLY, a guarded aggregate UPDATE that settles terminal
+   * `cancelled` and ADVANCES the generation by one — the teardown fence
+   * (Decision 0021 F3): late events from the fenced attempt/generation fail
+   * the generation gate, journal as history only, and late terminals are
+   * counted through the stale_terminal_events counter (T16-AC5).
+   * `survivors` / `owner_unproven` journal their honest uncertain-cleanup
+   * evidence and never touch the aggregate (T16-AC4): the projection stays
+   * `cancelling` with the stable diagnostic until a later pass proves
+   * teardown or the normal lifecycle settles the execution.
+   */
+  const recordTeardownOutcomeBase: PiSubagentExecutionRepositoryShape["recordTeardownOutcome"] = (
+    input,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const eventId = `teardown_${input.executionId}_${input.attemptId}_gen${input.generation}_${input.outcome}`;
+          const sequence = 76;
+          const diagnosticCode: PiSubagentDiagnosticCode =
+            input.outcome === "proven"
+              ? "pi_subagent_teardown_proven"
+              : input.outcome === "survivors"
+                ? "pi_subagent_teardown_survivors"
+                : "pi_subagent_teardown_owner_unproven";
+          const metadataJson = JSON.stringify({
+            phase: "process_tree_teardown",
+            outcome: input.outcome,
+            ...(input.survivorPids !== undefined && input.survivorPids.length > 0
+              ? { survivorPids: input.survivorPids }
+              : {}),
+            ...(input.metadata ?? {}),
+          });
+
+          const existing = yield* lookupJournalEvent({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence,
+          });
+          const executionRows = yield* getByIdInternal(input.executionId);
+          if (executionRows.length === 0) {
+            return yield* Effect.fail(
+              toPersistenceSqlError(
+                "PiSubagentExecutionRepository.recordTeardownOutcome:execution-lookup",
+              )(new Error(`Execution '${input.executionId}' not found`)),
+            );
+          }
+          const execution = rowToExecutionRecord(executionRows[0]!);
+
+          if (existing.length > 0) {
+            return { kind: "already_applied" as const, execution };
+          }
+
+          // The outcome targets the listed attempt/generation only: a
+          // concurrent resume or terminal settlement owns the newer truth
+          // and must never be fenced by a stale teardown decision.
+          if (
+            execution.attemptId !== input.attemptId ||
+            execution.generation !== input.generation
+          ) {
+            return { kind: "stale_generation" as const, execution };
+          }
+
+          // Terminal truth is never reversed: an execution that already
+          // settled through the normal lifecycle (child ack, terminal
+          // evidence, rejection) keeps its outcome — the teardown result
+          // journals as history only.
+          if (TERMINAL_OBSERVED_STATES.has(execution.observedState)) {
+            yield* makeJournalInsert({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+              state: execution.observedState,
+              occurredAt: input.occurredAt,
+              diagnosticCode,
+              diagnosticMessage: input.diagnosticMessage,
+              metadataJson: JSON.stringify({
+                ...JSON.parse(metadataJson),
+                aggregateAlreadyTerminal: true,
+              }),
+            });
+            return { kind: "already_applied" as const, execution };
+          }
+
+          if (input.outcome !== "proven") {
+            // Journal-only: uncertain cleanup never settles or fences.
+            yield* makeJournalInsert({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence,
+              state: execution.observedState,
+              occurredAt: input.occurredAt,
+              diagnosticCode,
+              diagnosticMessage: input.diagnosticMessage,
+              metadataJson,
+            });
+            return { kind: "recorded" as const, execution };
+          }
+
+          yield* makeJournalInsert({
+            eventId,
+            executionId: input.executionId,
+            attemptId: input.attemptId,
+            generation: input.generation,
+            sequence,
+            state: "cancelled",
+            occurredAt: input.occurredAt,
+            diagnosticCode,
+            diagnosticMessage: input.diagnosticMessage,
+            metadataJson,
+          });
+
+          // PROOF-BEFORE-FENCE (T16-AC5, Decision 0021 F3): the settle and
+          // the generation advance happen only now, after teardown proof,
+          // in the same transaction — never at the handoff (band 74).
+          yield* sql`
+              UPDATE pi_subagent_executions
+              SET
+                observed_state = 'cancelled',
+                desired_state = 'cancelled',
+                generation = ${input.generation + 1},
+                diagnostic_code = ${diagnosticCode},
+                rejection_reason = ${input.diagnosticMessage},
+                updated_at = ${input.occurredAt}
+              WHERE execution_id = ${input.executionId}
+                AND attempt_id = ${input.attemptId}
+                AND generation = ${input.generation}
+                AND observed_state NOT IN ('cancelled', 'succeeded', 'failed', 'rejected')
+            `;
+
+          const refreshedRows = yield* getByIdInternal(input.executionId);
+          const refreshed = rowToExecutionRecord(refreshedRows[0] ?? executionRows[0]!);
+          return { kind: "recorded" as const, execution: refreshed };
+        }),
+      )
+      .pipe(
+        Effect.catch((err) =>
+          Effect.gen(function* () {
+            // Concurrent same-identity outcome raced the insert: replay the
+            // dedup answer instead of surfacing a constraint failure.
+            const eventId = `teardown_${input.executionId}_${input.attemptId}_gen${input.generation}_${input.outcome}`;
+            const existing = yield* lookupJournalEvent({
+              eventId,
+              executionId: input.executionId,
+              attemptId: input.attemptId,
+              generation: input.generation,
+              sequence: 76,
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordTeardownOutcome:dedup-recheck",
+                ),
+              ),
+            );
+            const executionRows = yield* getByIdInternal(input.executionId).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "PiSubagentExecutionRepository.recordTeardownOutcome:execution-recheck",
+                ),
+              ),
+            );
+            if (existing.length > 0 && executionRows.length > 0) {
+              return {
+                kind: "already_applied" as const,
+                execution: rowToExecutionRecord(executionRows[0]!),
+              };
+            }
+            return yield* Effect.fail(err);
+          }),
+        ),
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.recordTeardownOutcome:insert"),
         ),
       );
 
@@ -3724,6 +3980,25 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       Effect.tap((result) => notifyIfLifecycleTruthChanged(result, 80)),
     );
 
+  // Ticket 16: the teardown request (75) is journal-only (no notification —
+  // no lifecycle truth changed); only a PROVEN teardown outcome changes
+  // observed/desired state (cancelled + fence), so it notifies on band 76.
+  const recordTeardownRequested: PiSubagentExecutionRepositoryShape["recordTeardownRequested"] = (
+    input,
+  ) => recordTeardownRequestedBase(input);
+
+  const recordTeardownOutcome: PiSubagentExecutionRepositoryShape["recordTeardownOutcome"] = (
+    input,
+  ) =>
+    recordTeardownOutcomeBase(input).pipe(
+      Effect.tap((result) => {
+        if (result.kind === "recorded" && input.outcome === "proven") {
+          return notifyIfLifecycleTruthChanged(result, 76);
+        }
+        return Effect.void;
+      }),
+    );
+
   // Review R4 (informational, closed cheaply): completion-outbox delivery
   // transitions change the card's `deliveryState`. They journal nothing, so
   // the notification re-reads the committed aggregate for honest states and
@@ -3820,6 +4095,8 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     recordResumeEvent,
     recordWallTimeExpiryEvent,
     recordWatchdogStageEvent,
+    recordTeardownRequested,
+    recordTeardownOutcome,
     getTelemetrySnapshot,
   } satisfies PiSubagentExecutionRepositoryShape;
 

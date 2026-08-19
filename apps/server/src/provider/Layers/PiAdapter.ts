@@ -171,6 +171,8 @@ import {
 } from "../piSubagentControlHealth.ts";
 import { startPiSubagentWallTimeSweep } from "../piSubagentWallTimeSweep.ts";
 import { startPiSubagentWatchdogSweep } from "../piSubagentWatchdogSweep.ts";
+import { startPiSubagentProcessTeardownSweep } from "../piSubagentProcessTeardownSweep.ts";
+import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown.ts";
 import { makePiSubagentSafeCorrelation } from "../piSubagentTelemetrySafety.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
@@ -598,6 +600,32 @@ export interface PiAdapterLiveOptions {
     readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
     readonly intervalMs?: number;
   };
+  /**
+   * Ticket 16 test seam: owned process-tree teardown clock/scheduler.
+   * Production uses the server clock and a 30-second periodic timer (the
+   * same cadence as the watchdog sweep); deterministic tests inject a
+   * manually-driven scheduler.
+   */
+  readonly piSubagentTeardownClock?: {
+    readonly now: () => number;
+    readonly schedule: (delayMs: number, callback: () => void) => { readonly cancel: () => void };
+    readonly intervalMs?: number;
+  };
+  /**
+   * Ticket 16 test seam: injectable owned-teardown resolver. Production
+   * resolves the owning session's process supervisor (the only kill
+   * authority); deterministic tests inject a controllable supervisor
+   * fixture.
+   */
+  readonly piSubagentTeardownResolver?: (execution: {
+    readonly executionId: string;
+    readonly attemptId: string;
+    readonly generation: number;
+    readonly parentThreadId: string;
+  }) => Promise<
+    | { readonly kind: "proven" | "survivors"; readonly survivorPids?: ReadonlyArray<number> }
+    | undefined
+  >;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -5015,6 +5043,100 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             },
           });
 
+    // Ticket 16: one adapter-lifetime owned process-tree teardown sweep —
+    // the production consumer of the ticket 15 band-74 teardown handoffs.
+    // The ONLY kill authority is the owning session's own process
+    // supervisor (T16-AC1): teardown is dispatched exclusively through
+    // `processSupervisor.teardownAll()`, which signals only processes it
+    // spawned and proves their exit (T16-AC3). A parent thread with no live
+    // session context resolves `undefined` — nothing is killed and the
+    // honest `owner_unproven` outcome is journaled (T16-AC7).
+    const piSubagentTeardownSweep =
+      piSubagentRepository === undefined
+        ? undefined
+        : startPiSubagentProcessTeardownSweep({
+            repository: piSubagentRepository,
+            resolveOwnedTeardown: async (execution) => {
+              if (options?.piSubagentTeardownResolver !== undefined) {
+                return options.piSubagentTeardownResolver(execution);
+              }
+              const context = sessions.get(ThreadId.makeUnsafe(execution.parentThreadId));
+              if (context === undefined) {
+                // No live session: ownership cannot be proven — no kill.
+                return undefined;
+              }
+              try {
+                await context.processSupervisor.teardownAll();
+                return { kind: "proven" as const };
+              } catch (cause) {
+                const survivorPids =
+                  cause instanceof ProviderProcessExitUnprovenError
+                    ? (cause.remainingDescendantPids ?? []).filter(
+                        (pid): pid is number => typeof pid === "number",
+                      )
+                    : [];
+                return {
+                  kind: "survivors" as const,
+                  ...(survivorPids.length > 0 ? { survivorPids } : {}),
+                };
+              }
+            },
+            onDiagnostic: (event) => {
+              const safeCorrelation = makePiSubagentSafeCorrelation({
+                executionId: event.executionId,
+                attemptId: event.attemptId,
+                threadId: event.parentThreadId,
+                generation: event.generation,
+                diagnosticCode: event.diagnosticCode,
+              });
+              const context = sessions.get(ThreadId.makeUnsafe(event.parentThreadId));
+              const logWarning = Effect.logWarning("pi.subagent.teardown_diagnostic", {
+                ...safeCorrelation,
+                message: event.diagnosticMessage,
+              });
+              void Effect.runPromise(logWarning).catch(() => undefined);
+              if (context !== undefined) {
+                offerRuntimeEvent({
+                  ...makePiRuntimeEventBase(context),
+                  type: "runtime.warning",
+                  payload: {
+                    message: `Pi subagent teardown [${event.diagnosticCode}]: ${event.diagnosticMessage}`,
+                    detail: safeCorrelation,
+                  },
+                  raw: {
+                    source: "pi.sdk.event",
+                    method: "subagents/teardown-diagnostic",
+                    payload: safeCorrelation,
+                  },
+                } satisfies ProviderRuntimeEvent);
+              }
+            },
+            ...(options?.piSubagentTeardownClock?.now
+              ? { now: options.piSubagentTeardownClock.now }
+              : {}),
+            ...(options?.piSubagentTeardownClock?.schedule
+              ? { schedule: options.piSubagentTeardownClock.schedule }
+              : {}),
+            ...(options?.piSubagentTeardownClock?.intervalMs !== undefined
+              ? { intervalMs: options.piSubagentTeardownClock.intervalMs }
+              : {}),
+            onOutcome: (outcome) => {
+              const safeDetail = makePiSubagentSafeCorrelation({
+                executionId: outcome.executionId,
+                attemptId: outcome.attemptId,
+                threadId: outcome.parentThreadId,
+                generation: outcome.generation,
+                diagnosticCode: "pi_subagent_teardown_proven",
+              });
+              void Effect.runPromise(
+                Effect.logWarning("pi.subagent.teardown_outcome", {
+                  ...safeDetail,
+                  outcome: outcome.outcomeKind,
+                }),
+              ).catch(() => undefined);
+            },
+          });
+
     const enableSynaraMcp: NonNullable<PiAdapterShape["enableSynaraMcp"]> = (input) =>
       Effect.gen(function* () {
         const context = sessions.get(input.threadId);
@@ -5167,6 +5289,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       Effect.sync(() => {
         piSubagentWallTimeSweep?.stop();
         piSubagentWatchdogSweep?.stop();
+        piSubagentTeardownSweep?.stop();
       }).pipe(
         Effect.andThen(
           Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {

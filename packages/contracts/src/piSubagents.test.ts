@@ -368,6 +368,20 @@ describe("Pi subagent completion-outbox contract schemas (Issue 08)", () => {
     ).toThrow();
   });
 
+  it("exposes the Ticket 16 owned process-tree teardown diagnostic codes as first-class literals", () => {
+    for (const code of [
+      "pi_subagent_teardown_requested",
+      "pi_subagent_teardown_proven",
+      "pi_subagent_teardown_survivors",
+      "pi_subagent_teardown_owner_unproven",
+    ] as const) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+    expect(() =>
+      Schema.decodeSync(PiSubagentDiagnosticCode)("pi_subagent_teardown_unknown" as never),
+    ).toThrow();
+  });
+
   it("exposes the Ticket 13 admission-quota and wall-time diagnostic codes as first-class literals", () => {
     for (const code of [
       "pi_subagent_admission_provider_concurrency_exhausted",

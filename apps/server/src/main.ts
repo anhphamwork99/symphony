@@ -64,6 +64,7 @@ import { startThreadRetentionJob } from "./threadRetention";
 import { PiSubagentExecutionRepository } from "./persistence/Services/PiSubagentExecutionRepository.ts";
 import { recoverCompletionOutbox } from "./provider/piSubagentCompletionOutbox.ts";
 import { reconcilePiSubagentExecutions } from "./provider/piSubagentRestartReconciliation.ts";
+import { runPiSubagentProcessTeardown } from "./provider/piSubagentProcessTeardown.ts";
 import { setPiSubagentExecutionLifecycleListener } from "./persistence/Layers/PiSubagentExecutionRepository.ts";
 import {
   pairExternalMcpClient,
@@ -540,6 +541,35 @@ const makeServerProgram = (input: CliInput) => {
             reconciled: reconciliation.outcomes.length,
             settlementFailures: reconciliation.failures.length,
             outcomes: reconciliation.outcomes.map((outcome) => outcome.kind),
+          });
+        }
+        // Ticket 16: bounded restart-side orphan-process discovery for
+        // teardown-handoff executions (T16-AC7). At boot no live owned
+        // process supervisor can exist, so ownership cannot be proven for
+        // any surviving process — nothing is killed; the pass records the
+        // bounded `owner_unproven` evidence once per handed-off execution
+        // and surfaces the uncertain-cleanup diagnostic to the operator log.
+        const teardown = yield* Effect.tryPromise(() =>
+          runPiSubagentProcessTeardown({
+            repository,
+            dispatchOwnedTeardown: () => Promise.resolve(undefined),
+            onDiagnostic: (event) =>
+              Effect.runFork(
+                Effect.logWarning("pi.subagent.teardown_diagnostic", {
+                  executionId: event.executionId,
+                  attemptId: event.attemptId,
+                  generation: event.generation,
+                  parentThreadId: event.parentThreadId,
+                  diagnosticCode: event.diagnosticCode,
+                  message: event.diagnosticMessage,
+                }),
+              ),
+          }),
+        ).pipe(Effect.option);
+        if (Option.isSome(teardown) && teardown.value.outcomes.length > 0) {
+          yield* Effect.logInfo("pi.subagent.startup-teardown-discovery", {
+            processed: teardown.value.outcomes.length,
+            outcomes: teardown.value.outcomes.map((outcome) => outcome.outcome.kind),
           });
         }
       }),
