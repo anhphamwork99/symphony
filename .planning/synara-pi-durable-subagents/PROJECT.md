@@ -179,7 +179,12 @@
   **Ticket 16 (owned process-tree teardown) is the active implementation
   frontier:** its Ticket-15 blocker is cleared; it must preserve
   proof-before-fence ownership and must not treat the band-74 teardown
-  handoff as termination proof.
+  handoff as termination proof. Decision 0027 binds Ticket 16 to journal
+  bands `75–78`, live-supervisor-only kill authority, and restart
+  `owner_unproven` evidence before Ticket-10 owner-loss fencing. Decision
+  0028 records the human owner's approval to replace the conditional
+  automated real-Pi destructive CI seam with deterministic fixtures plus the
+  isolated manual real-Pi verification recipe.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer
