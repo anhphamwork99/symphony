@@ -117,14 +117,20 @@
   emission accepted and the no-evidence test pairing accepted, but the
   terminal-evidence test captured its operator stream without asserting
   it.
-- [decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md](decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md) —
-  binding ACCEPT at Symphony `91e34c1e`: all four Decision-0024 reopening
+  - [decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md](decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md) —
+    binding ACCEPT at Symphony `91e34c1e`: all four Decision-0024 reopening
   conditions pass (terminal-evidence test pairs its exact band-72 durable
   row with the exact stage-scoped operator event; no-evidence pairing and
   band-71/72 distinction retained; F1/F3 intact; verification + real-Pi
   acceptance green). Ticket 15 transitions to complete; the frontier
-  advances to Ticket 16; Symphony `91e34c1e` is the accepted Ticket-15
-  baseline.
+    advances to Ticket 16; Symphony `91e34c1e` is the accepted Ticket-15
+    baseline.
+  - [decisions/0026-t14-explicit-resume-final-acceptance.md](decisions/0026-t14-explicit-resume-final-acceptance.md) —
+    binding ACCEPT at integrated Symphony `6d46f221` (with disclosed shared
+    contract/Vitest hunks already in accepted baseline `91e34c1e`): T14-AC1
+    through T14-AC6 pass; explicit-only resume creates one new attempt under
+    the same execution; prior attempts remain fenced; resume owns disjoint
+    sequence `80` while Ticket 15 retains watchdog `70–74`.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -138,7 +144,7 @@
   Tickets 01–05 are complete again per Decision 0010 (second matrix in the
   ticket-24 report, 31/31 rows).
 - **Remediation track:** tickets 18–24 — all accepted (Decisions 0002–0010).
-- **Frontier track:** tickets 01–13 are complete. Ticket 09 (per-thread
+  - **Frontier track:** tickets 01–15 are complete. Ticket 09 (per-thread
   completion coordinator) was rejected by Decision 0015 (crash window:
   durable `delivered` before the parent effect), remediated under Decision
   0016's crash-safe direction (immutable dispatch batch ledger migration 103,
@@ -166,8 +172,10 @@
   terminal-evidence window; F2 truthful stage-scoped diagnostics with the
   `pi_subagent_watchdog_terminal_evidence` literal and paired durable/
   operator assertions on both band-72 outcomes; F3 proof-before-fence
-  preserved for Ticket 16). The Ticket-14 disjoint-band constraint stands
-  as Ticket 14's own acceptance gate.
+    preserved for Ticket 16).
+    **Ticket 14 is complete** per Decision 0026 at integrated Symphony
+    `6d46f221`: explicit authorized resume uses sequence `80`, disjoint from
+    watchdog `70–74`, and preserves the no-automatic-replay invariant.
   **Ticket 16 (owned process-tree teardown) is the active implementation
   frontier:** its Ticket-15 blocker is cleared; it must preserve
   proof-before-fence ownership and must not treat the band-74 teardown

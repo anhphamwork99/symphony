@@ -9,7 +9,7 @@ events from the superseded attempt cannot alter the new attempt.
 **Blocked by:** 10 — Restart reconciliation to terminal or orphaned; 13 —
 Admission quotas and safe telemetry.
 
-**Status:** in-review
+**Status:** complete
 
 - [x] **T14-AC1:** Resume creates exactly one new `attemptId` under the existing
       `executionId` and records the new generation before child start.
