@@ -116,13 +116,15 @@
   binding reassessment at Symphony `067aa9a6`: stage-2 timeout operator
   emission accepted and the no-evidence test pairing accepted, but the
   terminal-evidence test captured its operator stream without asserting
-  it. Current Ticket-15 acceptance gate: the terminal-evidence test pairs
-  its exact band-72 durable row with `terminal_evidence` @
-  `provider_turn_interrupt` present and `stage_timeout` @
-  `provider_turn_interrupt` absent; the no-evidence pairing and
-  band-71/72 distinction retained; F1/F3 intact; focused verification +
-  standalone real-Pi acceptance green. Ticket 15 remains the active
-  acceptance frontier.
+  it.
+- [decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md](decisions/0025-t15-watchdog-escalation-final-acceptance-fourth-reopening-complete-frontier-to-ticket-16.md) —
+  binding ACCEPT at Symphony `91e34c1e`: all four Decision-0024 reopening
+  conditions pass (terminal-evidence test pairs its exact band-72 durable
+  row with the exact stage-scoped operator event; no-evidence pairing and
+  band-71/72 distinction retained; F1/F3 intact; verification + real-Pi
+  acceptance green). Ticket 15 transitions to complete; the frontier
+  advances to Ticket 16; Symphony `91e34c1e` is the accepted Ticket-15
+  baseline.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -157,14 +159,19 @@
   leg may cite Decision 0020 as its read-surface baseline but remains
   blocked by Tickets 15 and 16.
   Ticket 15 owns the production lease-expiry/watchdog sweep driver; its
-  Ticket-10 and Ticket-13 blockers are satisfied, so it is blocker-free.
-  **Ticket 15 is the active acceptance frontier:** implemented at Symphony
-  `262785a8` and rejected for remediation by Decision 0021 (F1 bounded
-  terminal-evidence wait for the provider-turn stage; F2 truthful
-  terminal-evidence diagnostics; F3 proof-before-fence ownership preserved
-  for Ticket 16). Decision 0021 also binds the parallel Ticket-14 stream to
-  re-band its resume event off watchdog band 70–74 before its own
-  acceptance.
+  Ticket-10 and Ticket-13 blockers are satisfied, so it was blocker-free.
+  **Ticket 15 is complete** per Decision 0025 at Symphony `91e34c1e` (Alfie
+  unchanged at `489acd626` / `0.14.0-alfie.1`), after the acceptance arc
+  Decisions 0021 → 0022 → 0023 → 0024 → 0025 (F1 bounded post-dispatch
+  terminal-evidence window; F2 truthful stage-scoped diagnostics with the
+  `pi_subagent_watchdog_terminal_evidence` literal and paired durable/
+  operator assertions on both band-72 outcomes; F3 proof-before-fence
+  preserved for Ticket 16). The Ticket-14 disjoint-band constraint stands
+  as Ticket 14's own acceptance gate.
+  **Ticket 16 (owned process-tree teardown) is the active implementation
+  frontier:** its Ticket-15 blocker is cleared; it must preserve
+  proof-before-fence ownership and must not treat the band-74 teardown
+  handoff as termination proof.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer

@@ -10,7 +10,7 @@ state until termination is proved.
 reconciliation to terminal or orphaned; 13 — Admission quotas and safe
 telemetry.
 
-**Status:** needs-remediation
+**Status:** complete (accepted by Decision 0025 at Symphony `91e34c1e`)
 
 > **Decision 0021 (binding, 2026-08-19):** final acceptance returned
 > NEEDS REMEDIATION — F1 (stage 2 must wait a bounded terminal-evidence
