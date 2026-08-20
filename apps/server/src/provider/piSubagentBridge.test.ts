@@ -4,11 +4,14 @@ import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
   type PiSubagentHandshakeRequest,
+  type PiSubagentTeardownOwnedProcessesCommand,
+  type PiSubagentTeardownOwnedProcessesResult,
 } from "@synara/contracts";
 
 import {
   attachPiSubagentManagedForegroundBinding,
   createDefaultHandshakeRequest,
+  dispatchPiSubagentTeardownOwnedProcesses,
   getPiSubagentManagedForegroundBinding,
   isPiSubagentManagedForegroundBinding,
   makeCompatiblePiSubagentExtension,
@@ -16,11 +19,14 @@ import {
   makeLegacyPiSubagentExtension,
   makeUnsupportedPiSubagentExtension,
   negotiatePiSubagentCapability,
+  negotiationSupportsPiSubagentCapability,
   PI_SUBAGENT_BRIDGE_KEY,
   PI_SUBAGENT_MANAGED_FOREGROUND_KEY,
+  PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
   type PiSubagentManagedForegroundBinding,
   type PiSubagentObservationInput,
   probePiSubagentBridge,
+  validatePiSubagentTeardownOwnedProcessesResult,
 } from "./piSubagentBridge.ts";
 
 describe("Pi subagent extension bridge & versioned handshake (Issue 19)", () => {
@@ -583,6 +589,355 @@ describe("Pi subagent managed foreground binding observation kinds & policy (Iss
         },
         { kind: "heartbeat", occurredAt: "2026-08-18T00:00:10.000Z" },
       ]);
+    });
+  });
+});
+
+describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () => {
+  const validCommand: PiSubagentTeardownOwnedProcessesCommand = {
+    commandId: "teardowncmd_exec_1_att_1_gen1",
+    executionId: "exec_1",
+    expectedAttemptId: "att_1",
+    expectedGeneration: 1,
+  };
+
+  const echoResult = (
+    status: PiSubagentTeardownOwnedProcessesResult["status"],
+    overrides?: Record<string, unknown>,
+  ): PiSubagentTeardownOwnedProcessesResult =>
+    ({
+      status,
+      executionId: validCommand.executionId,
+      attemptId: validCommand.expectedAttemptId,
+      generation: validCommand.expectedGeneration,
+      ...overrides,
+    }) as PiSubagentTeardownOwnedProcessesResult;
+
+  it("advertises child-bash-process-ownership as an OPTIONAL handshake capability only (D0033 §3/§6 compatibility)", () => {
+    expect(PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY).toBe("child-bash-process-ownership");
+    expect(PI_SUBAGENT_CAPABILITIES).toContain(PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY);
+
+    const defaultRequest = createDefaultHandshakeRequest();
+    expect(defaultRequest.optionalCapabilities).toContain(
+      PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+    );
+    // Never required: an old Alfie without the endpoint must stay manageable.
+    expect(defaultRequest.requiredCapabilities).not.toContain(
+      PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+    );
+  });
+
+  it("keeps an extension WITHOUT the capability fully managed (optional gating only)", async () => {
+    const { bridge } = makeCompatiblePiSubagentExtension({
+      capabilities: PI_SUBAGENT_CAPABILITIES.filter(
+        (c) => c !== PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+      ),
+    });
+
+    const negotiated = await negotiatePiSubagentCapability(bridge);
+
+    expect(negotiated.isManaged).toBe(true);
+    expect(negotiated.status).toBe("managed_enabled");
+    expect(negotiationSupportsPiSubagentCapability(negotiated, "child-bash-process-ownership"))
+      .toBe(false);
+  });
+
+  it("gates the capability on when a compatible extension supplies it", async () => {
+    const { bridge } = makeCompatiblePiSubagentExtension({
+      onTeardownOwnedProcesses: () => echoResult("proven"),
+    });
+
+    const negotiated = await negotiatePiSubagentCapability(bridge);
+
+    expect(negotiated.isManaged).toBe(true);
+    expect(
+      negotiationSupportsPiSubagentCapability(negotiated, "child-bash-process-ownership"),
+    ).toBe(true);
+  });
+
+  describe("validatePiSubagentTeardownOwnedProcessesResult", () => {
+    it("accepts every authenticated owner outcome with matching correlation", () => {
+      for (const result of [
+        echoResult("proven"),
+        echoResult("survivors", { survivorPids: [901, 4242] }),
+        echoResult("stale"),
+        echoResult("missing"),
+        echoResult("owner_unavailable"),
+        echoResult("dispatch_failed"),
+      ] as PiSubagentTeardownOwnedProcessesResult[]) {
+        expect(
+          validatePiSubagentTeardownOwnedProcessesResult(result, validCommand),
+        ).toStrictEqual(result);
+      }
+    });
+
+    it("rejects malformed / unknown-shape results as unproven (no validation bypass)", () => {
+      const malformedInputs = [
+        null,
+        undefined,
+        "proven",
+        42,
+        {},
+        { not_a_valid_field: true },
+        { status: "proven" },
+        // Unknown status spellings must never decode.
+        echoResult("owner_unproven" as never),
+        echoResult("cancelled" as never),
+          // Malformed PID evidence.
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [0] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [9007199254740993] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: ["4242"] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [2, 1] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [1, 1] },
+          {
+            status: "survivors",
+            executionId: "exec_1",
+            attemptId: "att_1",
+            generation: 1,
+            survivorPids: Array.from({ length: 17 }, (_, index) => index + 1),
+          },
+        // Survivor PIDs on a non-survivor status are forbidden by contract.
+        { status: "proven", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [4242] },
+      ];
+
+      for (const input of malformedInputs) {
+        expect(validatePiSubagentTeardownOwnedProcessesResult(input, validCommand)).toBeUndefined();
+      }
+    });
+
+    it("rejects schema-valid results whose correlation identity mismatches the command fencing", () => {
+      for (const mismatch of [
+        { executionId: "exec_OTHER" },
+        { attemptId: "att_OTHER" },
+        { generation: 2 },
+      ]) {
+        const mismatching = echoResult("proven", mismatch);
+        expect(
+          validatePiSubagentTeardownOwnedProcessesResult(mismatching, validCommand),
+        ).toBeUndefined();
+      }
+
+      // A `stale` owner report still must carry the exact requested identity.
+      expect(
+        validatePiSubagentTeardownOwnedProcessesResult(
+          echoResult("stale", { executionId: "exec_OTHER" }),
+          validCommand,
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("dispatchPiSubagentTeardownOwnedProcesses", () => {
+    it("does not advertise child-bash-process-ownership by default when the endpoint is absent", async () => {
+      const { bridge } = makeCompatiblePiSubagentExtension({});
+
+      const negotiated = await negotiatePiSubagentCapability(bridge);
+
+      expect(negotiated.isManaged).toBe(true);
+      expect(
+        negotiationSupportsPiSubagentCapability(negotiated, "child-bash-process-ownership"),
+      ).toBe(false);
+    });
+
+    it("returns validated proven/survivors results and dispatches the fenced command verbatim", async () => {
+      const seen: PiSubagentTeardownOwnedProcessesCommand[] = [];
+      const { bridge } = makeCompatiblePiSubagentExtension({
+        onTeardownOwnedProcesses: async (command) => {
+          seen.push(command);
+          return echoResult("proven");
+        },
+      });
+
+      const proven = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+      expect(proven.kind).toBe("validated");
+      expect(proven).toMatchObject({ kind: "validated", result: echoResult("proven") });
+      expect(seen).toEqual([validCommand]);
+
+      const survivors = await dispatchPiSubagentTeardownOwnedProcesses(
+        makeCompatiblePiSubagentExtension({
+          onTeardownOwnedProcesses: () => echoResult("survivors", { survivorPids: [4242] }),
+        }).bridge,
+        validCommand,
+      );
+      expect(survivors).toMatchObject({
+        kind: "validated",
+        result: { status: "survivors", survivorPids: [4242] },
+      });
+    });
+
+    it("returns owner_unproven when the bridge operation is absent (old Alfie, optional op)", async () => {
+      const { bridge } = makeCompatiblePiSubagentExtension({});
+      expect("teardownOwnedProcesses" in (bridge as object)).toBe(false);
+
+      const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+
+      expect(outcome.kind).toBe("unproven");
+      if (outcome.kind === "unproven") {
+        expect(outcome.diagnosticCode).toBe("pi_subagent_teardown_owner_unproven");
+        expect(outcome.reason).toBe("bridge_operation_absent");
+        expect(outcome.diagnosticMessage).toContain("teardownOwnedProcesses");
+        expect(outcome.attemptedCommand).toBe(validCommand);
+      }
+    });
+
+    it("returns owner_unproven when the dispatch throws", async () => {
+      const { bridge } = makeCompatiblePiSubagentExtension({
+        onTeardownOwnedProcesses: () => {
+          throw new Error("owner endpoint exploded");
+        },
+      });
+
+      const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+
+      expect(outcome.kind).toBe("unproven");
+      if (outcome.kind === "unproven") {
+        expect(outcome.reason).toBe("dispatch_threw");
+        expect(outcome.diagnosticMessage).toContain("owner endpoint exploded");
+      }
+    });
+
+    it("times out a never-settling owner endpoint into unproven with the exact attempted command and no unhandled rejection", async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (cause: unknown) => {
+        unhandled.push(cause);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        const seen: PiSubagentTeardownOwnedProcessesCommand[] = [];
+        const { bridge } = makeCompatiblePiSubagentExtension({
+          onTeardownOwnedProcesses: (command) => {
+            seen.push(command);
+            return new Promise<PiSubagentTeardownOwnedProcessesResult>(() => {});
+          },
+        });
+
+        const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand, {
+          timeoutMs: 100,
+        });
+
+        expect(outcome.kind).toBe("unproven");
+        if (outcome.kind === "unproven") {
+          expect(outcome.reason).toBe("dispatch_timed_out");
+          expect(outcome.diagnosticCode).toBe("pi_subagent_teardown_owner_unproven");
+          expect(outcome.diagnosticMessage).toContain("teardownOwnedProcesses");
+          expect(outcome.diagnosticMessage).toContain("100");
+          // The exact fenced command actually dispatched, verbatim.
+          expect(outcome.attemptedCommand).toBe(validCommand);
+          // A timeout win never fabricates an owner result.
+          expect(outcome.result).toBeUndefined();
+        }
+        expect(seen).toEqual([validCommand]);
+        // Give any (incorrect) unhandled rejection time to surface.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+    });
+
+    it("swallows a late endpoint rejection landing after the timeout win — never an unhandled rejection", async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (cause: unknown) => {
+        unhandled.push(cause);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        const { bridge } = makeCompatiblePiSubagentExtension({
+          onTeardownOwnedProcesses: () =>
+            new Promise<PiSubagentTeardownOwnedProcessesResult>((_resolve, reject) => {
+              setTimeout(() => reject(new Error("late owner endpoint failure")), 200);
+            }),
+        });
+
+        const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand, {
+          timeoutMs: 100,
+        });
+
+        expect(outcome.kind).toBe("unproven");
+        if (outcome.kind === "unproven") {
+          expect(outcome.reason).toBe("dispatch_timed_out");
+        }
+        // The rejection fires after the timeout already won.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+    });
+
+    it("normalizes an absent or invalid deadline to the shared watchdog-stage default instead of the raw value", async () => {
+      // An endpoint settling at ~150ms still validates: 50ms is below the
+      // shared MIN (100) so it must fall back to the 10s default rather
+      // than time the dispatch out.
+      const makeBridge = () =>
+        makeCompatiblePiSubagentExtension({
+          onTeardownOwnedProcesses: () =>
+            new Promise<PiSubagentTeardownOwnedProcessesResult>((resolve) => {
+              setTimeout(() => resolve(echoResult("proven")), 150);
+            }),
+        }).bridge;
+
+      const withInvalidLow = await dispatchPiSubagentTeardownOwnedProcesses(
+        makeBridge(),
+        validCommand,
+        { timeoutMs: 50 },
+      );
+      expect(withInvalidLow.kind).toBe("validated");
+
+      const withAbsent = await dispatchPiSubagentTeardownOwnedProcesses(
+        makeBridge(),
+        validCommand,
+      );
+      expect(withAbsent.kind).toBe("validated");
+    });
+
+    it("returns owner_unproven on a malformed owner response — never a proven claim", async () => {
+      const { bridge } = makeCompatiblePiSubagentExtension({
+        onTeardownOwnedProcesses: () => ({ not_a_valid_field: 123 }) as never,
+      });
+
+      const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+
+      expect(outcome.kind).toBe("unproven");
+      if (outcome.kind === "unproven") {
+        expect(outcome.reason).toBe("malformed_result");
+      }
+    });
+
+    it("returns owner_unproven on an identity-mismatched response (stale endpoint echo)", async () => {
+      const { bridge } = makeCompatiblePiSubagentExtension({
+        onTeardownOwnedProcesses: () => echoResult("proven", { generation: 7 }),
+      });
+
+      const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+
+      expect(outcome.kind).toBe("unproven");
+      if (outcome.kind === "unproven") {
+        expect(outcome.reason).toBe("identity_mismatch");
+      }
+    });
+
+    it("maps owner-reported owner_unavailable / dispatch_failed / stale / missing to unproven with diagnostic codes", async () => {
+      for (const [status, expectedReason] of [
+        ["owner_unavailable", "owner_unavailable"],
+        ["dispatch_failed", "dispatch_failed"],
+        ["stale", "stale_generation"],
+        ["missing", "owner_missing"],
+      ] as const) {
+        const { bridge } = makeCompatiblePiSubagentExtension({
+          onTeardownOwnedProcesses: () => echoResult(status),
+        });
+
+        const outcome = await dispatchPiSubagentTeardownOwnedProcesses(bridge, validCommand);
+
+        expect(outcome.kind).toBe("unproven");
+        if (outcome.kind === "unproven") {
+          expect(outcome.reason).toBe(expectedReason);
+          expect(outcome.diagnosticCode).toBe("pi_subagent_teardown_owner_unproven");
+          expect(outcome.result).toStrictEqual(echoResult(status));
+        }
+      }
     });
   });
 });

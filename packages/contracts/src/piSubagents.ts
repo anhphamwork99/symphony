@@ -25,6 +25,7 @@ export const PI_SUBAGENT_CAPABILITIES = [
   "completion-delivery-ownership",
   "restart-reconciliation",
   "paginated-transcripts",
+  "child-bash-process-ownership",
 ] as const;
 
 export const PiSubagentCapability = Schema.Literals(PI_SUBAGENT_CAPABILITIES);
@@ -307,6 +308,84 @@ export const PiSubagentCancelResult = Schema.Struct({
   diagnosticMessage: Schema.optional(TrimmedNonEmptyString),
 });
 export type PiSubagentCancelResult = typeof PiSubagentCancelResult.Type;
+
+/**
+ * Decision 0033 child-owned teardown command (host → owner endpoint). The
+ * bridge operation is the opaque `teardownOwnedProcesses` spelling; the
+ * capability `child-bash-process-ownership` gates it. The command carries
+ * ONLY the Ticket 06 identity-fencing conventions (command/execution/
+ * attempt/generation): the owner identity is endpoint-local and opaque, so
+ * raw PIDs, session keys, signals, and every other kill parameter stay out
+ * of the request. A mismatching live owner is `stale` and is never signaled
+ * (generation fencing, Ticket 16 ownership model).
+ */
+export const PiSubagentTeardownOwnedProcessesCommand = Schema.Struct({
+  commandId: TrimmedNonEmptyString,
+  executionId: PiSubagentExecutionId,
+  expectedAttemptId: PiSubagentAttemptId,
+  expectedGeneration: PositiveInt,
+});
+export type PiSubagentTeardownOwnedProcessesCommand =
+  typeof PiSubagentTeardownOwnedProcessesCommand.Type;
+
+/** Cap on ordered, deduplicated survivor PIDs carried per teardown result. */
+export const MAX_PI_SUBAGENT_TEARDOWN_RESULT_SURVIVOR_PIDS = 16;
+
+/** Positive safe-integer PID — the only individual PID shape the contract admits. */
+const PositiveSafeIntPid = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(1),
+).check(Schema.isLessThanOrEqualTo(9007199254740991));
+
+/**
+ * Owner-reported survivor evidence is immutable diagnostic data, never host
+ * kill authority. Require strict ascending order so the decoded evidence is
+ * non-empty, deterministic, and deduplicated without host-side normalization.
+ */
+const OrderedUniqueSurvivorPids = Schema.Array(PositiveSafeIntPid)
+  .check(Schema.isMinLength(1), Schema.isMaxLength(MAX_PI_SUBAGENT_TEARDOWN_RESULT_SURVIVOR_PIDS))
+  .check(
+    Schema.makeFilter((pids) =>
+      pids.every((pid, index) => index === 0 || pids[index - 1]! < pid),
+    ),
+  );
+
+/**
+ * Decision 0033 owner-teardown result (owner endpoint → host), with the
+ * correlation identity mirrored from the cancel result.
+ *
+ * - `proven` — the identity-matched owner proved every owned child process
+ *   exited (liveness-verified, never a bare kill API return).
+ * - `survivors` — the owner ran teardown but at least one owned child
+   *   remained live past its escalation bounds; the ONLY status that may
+   *   carry non-empty, ascending, deduplicated, bounded positive-safe-integer
+   *   survivor PID evidence.
+ * - `stale` — the live owner's identity does not match the command fencing;
+ *   nothing was signaled.
+ * - `missing` — no such execution under this owner.
+ * - `owner_unavailable` — no live owner endpoint exists to ask (the honest
+ *   owner-unproven state; never a kill claim).
+ * - `dispatch_failed` — the dispatch to the owner endpoint failed; no
+ *   teardown claim of any kind is made.
+ */
+export const PiSubagentTeardownOwnedProcessesResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("survivors"),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    generation: PositiveInt,
+      survivorPids: OrderedUniqueSurvivorPids,
+  }),
+  Schema.Struct({
+    status: Schema.Literals(["proven", "stale", "missing", "owner_unavailable", "dispatch_failed"]),
+    executionId: PiSubagentExecutionId,
+    attemptId: PiSubagentAttemptId,
+    generation: PositiveInt,
+    /** Survivor PID data is forbidden on every non-survivor status. */
+    survivorPids: Schema.optional(Schema.Never),
+  }),
+]);
+export type PiSubagentTeardownOwnedProcessesResult =
+  typeof PiSubagentTeardownOwnedProcessesResult.Type;
 
 /**
  * Ticket 07 terminal states a child settlement may report. `cancelled` is

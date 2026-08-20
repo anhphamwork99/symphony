@@ -131,6 +131,34 @@
     through T14-AC6 pass; explicit-only resume creates one new attempt under
     the same execution; prior attempts remain fenced; resume owns disjoint
     sequence `80` while Ticket 15 retains watchdog `70–74`.
+  - [decisions/0031-t17-ac6-destructive-boundary-evidence-split.md](decisions/0031-t17-ac6-destructive-boundary-evidence-split.md) —
+    binding Ticket-17 seam adjudication: the T17-AC6 destructive-boundary
+    evidence split is an ordinary ticket-level refinement under Decision 0001
+    (no new project-scoped owner-approved Decision Record is required for the
+    seam-design question). Mandatory evidence is three combined legs —
+    hermetic real-Pi harness evidence through teardown handoff, accepted
+    Ticket-16 deterministic fixtures, and the isolated manual real-Pi recipe
+    for the no-owned-child outcome. Deterministic/fixture-only satisfaction
+    and automated real-Pi destructive-pass claims are prohibited. The
+    concrete amended Testing Seam still requires explicit human-owner
+    approval before any AC6 test is written; the pending amendment is not
+    approved by this record.
+- [decisions/0032-t17-ac6-testing-seam-owner-approval.md](decisions/0032-t17-ac6-testing-seam-owner-approval.md) —
+  persists the owner's 2026-08-20 approval (`okay đồng ý`) of the concrete
+  amended T17-AC6 Testing Seam, discharging Decision 0031 reopening
+  condition 1. Decision 0031's settled technical direction is unchanged;
+  T17-AC6 tests may now be written under the approved three-leg seam with
+  the enduring prohibitions intact (fixture-only satisfaction, automated
+  real-Pi destructive-pass claims, and unrecorded manual-run reports are
+  prohibited). T17-AC6 may not be claimed or closed until all three legs
+  are satisfied, including the recorded operator-run manual real-Pi run
+  record as the sole source of the terminal zero-owned-child claim.
+- [decisions/0033-t16-managed-child-bash-ownership-reassessment.md](decisions/0033-t16-managed-child-bash-ownership-reassessment.md) —
+  binding narrow reassessment: Decision 0030's parent-supervisor proof does
+  not cover Alfie child-session Bash processes. Managed child teardown now
+  requires the exact child-scoped owner endpoint; no parent fallback or
+  Synara PID authority is permitted, and an unavailable endpoint is
+  non-terminal band 78.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -187,7 +215,21 @@
   production preserves bounded survivor-PID evidence through
   `AggregateError`. Decision 0030 supersedes that rejection after verified
   remediation at Symphony `9c27a48b`: Ticket 16 is complete and Ticket 17 is
-  unblocked; Alfie remains `489acd626` / `0.14.0-alfie.1`.
+  unblocked; Alfie remains `489acd626` / `0.14.0-alfie.1`. Decision 0031
+  settles Ticket 17's T17-AC6 evidence split as ordinary ticket-level seam
+  authority (three mandatory legs; fixture-only and automated-destructive
+    claims prohibited) while the concrete amended Testing Seam had awaited
+    explicit human-owner approval before any AC6 test was written. Decision 0032
+    persists that owner approval (2026-08-20): the seam is approved and AC6
+    tests may now be written under it; the T17-AC6 checkbox stays open until
+    all three legs — including the recorded manual real-Pi run — are
+    satisfied.
+  **Decision 0033 narrowly reopens Ticket 16 for Alfie managed-child Bash
+  ownership:** the isolated T17-AC6 discovery run proved that parent
+  `PiBashProcessSupervisor` proof can be vacuous while the real child Bash
+  remains live. The active remediation must create a child-scoped supervisor
+  and opaque identity-fenced owner endpoint. Until that remediation is
+  accepted, Ticket 17 cannot claim AC6's manual zero-owned-child proof.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer

@@ -127,8 +127,9 @@ export interface PiSubagentProcessTeardownInput {
   readonly repository: PiSubagentExecutionRepositoryShape;
   /**
    * Resolves the owned supervisor teardown for one execution's parent
-   * thread. `undefined` = no live owned supervisor → no kill (honest
-   * `owner_unproven` outcome, T16-AC1/AC7).
+   * thread. `undefined` = no live owned supervisor (or a failed dispatch —
+   * Decision 0033 §6) → no kill, honest non-terminal `owner_unproven`
+   * outcome (T16-AC1/AC7).
    */
   readonly dispatchOwnedTeardown: (execution: {
     readonly executionId: string;
@@ -268,7 +269,9 @@ const teardownOne = async (
 
   // T16-AC1: resolve the OWNED supervisor. No live owned supervisor → no
   // kill, honest owner_unproven outcome (also the bounded restart case,
-  // T16-AC7).
+  // T16-AC7). A failed/disposed/timed-out endpoint dispatch is the same
+  // honest non-terminal owner_unproven band 78 (Decision 0033 §6): no
+  // signal, no band 76, no cancelled settlement, no generation fence.
   const dispatchFailure = { message: undefined as string | undefined };
   const dispatch = await input
     .dispatchOwnedTeardown({
@@ -278,22 +281,20 @@ const teardownOne = async (
       parentThreadId: threadId,
     })
     .catch((cause: unknown) => {
-      // A dispatch crash never claims teardown ran: the honest outcome is
-      // uncertain cleanup with a message that says the dispatch itself
-      // failed — not "0 survivors" (review remediation: truthful
-      // diagnostics, Decision 0001/0022 vocabulary principle).
+      // A dispatch crash never claims teardown ran, and band 77 is reserved
+      // for an identity-matched owner's honest survivor report (Decision
+      // 0033 §7) — so the failed dispatch flows into the owner_unproven
+      // outcome below with truthful "the dispatch itself failed" wording,
+      // never a synthetic "0 survivors" row.
       dispatchFailure.message = cause instanceof Error ? cause.message : String(cause);
-      reportDiagnostic({
-        stage: "failure",
-        diagnosticCode: PI_SUBAGENT_TEARDOWN_SURVIVORS_DIAGNOSTIC,
-        diagnosticMessage: `Owned teardown dispatch failed: ${dispatchFailure.message}`,
-      });
-      return { kind: "survivors" as const, survivorPids: [] };
+      return undefined;
     });
 
   if (dispatch === undefined) {
-    const message =
-      "Owned process-tree teardown could not be dispatched: no live owned process supervisor could be proven for this execution (session stopped or server restarted); nothing was killed and cleanup remains uncertain";
+    const failed = dispatchFailure.message !== undefined;
+    const message = failed
+      ? `Owned teardown dispatch failed (${dispatchFailure.message}); no owned process-tree teardown was proven, nothing was killed, and cleanup remains uncertain — the execution stays cancelling`
+      : "Owned process-tree teardown could not be dispatched: no live owned process supervisor could be proven for this execution (session stopped or server restarted); nothing was killed and cleanup remains uncertain";
     reportDiagnostic({
       stage: "teardown_owner_unproven",
       diagnosticCode: PI_SUBAGENT_TEARDOWN_OWNER_UNPROVEN_DIAGNOSTIC,
@@ -308,7 +309,7 @@ const teardownOne = async (
           outcome: "owner_unproven",
           occurredAt: nowIso(),
           diagnosticMessage: message,
-          metadata: { reason: "no_live_owned_supervisor" },
+          metadata: { reason: failed ? "dispatch_failed" : "no_live_owned_supervisor" },
         }),
       ),
     );
@@ -321,16 +322,16 @@ const teardownOne = async (
   if (dispatch.kind === "survivors") {
     // T16-AC4: survivors produce the stable uncertain-cleanup diagnostic and
     // remain operationally visible; the projection stays `cancelling`.
+    // Band 77 comes ONLY from an identity-matched owner's honest survivor
+    // report (Decision 0033 §7) — a failed dispatch can never reach here.
     const survivorPids = capSurvivorPids(dispatch.survivorPids);
     const message =
-      dispatchFailure.message !== undefined
-        ? `Owned teardown dispatch failed (${dispatchFailure.message}); the teardown did not complete and cleanup remains uncertain — the execution stays cancelling`
-        : survivorPids === undefined
-          ? "Owned process-tree teardown did not prove exit; survivor PID evidence is unavailable, cleanup remains uncertain, and the execution stays cancelling"
-          : `Owned process-tree teardown left ${String(survivorPids.length)} captured survivor` +
-            `${survivorPids.length === 1 ? "" : "s"}` +
-            (survivorPids.length > 0 ? ` (${survivorPids.join(", ")})` : "") +
-            "; cleanup remains uncertain and the execution stays cancelling";
+      survivorPids === undefined
+        ? "Owned process-tree teardown did not prove exit; survivor PID evidence is unavailable, cleanup remains uncertain, and the execution stays cancelling"
+        : `Owned process-tree teardown left ${String(survivorPids.length)} captured survivor` +
+          `${survivorPids.length === 1 ? "" : "s"}` +
+          (survivorPids.length > 0 ? ` (${survivorPids.join(", ")})` : "") +
+          "; cleanup remains uncertain and the execution stays cancelling";
     reportDiagnostic({
       stage: "teardown_survivors",
       diagnosticCode: PI_SUBAGENT_TEARDOWN_SURVIVORS_DIAGNOSTIC,
@@ -346,12 +347,7 @@ const teardownOne = async (
           occurredAt: nowIso(),
           ...(survivorPids !== undefined ? { survivorPids } : {}),
           diagnosticMessage: message,
-          metadata: {
-            reason:
-              dispatchFailure.message !== undefined
-                ? "dispatch_failed"
-                : "survivors_after_escalation",
-          },
+          metadata: { reason: "survivors_after_escalation" },
         }),
       ),
     );

@@ -271,7 +271,7 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
     await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
   });
 
-  it("T22-WP03-2: reporter writes exact sequence 2 (started) and sequence 3 (detached) with bounded metadata", async () => {
+    it("T22-WP03-2: reporter writes exact sequence 2 (started) and sequence 3 (detached) with bounded metadata", async () => {
     let capturedBinding: PiSubagentManagedForegroundBinding | undefined;
     let observedSession: any;
 
@@ -418,8 +418,135 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
       yield* adapter.stopSession("th_fg_test_1" as ThreadId);
     });
 
-    await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
-  });
+      await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+    });
+
+    it("releases ordinary durable terminals from the stopped child-owner registry, while retaining the bridge until that terminal commits", async () => {
+      let observedSession: any;
+      let getRegistryStats:
+        | (() => {
+            readonly ownerCount: number;
+            readonly stoppedOwnerCount: number;
+            readonly executionCount: number;
+          })
+        | undefined;
+
+      const { extension } = makeCompatiblePiSubagentExtension({
+        onTeardownOwnedProcesses: async (command) => ({
+          status: "proven" as const,
+          executionId: command.executionId,
+          attemptId: command.expectedAttemptId,
+          generation: command.expectedGeneration,
+        }),
+      });
+      const customExtension = {
+        name: "pi-subagents",
+        factory: (pi: any) => {
+          extension.factory(pi);
+          pi.registerTool({
+            name: "Agent",
+            label: "Managed Agent",
+            description: "Terminal fixture",
+            parameters: {} as any,
+            execute: async (
+              _toolCallId: string,
+              _params: any,
+              _signal: any,
+              _onUpdate: any,
+              ctx: any,
+            ) => {
+              const binding = getPiSubagentManagedForegroundBinding(ctx);
+              expect(binding).toBeDefined();
+              await binding!.reportObservation({
+                kind: "terminal",
+                occurredAt: "2026-08-20T16:00:00.000Z",
+                terminal: {
+                  state: "succeeded",
+                  summary: "ordinary durable completion",
+                },
+              });
+              return { content: [{ type: "text", text: "terminal fixture" }] };
+            },
+          });
+        },
+        [Symbol.for("synara.pi.subagents.bridge")]: (extension as any)[
+          Symbol.for("synara.pi.subagents.bridge")
+        ],
+      };
+      const setup = makeTestSetup();
+      const testLayer = Layer.mergeAll(
+        makePiAdapterLive({
+          extensionFactories: [customExtension.factory],
+          onSubagentCapability: (event) => {
+            observedSession = event.session;
+          },
+          piSubagentOwnedTeardownRegistryObserver: (getStats) => {
+            getRegistryStats = getStats;
+          },
+        }).pipe(
+          Layer.provide(Layer.succeed(ServerConfig, setup.serverConfig)),
+          Layer.provide(NodeFileSystem.layer),
+          Layer.provide(PiSubagentExecutionRepositoryLive),
+          Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+          Layer.provide(Layer.succeed(McpSessionAuthority, setup.authorityService)),
+          Layer.provide(SqlitePersistenceMemory),
+        ),
+        PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        SqlitePersistenceMemory,
+      );
+
+      const testProgram = Effect.gen(function* () {
+        yield* seedProjections("th_fg_terminal_release", setup.tempDir);
+        const adapter = yield* PiAdapter;
+        yield* adapter.startSession({
+          threadId: "th_fg_terminal_release" as ThreadId,
+          cwd: setup.tempDir,
+          mcpAuthority: setup.mcpAuthority,
+          runtimeMode: "full-access",
+          providerOptions: { pi: { agentDir: setup.tempDir } },
+        });
+
+        const loadedExt = observedSession.resourceLoader
+          .getExtensions()
+          .extensions.find((entry: any) => entry.tools instanceof Map && entry.tools.has("Agent")) as any;
+        const agentEntry = loadedExt.tools.get("Agent");
+        const execute = agentEntry.execute ?? agentEntry.definition?.execute;
+        expect(typeof execute).toBe("function");
+        expect(getRegistryStats).toBeDefined();
+
+        for (const commandId of ["cmd_terminal_release_1", "cmd_terminal_release_2"]) {
+          yield* Effect.promise(() =>
+            execute(`call_${commandId}`, {
+              commandId,
+              subagent_type: "researcher",
+              task: "complete",
+              prompt: "complete",
+              run_in_background: true,
+              mode: "background",
+            }),
+          );
+          // The child-owner bridge stays live while the parent session is
+          // live, but the durable ordinary terminal has already released its
+          // exact execution reference.
+          expect(getRegistryStats!()).toEqual({
+            ownerCount: 1,
+            stoppedOwnerCount: 0,
+            executionCount: 0,
+          });
+        }
+
+        yield* adapter.stopSession("th_fg_terminal_release" as ThreadId);
+        // With no ordinary-terminal reference left, stopping the owner
+        // removes its opaque bridge rather than retaining it forever.
+        expect(getRegistryStats!()).toEqual({
+          ownerCount: 0,
+          stoppedOwnerCount: 0,
+          executionCount: 0,
+        });
+      });
+
+      await Effect.runPromise(testProgram.pipe(Effect.provide(testLayer)));
+    });
 
   it("T22-WP03-3: duplicate observations converge idempotently and detached before started is rejected", async () => {
     let capturedBinding: PiSubagentManagedForegroundBinding | undefined;

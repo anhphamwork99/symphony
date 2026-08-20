@@ -391,6 +391,10 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "durable-cancellation",
     "journal-terminal-lifecycle",
     "completion-delivery-ownership",
+    // Decision 0033 point 3: the opaque, identity-fenced child-owner teardown
+    // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
+    // capability. Additive: an old host simply never requires it.
+    "child-bash-process-ownership",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -630,7 +634,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
     // any leg of this file.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
 
     const rootDir = mkdtempSync(join(tmpdir(), "synara-t24-integrated-"));
     createdDirs.push(rootDir);
@@ -775,9 +779,11 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
           migrationEntries.map(([id, name]) => [id, name]),
         );
-        // effect_sql_migrations rows complete through 103, and a second
-        // explicit run is a no-op (idempotent convergence).
-        expect(tracker[tracker.length - 1]!.migration_id).toBe(103);
+          // The tracker reaches the current declared migration frontier, and
+          // a second explicit run is a no-op (idempotent convergence).
+          expect(tracker[tracker.length - 1]!.migration_id).toBe(
+            migrationEntries[migrationEntries.length - 1]![0],
+          );
         const secondPass = yield* runMigrations();
         expect(secondPass.length).toBe(0);
         yield* repositoryRoundTrip("fresh", 30_000);
@@ -803,9 +809,11 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
           VALUES (90, 'ProjectMcpActivation')
         `;
         const executed = yield* runMigrations();
-        expect(executed.map(([id]) => id)).toEqual([
-          90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
-        ]);
+        expect(executed.map(([id]) => id)).toEqual(
+          migrationEntries
+            .map(([id]) => id)
+            .filter((id) => id >= 90),
+        );
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
@@ -847,7 +855,12 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
             (96, 'ProjectionThreadsGoalAchievements')
         `;
         const executed = yield* runMigrations();
-        expect(executed.map(([id]) => id)).toEqual([97, 98, 99, 100, 101, 102, 103]);
+        // Expected IDs derive from migrationEntries so the assertion covers
+        // future frontier migrations instead of drifting behind them
+        // (everything after the seeded upstream 90-96 history must run).
+        expect(executed.map(([id]) => id)).toEqual(
+          migrationEntries.map(([id]) => id).filter((id) => id >= 97),
+        );
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
@@ -1767,7 +1780,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         "bounded-foreground-attachment",
         "coalesced-progress",
       ],
-      extensionVersion: "0.14.0-alfie.1",
+      extensionVersion: "0.15.0-alfie.4",
     });
     const capturingFloodExtension = {
       name: "pi-subagents-t24-flood",

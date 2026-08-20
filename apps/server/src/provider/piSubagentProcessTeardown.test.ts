@@ -837,7 +837,7 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
     );
   });
 
-  it("Decision 0001 failure coverage: a dispatch rejection is journaled as the honest survivors outcome, never a settled claim", async () => {
+  it("Decision 0033 §6: a thrown owned-teardown dispatch records non-terminal owner_unproven band 78, never synthetic survivors band 77 or a fence", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* PiSubagentExecutionRepository;
@@ -852,13 +852,58 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
           dispatchOwnedTeardown: () => Promise.reject(new Error("teardown dispatch crashed")),
           now: nowAt(EPOCH_T0),
         };
-        const result = yield* Effect.promise(() => runPiSubagentProcessTeardown(input));
-        expect(result.outcomes[0]!.outcome.kind).toBe("survivors");
+        const diagnostics: DiagnosticEvent[] = [];
+        const result = yield* Effect.promise(() =>
+          runPiSubagentProcessTeardown({ ...input, onDiagnostic: (event) => diagnostics.push(event as DiagnosticEvent) }),
+        );
+
+        // §6: a FAILED endpoint is owner_unproven — the dispatch crash never
+        // claims teardown ran and never synthesizes "0 survivors" (band 77
+        // is reserved for an identity-matched owner's honest survivor report).
+        expect(result.outcomes[0]!.outcome.kind).toBe("owner_unproven");
+
+        // Non-terminal and unfenced: no cancelled settlement, generation
+        // unchanged, so a later pass can retry with a validated endpoint.
         const stored = yield* repository.getById("exec_td_1");
         expect(Option.isSome(stored)).toBe(true);
         if (Option.isSome(stored)) {
           expect(stored.value.observedState).toBe("cancelling");
+          expect(stored.value.desiredState).toBe("cancelling");
+          expect(stored.value.generation).toBe(1);
+          expect(TERMINAL_STATES.has(stored.value.observedState)).toBe(false);
         }
+
+        const journal = yield* repository.listJournalEvents("exec_td_1");
+        // Band 75 request first (preserved ordering), then exactly the
+        // band-78 owner_unproven outcome; no band 76 and no band 77.
+        const outcomeRows = journal.filter((event) =>
+          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven ||
+          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors ||
+          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
+        );
+        expect(outcomeRows).toHaveLength(1);
+        const outcomeRow = outcomeRows[0]!;
+        expect(outcomeRow.sequence).toBe(PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven);
+        expect(outcomeRow.diagnosticCode ?? "").toBe("pi_subagent_teardown_owner_unproven");
+        // Truthful wording preserved: the dispatch itself failed.
+        expect(outcomeRow.diagnosticMessage).toContain("dispatch failed");
+        const metadata = (outcomeRow.metadata ?? {}) as Record<string, unknown>;
+        expect(metadata.reason).toBe("dispatch_failed");
+        // No fabricated survivor evidence on an owner-unproven row.
+        expect(metadata.survivorPids).toBeUndefined();
+
+        // Operator pairing: the owner_unproven stage/code reached the
+        // operator surface — never the survivors vocabulary.
+        expect(
+          diagnostics.some(
+            (event) =>
+              event.stage === "teardown_owner_unproven" &&
+              event.diagnosticCode === "pi_subagent_teardown_owner_unproven",
+          ),
+        ).toBe(true);
+        expect(
+          diagnostics.some((event) => event.diagnosticCode === "pi_subagent_teardown_survivors"),
+        ).toBe(false);
         void fixture;
       }).pipe(Effect.provide(repositoryLayer)),
     );

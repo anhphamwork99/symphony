@@ -295,7 +295,7 @@ const makeCapturingExtension = (hooks: {
       "bounded-foreground-attachment",
       "coalesced-progress",
     ],
-    extensionVersion: "0.14.0-alfie.1",
+    extensionVersion: "0.15.0-alfie.4",
   });
   return {
     name: "pi-subagents",

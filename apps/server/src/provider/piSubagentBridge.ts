@@ -16,6 +16,9 @@ import {
   type PiSubagentNegotiatedCapability,
   type PiSubagentSpawnCommand,
   type PiSubagentSpawnResult,
+  PiSubagentTeardownOwnedProcessesResult as PiSubagentTeardownOwnedProcessesResultSchema,
+  type PiSubagentTeardownOwnedProcessesCommand,
+  type PiSubagentTeardownOwnedProcessesResult,
 } from "@synara/contracts";
 
 import {
@@ -27,6 +30,7 @@ import {
   MIN_PI_SUBAGENT_HEARTBEAT_INTERVAL_MS,
   MIN_PI_SUBAGENT_LEASE_DURATION_MS,
   MIN_PI_SUBAGENT_PROGRESS_RATE_HZ,
+  resolvePiSubagentWatchdogStageTimeoutMs,
 } from "../config.ts";
 
 export const PI_SUBAGENT_BRIDGE_KEY = Symbol.for("synara.pi.subagents.bridge");
@@ -34,6 +38,41 @@ export const PI_SUBAGENT_MANAGED_FOREGROUND_KEY = Symbol.for(
   "synara.pi.subagents.managed_foreground.v1",
 );
 const PI_SUBAGENT_PROBE_CACHE_KEY = Symbol.for("synara.pi.subagents.probe_cache");
+
+/**
+ * Decision 0033 §3: the additive capability string gating the opaque
+ * identity-fenced child-owner teardown endpoint. It is advertised as an
+ * OPTIONAL handshake capability only — an old Alfie without the endpoint
+ * stays fully managed on the ordinary child path (D0033 compatibility:
+ * teardown proof simply degrades to band 78 owner-unproven).
+ */
+export const PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY =
+  "child-bash-process-ownership" as const;
+
+/** Reason discriminant for every non-terminal owner-unproven path (D0033 §6). */
+export type PiSubagentTeardownOwnedProcessesUnprovenReason =
+  | "bridge_operation_absent"
+  | "dispatch_threw"
+  | "dispatch_timed_out"
+  | "malformed_result"
+  | "identity_mismatch"
+  | "owner_unavailable"
+  | "dispatch_failed"
+  | "stale_generation"
+  | "owner_missing";
+
+export type PiSubagentTeardownOwnedProcessesDispatch =
+  | { readonly kind: "validated"; readonly result: PiSubagentTeardownOwnedProcessesResult }
+  | {
+      readonly kind: "unproven";
+      readonly reason: PiSubagentTeardownOwnedProcessesUnprovenReason;
+      readonly diagnosticCode: "pi_subagent_teardown_owner_unproven";
+      readonly diagnosticMessage: string;
+      /** Command fencing actually dispatched (absence: nothing was dispatched). */
+      readonly attemptedCommand: PiSubagentTeardownOwnedProcessesCommand;
+      /** Decoded result when one was produced but cannot be trusted as proof. */
+      readonly result?: PiSubagentTeardownOwnedProcessesResult;
+    };
 
 export type PiSubagentObservationKind =
   | "started"
@@ -243,6 +282,20 @@ export interface PiSubagentExtensionBridge {
   readonly cancel?: (
     command: PiSubagentCancelCommand,
   ) => Promise<PiSubagentCancelResult> | PiSubagentCancelResult;
+  /**
+   * Decision 0033 §3/§5 opaque identity-fenced child-owner teardown
+   * endpoint (owner → host is the RESULT; this is the host → owner command
+   * spelling). OPTIONAL and additive: an extension without the capability
+   * simply never exposes it, and every such absence degrades to non-terminal
+   * band 78 owner-unproven — never to parent-supervisor fallback. The
+   * command carries ONLY execution/attempt/generation fencing; PIDs, session
+   * keys, and signals stay endpoint-local.
+   */
+  readonly teardownOwnedProcesses?: (
+    command: PiSubagentTeardownOwnedProcessesCommand,
+  ) =>
+    | Promise<PiSubagentTeardownOwnedProcessesResult>
+    | PiSubagentTeardownOwnedProcessesResult;
   readonly abort?: (id: string) => boolean | Promise<boolean>;
   readonly abortAll?: () => number | Promise<number>;
   readonly getActiveExecutions?: () => ReadonlyArray<PiSubagentActiveChild>;
@@ -263,8 +316,243 @@ export function createDefaultHandshakeRequest(): PiSubagentHandshakeRequest {
       "completion-delivery-ownership",
       "restart-reconciliation",
       "paginated-transcripts",
+      PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
     ],
   };
+}
+
+/**
+ * Decision 0033 capability gate for an optional capability: true only when a
+ * negotiated handshake actually supplied it. An unmanaged or absent
+ * negotiation never enables the child-owner teardown path.
+ */
+export function negotiationSupportsPiSubagentCapability(
+  negotiated: PiSubagentNegotiatedCapability,
+  capability: PiSubagentCapability,
+): boolean {
+  return (
+    negotiated.isManaged && (negotiated.capabilities ?? []).includes(capability)
+  );
+}
+
+/**
+ * Decision 0033 §6/§7 result validation. Returns the authenticated owner
+ * result ONLY when it decodes against the staged contract AND its
+ * execution/attempt/generation correlation echoes the dispatched command
+ * fencing exactly. Malformed, unknown-shape, and mismatched data are all
+ * `undefined` — an invalid/unproven marker the caller maps to band 78 with
+ * no signal, no band 76, and no generation fence.
+ */
+export function validatePiSubagentTeardownOwnedProcessesResult(
+  raw: unknown,
+  command: PiSubagentTeardownOwnedProcessesCommand,
+): PiSubagentTeardownOwnedProcessesResult | undefined {
+  const decodedOption = Schema.decodeUnknownOption(
+    PiSubagentTeardownOwnedProcessesResultSchema,
+  )(raw);
+  if (Option.isNone(decodedOption)) {
+    return undefined;
+  }
+  const result = decodedOption.value;
+  if (
+    result.executionId !== command.executionId ||
+    result.attemptId !== command.expectedAttemptId ||
+    result.generation !== command.expectedGeneration
+  ) {
+    return undefined;
+  }
+  return result;
+}
+
+/**
+ * Review remediation (Decision 0033 §6): the host-side bound on the opaque
+ * `teardownOwnedProcesses` bridge call. It REUSES the existing Pi watchdog
+ * stage timeout semantics (Ticket 15 / T15-AC1: absent, invalid, or
+ * out-of-range input falls back to the shared 10s default — never clamped),
+ * so no new configuration knob, environment variable, or schema migration
+ * is introduced and direct callers without options stay safe.
+ */
+export interface PiSubagentTeardownOwnedProcessesDispatchOptions {
+  /** Bounded wait for the owner endpoint reply (default 10000ms). */
+  readonly timeoutMs?: number | undefined;
+}
+
+/** Module-private sentinel resolved when the bounded wait elapses first. */
+const PI_SUBAGENT_TEARDOWN_DISPATCH_TIMED_OUT = Symbol(
+  "synara.pi.subagents.teardown_owned_processes.dispatch_timed_out",
+);
+
+/**
+ * Decision 0033 §5/§6 host-side dispatch of the opaque child-owner teardown
+ * endpoint. This is the ONLY surface Symphony may call for managed-child
+ * Ticket-16 teardown; it never enumerates, caches, reconstructs, registers,
+ * or signals child PIDs/process groups, and never falls back to the parent
+ * PiBashProcessSupervisor. Every absent/malformed/mismatched/thrown/timed-
+ * out path is a non-terminal owner-unproven outcome — including the
+ * authenticated owner-reported `stale`/`missing`/`owner_unavailable`/
+ * `dispatch_failed` statuses, which carry no teardown proof of any kind.
+ * The opaque endpoint is never signalled or aborted when the bound elapses;
+ * the host simply stops waiting (D0033 §6: a timed-out endpoint is
+ * non-terminal owner-unproven with no kill claim).
+ */
+export async function dispatchPiSubagentTeardownOwnedProcesses(
+  bridge: PiSubagentExtensionBridge,
+  command: PiSubagentTeardownOwnedProcessesCommand,
+  options?: PiSubagentTeardownOwnedProcessesDispatchOptions,
+): Promise<PiSubagentTeardownOwnedProcessesDispatch> {
+  const teardownFn = bridge.teardownOwnedProcesses;
+  if (typeof teardownFn !== "function") {
+    // Mixed-version extension (no child-bash-process-ownership capability):
+    // nothing was dispatched; the honest band-78 owner-unproven posture.
+    return {
+      kind: "unproven",
+      reason: "bridge_operation_absent",
+      diagnosticCode: "pi_subagent_teardown_owner_unproven",
+      diagnosticMessage:
+        "The extension bridge does not expose the teardownOwnedProcesses owner endpoint (capability child-bash-process-ownership absent); no owned teardown was proven",
+      attemptedCommand: command,
+    };
+  }
+
+  // Direct-caller safety: an absent/invalid/out-of-range deadline falls
+  // back to the existing watchdog-stage default (10s), never to zero.
+  const timeoutMs = resolvePiSubagentWatchdogStageTimeoutMs(options?.timeoutMs);
+
+  let raw: unknown;
+  try {
+    raw = await new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(PI_SUBAGENT_TEARDOWN_DISPATCH_TIMED_OUT);
+      }, Math.max(0, timeoutMs));
+      timer.unref?.();
+      const accept = (value: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const fail = (cause: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(cause);
+      };
+      let endpointOutcome: unknown;
+      try {
+        endpointOutcome = teardownFn(command);
+      } catch (syncCause) {
+        // A bridge function may throw synchronously (same contract as a
+        // later rejection): the honest outcome is `dispatch_threw`.
+        fail(syncCause);
+        return;
+      }
+      // Handlers stay attached even after a timeout win, so a LATE endpoint
+      // settlement or rejection can never surface as an unhandled rejection.
+      void Promise.resolve(endpointOutcome).then(accept, fail);
+    });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return {
+      kind: "unproven",
+      reason: "dispatch_threw",
+      diagnosticCode: "pi_subagent_teardown_owner_unproven",
+      diagnosticMessage: `The teardownOwnedProcesses owner endpoint dispatch threw (${message}); no owned teardown was proven`,
+      attemptedCommand: command,
+    };
+  }
+
+  if (raw === PI_SUBAGENT_TEARDOWN_DISPATCH_TIMED_OUT) {
+    return {
+      kind: "unproven",
+      reason: "dispatch_timed_out",
+      diagnosticCode: "pi_subagent_teardown_owner_unproven",
+      diagnosticMessage: `The teardownOwnedProcesses owner endpoint did not settle within the bounded host-side wait of ${String(timeoutMs)}ms; the host stopped waiting without signalling the owner, no owned teardown was proven, and cleanup remains uncertain`,
+      attemptedCommand: command,
+    };
+  }
+
+  const decodedOption = Schema.decodeUnknownOption(
+    PiSubagentTeardownOwnedProcessesResultSchema,
+  )(raw);
+  if (Option.isNone(decodedOption)) {
+    return {
+      kind: "unproven",
+      reason: "malformed_result",
+      diagnosticCode: "pi_subagent_teardown_owner_unproven",
+      diagnosticMessage:
+        "The teardownOwnedProcesses owner endpoint returned a malformed or unknown result; no owned teardown was proven",
+      attemptedCommand: command,
+    };
+  }
+  const result = decodedOption.value;
+
+  if (
+    result.executionId !== command.executionId ||
+    result.attemptId !== command.expectedAttemptId ||
+    result.generation !== command.expectedGeneration
+  ) {
+    return {
+      kind: "unproven",
+      reason: "identity_mismatch",
+      diagnosticCode: "pi_subagent_teardown_owner_unproven",
+      diagnosticMessage:
+        "The teardownOwnedProcesses owner endpoint replied with a mismatching execution/attempt/generation identity; the stale owner was not trusted and nothing further was signalled",
+      attemptedCommand: command,
+      result,
+    };
+  }
+
+  switch (result.status) {
+    case "proven":
+      return { kind: "validated", result };
+    case "survivors":
+      // The ONLY survivor-evidence path (band 77); bounded by contract at
+      // MAX_PI_SUBAGENT_TEARDOWN_RESULT_SURVIVOR_PIDS entries.
+      return { kind: "validated", result };
+    case "stale":
+      return {
+        kind: "unproven",
+        reason: "stale_generation",
+        diagnosticCode: "pi_subagent_teardown_owner_unproven",
+        diagnosticMessage:
+          "The live owner endpoint reported the teardown fencing as stale; nothing was signalled and no teardown was proven",
+        attemptedCommand: command,
+        result,
+      };
+    case "missing":
+      return {
+        kind: "unproven",
+        reason: "owner_missing",
+        diagnosticCode: "pi_subagent_teardown_owner_unproven",
+        diagnosticMessage:
+          "The owner endpoint reported no such execution under this owner; no teardown was proven",
+        attemptedCommand: command,
+        result,
+      };
+    case "owner_unavailable":
+      return {
+        kind: "unproven",
+        reason: "owner_unavailable",
+        diagnosticCode: "pi_subagent_teardown_owner_unproven",
+        diagnosticMessage:
+          "No live owner endpoint exists to ask; no teardown was proven",
+        attemptedCommand: command,
+        result,
+      };
+    case "dispatch_failed":
+      return {
+        kind: "unproven",
+        reason: "dispatch_failed",
+        diagnosticCode: "pi_subagent_teardown_owner_unproven",
+        diagnosticMessage:
+          "The owner endpoint reported a failed dispatch; no teardown claim of any kind was made",
+        attemptedCommand: command,
+        result,
+      };
+  }
 }
 
 export async function negotiatePiSubagentCapability(
@@ -483,6 +771,7 @@ export interface CompatibleExtensionOptions {
   readonly protocolVersion?: number;
   readonly capabilities?: PiSubagentCapability[];
   readonly extensionVersion?: string;
+  readonly onExecuteContext?: (context: unknown) => void;
   readonly onSpawn?: (
     command: PiSubagentSpawnCommand,
   ) => Promise<PiSubagentSpawnResult> | PiSubagentSpawnResult;
@@ -490,11 +779,23 @@ export interface CompatibleExtensionOptions {
   readonly onCancel?: (
     command: PiSubagentCancelCommand,
   ) => Promise<PiSubagentCancelResult> | PiSubagentCancelResult;
+  /** Decision 0033 optional child-owner teardown endpoint fixture wiring. */
+  readonly onTeardownOwnedProcesses?: (
+    command: PiSubagentTeardownOwnedProcessesCommand,
+  ) =>
+    | Promise<PiSubagentTeardownOwnedProcessesResult>
+    | PiSubagentTeardownOwnedProcessesResult;
 }
 
 export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionOptions) {
   const protocolVersion = options?.protocolVersion ?? PI_SUBAGENTS_PROTOCOL_VERSION;
-  const capabilities = options?.capabilities ?? [...PI_SUBAGENT_CAPABILITIES];
+  const capabilities =
+    options?.capabilities ??
+    (options?.onTeardownOwnedProcesses === undefined
+      ? PI_SUBAGENT_CAPABILITIES.filter(
+          (capability) => capability !== PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+        )
+      : [...PI_SUBAGENT_CAPABILITIES]);
   const extensionVersion = options?.extensionVersion ?? "0.1.0";
   const emittedEvents: PiSubagentLifecycleEvent[] = [];
 
@@ -507,6 +808,9 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
     }),
     ...(options?.onSpawn !== undefined ? { spawn: options.onSpawn } : {}),
     ...(options?.onCancel !== undefined ? { cancel: options.onCancel } : {}),
+    ...(options?.onTeardownOwnedProcesses !== undefined
+      ? { teardownOwnedProcesses: options.onTeardownOwnedProcesses }
+      : {}),
     emitLifecycleEvent: async (event) => {
       emittedEvents.push(event);
       if (options?.onLifecycleEvent) {
@@ -530,7 +834,8 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
           label: "Managed Agent",
           description: "Managed Pi subagent tool",
           parameters: {} as any,
-          execute: async (_toolCallId: string, params: any) => {
+          execute: async (_toolCallId: string, params: any, _signal?: unknown, _onUpdate?: unknown, ctx?: unknown) => {
+            options?.onExecuteContext?.(ctx);
             if (bridge.spawn) {
               const spawnResult = await bridge.spawn({
                 commandId: params.commandId ?? `cmd_${Date.now()}`,

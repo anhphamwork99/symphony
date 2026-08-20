@@ -330,7 +330,7 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
   it("T15-AC1/AC4: wall-time expiry escalates a real background child through stage-1 abort and settles exactly once on child acknowledgement", async () => {
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
 
     const modelServer = await startDeterministicModelServer();
 

@@ -360,7 +360,7 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
 
     const modelServer = await startDeterministicModelServer();
 

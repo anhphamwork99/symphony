@@ -127,6 +127,8 @@ import type {
 } from "@synara/contracts";
 import {
   attachPiSubagentManagedForegroundBinding,
+  dispatchPiSubagentTeardownOwnedProcesses,
+  PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
   probePiSubagentBridge,
   type PiSubagentManagedForegroundBinding,
   type PiSubagentObservationInput,
@@ -174,6 +176,7 @@ import { startPiSubagentWatchdogSweep } from "../piSubagentWatchdogSweep.ts";
 import { startPiSubagentProcessTeardownSweep } from "../piSubagentProcessTeardownSweep.ts";
 import {
   MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS,
+  PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC,
   type PiSubagentOwnedTeardownDispatchResult,
 } from "../piSubagentProcessTeardown.ts";
 import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown.ts";
@@ -448,6 +451,7 @@ interface PiSessionContext {
   pendingUserInputs: Map<ApprovalRequestId, PiPendingUserInput>;
   stopped: boolean;
   subagentCapability?: PiSubagentNegotiatedCapability;
+  subagentOwnedTeardownOwnerKey?: string;
   /**
    * Ticket 14: session-start subject authority binding (Decision 21). The
    * explicit resume path re-runs the shared admission gates, which
@@ -517,6 +521,18 @@ interface PiTrackedToolCall {
   readonly itemId: RuntimeItemId;
   readonly itemType: "command_execution" | "file_change" | "dynamic_tool_call" | "web_search";
 }
+
+interface PiSubagentOwnedTeardownOwnerRecord {
+  readonly bridge: ReturnType<typeof extractPiSubagentBridge>;
+  referenceCount: number;
+  stopped: boolean;
+}
+
+const piSubagentOwnedTeardownExecutionKey = (input: {
+  readonly executionId: string;
+  readonly attemptId: string;
+  readonly generation: number;
+}) => `${input.executionId}\u0000${input.attemptId}\u0000${String(input.generation)}`;
 
 interface PiPendingUserInput {
   readonly resolve: (answers: ProviderUserInputAnswers) => void;
@@ -630,6 +646,23 @@ export interface PiAdapterLiveOptions {
     | { readonly kind: "proven" | "survivors"; readonly survivorPids?: ReadonlyArray<number> }
     | undefined
   >;
+  /**
+   * Decision 0033 review follow-up test seam: read-only snapshot of the
+   * in-memory owned-teardown registry (stopped owner bridges plus their
+   * retained execution mappings). The adapter registers the getter once at
+   * build; production leaves this undefined, and the getter mutates
+   * nothing. Deterministic tests use it to observe bounded retention —
+   * ordinary durable terminals release their mapping, while cancelling /
+   * teardown-eligible executions stay mapped until the post-band-76 proven
+   * diagnostic — without any production behavior change.
+   */
+  readonly piSubagentOwnedTeardownRegistryObserver?: (
+    getStats: () => {
+      readonly ownerCount: number;
+      readonly stoppedOwnerCount: number;
+      readonly executionCount: number;
+    },
+  ) => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2037,6 +2070,111 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
     const sessions = new Map<ThreadId, PiSessionContext>();
+    const piSubagentOwnedTeardownOwners = new Map<string, PiSubagentOwnedTeardownOwnerRecord>();
+    const piSubagentOwnedTeardownExecutions = new Map<
+      string,
+      { readonly ownerKey: string }
+    >();
+
+    const releasePiSubagentOwnedTeardownExecution = (input: {
+      readonly executionId: string;
+      readonly attemptId: string;
+      readonly generation: number;
+    }) => {
+      const executionKey = piSubagentOwnedTeardownExecutionKey(input);
+      const ownedExecution = piSubagentOwnedTeardownExecutions.get(executionKey);
+      if (ownedExecution === undefined) {
+        return;
+      }
+      piSubagentOwnedTeardownExecutions.delete(executionKey);
+      const owner = piSubagentOwnedTeardownOwners.get(ownedExecution.ownerKey);
+      if (owner === undefined) {
+        return;
+      }
+      owner.referenceCount = Math.max(0, owner.referenceCount - 1);
+      if (owner.stopped && owner.referenceCount === 0) {
+        piSubagentOwnedTeardownOwners.delete(ownedExecution.ownerKey);
+      }
+    };
+
+    const registerPiSubagentOwnedTeardownOwner = (context: PiSessionContext) => {
+      context.subagentOwnedTeardownOwnerKey = undefined;
+      if (
+        context.subagentCapability?.isManaged !== true ||
+        context.subagentCapability.capabilities?.includes(
+          PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+        ) !== true
+      ) {
+        return;
+      }
+      const bridge = extractPiSubagentBridge(context.runtime.session);
+      if (typeof bridge.teardownOwnedProcesses !== "function") {
+        return;
+      }
+      const ownerKey = crypto.randomUUID();
+      piSubagentOwnedTeardownOwners.set(ownerKey, {
+        bridge,
+        referenceCount: 0,
+        stopped: false,
+      });
+      context.subagentOwnedTeardownOwnerKey = ownerKey;
+    };
+
+    const registerPiSubagentOwnedTeardownExecution = (
+      context: PiSessionContext,
+      input: {
+        readonly executionId: string;
+        readonly attemptId: string;
+        readonly generation: number;
+      },
+    ) => {
+      const ownerKey = context.subagentOwnedTeardownOwnerKey;
+      if (ownerKey === undefined) {
+        return;
+      }
+      const owner = piSubagentOwnedTeardownOwners.get(ownerKey);
+      if (owner === undefined) {
+        context.subagentOwnedTeardownOwnerKey = undefined;
+        return;
+      }
+      const executionKey = piSubagentOwnedTeardownExecutionKey(input);
+      const existing = piSubagentOwnedTeardownExecutions.get(executionKey);
+      if (existing?.ownerKey === ownerKey) {
+        return;
+      }
+      if (existing !== undefined) {
+        releasePiSubagentOwnedTeardownExecution(input);
+      }
+      piSubagentOwnedTeardownExecutions.set(executionKey, { ownerKey });
+      owner.referenceCount += 1;
+    };
+
+    const markPiSubagentOwnedTeardownOwnerStopped = (context: PiSessionContext) => {
+      const ownerKey = context.subagentOwnedTeardownOwnerKey;
+      if (ownerKey === undefined) {
+        return;
+      }
+      const owner = piSubagentOwnedTeardownOwners.get(ownerKey);
+      if (owner === undefined) {
+        context.subagentOwnedTeardownOwnerKey = undefined;
+        return;
+      }
+      owner.stopped = true;
+      if (owner.referenceCount === 0) {
+        piSubagentOwnedTeardownOwners.delete(ownerKey);
+      }
+    };
+
+    // Decision 0033 review follow-up test seam (read-only): see the option
+    // docs above. Registered once so the getter always observes the live
+    // adapter-lifetime maps.
+    options?.piSubagentOwnedTeardownRegistryObserver?.(() => ({
+      ownerCount: piSubagentOwnedTeardownOwners.size,
+      stoppedOwnerCount: Array.from(piSubagentOwnedTeardownOwners.values()).filter(
+        (owner) => owner.stopped,
+      ).length,
+      executionCount: piSubagentOwnedTeardownExecutions.size,
+    }));
     // Decision 0016: adapter-lifetime per-thread completion coordinator — the
     // production consumer of the Ticket 08 durable outbox (Decision 0013 F3).
     // One coordinator spans every managed Pi session of this adapter;
@@ -2692,6 +2830,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       }
       context.pendingUserInputs.clear();
       context.stopped = true;
+      markPiSubagentOwnedTeardownOwnerStopped(context);
       let runtimeFailure: unknown;
       try {
         await context.runtime.dispose();
@@ -3305,6 +3444,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           Effect.catch((error) => Effect.succeed(error)),
         );
         context.subagentCapability = subagentCapability;
+        registerPiSubagentOwnedTeardownOwner(context);
         options?.onSubagentCapability?.({
           threadId: input.threadId,
           capability: subagentCapability,
@@ -3498,6 +3638,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
                   );
                 }
+                let durableOrdinaryTerminal: {
+                  readonly executionId: string;
+                  readonly attemptId: string;
+                  readonly generation: number;
+                } | undefined;
                 const ingest = await Effect.runPromise(
                   Effect.result(
                     ingestPiSubagentTerminal({
@@ -3527,6 +3672,25 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                             : undefined,
                       },
                       onTerminalPersisted: (event) => {
+                        // Decision 0033 review follow-up: capture the exact
+                        // committed aggregate below. `onTerminalPersisted` is
+                        // the post-commit seam (it fires ONLY for a `recorded`
+                        // terminal — journal row + aggregate + outbox all
+                        // committed in one transaction), so this is the only
+                        // place the ordinary-terminal release below can learn
+                        // the durable truth it must gate on.
+                        if (
+                          (event.result.execution.observedState === "succeeded" ||
+                            event.result.execution.observedState === "failed") &&
+                          event.result.execution.desiredState ===
+                            event.result.execution.observedState
+                        ) {
+                          durableOrdinaryTerminal = {
+                            executionId: event.result.execution.executionId,
+                            attemptId: event.result.execution.attemptId,
+                            generation: event.result.execution.generation,
+                          };
+                        }
                         // T07-AC1: completion delivery may begin only now
                         // (journal + aggregate are committed). Ticket 08:
                         // the durable completion-outbox entry was created
@@ -3684,7 +3848,31 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   (err as any).diagnosticCode = "pi_subagent_terminal_persistence_failed";
                   throw err;
                 }
-                return;
+                if (durableOrdinaryTerminal !== undefined) {
+                  // Decision 0033 review follow-up (bounded lifecycle): this
+                  // is the ONLY ordinary release path for the opaque owner
+                  // execution mapping. It runs strictly AFTER the durable
+                  // terminal commit made this exact execution terminal —
+                  // never on the observation alone, never on a stale
+                  // (`ignored_stale`/`already_applied` returns nothing above)
+                  // or failed persistence (the Failure branch threw), and
+                  // never for a cancelling/teardown-eligible execution (the
+                  // guard in onTerminalPersisted requires the committed
+                  // observed AND desired state to be the ordinary terminal
+                  // succeeded/failed). A durably succeeded/failed execution
+                  // never enters the band-74 teardown scan, so keeping the
+                  // mapping would pin a stopped owner bridge for the adapter
+                  // lifetime; cancelling executions keep theirs until the
+                  // post-band-76 proven diagnostic clears them.
+                  releasePiSubagentOwnedTeardownExecution(durableOrdinaryTerminal);
+                }
+                  // A child terminal observation is not child-process-tree
+                  // proof: a Bash root can settle while a captured descendant
+                  // remains alive. A cancelling/teardown-eligible execution
+                  // therefore retains the opaque owner endpoint until the
+                  // Ticket-16 coordinator durably commits band 76/fences the
+                  // exact generation; only that post-proof path releases it.
+                  return;
               }
 
               // Ticket 23 observation kinds take the coalescing/UPDATE-only
@@ -4036,8 +4224,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               }
 
               if (admissionResult.status === "already_applied") {
-                // Redelivered command: the identities are returned but the
-                // child is NOT started a second time (T20-AC3/AC6).
+                // Redelivery must not rebind child ownership. The original
+                // accepted execution is the only one that created the child
+                // and registered its opaque endpoint; a newer parent session
+                // may receive this idempotent reply but owns no child to tear
+                // down. Replacing the retained mapping here would discard the
+                // actual old owner and turn an eligible handoff into band 78.
                 return {
                   content: [
                     {
@@ -4057,6 +4249,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 attemptId: admissionResult.attemptId,
                 generation: admissionResult.generation,
               };
+              registerPiSubagentOwnedTeardownExecution(context, {
+                executionId: admissionResult.executionId,
+                attemptId: admissionResult.attemptId,
+                generation: admissionResult.generation,
+              });
 
               const baseCtx = ctx ?? {
                 ui: makePiExtensionUIContext(context),
@@ -4218,6 +4415,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 reportObservation,
                 progress: { rateHz: progressRateHz },
                 heartbeat: { intervalMs: heartbeatIntervalMs, leaseMs: leaseDurationMs },
+              });
+              registerPiSubagentOwnedTeardownExecution(context, {
+                executionId: attempt.executionId,
+                attemptId: attempt.attemptId,
+                generation: attempt.generation,
               });
               // The Agent tool execute contract expects an ExtensionContext-
               // shaped object. The runner's live context is not exposed to
@@ -4611,10 +4813,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   cause,
                 }),
             ),
-          );
-          for (const outcome of cancelOutcome.outcomes) {
-            if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
-              offerRuntimeEvent({
+            );
+            for (const outcome of cancelOutcome.outcomes) {
+              if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+                // Cancellation acknowledgement/owner death settles this
+                // lifecycle attempt but is not root-and-descendant teardown
+                // proof. Keep the exact opaque child owner for a later
+                // Ticket-16 handoff; only durable band 76 may release it.
+                offerRuntimeEvent({
                 ...makeEventBase(context),
                 type: "runtime.warning",
                 payload: {
@@ -4878,10 +5084,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 cause,
               }),
           ),
-        );
-        const outcome = result.outcome;
-        if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
-          offerRuntimeEvent({
+          );
+          const outcome = result.outcome;
+          if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+            // See parent-turn cancellation: acknowledgement is lifecycle
+            // evidence, not child process-tree proof, so it cannot release
+            // this exact owner mapping before a durable band-76 fence.
+            offerRuntimeEvent({
             ...makeEventBase(context),
             type: "runtime.warning",
             payload: {
@@ -5094,14 +5303,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             },
           });
 
-    // Ticket 16: one adapter-lifetime owned process-tree teardown sweep —
-    // the production consumer of the ticket 15 band-74 teardown handoffs.
-    // The ONLY kill authority is the owning session's own process
-    // supervisor (T16-AC1): teardown is dispatched exclusively through
-    // `processSupervisor.teardownAll()`, which signals only processes it
-    // spawned and proves their exit (T16-AC3). A parent thread with no live
-    // session context resolves `undefined` — nothing is killed and the
-    // honest `owner_unproven` outcome is journaled (T16-AC7).
+    // Ticket 16 / Decision 0033: one adapter-lifetime owned process-tree
+    // teardown sweep — the production consumer of the ticket 15 band-74
+    // teardown handoffs. Managed-child teardown NEVER falls back to the
+    // parent process supervisor. It resolves only the exact admitted
+    // execution's retained opaque owner endpoint and dispatches only the
+    // identity-fenced `teardownOwnedProcesses` bridge helper; every
+    // absent/malformed/mismatched/thrown/unavailable path degrades to
+    // `undefined` so the coordinator journals the honest band-78
+    // owner-unproven outcome with no kill and no fence.
     const piSubagentTeardownSweep =
       piSubagentRepository === undefined
         ? undefined
@@ -5111,15 +5321,70 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               if (options?.piSubagentTeardownResolver !== undefined) {
                 return options.piSubagentTeardownResolver(execution);
               }
-              const context = sessions.get(ThreadId.makeUnsafe(execution.parentThreadId));
-              if (context === undefined) {
-                // No live session: ownership cannot be proven — no kill.
+              const ownedExecution = piSubagentOwnedTeardownExecutions.get(
+                piSubagentOwnedTeardownExecutionKey(execution),
+              );
+              if (ownedExecution === undefined) {
                 return undefined;
               }
-              return resolvePiSubagentOwnedTeardown(context.processSupervisor);
-            },
-            onDiagnostic: (event) => {
-              const safeCorrelation = makePiSubagentSafeCorrelation({
+              const owner = piSubagentOwnedTeardownOwners.get(ownedExecution.ownerKey);
+              if (owner === undefined) {
+                piSubagentOwnedTeardownExecutions.delete(
+                  piSubagentOwnedTeardownExecutionKey(execution),
+                );
+                return undefined;
+              }
+              const dispatch = await dispatchPiSubagentTeardownOwnedProcesses(
+                owner.bridge,
+                {
+                  commandId: `teardowncmd_${execution.executionId}_${execution.attemptId}_gen${String(
+                    execution.generation,
+                  )}_${execution.parentThreadId}`,
+                  executionId: execution.executionId,
+                  expectedAttemptId: execution.attemptId,
+                  expectedGeneration: execution.generation,
+                },
+                // Decision 0033 §6 host-side bound reuses the existing Pi
+                // watchdog stage timeout (T15-AC1 default/bounds; no new
+                // knob): a hung opaque owner endpoint degrades to the
+                // non-terminal band-78 owner-unproven path below so the
+                // sweep still completes and schedules its next pass.
+                { timeoutMs: serverConfig.piSubagentWatchdogStageTimeoutMs },
+              );
+                if (dispatch.kind !== "validated") {
+                  return undefined;
+                }
+                if (dispatch.result.status === "proven") {
+                  // Keep the exact opaque owner mapping until the coordinator
+                  // commits band 76 plus its cancellation/fence transaction.
+                  // A valid endpoint reply alone is not durable proof; if that
+                  // write fails, the next pass must be able to ask this owner
+                  // again instead of degrading to a synthetic owner-unproven.
+                  return { kind: "proven" };
+                }
+              if (dispatch.result.status === "survivors") {
+                return {
+                  kind: "survivors",
+                  ...(dispatch.result.survivorPids === undefined
+                    ? {}
+                    : { survivorPids: dispatch.result.survivorPids }),
+                };
+              }
+              return undefined;
+              },
+              onDiagnostic: (event) => {
+                if (event.diagnosticCode === PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC) {
+                  // teardownOne emits this diagnostic only after
+                  // recordTeardownOutcome durably committed the proven
+                  // settlement/fence. This is the first safe moment to
+                  // release the retained child-owner endpoint.
+                  releasePiSubagentOwnedTeardownExecution({
+                    executionId: event.executionId,
+                    attemptId: event.attemptId,
+                    generation: event.generation,
+                  });
+                }
+                const safeCorrelation = makePiSubagentSafeCorrelation({
                 executionId: event.executionId,
                 attemptId: event.attemptId,
                 threadId: event.parentThreadId,

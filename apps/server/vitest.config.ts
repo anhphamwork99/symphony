@@ -33,6 +33,11 @@ const WALLCLOCK_TESTS = [
   "src/provider/piSubagentResumeAcceptance.test.ts",
   "src/provider/piSubagentCompletionOwnershipAcceptance.test.ts",
   "src/provider/piSubagentWatchdogAcceptance.test.ts",
+  // Ticket 17 slice 1: the integrated real-Pi acceptance smoke (stages 0–2)
+  // chains the production WS composition against the pinned Alfie extension;
+  // its stage-2 `budget + 500 ms` detach envelope requires the same
+  // standalone per-file wall-clock method as the suites above.
+  "src/provider/piSubagentRealPiAcceptance.test.ts",
 ];
 
 const wallclockProject = defineConfig({

@@ -25,7 +25,7 @@ const capability: PiSubagentNegotiatedCapability = {
   isManaged: true,
   protocolVersion: 1,
   capabilities: ["managed-spawn", "coalesced-progress"],
-  extensionVersion: "0.14.0-alfie.1",
+  extensionVersion: "0.15.0-alfie.4",
 };
 
 const thread = {

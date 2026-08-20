@@ -658,6 +658,10 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     "durable-cancellation",
     "journal-terminal-lifecycle",
     "completion-delivery-ownership",
+    // Decision 0033 point 3: the opaque, identity-fenced child-owner teardown
+    // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
+    // capability. Additive: an old host simply never requires it.
+    "child-bash-process-ownership",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -1309,7 +1313,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     const provenance = verifyExtensionGitProvenance(repoDir);
     expect(provenance.isVerified).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.packageVersion).toBe("0.14.0-alfie.1");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
     expect(provenance.commit).toMatch(/^[0-9a-f]{40}$/);
 
     // 2. Reject synthetic inline factory extension

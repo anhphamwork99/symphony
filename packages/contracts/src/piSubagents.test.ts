@@ -5,6 +5,8 @@ import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
   PiSubagentCapability,
+  PiSubagentCancelCommand,
+  PiSubagentCancelResult,
   PiSubagentCompletionDeliveryState,
   PiSubagentCompletionOutboxEntry,
   PiSubagentDiagnosticCode,
@@ -19,6 +21,8 @@ import {
   PiSubagentResultReadResult,
   PiSubagentSpawnCommand,
   PiSubagentSpawnResult,
+  PiSubagentTeardownOwnedProcessesCommand,
+  PiSubagentTeardownOwnedProcessesResult,
   PiSubagentTranscriptEntry,
   PiSubagentTranscriptReadResult,
 } from "./piSubagents";
@@ -253,6 +257,277 @@ describe("Pi subagent handshake contract schemas (Issue 19)", () => {
     expect(() =>
       Schema.decodeSync(PiSubagentCapability)("completion-ownership" as never),
     ).toThrow();
+  });
+});
+
+describe("Pi subagent child-owned teardown bridge contract schemas (Decision 0033)", () => {
+  it("decodes child-bash-process-ownership as an accepted additive capability (D0033)", () => {
+    expect(PI_SUBAGENT_CAPABILITIES).toContain("child-bash-process-ownership");
+    const decoded = Schema.decodeSync(PiSubagentCapability)("child-bash-process-ownership");
+    expect(decoded).toBe("child-bash-process-ownership");
+    // The capability stays additive: near-miss spellings must not be accepted.
+    expect(() =>
+      Schema.decodeSync(PiSubagentCapability)("child-bash-ownership" as never),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCapability)("bash-process-ownership" as never),
+    ).toThrow();
+  });
+
+  it("decodes a valid teardownOwnedProcesses command with the cancel-command identity conventions (D0033)", () => {
+    const decoded = Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+      commandId: "teardowncmd_exec_1_att_1_gen1",
+      executionId: "exec_123456",
+      expectedAttemptId: "att_001",
+      expectedGeneration: 1,
+    });
+    expect(decoded.commandId).toBe("teardowncmd_exec_1_att_1_gen1");
+    expect(decoded.executionId).toBe("exec_123456");
+    expect(decoded.expectedAttemptId).toBe("att_001");
+    expect(decoded.expectedGeneration).toBe(1);
+  });
+
+  it("rejects teardown commands with empty/blank identity or malformed generation (D0033)", () => {
+    const base = {
+      commandId: "teardowncmd_exec_1_att_1_gen1",
+      executionId: "exec_123456",
+      expectedAttemptId: "att_001",
+      expectedGeneration: 1,
+    };
+
+    // Identity: valid non-empty trimmed strings required.
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, commandId: "   " }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, commandId: "" }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, executionId: "" }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+        ...base,
+        expectedAttemptId: "  ",
+      }),
+    ).toThrow();
+
+    // Generation: positive integer (the existing cancel-command convention).
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, expectedGeneration: 0 }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, expectedGeneration: -1 }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+        ...base,
+        expectedGeneration: 1.5,
+      }),
+    ).toThrow();
+
+    // NonNegativeInt is not accepted — generation must be fenced positively.
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+        ...base,
+        expectedGeneration: 0,
+      }),
+    ).toThrow();
+  });
+
+  it("decodes every owner-teardown result status with correlation identity (D0033)", () => {
+    const correlation = {
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+    };
+
+      // `survivors` is the only status that carries non-empty owner evidence.
+      const decodedSurvivors = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors",
+        ...correlation,
+        survivorPids: [901, 4242],
+      });
+      expect(decodedSurvivors.status).toBe("survivors");
+
+    for (const status of [
+      "proven",
+      "stale",
+      "missing",
+      "owner_unavailable",
+      "dispatch_failed",
+    ] as const) {
+      const decoded = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status,
+        ...correlation,
+      });
+      expect(decoded.status).toBe(status);
+      expect(decoded.executionId).toBe("exec_123456");
+      expect(decoded.attemptId).toBe("att_001");
+      expect(decoded.generation).toBe(1);
+    }
+  });
+
+  it("rejects teardown results with unknown statuses or malformed correlation identity (D0033)", () => {
+    const base = {
+      status: "proven" as const,
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+    };
+
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        ...base,
+        status: "owner_unproven" as never,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        ...base,
+        status: "cancelled" as never,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        ...base,
+        status: "already_terminal" as never,
+      }),
+    ).toThrow();
+
+    // Correlation identity must be well-formed on EVERY result variant.
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        ...base,
+        executionId: " ",
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ ...base, attemptId: "" }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ ...base, generation: 0 }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ ...base, generation: -2 }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ ...base, generation: 2.25 }),
+    ).toThrow();
+  });
+
+    it("carries canonical survivor evidence and rejects malformed PID data (D0033)", () => {
+    const base = {
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+    };
+
+    const decoded = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+      status: "survivors" as const,
+      ...base,
+        survivorPids: [901, 4242],
+      });
+      expect(decoded.status).toBe("survivors");
+      expect(decoded.survivorPids).toEqual([901, 4242]);
+
+      // Owner evidence is non-empty, positive-safe-integer, strictly ascending,
+      // deduplicated, and capped; the host must reject rather than normalize it.
+      for (const survivorPids of [
+        [],
+        [2, 1],
+        [1, 1],
+        [1, 2, 1],
+        Array.from({ length: 17 }, (_, index) => index + 1),
+      ]) {
+        expect(() =>
+          Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+            status: "survivors" as const,
+            ...base,
+            survivorPids,
+          }),
+        ).toThrow();
+      }
+
+      // Only positive safe integers are individual survivor evidence.
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors" as const,
+        ...base,
+        survivorPids: [0],
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors" as const,
+        ...base,
+        survivorPids: [-1],
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors" as const,
+        ...base,
+        survivorPids: [4242.5],
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors" as const,
+        ...base,
+        survivorPids: [9007199254740993], // > Number.MAX_SAFE_INTEGER
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+        status: "survivors" as const,
+        ...base,
+        survivorPids: ["4242" as never],
+      }),
+    ).toThrow();
+  });
+
+  it("forbids survivor PID data on every non-survivor status (D0033)", () => {
+    const base = {
+      executionId: "exec_123456",
+      attemptId: "att_001",
+      generation: 1,
+    };
+
+    for (const status of ["proven", "stale", "missing", "owner_unavailable", "dispatch_failed"] as const) {
+      expect(() =>
+        Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+          status,
+          ...base,
+          survivorPids: [4242],
+        } as never),
+      ).toThrow();
+      // ...and the same status decodes cleanly WITHOUT survivor data.
+      expect(Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ status, ...base }).status).toBe(
+        status,
+      );
+    }
+  });
+
+  it("keeps raw PID/session owner details out of the teardown command contract (D0033)", () => {
+    // The request stays identity-fenced: owner identity is endpoint-local
+    // and opaque; no raw PID, session key, or kill parameters may ride it.
+    const fields = Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields);
+    expect(fields).toContain("commandId");
+    expect(fields).toContain("executionId");
+    expect(fields).toContain("expectedAttemptId");
+    expect(fields).toContain("expectedGeneration");
+    for (const forbidden of ["pids", "ownerPid", "pid", "sessionKey", "sessionId", "signal", "kill"]) {
+      expect(fields).not.toContain(forbidden);
+    }
+  });
+
+  it("exposes teardownOwnedProcesses as the opaque bridge operation spelling (D0033)", () => {
+    // The operation stays opaque at the contract layer: the schema names carry
+    // the binding spelling and no generic PID/kill surface is introduced.
+    expect(
+      Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields).sort(),
+    ).toEqual(["commandId", "executionId", "expectedAttemptId", "expectedGeneration"]);
   });
 });
 
@@ -510,5 +785,44 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
     const eventFields = Object.keys(PiSubagentLifecycleEvent.fields);
     expect(eventFields).not.toContain("resultContent");
     expect(eventFields).not.toContain("transcriptContent");
+  });
+});
+
+// Keep the sibling Ticket 06 cancel-command conventions pinned: the teardown
+// command mirrors them, so drift here is a contract regression.
+describe("Pi subagent cancel command conventions (Issue 06, D0033 reference)", () => {
+  it("rejects cancel commands with malformed identity or non-positive generation", () => {
+    const base = {
+      cancelCommandId: "cancel_exec_1_att_1_gen1",
+      executionId: "exec_123456",
+      expectedAttemptId: "att_001",
+      expectedGeneration: 1,
+    };
+
+    const decoded = Schema.decodeSync(PiSubagentCancelCommand)(base);
+    expect(decoded.cancelCommandId).toBe("cancel_exec_1_att_1_gen1");
+
+    expect(() => Schema.decodeSync(PiSubagentCancelCommand)({ ...base, cancelCommandId: "" })).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCancelCommand)({ ...base, expectedGeneration: 0 }),
+    ).toThrow();
+    // The cancel result vocabulary must stay closed — the teardown statuses
+    // are a separate surface and must not leak into the cancel result union.
+    expect(() =>
+      Schema.decodeSync(PiSubagentCancelResult)({
+        status: "proven" as never,
+        executionId: base.executionId,
+        attemptId: base.expectedAttemptId,
+        generation: base.expectedGeneration,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCancelResult)({
+        status: "owner_unavailable" as never,
+        executionId: base.executionId,
+        attemptId: base.expectedAttemptId,
+        generation: base.expectedGeneration,
+      }),
+    ).toThrow();
   });
 });
