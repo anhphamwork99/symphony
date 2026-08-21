@@ -51,7 +51,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { CommandId, MessageId, ProjectId, ThreadId } from "@synara/contracts";
+import {
+  CommandId,
+  MessageId,
+  ProjectId,
+  ThreadId,
+  type OrchestrationEvent,
+} from "@synara/contracts";
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -87,6 +93,38 @@ interface RealPiSliceFixture {
 }
 
 let fixture: RealPiSliceFixture | undefined;
+
+// ─── OrchestrationEvent type guards (narrowing the replay event union) ──────
+// `replayEvents` returns the full public event union; each guard narrows to
+// exactly the event member the surrounding assertion reads, so the payload
+// fields stay type-checked against the contract instead of cast away.
+
+function isPiSubagentExecutionUpdatedEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.pi-subagent-execution-updated" }> {
+  return event.type === "thread.pi-subagent-execution-updated";
+}
+
+function isActivityAppendedEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> {
+  return event.type === "thread.activity-appended";
+}
+
+function isMessageSentEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.message-sent" }> {
+  return event.type === "thread.message-sent";
+}
+
+/** Structurally validates a JSON activity payload carrying a detail string. */
+function activityPayloadDetail(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  if (!("detail" in payload) || typeof (payload as { detail?: unknown }).detail !== "string") {
+    return undefined;
+  }
+  return (payload as { detail: string }).detail;
+}
 
 describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", () => {
   // -------------------------------------------------------------------------
@@ -603,9 +641,10 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           .filter((event) => String(event.threadId) === String(absentThreadId)),
       ).toHaveLength(0);
       expect(
-        [...absentDetail.thread.piSubagentExecutions, ...strippedDetail.thread.piSubagentExecutions].some(
-          (card) => card.observedState === "orphaned",
-        ),
+        [
+          ...(absentDetail.thread.piSubagentExecutions ?? []),
+          ...(strippedDetail.thread.piSubagentExecutions ?? []),
+        ].some((card) => card.observedState === "orphaned"),
       ).toBe(false);
     } catch (error) {
       throw new Error(
@@ -754,7 +793,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         (events) =>
           events.some(
             (event) =>
-              event.type === "thread.pi-subagent-execution-updated" &&
+              isPiSubagentExecutionUpdatedEvent(event) &&
               event.payload.executionId === executionId &&
               event.payload.journalSequence === 90 &&
               event.payload.card.attemptId === durableBeforeCancel.attemptId &&
@@ -765,14 +804,22 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       );
       const cancellingCardUpdate = cancellingIntentEvent.find(
         (event) =>
-          event.type === "thread.pi-subagent-execution-updated" &&
+          isPiSubagentExecutionUpdatedEvent(event) &&
           event.payload.executionId === executionId &&
           event.payload.journalSequence === 90 &&
           event.payload.card.attemptId === durableBeforeCancel.attemptId &&
           event.payload.card.generation === durableBeforeCancel.generation,
       );
-      expect(cancellingCardUpdate?.payload.card.executionId).toBe(runningCard.executionId);
-      expect(cancellingCardUpdate?.payload.journalSequence).toBe(90);
+      if (
+        cancellingCardUpdate === undefined ||
+        !isPiSubagentExecutionUpdatedEvent(cancellingCardUpdate)
+      ) {
+        throw new Error(
+          `${stage} cancel-intent card publication was not a pi-subagent-execution-updated event.`,
+        );
+      }
+      expect(cancellingCardUpdate.payload.card.executionId).toBe(runningCard.executionId);
+      expect(cancellingCardUpdate.payload.journalSequence).toBe(90);
 
       const cancellingIntent = await waitFor(
         () => harness.durable.listJournalEvents(executionId),
@@ -892,9 +939,9 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         (events) =>
           events.some(
             (event) =>
-              event.type === "thread.activity-appended" &&
+              isActivityAppendedEvent(event) &&
               event.payload.activity.kind === "provider.subagent-execution.cancel.failed" &&
-              event.payload.activity.payload.detail ===
+              activityPayloadDetail(event.payload.activity.payload) ===
                 "No active provider session is bound to this thread.",
           ),
         30_000,
@@ -902,10 +949,18 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       );
       const inaccessibleFailureEvent = inaccessibleFailure.find(
         (event) =>
-          event.type === "thread.activity-appended" &&
+          isActivityAppendedEvent(event) &&
           event.payload.activity.kind === "provider.subagent-execution.cancel.failed",
       );
-      expect(inaccessibleFailureEvent?.payload.activity.summary).toBe(
+      if (
+        inaccessibleFailureEvent === undefined ||
+        !isActivityAppendedEvent(inaccessibleFailureEvent)
+      ) {
+        throw new Error(
+          `${stage} inaccessible cancel diagnostic was not an activity-appended event.`,
+        );
+      }
+      expect(inaccessibleFailureEvent.payload.activity.summary).toBe(
         "Subagent execution cancel failed",
       );
 
@@ -1068,27 +1123,29 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         (events) =>
           events.some(
             (event) =>
-              event.type === "thread.message-sent" &&
+              isMessageSentEvent(event) &&
               event.payload.text.includes("background subagents finished:"),
           ),
         60_000,
         `${stage} accepted batched parent follow-up`,
       );
-      const followUps = replayed.filter(
-        (event) =>
-          event.type === "thread.message-sent" &&
-          event.payload.text.includes("background subagents finished:"),
-      );
+      const followUps = replayed
+        .filter(isMessageSentEvent)
+        .filter((event) => event.payload.text.includes("background subagents finished:"));
       expect(followUps).toHaveLength(1);
+      const followUp = followUps[0];
+      if (followUp === undefined) {
+        throw new Error(`${stage} expected exactly one accepted batched parent follow-up.`);
+      }
       // The durable `acceptedReceiptSequence` is the engine's command receipt;
       // the public message event is the resulting parent effect and can have
       // an earlier sequence. `acknowledged` is only reachable after exact
       // fingerprint/command/message receipt correlation in the repository.
-      expect(followUps[0]!.commandId).toBe(batch.parentCommandId);
-      expect(followUps[0]!.payload.messageId).toBe(batch.parentMessageId);
-      expect(followUps[0]!.sequence).toBeLessThan(batch.acceptedReceiptSequence!);
+      expect(followUp.commandId).toBe(batch.parentCommandId);
+      expect(followUp.payload.messageId).toBe(batch.parentMessageId);
+      expect(followUp.sequence).toBeLessThan(batch.acceptedReceiptSequence!);
       for (const executionId of executionIds) {
-        expect(followUps[0]!.payload.text.includes(executionId)).toBe(true);
+        expect(followUp.payload.text.includes(executionId)).toBe(true);
       }
 
       const resultReads = await Promise.all(
@@ -2004,7 +2061,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         expect(after?.observedState).toBe("cancelled");
         expect(after?.generation).toBe(before.generation + 1);
         const detail = await client.getThreadDetailSnapshot(String(threadId));
-        const card = detail?.thread.piSubagentExecutions.find(
+        const card = (detail?.thread.piSubagentExecutions ?? []).find(
           (candidate) => candidate.executionId === executionId,
         );
         expect(card?.observedState).toBe("cancelled");
@@ -2025,16 +2082,24 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
   );
 });
 
-async function waitFor<T>(
-  read: () => T | Promise<T>,
-  predicate: (value: T | undefined) => boolean,
+/**
+ * Sound durable-read polling: the predicate only ever sees a defined value,
+ * and the resolved value is only returned after a runtime `!== undefined`
+ * check, so callers never receive `undefined` under the declared type.
+ * Polling stays at 50 ms and the timeout diagnostic is unchanged.
+ */
+async function waitFor<Defined>(
+  read: () => Awaited<Defined> | undefined | Promise<Awaited<Defined> | undefined>,
+  predicate: (value: Exclude<Defined, undefined>) => boolean,
   timeoutMs: number,
   description: string,
-): Promise<T> {
+): Promise<Exclude<Defined, undefined>> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await Promise.resolve(read()).catch(() => undefined);
-    if (predicate(value)) return value as T;
+    if (value !== undefined && predicate(value as Exclude<Defined, undefined>)) {
+      return value as Exclude<Defined, undefined>;
+    }
     if (Date.now() >= deadline) {
       throw new Error(`Timed out after ${timeoutMs}ms waiting for ${description}.`);
     }

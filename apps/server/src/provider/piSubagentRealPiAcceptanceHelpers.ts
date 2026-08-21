@@ -55,7 +55,6 @@ import {
   type PiSubagentSpawnCommand,
   type PiSubagentSpawnResult,
   type ServerSettingsView,
-  type ThreadId,
   WS_COMPATIBILITY_QUERY,
   WS_FEATURE_PATH,
   WS_NEGOTIATE_HTTP_PATH,
@@ -68,6 +67,7 @@ import {
   WsDeviceRpcGroup,
   WsFeatureRpcGroup,
 } from "@synara/contracts";
+import { ThreadId } from "@synara/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
@@ -108,7 +108,7 @@ import {
   makePiAdapterLive,
 } from "../provider/Layers/PiAdapter.ts";
 import { makeDurableProviderServiceLive } from "../provider/Layers/ProviderService.ts";
-import { PiAdapter } from "../provider/Services/PiAdapter.ts";
+import { PiAdapter, type PiAdapterShape } from "../provider/Services/PiAdapter.ts";
 import { ProviderAdapterRegistry } from "../provider/Services/ProviderAdapterRegistry.ts";
 import { makePiSubagentExecutionCardBridge } from "../provider/piSubagentExecutionCardBridge.ts";
 import { makePiSubagentParentEffectDispatcher } from "../provider/piSubagentParentEffectDispatcher.ts";
@@ -1204,10 +1204,17 @@ export async function makeRealPiWsHarness(
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(Layer.succeed(McpSessionAuthority, authorityForwarder)),
   );
+  // The real adapter instance backing every provider operation above. It is
+  // captured where `adapterRegistryLayer` yields the composed `PiAdapter`
+  // service (the registry is the only composition surface that exposes the
+  // adapter), so harness-facing operations (`stopPiSession`) use the exact
+  // instance the production graph resolved — never a second composition.
+  let piAdapterInstance: PiAdapterShape | undefined;
   const adapterRegistryLayer = Layer.effect(
     ProviderAdapterRegistry,
     Effect.gen(function* () {
       const piAdapter = yield* PiAdapter;
+      piAdapterInstance = piAdapter;
       return {
         getByProvider: (provider: string) =>
           provider === "pi"
@@ -1628,12 +1635,16 @@ export async function makeRealPiWsHarness(
       }
       await session.abort();
     },
-    stopPiSession: (threadId) =>
-      runtime.runPromise(
-        Effect.flatMap(Effect.service(PiAdapter), (adapter) =>
-          Effect.as(adapter.stopSession(ThreadId.makeUnsafe(threadId)), "stopped" as const),
-        ),
-      ),
+    stopPiSession: async (threadId) => {
+      if (piAdapterInstance === undefined) {
+        throw new RealPiHarnessError(
+          "No Pi adapter was built for this harness; provider-session stop is unavailable.",
+          "stopPiSession",
+        );
+      }
+      await piAdapterInstance.stopSession(ThreadId.makeUnsafe(threadId));
+      return "stopped" as const;
+    },
       durable,
     dispose,
   } satisfies RealPiWsHarness;
