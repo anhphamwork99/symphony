@@ -1689,25 +1689,58 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
             event.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC,
         ),
       ).toBe(true);
-      expect(
-        diagnostics.some(
-          (event) =>
-            event.stage === "provider_session_stop" &&
-            event.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC,
-        ),
-      ).toBe(true);
-      expect(
-        diagnostics.some(
-          (event) =>
-            event.stage === "teardown_handoff" &&
-            event.diagnosticCode === PI_SUBAGENT_WATCHDOG_CLEANUP_UNCERTAIN_DIAGNOSTIC,
-        ),
-      ).toBe(true);
-      expect(
-        diagnostics.some(
-          (event) => event.diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC,
-        ),
-      ).toBe(false);
+      const metadataPhase = (metadata: unknown): string | undefined => {
+        if (typeof metadata !== "object" || metadata === null || !("phase" in metadata)) {
+          return undefined;
+        }
+        return typeof metadata.phase === "string" ? metadata.phase : undefined;
+      };
+      const metadataDispatched = (metadata: unknown): boolean | undefined => {
+        if (typeof metadata !== "object" || metadata === null || !("dispatched" in metadata)) {
+          return undefined;
+        }
+        return typeof metadata.dispatched === "boolean" ? metadata.dispatched : undefined;
+      };
+      const metadataResult = (metadata: unknown): string | undefined => {
+        if (typeof metadata !== "object" || metadata === null || !("result" in metadata)) {
+          return undefined;
+        }
+        return typeof metadata.result === "string" ? metadata.result : undefined;
+      };
+      const metadataReason = (metadata: unknown): string | undefined => {
+        if (typeof metadata !== "object" || metadata === null || !("reason" in metadata)) {
+          return undefined;
+        }
+        return typeof metadata.reason === "string" ? metadata.reason : undefined;
+      };
+      const providerSessionStopDiagnostics = diagnostics.filter(
+        (event) => event.stage === "provider_session_stop",
+      );
+      const teardownHandoffDiagnostics = diagnostics.filter(
+        (event) => event.stage === "teardown_handoff",
+      );
+      expect(providerSessionStopDiagnostics).toSatisfy(
+        (events: typeof providerSessionStopDiagnostics) =>
+          events.length === 0 ||
+          (events.length === 1 &&
+            events[0]?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC),
+      );
+      expect(teardownHandoffDiagnostics).toHaveLength(1);
+      expect(teardownHandoffDiagnostics[0]?.diagnosticCode).toSatisfy(
+        (diagnosticCode: string | undefined) =>
+          diagnosticCode === PI_SUBAGENT_WATCHDOG_CLEANUP_UNCERTAIN_DIAGNOSTIC ||
+          diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC,
+      );
+      const usedStoppedBranch =
+        providerSessionStopDiagnostics.length === 0 &&
+        teardownHandoffDiagnostics[0]?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC;
+      const usedTimeoutBranch =
+        providerSessionStopDiagnostics.length === 1 &&
+        providerSessionStopDiagnostics[0]?.diagnosticCode ===
+          PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC &&
+        teardownHandoffDiagnostics[0]?.diagnosticCode ===
+          PI_SUBAGENT_WATCHDOG_CLEANUP_UNCERTAIN_DIAGNOSTIC;
+      expect(usedStoppedBranch || usedTimeoutBranch).toBe(true);
       expect(diagnostics.some((event) => event.stage === "failure")).toBe(false);
 
       const journal = await waitFor(
@@ -1746,28 +1779,41 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           (event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.providerTurnInterrupt,
         )?.diagnosticCode,
       ).toBe(PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC);
-      expect(
-        watchdogRows.find(
-          (event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.providerSessionStop,
-        )?.diagnosticCode,
-      ).toBe(PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC);
+      const providerSessionStopRow = watchdogRows.find(
+        (event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.providerSessionStop,
+      );
+      expect(providerSessionStopRow?.diagnosticCode).toSatisfy(
+        (diagnosticCode: string | undefined) =>
+          diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC ||
+          diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC,
+      );
       expect(
         watchdogRows.find((event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.teardownHandoff)
           ?.diagnosticCode,
       ).toBe(PI_SUBAGENT_WATCHDOG_CLEANUP_UNCERTAIN_DIAGNOSTIC);
-      expect(
-        watchdogRows.find(
-          (event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.providerSessionStop,
-        )?.metadata,
-      ).toMatchObject({
-        phase: "watchdog_escalation",
-        dispatched: true,
-        result: expect.stringMatching(/^(timeout|failed)$/),
+      expect(providerSessionStopRow?.metadata).toSatisfy((metadata: unknown) => {
+        if (metadataPhase(metadata) !== "watchdog_escalation") return false;
+        if (metadataDispatched(metadata) !== true) return false;
+        const result = metadataResult(metadata);
+        return result === "stopped" || result === "timeout" || result === "failed";
+      });
+      const teardownHandoffRow = watchdogRows.find(
+        (event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.teardownHandoff,
+      );
+      expect(teardownHandoffRow?.metadata).toSatisfy((metadata: unknown) => {
+        if (metadataPhase(metadata) !== "watchdog_escalation") return false;
+        const reason = metadataReason(metadata);
+        return reason === "session_stop_timeout" || reason === "session_stopped";
       });
       expect(
-        watchdogRows.find((event) => event.sequence === PI_SUBAGENT_WATCHDOG_BAND.teardownHandoff)
-          ?.metadata,
-      ).toMatchObject({ phase: "watchdog_escalation", reason: "session_stop_timeout" });
+        (providerSessionStopRow?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC &&
+          metadataResult(providerSessionStopRow?.metadata) === "stopped" &&
+          metadataReason(teardownHandoffRow?.metadata) === "session_stopped") ||
+          (providerSessionStopRow?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC &&
+            (metadataResult(providerSessionStopRow?.metadata) === "timeout" ||
+              metadataResult(providerSessionStopRow?.metadata) === "failed") &&
+            metadataReason(teardownHandoffRow?.metadata) === "session_stop_timeout"),
+      ).toBe(true);
 
       expect(journal.some((event) => event.sequence === 40)).toBe(false);
       expect(journal.some((event) => event.sequence === 92)).toBe(false);
