@@ -3,8 +3,8 @@
 ## Routing metadata
 
 - **Owner:** anhpham99
-- **Lifecycle:** Specification ready for implementation planning
-- **Triage status:** ready-for-agent
+- **Lifecycle:** Acceptance complete
+- **Triage status:** complete
 - **Tracker:** Local Markdown
 
 ## Authoritative routing
@@ -159,6 +159,12 @@
   requires the exact child-scoped owner endpoint; no parent fallback or
   Synara PID authority is permitted, and an unavailable endpoint is
   non-terminal band 78.
+- [decisions/0034-t17-integrated-real-pi-acceptance-and-managed-child-ownership-reassessment.md](decisions/0034-t17-integrated-real-pi-acceptance-and-managed-child-ownership-reassessment.md) —
+  final acceptance of Ticket 17 at Symphony `9b6d06cb`, with all T17-AC1–AC9
+  passing under the binding AC6 three-leg evidence split. Closes Decision
+  0033's narrow managed-child ownership reopening while retaining its exact
+  child-owner, fail-closed band-78, no-parent-fallback, no-Synara-PID, and
+  proof-before-fence requirements.
 - [plans/22-real-bounded-foreground-attachment/](plans/22-real-bounded-foreground-attachment/) —
   delegation-ready implementation plan and Work Packages for Ticket 22.
 - [issues/](issues/) — normative implementation tickets in dependency order;
@@ -204,32 +210,21 @@
     **Ticket 14 is complete** per Decision 0026 at integrated Symphony
     `6d46f221`: explicit authorized resume uses sequence `80`, disjoint from
     watchdog `70–74`, and preserves the no-automatic-replay invariant.
-  **Ticket 16 (owned process-tree teardown) is complete; Ticket 17 is the
-  active implementation frontier.** Decision 0027 binds Ticket 16 to journal
-  bands `75–78`, live-supervisor-only kill authority, and restart
-  `owner_unproven` evidence before Ticket-10 owner-loss fencing. Decision
-  0028 records the human owner's approval to replace the conditional
-  automated real-Pi destructive CI seam with deterministic fixtures plus the
-  isolated manual real-Pi verification recipe. Decision 0029 records the
-  one final-acceptance consultation's rejection: T16-AC4 remains open until
-  production preserves bounded survivor-PID evidence through
-  `AggregateError`. Decision 0030 supersedes that rejection after verified
-  remediation at Symphony `9c27a48b`: Ticket 16 is complete and Ticket 17 is
-  unblocked; Alfie remains `489acd626` / `0.14.0-alfie.1`. Decision 0031
-  settles Ticket 17's T17-AC6 evidence split as ordinary ticket-level seam
-  authority (three mandatory legs; fixture-only and automated-destructive
-    claims prohibited) while the concrete amended Testing Seam had awaited
-    explicit human-owner approval before any AC6 test was written. Decision 0032
-    persists that owner approval (2026-08-20): the seam is approved and AC6
-    tests may now be written under it; the T17-AC6 checkbox stays open until
-    all three legs — including the recorded manual real-Pi run — are
-    satisfied.
-  **Decision 0033 narrowly reopens Ticket 16 for Alfie managed-child Bash
-  ownership:** the isolated T17-AC6 discovery run proved that parent
-  `PiBashProcessSupervisor` proof can be vacuous while the real child Bash
-  remains live. The active remediation must create a child-scoped supervisor
-  and opaque identity-fenced owner endpoint. Until that remediation is
-  accepted, Ticket 17 cannot claim AC6's manual zero-owned-child proof.
+  **Ticket 16 and Ticket 17 are complete; no active implementation frontier
+  remains in tickets 01–24.** Decision 0027 binds Ticket 16 to journal bands
+  `75–78`, live-supervisor-only kill authority, and restart `owner_unproven`
+  evidence before Ticket-10 owner-loss fencing. Decision 0028 records the
+  human owner's approval to replace the conditional automated real-Pi
+  destructive CI seam with deterministic fixtures plus the isolated manual
+  real-Pi verification recipe. Decision 0030 accepts the remediated Ticket 16
+  baseline. Decisions 0031 and 0032 preserve and approve Ticket 17's
+  three-leg AC6 evidence boundary. Decision 0033's narrow managed-child
+  ownership reopening is implemented and closed by Decision 0034: managed
+  children use the exact opaque child-owner endpoint, unavailable ownership
+  remains non-terminal band 78, and parent-supervisor/PID fallback remains
+  prohibited. Decision 0034 accepts Ticket 17 at `9b6d06cb`; all listed
+  implementation tickets 01–24 are accepted, with no successor ticket named
+  by this Project Home.
   - **Accepted out-of-frontier ticket:** Ticket 13 — admission quotas and safe
     telemetry — is complete per Decision 0017.
 - Every implementation ticket owns an `Implementation Report`; an implementer

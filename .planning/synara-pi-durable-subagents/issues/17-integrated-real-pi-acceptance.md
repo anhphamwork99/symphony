@@ -17,27 +17,28 @@ Restart reconciliation to terminal or orphaned; 11 — Reconnectable execution
 card; 13 — Admission quotas and safe telemetry; 15 — Watchdog escalation
 through provider-session stop; 16 — Owned process-tree teardown and fencing.
 
-**Status:** ready-for-agent
+**Status:** complete — accepted by Decision 0034 at Symphony candidate
+`9b6d06cb` (2026-08-21)
 
-- [ ] **T17-AC1:** A compatible real Pi session negotiates managed capability
+- [x] **T17-AC1:** A compatible real Pi session negotiates managed capability
       and starts one identity-stamped long-running execution.
-- [ ] **T17-AC2:** The foreground parent releases within the configured budget,
+- [x] **T17-AC2:** The foreground parent releases within the configured budget,
       progress remains bounded, and browser reconnect restores the execution card.
-- [ ] **T17-AC3:** Parent Stop reaches the real child and the card remains
+- [x] **T17-AC3:** Parent Stop reaches the real child and the card remains
       cancelling until termination evidence.
-- [ ] **T17-AC4:** Multiple real child completions create one bounded follow-up
+- [x] **T17-AC4:** Multiple real child completions create one bounded follow-up
       per thread and remain individually retrievable by execution identity.
-- [ ] **T17-AC5:** Restart during a non-terminal execution reconciles to a
+- [x] **T17-AC5:** Restart during a non-terminal execution reconciles to a
       proven live owner, recovered terminal, or honest orphan, with no automatic
       replay.
-- [ ] **T17-AC6:** A deliberately wedged execution progresses through watchdog
+- [x] **T17-AC6:** A deliberately wedged execution progresses through watchdog
       stages and leaves no owned child process after proven teardown.
-- [ ] **T17-AC7:** A no-bridge or legacy-extension leg retains legacy semantics
+- [x] **T17-AC7:** A no-bridge or legacy-extension leg retains legacy semantics
       and is never labeled managed or recoverable.
-- [ ] **T17-AC8:** The harness uses an isolated home, non-default ports, isolated
+- [x] **T17-AC8:** The harness uses an isolated home, non-default ports, isolated
       process ownership, and does not read or mutate the user's active Synara/Pi
       instance or agent configuration.
-- [ ] **T17-AC9:** Any stage failure reports the stage and stable diagnostic and
+- [x] **T17-AC9:** Any stage failure reports the stage and stable diagnostic and
       fails loudly; a mock-only success is impossible.
 
 ## Testing Seams
@@ -201,12 +202,11 @@ destructive pass occurred is prohibited.
   all three legs are satisfied, including the recorded operator-run manual
   real-Pi run record).
 
-## Implementation Report — candidate awaiting review
+## Implementation Report — accepted candidate
 
 **Candidate provenance**
 
-- Symphony baseline: `5468d1c1992e63cd993198a1e88767604f686fa1`, with the
-  Ticket-17/Decision-0033 implementation still uncommitted at this report.
+- Symphony baseline: `46b32d71`; accepted candidate: `9b6d06cb`.
 - Alfie release: `aa6fa4a8540644d2509b10d6df854486ddc67d1d`,
   `@alfie/pi-subagents@0.15.0-alfie.4`.
 - The real-Pi provenance manifest pins that exact Alfie commit and hashes the
@@ -266,8 +266,16 @@ destructive pass occurred is prohibited.
 
 **Open completion gates**
 
-- Run the required independent feature review and Supervisor reassessment of
-  Decisions 0030/0033.
-- Commit the verified Symphony candidate, then run the final workspace
-  verification set and record its exact evidence before changing ticket
-  checkboxes or status.
+All completion gates are closed by Decision 0034:
+
+- Independent feature-level review:
+  [reviews/17-integrated-real-pi-acceptance-review.md](../reviews/17-integrated-real-pi-acceptance-review.md).
+- Supervisor final acceptance/reassessment:
+  [Decision 0034](../decisions/0034-t17-integrated-real-pi-acceptance-and-managed-child-ownership-reassessment.md).
+- Candidate verification: 62 focused child-owner/bridge tests, 9 automated
+  real-Pi tests with the destructive manual leg skipped, `bun fmt` exit 0,
+  `bun lint` exit 0 with 0 errors, and `bun typecheck` 7/7.
+
+The manual real-Pi record remains isolated operator evidence and the sole
+source for the zero-owned-child-after-proven-teardown claim. It must not be
+described as an automated destructive pass or deterministic-fixture evidence.
