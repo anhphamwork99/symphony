@@ -1642,7 +1642,11 @@ export async function makeRealPiWsHarness(
           "stopPiSession",
         );
       }
-      await piAdapterInstance.stopSession(ThreadId.makeUnsafe(threadId));
+      // `PiAdapterShape.stopSession` returns an Effect (Layers/PiAdapter.ts);
+      // awaiting the value alone would never execute it. Drive it through
+      // the harness's own `ManagedRuntime` so the real adapter stop path
+      // (session disposal + runtime events) actually runs.
+      await runtime.runPromise(piAdapterInstance.stopSession(ThreadId.makeUnsafe(threadId)));
       return "stopped" as const;
     },
       durable,
