@@ -165,7 +165,10 @@ import {
   cancelSinglePiSubagentExecution,
 } from "../piSubagentCancellationCoordinator.ts";
 import { resumePiSubagentExecution as resumePiSubagentExecutionCoordinator } from "../piSubagentResumeCoordinator.ts";
-import { extractPiSubagentBridge } from "../piSubagentBridge.ts";
+import {
+  extractPiSubagentBridge,
+  type PiSubagentExtensionBridge,
+} from "../piSubagentBridge.ts";
 import {
   makePiSubagentControlHealth,
   type PiSubagentControlHealthShape,
@@ -451,7 +454,7 @@ interface PiSessionContext {
   pendingUserInputs: Map<ApprovalRequestId, PiPendingUserInput>;
   stopped: boolean;
   subagentCapability?: PiSubagentNegotiatedCapability;
-  subagentOwnedTeardownOwnerKey?: string;
+  subagentOwnedTeardownOwnerKey?: string | undefined;
   /**
    * Ticket 14: session-start subject authority binding (Decision 21). The
    * explicit resume path re-runs the shared admission gates, which
@@ -523,7 +526,7 @@ interface PiTrackedToolCall {
 }
 
 interface PiSubagentOwnedTeardownOwnerRecord {
-  readonly bridge: ReturnType<typeof extractPiSubagentBridge>;
+  readonly bridge: PiSubagentExtensionBridge;
   referenceCount: number;
   stopped: boolean;
 }
@@ -2108,7 +2111,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         return;
       }
       const bridge = extractPiSubagentBridge(context.runtime.session);
-      if (typeof bridge.teardownOwnedProcesses !== "function") {
+      // Decision 0033 §6 fail-closed guard: the capability may be cached on
+      // the session while the live bridge (or its child-owner endpoint) is
+      // absent — a mixed-version or mid-lifecycle extension. Both absences
+      // return with NO owner registered, so no execution ever binds an
+      // owner record and the teardown sweep resolves `undefined` for it:
+      // the honest non-terminal band-78 owner-unproven path with no band
+      // 76, no cancelled settlement, and no generation fence.
+      if (
+        bridge === undefined ||
+        typeof bridge.teardownOwnedProcesses !== "function"
+      ) {
         return;
       }
       const ownerKey = crypto.randomUUID();
