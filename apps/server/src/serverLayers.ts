@@ -1,10 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Layer } from "effect";
+import { FileSystem, Layer, Path } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { AgentGatewayLive } from "./agentGateway/Layers/AgentGateway";
 import { AgentGatewayOperationRepositoryLive } from "./agentGateway/Layers/AgentGatewayOperationRepository";
 import { AgentGatewayCredentialsWithSecretsLive } from "./agentGateway/Layers/AgentGatewayCredentials";
 import { McpSessionAuthorityLive } from "./agentGateway/Layers/McpSessionAuthority";
+import type { McpSessionAuthority } from "./agentGateway/Services/McpSessionAuthority";
+import type { SecretStoreError } from "./auth/Services/ServerSecretStore";
 import { BrowserAutomationHostLive } from "./browserAutomation/Layers/BrowserAutomationHost";
 import { AutomationRunReactorLive } from "./automation/Layers/AutomationRunReactor";
 import { AutomationSchedulerLive } from "./automation/Layers/AutomationScheduler";
@@ -13,6 +16,8 @@ import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQu
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
+import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
+import type { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { StudioOutputReactorLive } from "./orchestration/Layers/StudioOutputReactor";
 import { ThreadGitMetadataReactorLive } from "./orchestration/Layers/ThreadGitMetadataReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
@@ -45,6 +50,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepository";
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
+import { ServerConfig } from "./config";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
@@ -76,15 +82,63 @@ export function provideThreadDeletionReactorDeviceService<
   return reactorLayer.pipe(Layer.provideMerge(deviceServiceLayer));
 }
 
+/**
+ * The exact layer type of the Decision-21 composition-owned MCP session
+ * authority leaf (live registry over the persisted secret store).
+ */
+type McpSessionAuthoritySharedLayer = Layer.Layer<
+  McpSessionAuthority,
+  SecretStoreError,
+  FileSystem.FileSystem | Path.Path | ServerConfig
+>;
+
+/**
+ * The exact layer type of the Decision-21 composition-owned projection
+ * snapshot query leaf (the same layer object the orchestration runtime
+ * merges).
+ */
+type ProjectionSnapshotQuerySharedLayer = Layer.Layer<
+  ProjectionSnapshotQuery,
+  never,
+  SqlClient.SqlClient
+>;
+
 export function makeServerRuntimeServicesLayer(
   options: {
     readonly agentGatewayCredentialsLayer?: typeof AgentGatewayCredentialsWithSecretsLive;
+    /**
+     * Application-owned shared MCP session authority registry (Decision 21).
+     * The production composition owns EXACTLY ONE of these layers and passes
+     * that same reference to both graphs, so the PiAdapter resolves the same
+     * in-memory registry the gateway/reactor mint, bind, revoke, and validate
+     * through. Retained default for isolated constructions without the
+     * application composition: the standard registry with the same
+     * secret-store wiring.
+     */
+    readonly mcpSessionAuthorityLayer?: McpSessionAuthoritySharedLayer;
+    /**
+     * Application-owned shared projection snapshot query. The production
+     * composition owns exactly one (the same layer object the orchestration
+     * runtime merges) and passes it to both graphs; layer memoization builds
+     * it once, so PiAdapter and the runtime serve from the same read model.
+     * Retained default for isolated constructions.
+     */
+    readonly projectionSnapshotQueryLayer?: ProjectionSnapshotQuerySharedLayer;
   } = {},
 ) {
   const agentGatewayCredentialsLayer =
     options.agentGatewayCredentialsLayer ?? AgentGatewayCredentialsWithSecretsLive;
   const providerHealthLayer = ProviderHealthLive.pipe(Layer.provideMerge(ServerSettingsLive));
   const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
+  const mcpSessionAuthorityLayer =
+    options.mcpSessionAuthorityLayer ??
+    McpSessionAuthorityLive.pipe(Layer.provide(ServerSecretStoreLive));
+  // The orchestration runtime already merges the standard projection snapshot
+  // query; the composition-owned reference is merged here explicitly so the
+  // exact layer object shared with the provider graph is visible in this
+  // graph (memoization dedupes the build).
+  const projectionSnapshotQueryLayer =
+    options.projectionSnapshotQueryLayer ?? OrchestrationProjectionSnapshotQueryLive;
 
   const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
     Layer.provideMerge(OrchestrationLayerLive),
@@ -93,6 +147,7 @@ export function makeServerRuntimeServicesLayer(
 
   const runtimeServicesLayer = Layer.mergeAll(
     OrchestrationLayerLive,
+    projectionSnapshotQueryLayer,
     checkpointStoreLayer,
     checkpointDiffQueryLayer,
     RuntimeReceiptBusLive,
@@ -163,9 +218,6 @@ export function makeServerRuntimeServicesLayer(
     sessionCredentialLayer,
     authControlPlaneLayer,
     serverAuthLayer,
-  );
-  const mcpSessionAuthorityLayer = McpSessionAuthorityLive.pipe(
-    Layer.provide(ServerSecretStoreLive),
   );
   const automationServiceLayer = AutomationServiceLive.pipe(
     Layer.provideMerge(AutomationRepositoryLive),
@@ -274,13 +326,28 @@ export function makeServerApplicationLayers() {
   // Ticket 11: execution-card projection bridge, same composition ownership
   // (constructed before layers, bound exactly once in main.ts).
   const piSubagentExecutionCardBridge = makePiSubagentExecutionCardBridge();
+  // Decision 21 production composition: EXACTLY ONE live projection snapshot
+  // query and EXACTLY ONE live MCP session authority registry for the whole
+  // application. The same layer references are handed to both graphs below;
+  // layer memoization builds them once, so PiAdapter captures the same server
+  // read service and the same in-memory authority registry the gateway and
+  // reactor bind and revoke through (a revocation is then observed at
+  // admission). Never construct a second registry for the provider graph.
+  const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+  const mcpSessionAuthorityLayer = McpSessionAuthorityLive.pipe(
+    Layer.provide(ServerSecretStoreLive),
+  );
   return {
     runtimeServicesLayer: makeServerRuntimeServicesLayer({
       agentGatewayCredentialsLayer,
+      mcpSessionAuthorityLayer,
+      projectionSnapshotQueryLayer,
     }),
     providerLayer: makeServerProviderLayer({
       agentGatewayCredentialsLayer,
       completionDispatchBridge,
+      mcpSessionAuthorityLayer,
+      projectionSnapshotQueryLayer,
     }),
     completionDispatchBridge,
     piSubagentExecutionCardBridge,
