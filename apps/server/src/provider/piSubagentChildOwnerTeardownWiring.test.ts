@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
 import {
   PI_SUBAGENT_CAPABILITIES,
+  type PiSubagentCapability,
+  type PiSubagentNegotiatedCapability,
+  type PiSubagentTeardownOwnedProcessesCommand,
+  type PiSubagentTeardownOwnedProcessesResult,
   type ThreadId,
 } from "@synara/contracts";
 
@@ -27,7 +31,41 @@ import { PI_SUBAGENT_WATCHDOG_BAND } from "./piSubagentWatchdogEscalation.ts";
 import {
   makeCompatiblePiSubagentExtension,
   PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+  type CompatibleExtensionOptions,
 } from "./piSubagentBridge.ts";
+
+/**
+ * Test fixture type for the malformed/absent child-owner endpoint cases:
+ * `capabilities` and `teardown` are OPTIONAL so every combination (absent
+ * capability, advertised capability with no endpoint, present endpoint with
+ * an invalid reply) stays representable under exactOptionalPropertyTypes.
+ */
+interface InvalidOwnerEndpointCase {
+  readonly label: string;
+  /** Advertised handshake capabilities; absent = fixture default filtering. */
+  readonly capabilities?: readonly PiSubagentCapability[];
+  /** Owner endpoint reply callback; absent = no endpoint exposed at all. */
+  readonly teardown?: CompatibleExtensionOptions["onTeardownOwnedProcesses"];
+}
+
+/**
+ * The `onSubagentCapability` seam exposes the live session context as
+ * `unknown`. Narrow it structurally to exactly the parent supervisor surface
+ * this test replaces with a counting spy — the only parent-fallback guard —
+ * instead of an unsafe `any` access.
+ */
+const isParentProcessSupervisorContext = (
+  context: unknown,
+): context is {
+  readonly processSupervisor: { teardownAll: () => Promise<void> };
+} =>
+  typeof context === "object" &&
+  context !== null &&
+  "processSupervisor" in context &&
+  typeof (context as { processSupervisor?: unknown }).processSupervisor === "object" &&
+  (context as { processSupervisor?: unknown }).processSupervisor !== null &&
+  typeof (context as { processSupervisor: { teardownAll?: unknown } }).processSupervisor
+    .teardownAll === "function";
 
 class TeardownClock {
   private nowMs = Date.parse("2026-08-20T12:00:00.000Z");
@@ -76,6 +114,34 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
   }
 };
+
+// Identity-matched helper for fully typed non-survivor owner replies. Every
+// legitimate fixture reply below is a valid contract result carrying the exact
+// command fencing; only the single `malformed` case intentionally violates the
+// contract.
+const identityReply = (
+  command: PiSubagentTeardownOwnedProcessesCommand,
+  status: "proven" | "stale" | "missing" | "owner_unavailable" | "dispatch_failed",
+): PiSubagentTeardownOwnedProcessesResult => ({
+  status,
+  executionId: command.executionId,
+  attemptId: command.expectedAttemptId,
+  generation: command.expectedGeneration,
+});
+
+// Identity-matched helper for survivor-evidence replies. The malformed variants
+// below deliberately break the contract-canonical evidence rules
+// (empty/unsorted/duplicated/over-cap) so they must fail closed to band 78.
+const survivorsReply = (
+  command: PiSubagentTeardownOwnedProcessesCommand,
+  survivorPids: number[],
+): PiSubagentTeardownOwnedProcessesResult => ({
+  status: "survivors",
+  executionId: command.executionId,
+  attemptId: command.expectedAttemptId,
+  generation: command.expectedGeneration,
+  ...(survivorPids.length === 0 ? {} : { survivorPids }),
+});
 
 const withTempHome = async <T>(tempDir: string, run: () => Promise<T>): Promise<T> => {
   const previousHome = process.env.HOME;
@@ -240,10 +306,7 @@ const seedHandedOffExecution = (
     });
   });
 
-const driveToHandedOff = (
-  repository: PiSubagentExecutionRepositoryShape,
-  executionId: string,
-) =>
+const driveToHandedOff = (repository: PiSubagentExecutionRepositoryShape, executionId: string) =>
   Effect.gen(function* () {
     const stored = yield* repository.getById(executionId);
     expect(Option.isSome(stored)).toBe(true);
@@ -275,10 +338,14 @@ const driveToHandedOff = (
     });
   });
 
-function findAgentExecute(session: any): (toolCallId: string, params: Record<string, unknown>) => Promise<any> {
+function findAgentExecute(
+  session: any,
+): (toolCallId: string, params: Record<string, unknown>) => Promise<any> {
   const loadedExt = session.resourceLoader
     .getExtensions()
-    .extensions.find((extension: any) => extension.tools instanceof Map && extension.tools.has("Agent"));
+    .extensions.find(
+      (extension: any) => extension.tools instanceof Map && extension.tools.has("Agent"),
+    );
   const entry = loadedExt?.tools.get("Agent");
   const executeFn = entry?.execute ?? entry?.definition?.execute;
   if (typeof executeFn !== "function") {
@@ -287,10 +354,13 @@ function findAgentExecute(session: any): (toolCallId: string, params: Record<str
   return executeFn;
 }
 
-const runManagedSpawn = async (session: any, input: {
-  commandId: string;
-  prompt: string;
-}): Promise<{ executionId: string; attemptId: string; generation: number }> => {
+const runManagedSpawn = async (
+  session: any,
+  input: {
+    commandId: string;
+    prompt: string;
+  },
+): Promise<{ executionId: string; attemptId: string; generation: number }> => {
   const execute = findAgentExecute(session);
   const result = await execute(`call_${input.commandId}`, {
     commandId: input.commandId,
@@ -362,12 +432,12 @@ const expectOwnerUnproven = (repository: PiSubagentExecutionRepositoryShape, exe
           event.diagnosticCode === "pi_subagent_teardown_owner_unproven",
       ),
     ).toBe(true);
-    expect(
-      journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven),
-    ).toBe(false);
-    expect(
-      journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors),
-    ).toBe(false);
+    expect(journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven)).toBe(
+      false,
+    );
+    expect(journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors)).toBe(
+      false,
+    );
     const stored = yield* repository.getById(executionId);
     expect(Option.isSome(stored)).toBe(true);
     if (Option.isSome(stored)) {
@@ -544,19 +614,35 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
   });
 
   it("maps invalid owner replies to band 78 without parent supervisor fallback", async () => {
-    const invalidCases = [
+    const invalidCases: readonly InvalidOwnerEndpointCase[] = [
       {
         label: "capability_absent",
         capabilities: PI_SUBAGENT_CAPABILITIES.filter(
           (capability) => capability !== PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
         ),
-        teardown: undefined,
       },
-      { label: "malformed", teardown: async () => ({ nope: true }) },
+      // Decision 0033 fail-closed: the handshake ADVERTISES the
+      // child-bash-process-ownership capability, but the extracted bridge
+      // exposes no teardownOwnedProcesses endpoint (mixed-version owner).
+      // Capability alone never creates a usable owner: this must still settle
+      // owner-unproven/band 78 with zero parent-supervisor calls.
+      {
+        label: "capability_endpoint_absent",
+        capabilities: [...PI_SUBAGENT_CAPABILITIES],
+      },
+      {
+        label: "malformed",
+        teardown: async (): Promise<PiSubagentTeardownOwnedProcessesResult> =>
+          // Deliberately untrusted endpoint payload: it violates the
+          // PiSubagentTeardownOwnedProcessesResult contract on purpose, so an
+          // explicit local cast is the only sound type. No other fixture
+          // reply uses a cast.
+          ({ nope: true }) as unknown as PiSubagentTeardownOwnedProcessesResult,
+      },
       {
         label: "mismatched",
         teardown: async () => ({
-          status: "proven",
+          status: "proven" as const,
           executionId: "wrong_exec",
           attemptId: "wrong_att",
           generation: 7,
@@ -570,89 +656,50 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
       },
       {
         label: "stale",
-        teardown: async (command: any) => ({
-          status: "stale",
-          executionId: command.executionId,
-          attemptId: command.expectedAttemptId,
-          generation: command.expectedGeneration,
-        }),
+        teardown: async (command) => identityReply(command, "stale"),
       },
       {
         label: "missing",
-        teardown: async (command: any) => ({
-          status: "missing",
-          executionId: command.executionId,
-          attemptId: command.expectedAttemptId,
-          generation: command.expectedGeneration,
-        }),
+        teardown: async (command) => identityReply(command, "missing"),
       },
       {
         label: "owner_unavailable",
-        teardown: async (command: any) => ({
-          status: "owner_unavailable",
-          executionId: command.executionId,
-          attemptId: command.expectedAttemptId,
-          generation: command.expectedGeneration,
-        }),
+        teardown: async (command) => identityReply(command, "owner_unavailable"),
       },
-        {
-          label: "dispatch_failed",
-          teardown: async (command: any) => ({
-            status: "dispatch_failed",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-          }),
-        },
-        // Decision 0033 survivor evidence is contract-canonical. A malformed
-        // owner report must fail closed to band 78, never create band 77.
-        {
-          label: "survivors_empty",
-          teardown: async (command: any) => ({
-            status: "survivors",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-            survivorPids: [],
-          }),
-        },
-        {
-          label: "survivors_unsorted",
-          teardown: async (command: any) => ({
-            status: "survivors",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-            survivorPids: [2, 1],
-          }),
-        },
-        {
-          label: "survivors_duplicated",
-          teardown: async (command: any) => ({
-            status: "survivors",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-            survivorPids: [1, 1],
-          }),
-        },
-        {
-          label: "survivors_over_cap",
-          teardown: async (command: any) => ({
-            status: "survivors",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-            survivorPids: Array.from({ length: 17 }, (_, index) => index + 1),
-          }),
-        },
-      ] as const;
+      {
+        label: "dispatch_failed",
+        teardown: async (command) => identityReply(command, "dispatch_failed"),
+      },
+      // Decision 0033 survivor evidence is contract-canonical. A malformed
+      // owner report must fail closed to band 78, never create band 77.
+      {
+        label: "survivors_empty",
+        teardown: async (command) => survivorsReply(command, []),
+      },
+      {
+        label: "survivors_unsorted",
+        teardown: async (command) => survivorsReply(command, [2, 1]),
+      },
+      {
+        label: "survivors_duplicated",
+        teardown: async (command) => survivorsReply(command, [1, 1]),
+      },
+      {
+        label: "survivors_over_cap",
+        teardown: async (command) =>
+          survivorsReply(
+            command,
+            Array.from({ length: 17 }, (_, index) => index + 1),
+          ),
+      },
+    ];
 
     for (const invalidCase of invalidCases) {
       const setup = makeSetup();
       const clock = new TeardownClock();
       let observedSession: any;
       let processSupervisorCalls = 0;
+      let observedCapability: PiSubagentNegotiatedCapability | undefined;
 
       const { extension } = makeCompatiblePiSubagentExtension({
         ...(invalidCase.capabilities === undefined
@@ -677,9 +724,16 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
           piSubagentTeardownClock: clock,
           onSubagentCapability: (event) => {
             observedSession = event.session;
-            (event.context.processSupervisor as any).teardownAll = async () => {
-              processSupervisorCalls += 1;
-            };
+            observedCapability = event.capability;
+            if (isParentProcessSupervisorContext(event.context)) {
+              event.context.processSupervisor.teardownAll = async () => {
+                processSupervisorCalls += 1;
+              };
+            } else {
+              throw new Error(
+                "onSubagentCapability context did not expose the parent process supervisor",
+              );
+            }
           },
         }).pipe(
           Layer.provide(Layer.succeed(ServerConfig, setup.serverConfig)),
@@ -707,6 +761,18 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
           providerOptions: { pi: { agentDir: setup.tempDir } },
         } as any);
 
+        // For the capability-endpoint mismatch case, prove the precondition
+        // first: the handshake genuinely advertised the ownership capability,
+        // so the fail-closed outcome below cannot pass vacuously.
+        if (invalidCase.label === "capability_endpoint_absent") {
+          expect(observedCapability?.status).toBe("managed_enabled");
+          expect(
+            observedCapability?.capabilities?.includes(
+              PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
+            ),
+          ).toBe(true);
+        }
+
         const spawned = yield* Effect.promise(() =>
           runManagedSpawn(observedSession, {
             commandId: `cmd_${invalidCase.label}`,
@@ -728,7 +794,7 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
     }
   });
 
-    it("times out a never-settling owner endpoint into durable band 78 and keeps scheduling subsequent sweep passes", async () => {
+  it("times out a never-settling owner endpoint into durable band 78 and keeps scheduling subsequent sweep passes", async () => {
     const setup = makeSetup();
     const clock = new TeardownClock();
     const teardownCalls: string[] = [];
@@ -759,9 +825,15 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
         piSubagentTeardownClock: clock,
         onSubagentCapability: (event) => {
           observedSession = event.session;
-          (event.context.processSupervisor as any).teardownAll = async () => {
-            processSupervisorCalls += 1;
-          };
+          if (isParentProcessSupervisorContext(event.context)) {
+            event.context.processSupervisor.teardownAll = async () => {
+              processSupervisorCalls += 1;
+            };
+          } else {
+            throw new Error(
+              "onSubagentCapability context did not expose the parent process supervisor",
+            );
+          }
         },
       }).pipe(
         Layer.provide(
@@ -820,9 +892,9 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
       // never band 76 (proven) or band 77 (survivors).
       const sequences = journal.map((event) => event.sequence);
       expect(sequences.indexOf(PI_SUBAGENT_TEARDOWN_BAND.request)).toBeGreaterThanOrEqual(0);
-      expect(
-        sequences.indexOf(PI_SUBAGENT_TEARDOWN_BAND.request),
-      ).toBeLessThan(sequences.indexOf(PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven));
+      expect(sequences.indexOf(PI_SUBAGENT_TEARDOWN_BAND.request)).toBeLessThan(
+        sequences.indexOf(PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven),
+      );
       expect(
         journal.some(
           (event) =>
@@ -830,12 +902,12 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
             event.diagnosticCode === "pi_subagent_teardown_owner_unproven",
         ),
       ).toBe(true);
-      expect(
-        journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven),
-      ).toBe(false);
-      expect(
-        journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors),
-      ).toBe(false);
+      expect(journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven)).toBe(
+        false,
+      );
+      expect(journal.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors)).toBe(
+        false,
+      );
 
       // Non-terminal and unfenced: cancelling, generation unchanged, so a
       // later validated owner can still prove teardown.
@@ -864,134 +936,134 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
 
     await withTempHome(setup.tempDir, () =>
       Effect.runPromise(program.pipe(Effect.provide(testLayer))),
-      );
-    });
+    );
+  });
 
-    it("retains the exact owner after a durable proven-outcome write fails so the next sweep can retry proof", async () => {
-      const setup = makeSetup();
-      const clock = new TeardownClock();
-      const teardownCalls: string[] = [];
-      let observedSession: any;
-      let remainingOutcomeWriteFailures = 1;
-      const repositoryRef: { current: PiSubagentExecutionRepositoryShape | undefined } = {
-        current: undefined,
-      };
-      const injectedRepository = new Proxy({} as PiSubagentExecutionRepositoryShape, {
-        get(_target, property) {
-          const repository = repositoryRef.current;
-          if (repository === undefined) {
-            throw new Error("test repository was not bound before use");
-          }
-          if (property === "recordTeardownOutcome") {
-            return (
-              input: Parameters<PiSubagentExecutionRepositoryShape["recordTeardownOutcome"]>[0],
-            ) => {
-              if (remainingOutcomeWriteFailures > 0) {
-                remainingOutcomeWriteFailures -= 1;
-                return Effect.fail(new Error("forced proven-outcome persistence failure") as never);
-              }
-              return repository.recordTeardownOutcome(input);
-            };
-          }
-          const value = (repository as any)[property];
-          return typeof value === "function" ? value.bind(repository) : value;
-        },
-      });
-      const { extension } = makeCompatiblePiSubagentExtension({
-        onSpawn: () => ({
-          status: "accepted",
-          executionId: "exec_d33_proven_retry",
-          attemptId: "att_d33_proven_retry",
-          generation: 1,
-          state: "accepted",
-          diagnosticCode: "pi_subagent_managed_enabled",
-        }),
-        onTeardownOwnedProcesses: async (command) => {
-          teardownCalls.push(command.executionId);
-          return {
-            status: "proven",
-            executionId: command.executionId,
-            attemptId: command.expectedAttemptId,
-            generation: command.expectedGeneration,
-          };
-        },
-      });
-      const testLayer = Layer.mergeAll(
-        makePiAdapterLive({
-          extensionFactories: [extension.factory],
-          piSubagentRepository: injectedRepository,
-          piSubagentTeardownClock: clock,
-          onSubagentCapability: (event) => {
-            observedSession = event.session;
-          },
-        }).pipe(
-          Layer.provide(Layer.succeed(ServerConfig, setup.serverConfig)),
-          Layer.provide(NodeFileSystem.layer),
-          Layer.provide(PiSubagentExecutionRepositoryLive),
-          Layer.provide(OrchestrationProjectionSnapshotQueryLive),
-          Layer.provide(Layer.succeed(McpSessionAuthority, setup.authorityService)),
-          Layer.provide(SqlitePersistenceMemory),
-        ),
-        PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-        SqlitePersistenceMemory,
-      );
-
-      const program = Effect.gen(function* () {
-        const repository = yield* PiSubagentExecutionRepository;
-        repositoryRef.current = repository;
-        const adapter = yield* PiAdapter;
-        yield* seedProjectAndThread("th_d33_proven_retry", setup.tempDir);
-        yield* adapter.startSession({
-          threadId: "th_d33_proven_retry" as ThreadId,
-          cwd: setup.tempDir,
-          mcpAuthority: setup.mintAuthority("th_d33_proven_retry"),
-          runtimeMode: "full-access",
-          providerOptions: { pi: { agentDir: setup.tempDir } },
-        } as any);
-        const spawned = yield* Effect.promise(() =>
-          runManagedSpawn(observedSession, {
-            commandId: "cmd_d33_proven_retry",
-            prompt: "retry proven owner after persistence failure",
-          }),
-        );
-        yield* driveToHandedOff(repository, spawned.executionId);
-
-        // Valid owner proof arrives, but the durable band-76/fence write fails.
-        // The mapping must remain: this is cancelling generation 1 with no
-        // terminal teardown claim, not a reason to fall back to band 78.
-        yield* Effect.promise(() => clock.advance(30_100));
-        yield* Effect.promise(() => settle());
-        expect(teardownCalls).toEqual([spawned.executionId]);
-        const afterFailure = yield* repository.getById(spawned.executionId);
-        expect(Option.isSome(afterFailure)).toBe(true);
-        if (Option.isSome(afterFailure)) {
-          expect(afterFailure.value.observedState).toBe("cancelling");
-          expect(afterFailure.value.generation).toBe(1);
+  it("retains the exact owner after a durable proven-outcome write fails so the next sweep can retry proof", async () => {
+    const setup = makeSetup();
+    const clock = new TeardownClock();
+    const teardownCalls: string[] = [];
+    let observedSession: any;
+    let remainingOutcomeWriteFailures = 1;
+    const repositoryRef: { current: PiSubagentExecutionRepositoryShape | undefined } = {
+      current: undefined,
+    };
+    const injectedRepository = new Proxy({} as PiSubagentExecutionRepositoryShape, {
+      get(_target, property) {
+        const repository = repositoryRef.current;
+        if (repository === undefined) {
+          throw new Error("test repository was not bound before use");
         }
-        const journalAfterFailure = yield* repository.listJournalEvents(spawned.executionId);
-        expect(
-          journalAfterFailure.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven),
-        ).toBe(false);
-        expect(
-          journalAfterFailure.some(
-            (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
-          ),
-        ).toBe(false);
+        if (property === "recordTeardownOutcome") {
+          return (
+            input: Parameters<PiSubagentExecutionRepositoryShape["recordTeardownOutcome"]>[0],
+          ) => {
+            if (remainingOutcomeWriteFailures > 0) {
+              remainingOutcomeWriteFailures -= 1;
+              return Effect.fail(new Error("forced proven-outcome persistence failure") as never);
+            }
+            return repository.recordTeardownOutcome(input);
+          };
+        }
+        const value = (repository as any)[property];
+        return typeof value === "function" ? value.bind(repository) : value;
+      },
+    });
+    const { extension } = makeCompatiblePiSubagentExtension({
+      onSpawn: () => ({
+        status: "accepted",
+        executionId: "exec_d33_proven_retry",
+        attemptId: "att_d33_proven_retry",
+        generation: 1,
+        state: "accepted",
+        diagnosticCode: "pi_subagent_managed_enabled",
+      }),
+      onTeardownOwnedProcesses: async (command) => {
+        teardownCalls.push(command.executionId);
+        return {
+          status: "proven",
+          executionId: command.executionId,
+          attemptId: command.expectedAttemptId,
+          generation: command.expectedGeneration,
+        };
+      },
+    });
+    const testLayer = Layer.mergeAll(
+      makePiAdapterLive({
+        extensionFactories: [extension.factory],
+        piSubagentRepository: injectedRepository,
+        piSubagentTeardownClock: clock,
+        onSubagentCapability: (event) => {
+          observedSession = event.session;
+        },
+      }).pipe(
+        Layer.provide(Layer.succeed(ServerConfig, setup.serverConfig)),
+        Layer.provide(NodeFileSystem.layer),
+        Layer.provide(PiSubagentExecutionRepositoryLive),
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(Layer.succeed(McpSessionAuthority, setup.authorityService)),
+        Layer.provide(SqlitePersistenceMemory),
+      ),
+      PiSubagentExecutionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+      SqlitePersistenceMemory,
+    );
 
-        // The retained exact endpoint receives the same execution identity on
-        // the next pass; only this successful durable write may release it.
-        yield* Effect.promise(() => clock.advance(30_100));
-        yield* Effect.promise(() => settle());
-        expect(teardownCalls).toEqual([spawned.executionId, spawned.executionId]);
-        yield* expectProven(repository, spawned.executionId);
-      });
-
-      await withTempHome(setup.tempDir, () =>
-        Effect.runPromise(program.pipe(Effect.provide(testLayer))),
+    const program = Effect.gen(function* () {
+      const repository = yield* PiSubagentExecutionRepository;
+      repositoryRef.current = repository;
+      const adapter = yield* PiAdapter;
+      yield* seedProjectAndThread("th_d33_proven_retry", setup.tempDir);
+      yield* adapter.startSession({
+        threadId: "th_d33_proven_retry" as ThreadId,
+        cwd: setup.tempDir,
+        mcpAuthority: setup.mintAuthority("th_d33_proven_retry"),
+        runtimeMode: "full-access",
+        providerOptions: { pi: { agentDir: setup.tempDir } },
+      } as any);
+      const spawned = yield* Effect.promise(() =>
+        runManagedSpawn(observedSession, {
+          commandId: "cmd_d33_proven_retry",
+          prompt: "retry proven owner after persistence failure",
+        }),
       );
+      yield* driveToHandedOff(repository, spawned.executionId);
+
+      // Valid owner proof arrives, but the durable band-76/fence write fails.
+      // The mapping must remain: this is cancelling generation 1 with no
+      // terminal teardown claim, not a reason to fall back to band 78.
+      yield* Effect.promise(() => clock.advance(30_100));
+      yield* Effect.promise(() => settle());
+      expect(teardownCalls).toEqual([spawned.executionId]);
+      const afterFailure = yield* repository.getById(spawned.executionId);
+      expect(Option.isSome(afterFailure)).toBe(true);
+      if (Option.isSome(afterFailure)) {
+        expect(afterFailure.value.observedState).toBe("cancelling");
+        expect(afterFailure.value.generation).toBe(1);
+      }
+      const journalAfterFailure = yield* repository.listJournalEvents(spawned.executionId);
+      expect(
+        journalAfterFailure.some((event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven),
+      ).toBe(false);
+      expect(
+        journalAfterFailure.some(
+          (event) => event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
+        ),
+      ).toBe(false);
+
+      // The retained exact endpoint receives the same execution identity on
+      // the next pass; only this successful durable write may release it.
+      yield* Effect.promise(() => clock.advance(30_100));
+      yield* Effect.promise(() => settle());
+      expect(teardownCalls).toEqual([spawned.executionId, spawned.executionId]);
+      yield* expectProven(repository, spawned.executionId);
     });
 
-    it("retains a capability-bearing owner endpoint across same-process parent session stop", async () => {
+    await withTempHome(setup.tempDir, () =>
+      Effect.runPromise(program.pipe(Effect.provide(testLayer))),
+    );
+  });
+
+  it("retains a capability-bearing owner endpoint across same-process parent session stop", async () => {
     const setup = makeSetup();
     const clock = new TeardownClock();
     const teardownCalls: string[] = [];
@@ -1107,10 +1179,10 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
 
     await withTempHome(setup.tempDir, () =>
       Effect.runPromise(program.pipe(Effect.provide(testLayer))),
-      );
-    });
+    );
+  });
 
-    it("isolates sibling and historical same-thread owner endpoints by exact execution identity", async () => {
+  it("isolates sibling and historical same-thread owner endpoints by exact execution identity", async () => {
     const setup = makeSetup();
     const clock = new TeardownClock();
     let observedSession: any;
@@ -1188,7 +1260,9 @@ describe("PiAdapter Decision 0033 managed-child teardown wiring", () => {
       if (sessionFactoryCallCount === 2) {
         return newFixture.extension.factory(pi);
       }
-      throw new Error(`Unexpected extension factory invocation #${String(sessionFactoryCallCount)}`);
+      throw new Error(
+        `Unexpected extension factory invocation #${String(sessionFactoryCallCount)}`,
+      );
     };
 
     const testLayer = Layer.mergeAll(
