@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 
 import type { PiSubagentArtifactVerification } from "./piSubagentArtifactVerifier.ts";
 
@@ -206,21 +207,47 @@ describe("evaluatePiSubagentDesktopArtifactGate", () => {
     });
   });
 
-  describe("desktop with a valid artifact still fails closed (Ticket 02 boundary)", () => {
-    it("returns managed_runtime_binding_unavailable without leaking metadata", async () => {
+  describe("desktop with a valid artifact returns the trusted controlled-runtime binding (Ticket 02)", () => {
+    it("passes with the controlled <root>/agent agentDir and the verifier's trusted metadata", async () => {
       const { verifier, calls } = verifierReturning(validVerification);
       const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
         env: desktopEnv("/release/pi-subagents-artifact"),
         verify: verifier,
       });
-      expect(result).toEqual({
-        kind: "unavailable",
-        reason: "managed_runtime_binding_unavailable",
-        detail: "managed pi runtime binding is not available in this build",
-      });
       expect(calls).toEqual(["/release/pi-subagents-artifact"]);
-      expect(JSON.stringify(result)).not.toContain("sourceIdentity");
-      expect(JSON.stringify(result)).not.toContain("capabilityProfile");
+      expect(result).toEqual({
+        kind: "pass",
+        managed: {
+          agentDir: `${"/release/pi-subagents-artifact"}${path.sep}agent`,
+          metadata: validVerification.metadata,
+        },
+      });
+    });
+
+    it("never returns the artifact root itself as the controlled agentDir", async () => {
+      const { verifier } = verifierReturning(validVerification);
+      const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+        env: desktopEnv("/release/pi-subagents-artifact"),
+        verify: verifier,
+      });
+      expect(result.kind).toBe("pass");
+      if (result.kind !== "pass" || !("managed" in result)) return;
+      expect(result.managed.agentDir).not.toBe("/release/pi-subagents-artifact");
+      expect(result.managed.agentDir.endsWith("agent")).toBe(true);
+      // The controlled agentDir lives strictly INSIDE the verified root.
+      expect(result.managed.agentDir.startsWith("/release/pi-subagents-artifact")).toBe(true);
+    });
+
+    it("carries no diagnostic surface in the managed binding", async () => {
+      const { verifier } = verifierReturning(validVerification);
+      const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+        env: desktopEnv("/release/pi-subagents-artifact"),
+        verify: verifier,
+      });
+      expect(result.kind).toBe("pass");
+      if (result.kind !== "pass" || !("managed" in result)) return;
+      expect(Object.keys(result.managed).toSorted()).toEqual(["agentDir", "metadata"]);
+      expect(Object.keys(result).toSorted()).toEqual(["kind", "managed"]);
     });
 
     it("trims surrounding whitespace from the locator before verifying", async () => {
@@ -243,7 +270,7 @@ describe("evaluatePiSubagentDesktopArtifactGate", () => {
       expect(Object.keys(result).toSorted()).toEqual(["detail", "kind", "reason"]);
     });
 
-    it("a pass result exposes exactly kind", async () => {
+    it("a pass result for non-desktop exposes exactly kind", async () => {
       const result = await evaluatePiSubagentDesktopArtifactGate("web", { env: {} });
       expect(Object.keys(result)).toEqual(["kind"]);
     });
