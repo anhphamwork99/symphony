@@ -107,6 +107,10 @@ import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSession
 import {
   makePiAdapterLive,
 } from "../provider/Layers/PiAdapter.ts";
+import {
+  PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
+} from "../provider/piSubagentDesktopArtifactGate.ts";
+import { piSubagentDesktopManagedExtensionDir } from "../provider/piSubagentManagedRuntimeBinding.ts";
 import { makeDurableProviderServiceLive } from "../provider/Layers/ProviderService.ts";
 import { PiAdapter } from "../provider/Services/PiAdapter.ts";
 import { ProviderAdapterRegistry } from "../provider/Services/ProviderAdapterRegistry.ts";
@@ -829,6 +833,26 @@ export class RealPiHarnessError extends Error {
   }
 }
 
+/**
+ * Ticket 02 — desktop managed harness configuration (WP-A).
+ *
+ * When present, the harness composes the PRODUCTION desktop managed Pi
+ * bootstrap: ServerConfig switches to `mode: "desktop"`, `makePiAdapterLive`
+ * receives the release-derived artifact locator env (`SYNARA_PI_SUBAGENT_ARTIFACT_DIR`)
+ * plus the explicit user agent dir, and the deterministic loopback
+ * auth/models are written INTO that isolated user dir. The `providers.pi.agentDir`
+ * setting still routes at the (web-shaped) parent dir — a decoy the desktop
+ * managed path must ignore for extension discovery (extensions load only
+ * from `<verified artifact>/agent`). Absent, every web-mode behavior is
+ * preserved exactly.
+ */
+export interface RealPiWsHarnessDesktopManagedConfig {
+  /** Verified-release artifact root (the gate locator value). */
+  readonly artifactDir: string;
+  /** Isolated user Pi agent dir supplying auth.json/models.json. */
+  readonly userAgentDir: string;
+}
+
 export interface MakeRealPiWsHarnessOptions {
   readonly foregroundWaitMs?: number;
   readonly progressRateHz?: number;
@@ -841,6 +865,8 @@ export interface MakeRealPiWsHarnessOptions {
   readonly dbPath?: string;
   /** Reuse an existing loopback model server across a server restart. */
   readonly modelServer?: LoopbackModelServer;
+  /** Ticket 02: compose the desktop managed bootstrap (web mode when absent). */
+  readonly desktopManaged?: RealPiWsHarnessDesktopManagedConfig;
 }
 
 export interface ObservedSubagentAdmission {
@@ -860,6 +886,18 @@ export interface RealPiWsHarness {
   readonly childAgentDir: string;
   /** Isolated PI_HOME (the extension's PREFERENCES.md root). */
   readonly piHomeDir: string;
+  /**
+   * Ticket 02: controlled desktop managed locations, present ONLY when the
+   * harness was composed with `desktopManaged` (undefined in web mode).
+   */
+  readonly desktop?: {
+    readonly artifactDir: string;
+    readonly userAgentDir: string;
+    /** Controlled agent dir the gate derives from the artifact (`<root>/agent`). */
+    readonly managedAgentDir: string;
+    /** Release-controlled extension dir (the only extension source). */
+    readonly managedExtensionDir: string;
+  };
   /** Writes an isolated subagent model preference (invalidates the loader's mtime cache). */
   readonly writeSubagentModelPreference: (selector: string) => void;
   readonly foregroundWaitMs: number;
@@ -1045,6 +1083,18 @@ export async function makeRealPiWsHarness(
   writeAgentDirWithModels(parentAgentDir, modelServer.baseUrl);
   writeAgentDirWithModels(childAgentDir, modelServer.baseUrl);
 
+  // Ticket 02 desktop managed harness leg (WP-A): the explicit user agent
+  // dir receives the SAME deterministic loopback auth/models the web-mode
+  // dirs get — schema-valid isolated user runtime configuration. The caller
+  // may supply a not-yet-existing directory (the harness owns creating the
+  // isolated tree). The artifact itself is NEVER staged here (the caller
+  // supplies a verified release artifact root; staging is a separate
+  // verified pipeline).
+  if (options.desktopManaged !== undefined) {
+    mkdirSync(options.desktopManaged.userAgentDir, { recursive: true });
+    writeModelsAndAuth(options.desktopManaged.userAgentDir, modelServer.baseUrl);
+  }
+
   // Isolated child-agent resolution: the extension spawns children against
   // the SDK default agent dir, so point PI_CODING_AGENT_DIR at the owned
   // child dir for the harness lifetime (restored on dispose). PI_HOME is
@@ -1105,7 +1155,11 @@ export async function makeRealPiWsHarness(
         homeDir,
       });
       return {
-        mode: "web",
+        // Ticket 02: ONLY the mode field changes on the desktop leg — the
+        // desktop managed Pi bootstrap keys off `mode === "desktop"`; every
+        // other production path (paths, roots, flags, subagent timers) is
+        // identical between the two harness legs.
+        mode: options.desktopManaged === undefined ? ("web" as const) : ("desktop" as const),
         port: 0,
         host: "127.0.0.1",
         cwd: workspaceDir,
@@ -1180,6 +1234,19 @@ export async function makeRealPiWsHarness(
 
   const piAdapterLayer = makePiAdapterLive({
     completionDispatchBridge,
+    // Ticket 02 desktop managed harness leg (WP-A): production desktop
+    // gate env (release-derived artifact locator) plus the explicit user
+    // agent dir. Both are undefined in web mode — `makePiAdapterLive` then
+    // observes the real process env and the SDK's own agent-dir resolution,
+    // exactly like the web-mode composition always did.
+    ...(options.desktopManaged === undefined
+      ? {}
+      : {
+          piSubagentDesktopArtifactGateEnv: {
+            SYNARA_PI_SUBAGENT_ARTIFACT_DIR: options.desktopManaged.artifactDir,
+          },
+          piSubagentDesktopUserAgentDir: options.desktopManaged.userAgentDir,
+        }),
     spawnProcess: (command, args, options) => {
       const child = spawn(command, [...args], options);
       if (child.pid !== undefined) {
@@ -1331,7 +1398,11 @@ export async function makeRealPiWsHarness(
   // Wire the parent agent dir through the PUBLIC settings seam so the
   // production `ensureSessionForThreadCore` provider-options resolution
   // (`providerStartOptionsFromServerSettings`) picks it up for every Pi
-  // session start — no server internals, no env mutation.
+  // session start — no server internals, no env mutation. On the desktop
+  // managed leg this same setting is intentionally a DECOY: the desktop
+  // bootstrap ignores `agentDir` for extension discovery (extensions load
+  // only from the verified artifact's controlled `agent` subtree), so a
+  // desktop harness can prove the decoy never reaches the loader.
   let client: RealPiWsClient;
   try {
     client = await connectRealPiWsClient(port);
@@ -1585,6 +1656,24 @@ export async function makeRealPiWsHarness(
     parentAgentDir,
     childAgentDir,
     piHomeDir,
+    ...(options.desktopManaged === undefined
+      ? {}
+      : {
+          desktop: {
+            artifactDir: options.desktopManaged.artifactDir,
+            userAgentDir: options.desktopManaged.userAgentDir,
+            managedAgentDir: path.join(
+              options.desktopManaged.artifactDir,
+              PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
+            ),
+            managedExtensionDir: piSubagentDesktopManagedExtensionDir(
+              path.join(
+                options.desktopManaged.artifactDir,
+                PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
+              ),
+            ),
+          },
+        }),
     writeSubagentModelPreference: (selector) => {
       writeFileSync(
         path.join(piHomeDir, "PREFERENCES.md"),
