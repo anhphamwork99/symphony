@@ -11,7 +11,7 @@
 // composition, no network, no git.
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -207,7 +207,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         getCwd: () => input.cwd,
         getSessionFile: () => undefined,
       },
-      getSessionStats: () => undefined,
+      getSessionStats: () => ({
+        tokens: { input: 0, cacheRead: 0, output: 0, total: 0 },
+      }),
       getAllTools: () => [],
       subscribe: () => () => undefined,
       bindExtensions: async () => {
@@ -269,6 +271,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         );
       }
       return {
+        cwd: input.cwd,
+        agentDir: input.agentDir,
         settingsManager: {
           getShellPath: () => undefined,
           getShellCommandPrefix: () => undefined,
@@ -278,8 +282,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         resourceLoader: makeResourceLoader(),
       };
     },
-    createAgentSessionFromServices: async (input: Record<string, unknown>) =>
-      input as unknown as Record<string, unknown>,
+    createAgentSessionFromServices: async (input: {
+      services: { cwd: string; agentDir: string };
+    }) => ({
+      ...input,
+      session: makeSession({ cwd: input.services.cwd, agentDir: input.services.agentDir }),
+    }),
     createAgentSessionRuntime: async (
       factory: (input: {
         cwd: string;
@@ -432,26 +440,14 @@ const runStartSession = (input: {
 }): Promise<RunResult> =>
   Effect.gen(function* () {
     const adapter = yield* PiAdapter;
-    const outcome = yield* adapter
-      .startSession(startSessionInput as never)
-      .pipe(
-        Effect.exit,
-        Effect.map((exit) =>
-          exit._tag === "Success"
-            ? { _tag: "Right" as const, right: exit.value }
-            : {
-                _tag: "Left" as const,
-                left:
-                  exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error ??
-                  new Error("unknown startSession failure"),
-              },
-        ),
-      );
+    const outcome = yield* Effect.exit(adapter.startSession(startSessionInput as never));
     const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
     const sessions = yield* adapter.listSessions();
     return {
-      success: outcome._tag === "Right" ? outcome.right : undefined,
-      failure: outcome._tag === "Left" ? (outcome.left as ProviderAdapterError) : undefined,
+      success: Exit.isSuccess(outcome) ? outcome.value : undefined,
+      failure: Exit.isFailure(outcome)
+        ? (Cause.squash(outcome.cause) as ProviderAdapterError)
+        : undefined,
       hasSession,
       listSessionCount: sessions.length,
     } satisfies RunResult;
@@ -536,16 +532,10 @@ const desktopGateEnv = (locator: string | undefined): NodeJS.ProcessEnv => ({
   PI_CODING_AGENT_DIR: `/Users/${CANARY.userAgentDir}/sdk-global-pollution`,
 });
 
-const expectedControlledAgentDir = path.join(
-  "/synara-t02-fixture-root",
-  CANARY.artifactRoot,
-  PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
-);
-const expectedExtensionPath = path.join(
-  expectedControlledAgentDir,
-  "extensions",
-  "pi-subagents",
-);
+const expectedControlledAgentDir = (): string =>
+  path.join(artifactRoot, PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT);
+const expectedExtensionPath = (): string =>
+  path.join(expectedControlledAgentDir(), "extensions", "pi-subagents");
 
 /** Serialized failure surface a leak would escape through. */
 const failureSurface = (failure: unknown): string =>
@@ -605,9 +595,9 @@ describe("PiAdapter desktop managed bootstrap — controlled runtime (T02-AC1)",
 
     // The runtime agentDir is EXACTLY the verified artifact's `agent` subtree.
     expect(sdkHarness.runtimeCreates).toHaveLength(1);
-    expect(sdkHarness.runtimeCreates[0]!.agentDir).toBe(expectedControlledAgentDir);
+    expect(sdkHarness.runtimeCreates[0]!.agentDir).toBe(expectedControlledAgentDir());
     expect(sdkHarness.serviceCreations).toHaveLength(1);
-    expect(sdkHarness.serviceCreations[0]!.agentDir).toBe(expectedControlledAgentDir);
+    expect(sdkHarness.serviceCreations[0]!.agentDir).toBe(expectedControlledAgentDir());
 
     // The model/auth runtime reads the USER dir explicitly (auth.json +
     // models.json), never the artifact's agentDir and never a broad copy.
@@ -623,7 +613,7 @@ describe("PiAdapter desktop managed bootstrap — controlled runtime (T02-AC1)",
     // dormant Synara MCP factory (no caller factories, no user globals).
     const loaderOptions = sdkHarness.serviceCreations[0]!.resourceLoaderOptions;
     expect(loaderOptions.noExtensions).toBe(true);
-    expect(loaderOptions.additionalExtensionPaths).toEqual([expectedExtensionPath]);
+    expect(loaderOptions.additionalExtensionPaths).toEqual([expectedExtensionPath()]);
     expect(Array.isArray(loaderOptions.extensionFactories)).toBe(true);
     expect((loaderOptions.extensionFactories as unknown[]).length).toBe(1);
     expect(sdkHarness.observedExtensionFactories.length).toBe(1);
@@ -671,8 +661,10 @@ describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)",
     // …and the capability callback only after the handshake.
     const capabilityIndex = trace.indexOf("onSubagentCapability");
     expect(capabilityIndex).toBeGreaterThan(handshakeIndex);
-    // The staged runtime is never disposed on the success path.
-    expect(trace).not.toContain("runtime.dispose");
+    // The scoped test harness tears down the published runtime only after the
+    // completed bootstrap; no disposal occurs before capability publication.
+    const disposeIndex = trace.indexOf("runtime.dispose");
+    expect(disposeIndex).toBeGreaterThan(capabilityIndex);
     // The published capability is the managed seven-capability truth.
     expect(observers.subagentCapability).toEqual([
       { status: "managed_enabled", isManaged: true },
@@ -790,8 +782,8 @@ describe("PiAdapter desktop managed bootstrap — fatal denial matrix (T02-AC2/A
 // AC5 — non-desktop regression (default 3-cap degraded probe stays nonfatal)
 // ---------------------------------------------------------------------------
 
-describe("PiAdapter non-desktop regression — legacy degraded probe (T02-AC5)", () => {
-  it("keeps web mode nonfatal with a 3-capability bridge and loads caller extension factories", async () => {
+describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)", () => {
+  it("keeps web mode nonfatal with the historical 3-capability baseline and loads caller extension factories", async () => {
     resetScenario({ handshake: managedHandshake(LEGACY_THREE_CAPABILITIES) });
     const observers = makeObservers();
 
@@ -803,13 +795,13 @@ describe("PiAdapter non-desktop regression — legacy degraded probe (T02-AC5)",
       extensionFactories: [{ name: "caller-factory-allowed-in-web-mode" }],
     });
 
-    // Nonfatal: the session starts and publishes despite the degraded
-    // capability, and the capability callback observes the degradation.
+    // Nonfatal: outside desktop mode the historical 3-capability request is
+    // unchanged, so this bridge remains managed-enabled and publishable.
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
     expect(result.listSessionCount).toBe(1);
     expect(observers.subagentCapability).toEqual([
-      { status: "capability_mismatch", isManaged: false },
+      { status: "managed_enabled", isManaged: true },
     ]);
 
     // The historical non-desktop loader shape is preserved (no noExtensions
@@ -825,7 +817,7 @@ describe("PiAdapter non-desktop regression — legacy degraded probe (T02-AC5)",
 
     // Non-desktop agentDir resolution keeps the SDK-global discovery path.
     expect(sdkHarness.getAgentDirCalls).toBeGreaterThanOrEqual(1);
-    // No runtime disposal: the degraded session stays alive (nonfatal).
-    expect(trace).not.toContain("runtime.dispose");
+    // The scoped harness disposes only after the successful session lifecycle.
+    expect(trace.indexOf("runtime.dispose")).toBeGreaterThanOrEqual(0);
   });
 });
