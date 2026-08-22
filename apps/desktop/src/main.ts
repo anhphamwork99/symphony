@@ -224,6 +224,7 @@ import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopAppSnapManager } from "./appSnapManager";
 import { hardenBrowserAnnotationWebviewPreferences } from "./browserAnnotations/webviewSecurity";
 import { LOCAL_HTML_PREVIEW_SCHEME } from "./localHtmlPreviewProtocol";
+import { applyPiSubagentArtifactBackendEnv } from "./piSubagentDesktopArtifactEnvironment";
 import {
   registerAppSnapIpcHandlers,
   sendAppSnapCaptured,
@@ -3129,11 +3130,22 @@ function backendEnv(): NodeJS.ProcessEnv {
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
+  // Ticket 01 WP3 / Decision 0004: the managed Pi artifact locator must be
+  // release-derived and immune to inherited/renderer input, and the inherited
+  // Pi agent-dir override must never reach the backend child. Applied to a
+  // cloned env object only — `process.env` is never mutated here.
+  const piSubagentEnv = applyPiSubagentArtifactBackendEnv({
+    inheritedEnv: env,
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    exists: (candidate) => FS.existsSync(candidate),
+  });
   // The backend runs the same login-shell probe at startup and does not begin listening
   // until it returns, so an unmarked child serializes a second ~1s hydration behind ours.
   // Written explicitly in both directions: an inherited marker must never suppress a
   // probe when our own hydration failed and the child's PATH is the raw launch one.
-  return applyShellEnvironmentHydrationMarker(env, shellEnvironmentSync.pathHydrated);
+  return applyShellEnvironmentHydrationMarker(piSubagentEnv, shellEnvironmentSync.pathHydrated);
 }
 
 function scheduleBackendRestart(reason: string): void {
