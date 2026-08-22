@@ -67,6 +67,87 @@ const BASE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   { path: "agent/extensions/pi-subagents/src/.gitkeep", content: "" },
 ];
 
+/**
+ * Ticket 01b (Decision 0006 Binding decision 2) — the expanded runtime
+ * closure: the staged `agent/extensions/shared` sibling content the pinned
+ * extension imports and the release-owned lock-proven `node_modules`
+ * regular-file dependency closure. Every entry is a regular manifest-listed
+ * file, mirroring the release stager's expanded layout
+ * (`scripts/lib/piSubagentArtifactStaging.ts` stages `shared/*.js` +
+ * `shared/*.d.ts` and a root-level `node_modules/<package>/...` tree).
+ */
+const SHARED_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
+  {
+    path: "agent/extensions/shared/durable-preferences.js",
+    content: "export const durablePreferences = 'shared';\n",
+  },
+  {
+    path: "agent/extensions/shared/durable-preferences.d.ts",
+    content: "export declare const durablePreferences: string;\n",
+  },
+];
+
+const DEPENDENCY_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
+  {
+    path: "node_modules/zod/package.json",
+    content: JSON.stringify({
+      name: "zod",
+      version: "3.24.1",
+      main: "index.js",
+      type: "commonjs",
+    }),
+  },
+  {
+    path: "node_modules/zod/index.js",
+    content: "module.exports = require('./lib/index.js');\n",
+  },
+  {
+    path: "node_modules/@scope/dep/dist/runtime.js",
+    content: "export const runtimeDependency = true;\n",
+  },
+];
+
+/** Extension + shared + dependency subtrees — the full 01b closure. */
+const CLOSURE_FILES: ReadonlyArray<ArtifactFileSpec> = [
+  ...BASE_FILES,
+  ...SHARED_SUBTREE_FILES,
+  ...DEPENDENCY_SUBTREE_FILES,
+];
+
+/** The two expanded-closure subtrees proven per failure category (AC3). */
+const EXPANDED_SUBTREES = [
+  [
+    "shared",
+    {
+      files: SHARED_SUBTREE_FILES,
+      /** A manifest-listed regular file inside the subtree. */
+      listedEntry: "agent/extensions/shared/durable-preferences.js",
+      /** Same-byte-length tampered content for the listed entry. */
+      tamperedContent: "export const durablePreferences = 'shareD';\n",
+      /** Not-yet-present relative file path inside the subtree. */
+      unlistedFileTarget: "agent/extensions/shared/model-catalog-reconciler.js",
+      /** Not-yet-present relative non-regular node path inside the subtree. */
+      unlistedNonRegularTarget: "agent/extensions/shared/extra.fifo",
+      /** Control-character (newline) filename inside the subtree. */
+      unsafeNameTarget: "agent/extensions/shared/bad\nname.js",
+      /** Symlinked-directory name inside the subtree. */
+      symlinkDirTarget: "agent/extensions/shared/node_modules",
+    },
+  ],
+  [
+    "node_modules",
+    {
+      files: DEPENDENCY_SUBTREE_FILES,
+      listedEntry: "node_modules/zod/index.js",
+      tamperedContent: "module.exports = require('./lib/index.jS');\n",
+      unlistedFileTarget: "node_modules/zod/lib/index.js",
+      unlistedNonRegularTarget: "node_modules/zod/extra.fifo",
+      unsafeNameTarget: "node_modules/zod/bad\nname.js",
+      symlinkDirTarget: "node_modules/zod/lib",
+    },
+  ],
+] as const;
+
 /** Builds the manifest JSON for a file set (the release pipeline's shape). */
 const manifestFor = (
   files: ReadonlyArray<ArtifactFileSpec>,
@@ -100,6 +181,11 @@ const stageArtifact = async (
     join(root, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
     JSON.stringify(manifest, null, 2),
   );
+};
+
+/** Stages the full Ticket 01b expanded runtime closure fixture. */
+const stageClosureArtifact = async (root: string): Promise<void> => {
+  await stageArtifact(root, { files: CLOSURE_FILES });
 };
 
 let fixtureRoot: string;
@@ -520,4 +606,184 @@ describe("Pi subagent artifact production verifier (Ticket 01, handshake-first)"
 
     expect(result.valid).toBe(true);
   });
+});
+
+describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b, Decision 0006)", () => {
+  it("accepts the expanded closure: extension + shared + node_modules as manifest-listed regular files (AC3 baseline)", async () => {
+    const root = await freshRoot("closure-valid");
+    await stageClosureArtifact(root);
+
+    const result = await verifyPiSubagentArtifact(root);
+
+    expect(result).toEqual({
+      valid: true,
+      metadata: {
+        sourceIdentity: VALID_SOURCE_IDENTITY,
+        capabilityProfile: {
+          protocolVersion: 1,
+          capabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+          requiredCapabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+        },
+      },
+    });
+  });
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: a missing manifest-listed entry is entry_missing with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-missing`);
+      await stageClosureArtifact(root);
+      await rm(join(root, subtree.listedEntry));
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "entry_missing");
+      expect(result).toMatchObject({ entry: subtree.listedEntry });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: same-size tampered bytes are digest_mismatch with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-tampered`);
+      await stageClosureArtifact(root);
+      const original = subtree.files.find(
+        (file) => file.path === subtree.listedEntry,
+      )?.content as string;
+      expect(Buffer.byteLength(subtree.tamperedContent)).toBe(Buffer.byteLength(original));
+      await writeFile(join(root, subtree.listedEntry), subtree.tamperedContent);
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "digest_mismatch");
+      expect(result).toMatchObject({ entry: subtree.listedEntry });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: an unlisted regular file is unlisted_entry with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-unlisted-file`);
+      await stageClosureArtifact(root);
+      await mkdir(join(root, subtree.unlistedFileTarget, ".."), { recursive: true });
+      await writeFile(join(root, subtree.unlistedFileTarget), "unlisted bytes");
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "unlisted_entry");
+      expect(result).toMatchObject({ entry: subtree.unlistedFileTarget });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: an unlisted non-regular node is unlisted_entry with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-unlisted-fifo`);
+      await stageClosureArtifact(root);
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("mkfifo", [join(root, subtree.unlistedNonRegularTarget)]);
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "unlisted_entry");
+      expect(result).toMatchObject({ entry: subtree.unlistedNonRegularTarget });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: a control-character entry name is path_escape with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-unsafe-name`);
+      await stageClosureArtifact(root);
+      await writeFile(join(root, subtree.unsafeNameTarget), "x");
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "path_escape");
+      expect(result).toMatchObject({ entry: subtree.unsafeNameTarget });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: a symlinked FILE entry is symlink_escape with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-file-symlink`);
+      await stageClosureArtifact(root);
+      const target = join(fixtureRoot, `outside-${label}-file.js`);
+      await rm(target, { force: true });
+      await writeFile(target, "outside content");
+      await rm(join(root, subtree.listedEntry));
+      await symlink(target, join(root, subtree.listedEntry));
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "symlink_escape");
+      expect(result).toMatchObject({ entry: subtree.listedEntry });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: a symlinked DIRECTORY is symlink_escape with no metadata",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-dir-symlink`);
+      await stageClosureArtifact(root);
+      const outsideDir = join(fixtureRoot, `outside-${label}-dir`);
+      await rm(outsideDir, { recursive: true, force: true });
+      await mkdir(join(outsideDir, "inner"), { recursive: true });
+      await writeFile(join(outsideDir, "inner", "payload.js"), "sneaky");
+      await symlink(outsideDir, join(root, subtree.symlinkDirTarget));
+
+      const result = await verifyPiSubagentArtifact(root);
+
+      expectInvalid(result, "symlink_escape");
+      expect(result).toMatchObject({ entry: subtree.symlinkDirTarget });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
+
+  it.for(EXPANDED_SUBTREES)(
+    "%s subtree: a manifest record resolving outside the root is path_escape (seam)",
+    async ([label, subtree]) => {
+      const root = await freshRoot(`closure-${label}-record-escape`);
+      await stageClosureArtifact(root);
+      const base = await import("node:fs/promises");
+      const escapedLabel = `../escaped-${label}.js`;
+      const escapingFs = {
+        lstat: base.lstat,
+        stat: base.stat,
+        readFile: base.readFile,
+        open: base.open,
+        readdir: async (dir: string, options: { readonly withFileTypes: true }) => {
+          const entries = (await base.readdir(dir, options)) as Array<Dirent>;
+          if (dir === root) {
+            return [
+              ...entries.filter((entry) => entry.name !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
+              { name: escapedLabel, isFile: () => true, isDirectory: () => false } as unknown as Dirent,
+            ];
+          }
+          return entries;
+        },
+      };
+
+      const result = await verifyPiSubagentArtifact(root, { fsLike: escapingFs });
+
+      expectInvalid(result, "path_escape");
+      expect(result).toMatchObject({ entry: escapedLabel });
+      expect(result).not.toHaveProperty("metadata");
+      expectBoundedDiagnostic(result);
+    },
+  );
 });

@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import type { PiSubagentArtifactVerification } from "./piSubagentArtifactVerifier.ts";
+import {
+  PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+  PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
+} from "@synara/contracts";
+
+import {
+  PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
+  type PiSubagentArtifactVerification,
+  verifyPiSubagentArtifact,
+} from "./piSubagentArtifactVerifier.ts";
 
 import {
   evaluatePiSubagentDesktopArtifactGate,
@@ -274,5 +287,129 @@ describe("evaluatePiSubagentDesktopArtifactGate", () => {
       const result = await evaluatePiSubagentDesktopArtifactGate("web", { env: {} });
       expect(Object.keys(result)).toEqual(["kind"]);
     });
+  });
+});
+
+/**
+ * Ticket 01b (AC3/AC6, Decision 0006) — the shared fail-close gate fed by the
+ * PRODUCTION verifier over REAL on-disk expanded-closure fixtures (extension
+ * + `agent/extensions/shared` + root-level `node_modules` regular files).
+ * No verifier stub: the denial reason is the real verifier's bounded category
+ * for a genuinely invalid shared or dependency artifact.
+ */
+const closureSha256 = (content: string): string =>
+  createHash("sha256").update(content).digest("hex");
+
+const CLOSURE_VALID_FILES = [
+  {
+    path: "agent/extensions/pi-subagents/package.json",
+    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.4" }),
+  },
+  {
+    path: "agent/extensions/shared/durable-preferences.js",
+    content: "export const durablePreferences = 'shared';\n",
+  },
+  {
+    path: "node_modules/zod/index.js",
+    content: "module.exports = require('./lib/index.js');\n",
+  },
+] as const;
+
+const stageClosureArtifact = async (root: string): Promise<void> => {
+  const files = CLOSURE_VALID_FILES.map((file) => ({ ...file }));
+  for (const file of files) {
+    await mkdir(join(root, file.path, ".."), { recursive: true });
+    await writeFile(join(root, file.path), file.content);
+  }
+  await writeFile(
+    join(root, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
+    JSON.stringify(
+      {
+        schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+        sourceIdentity: validVerification.metadata.sourceIdentity,
+        capabilityProfile: {
+          protocolVersion: 1,
+          capabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+          requiredCapabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+        },
+        files: files.map((file) => ({
+          path: file.path,
+          sizeBytes: Buffer.byteLength(file.content),
+          sha256: closureSha256(file.content),
+        })),
+      },
+      null,
+      2,
+    ),
+  );
+};
+
+let closureFixtureRoot: string;
+
+beforeAll(async () => {
+  closureFixtureRoot = await mkdtemp(join(tmpdir(), "synara-t01b-gate-"));
+});
+
+afterAll(async () => {
+  await rm(closureFixtureRoot, { recursive: true, force: true });
+});
+
+const REAL_VERIFIER: PiSubagentArtifactVerifier = (root) => verifyPiSubagentArtifact(root);
+
+describe("evaluatePiSubagentDesktopArtifactGate with the production verifier over real expanded-closure artifacts (Ticket 01b)", () => {
+  it.for([
+    [
+      "shared",
+      {
+        category: "entry_missing",
+        entry: "agent/extensions/shared/durable-preferences.js",
+        corrupt: async (root: string) => {
+          await rm(join(root, "agent/extensions/shared/durable-preferences.js"));
+        },
+      },
+    ],
+    [
+      "node_modules",
+      {
+        category: "digest_mismatch",
+        entry: "node_modules/zod/index.js",
+        corrupt: async (root: string) => {
+          await writeFile(join(root, "node_modules/zod/index.js"), "module.exports = require('./lib/index.jS');\n");
+        },
+      },
+    ],
+  ] as const)(
+    "a real invalid %s artifact denies with the verifier's bounded category and a safe detail",
+    async ([label, variant]) => {
+      const artifactRoot = await mkdtemp(join(closureFixtureRoot, `${label}-`));
+      await stageClosureArtifact(artifactRoot);
+      await variant.corrupt(artifactRoot);
+
+      const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+        env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: artifactRoot },
+        verify: REAL_VERIFIER,
+      });
+
+      expect(result).toEqual({
+        kind: "unavailable",
+        reason: variant.category,
+        detail: `managed pi artifact verification failed: ${variant.category} (entry: ${variant.entry})`,
+      });
+    },
+  );
+
+  it("a real VALID expanded closure passes with the trusted controlled binding", async () => {
+    const artifactRoot = await mkdtemp(join(closureFixtureRoot, "valid-"));
+    await stageClosureArtifact(artifactRoot);
+
+    const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+      env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: artifactRoot },
+      verify: REAL_VERIFIER,
+    });
+
+    expect(result.kind).toBe("pass");
+    if (result.kind !== "pass" || !("managed" in result)) return;
+    expect(result.managed.agentDir).toBe(join(artifactRoot, "agent"));
+    expect(Object.keys(result.managed).toSorted()).toEqual(["agentDir", "metadata"]);
   });
 });

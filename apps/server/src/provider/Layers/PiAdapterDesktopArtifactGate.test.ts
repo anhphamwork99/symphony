@@ -1,9 +1,20 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+  PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
+} from "@synara/contracts";
 
 import { ServerConfig, type ServerConfigShape } from "../../config";
 import type { ProviderAdapterError } from "../Errors";
+import { PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME } from "../piSubagentArtifactVerifier.ts";
+import { SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV } from "../piSubagentDesktopArtifactGate.ts";
 import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter";
 import { makePiAdapterLive } from "./PiAdapter";
 
@@ -12,9 +23,17 @@ import { makePiAdapterLive } from "./PiAdapter";
  * `piSubagentDesktopArtifactGate.test.ts` verifies the real artifact verifier,
  * while this suite proves every Pi SDK entry point consults that gate before
  * importing the SDK or resolving its global agent directory.
+ *
+ * The Ticket 01b AC6 block below additionally routes the adapter through the
+ * PRODUCTION gate + PRODUCTION verifier (never a fabricated unavailable
+ * reason) against on-disk expanded-closure fixtures that carry real
+ * `agent/extensions/shared` and `node_modules` regular files, mirroring the
+ * release stager's expanded layout (Decision 0006 Binding decision 2).
  */
 const gateHarness = vi.hoisted(() => ({
   calls: [] as Array<{ readonly mode: unknown; readonly env: unknown }>,
+  /** "fabricated" (Ticket 01 matrix) or "real" (Ticket 01b AC6). */
+  mode: "fabricated" as "fabricated" | "real",
   result: {
     kind: "unavailable",
     reason: "locator_missing",
@@ -30,12 +49,32 @@ const piSdkHarness = vi.hoisted(() => ({
   sessionManagerOpenCalls: 0,
 }));
 
-vi.mock("../piSubagentDesktopArtifactGate.ts", () => ({
-  evaluatePiSubagentDesktopArtifactGate: async (mode: unknown, input: { readonly env: unknown }) => {
-    gateHarness.calls.push({ mode, env: input.env });
-    return gateHarness.result;
-  },
-}));
+vi.mock("../piSubagentDesktopArtifactGate.ts", async (importOriginal) => {
+  // Ticket 01b AC6: keep the deterministic fabricated-result surface for the
+  // Ticket 01 ordering matrix, but route to the PRODUCTION gate (and through
+  // it the PRODUCTION verifier) when a test opts in — so the fail-close
+  // denial is proven from a real invalid on-disk artifact, never fabricated.
+  const actual =
+    await importOriginal<
+      typeof import("../piSubagentDesktopArtifactGate.ts")
+    >();
+  return {
+    ...actual,
+    evaluatePiSubagentDesktopArtifactGate: async (
+      mode: unknown,
+      input: { readonly env: unknown },
+    ) => {
+      gateHarness.calls.push({ mode, env: input.env });
+      if (gateHarness.mode === "real") {
+        return actual.evaluatePiSubagentDesktopArtifactGate(
+          mode as Parameters<typeof actual.evaluatePiSubagentDesktopArtifactGate>[0],
+          input as Parameters<typeof actual.evaluatePiSubagentDesktopArtifactGate>[1],
+        );
+      }
+      return gateHarness.result;
+    },
+  };
+});
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
   piSdkHarness.imports += 1;
@@ -63,6 +102,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
 
 const resetHarness = () => {
   gateHarness.calls.splice(0);
+  gateHarness.mode = "fabricated";
   gateHarness.result = {
     kind: "unavailable",
     reason: "locator_missing",
@@ -212,6 +252,255 @@ describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
     ]);
     expect(piSdkHarness).toMatchObject({
       imports: 1,
+      getAgentDirCalls: 1,
+      serviceCreationCalls: 1,
+      sessionManagerCreateCalls: 0,
+      sessionManagerOpenCalls: 0,
+    });
+  });
+});
+
+/**
+ * Ticket 01b (AC6, Decision 0006) — real on-disk expanded-closure fixtures.
+ *
+ * Each fixture is a staged expanded-closure artifact (extension + shared +
+ * `node_modules` regular files) that the PRODUCTION verifier genuinely
+ * rejects with a distinct bounded category, so the fail-close denial proves
+ * the real verifier/gate result — never a fabricated unavailable reason.
+ */
+const closureSha256 = (content: string): string =>
+  createHash("sha256").update(content).digest("hex");
+
+const CLOSURE_SOURCE_IDENTITY = {
+  repositoryUrl: "https://github.com/anhphamwork99/alfie.git",
+  pinnedCommit: "aa6fa4a8540644d2509b10d6df854486ddc67d1d",
+  packageName: "@alfie/pi-subagents",
+  packageVersion: "0.15.0-alfie.4",
+};
+
+const CLOSURE_CAPABILITY_PROFILE = {
+  protocolVersion: 1,
+  capabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+  requiredCapabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+};
+
+interface ClosureFileSpec {
+  readonly path: string;
+  readonly content: string;
+}
+
+/**
+ * The expanded-closure file set. Mirrors the release stager's layout
+ * (Decision 0006 Binding decision 2): the extension tree, the sibling
+ * `agent/extensions/shared` modules it imports, and the release-owned
+ * lock-proven root-level `node_modules` regular-file dependency closure.
+ */
+const CLOSURE_BASE_FILES: ReadonlyArray<ClosureFileSpec> = [
+  {
+    path: "agent/extensions/pi-subagents/package.json",
+    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.4" }),
+  },
+  {
+    path: "agent/extensions/pi-subagents/src/index.ts",
+    content: "export const managed = true;\n",
+  },
+  {
+    path: "agent/extensions/shared/durable-preferences.js",
+    content: "export const durablePreferences = 'shared';\n",
+  },
+  {
+    path: "agent/extensions/shared/durable-preferences.d.ts",
+    content: "export declare const durablePreferences: string;\n",
+  },
+  {
+    path: "node_modules/zod/package.json",
+    content: JSON.stringify({ name: "zod", version: "3.24.1", main: "index.js" }),
+  },
+  {
+    path: "node_modules/zod/index.js",
+    content: "module.exports = require('./lib/index.js');\n",
+  },
+  {
+    path: "node_modules/@scope/dep/dist/runtime.js",
+    content: "export const runtimeDependency = true;\n",
+  },
+];
+
+/** Records the manifest for exactly the staged file set. */
+const closureManifestFor = (
+  files: ReadonlyArray<ClosureFileSpec>,
+): Record<string, unknown> => ({
+  schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+  sourceIdentity: CLOSURE_SOURCE_IDENTITY,
+  capabilityProfile: CLOSURE_CAPABILITY_PROFILE,
+  files: files.map((file) => ({
+    path: file.path,
+    sizeBytes: Buffer.byteLength(file.content),
+    sha256: closureSha256(file.content),
+  })),
+});
+
+const stageClosureArtifact = async (
+  root: string,
+  files: ReadonlyArray<ClosureFileSpec>,
+): Promise<void> => {
+  for (const file of files) {
+    await mkdir(join(root, file.path, ".."), { recursive: true });
+    await writeFile(join(root, file.path), file.content);
+  }
+  await writeFile(
+    join(root, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
+    JSON.stringify(closureManifestFor(files), null, 2),
+  );
+};
+
+/**
+ * AC6 invalid-variant matrix over the expanded closure: every case stages a
+ * manifest-declared regular-file closure on disk and is genuinely rejected by
+ * the production verifier with a bounded category — the shared leg and the
+ * dependency (`node_modules`) leg are proven separately. The expected gate
+ * detail is derived from category + entry, exactly the production shape.
+ */
+const closureInvalidVariants = [
+  {
+    label: "shared entry_missing",
+    category: "entry_missing",
+    entry: "agent/extensions/shared/durable-preferences.js",
+    stage: async (root: string) => {
+      await stageClosureArtifact(root, CLOSURE_BASE_FILES);
+      await rm(join(root, "agent/extensions/shared/durable-preferences.js"));
+    },
+  },
+  {
+    label: "dependency digest_mismatch",
+    category: "digest_mismatch",
+    entry: "node_modules/zod/index.js",
+    stage: async (root: string) => {
+      await stageClosureArtifact(root, CLOSURE_BASE_FILES);
+      // Same byte length as the staged content, different bytes.
+      await writeFile(
+        join(root, "node_modules/zod/index.js"),
+        "module.exports = require('./lib/index.jS');\n",
+      );
+    },
+  },
+  {
+    label: "shared unlisted_entry",
+    category: "unlisted_entry",
+    entry: "agent/extensions/shared/model-catalog-reconciler.js",
+    stage: async (root: string) => {
+      await stageClosureArtifact(root, CLOSURE_BASE_FILES);
+      await writeFile(
+        join(root, "agent/extensions/shared/model-catalog-reconciler.js"),
+        "export const unlisted = true;\n",
+      );
+    },
+  },
+  {
+    label: "dependency symlink_escape",
+    category: "symlink_escape",
+    entry: "node_modules/zod",
+    stage: async (root: string) => {
+      await stageClosureArtifact(root, CLOSURE_BASE_FILES);
+      await rm(join(root, "node_modules/zod"), { recursive: true, force: true });
+      const outside = join(fixtureRoot, "outside-dependency-zod");
+      await mkdir(outside, { recursive: true });
+      await writeFile(join(outside, "index.js"), "outside content");
+      const { symlink } = await import("node:fs/promises");
+      await symlink(outside, join(root, "node_modules/zod"));
+    },
+  },
+] as const;
+
+const expectedGateDetail = (variant: (typeof closureInvalidVariants)[number]): string =>
+  `managed pi artifact verification failed: ${variant.category} (entry: ${variant.entry})`;
+
+let fixtureRoot: string;
+
+beforeAll(async () => {
+  fixtureRoot = await mkdtemp(join(tmpdir(), "synara-t01b-ac6-"));
+});
+
+afterAll(async () => {
+  await rm(fixtureRoot, { recursive: true, force: true });
+});
+
+/** Desktop env for the AC6 legs: the real locator plus an inherited untrusted agent dir. */
+const invalidClosureEnv = (artifactRoot: string): NodeJS.ProcessEnv => ({
+  [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: artifactRoot,
+  PI_CODING_AGENT_DIR: "/untrusted/inherited-pi-agent-dir",
+});
+
+describe("PiAdapter desktop fail-close against real invalid expanded-closure artifacts (Ticket 01b AC6)", () => {
+  it.for(closureInvalidVariants)(
+    "rejects desktop entries for $label before SDK import or discovery, using the real verifier/gate result",
+    async (variant) => {
+      for (const entry of entryPaths) {
+        resetHarness();
+        gateHarness.mode = "real";
+        const artifactRoot = await mkdtemp(join(fixtureRoot, `${variant.label.replace(/[^a-z0-9]+/gu, "-")}-`));
+        await variant.stage(artifactRoot);
+
+        const failure = await runPath({
+          mode: "desktop",
+          env: invalidClosureEnv(artifactRoot),
+          entry,
+        });
+
+        expect(failure).toMatchObject({
+          _tag: "ProviderAdapterRequestError",
+          provider: "pi",
+          method: entry.method,
+          detail: `Managed Pi subagents are unavailable (${variant.category}): ${expectedGateDetail(variant)}`,
+        });
+        expect(gateHarness.calls).toEqual([
+          {
+            mode: "desktop",
+            env: invalidClosureEnv(artifactRoot),
+          },
+        ]);
+        expect(piSdkHarness).toEqual({
+          imports: 0,
+          getAgentDirCalls: 0,
+          serviceCreationCalls: 0,
+          sessionManagerCreateCalls: 0,
+          sessionManagerOpenCalls: 0,
+        });
+      }
+    },
+  );
+
+  it("keeps non-desktop pass-through with a real invalid expanded-closure locator present", async () => {
+    resetHarness();
+    gateHarness.mode = "real";
+    const artifactRoot = await mkdtemp(join(fixtureRoot, "non-desktop-invalid-"));
+    await stageClosureArtifact(artifactRoot, CLOSURE_BASE_FILES);
+    await rm(join(artifactRoot, "agent/extensions/shared/durable-preferences.js"));
+
+    const failure = await runPath({
+      mode: "web",
+      env: invalidClosureEnv(artifactRoot),
+      entry: entryPaths[2]!,
+    });
+
+    // Non-desktop pass-through is unchanged (Decision 0004 §6): the gate
+    // returns pass WITHOUT verifying, so the (mock) SDK path is reached.
+    expect(failure).toMatchObject({
+      _tag: "ProviderAdapterRequestError",
+      provider: "pi",
+      method: "skill/list",
+      detail: "mock Pi SDK reached",
+    });
+    expect(gateHarness.calls).toEqual([
+      {
+        mode: "web",
+        env: invalidClosureEnv(artifactRoot),
+      },
+    ]);
+    expect(piSdkHarness).toMatchObject({
+      // The lazy SDK module memoizes per worker, so `imports` counts the
+      // FIRST load only; proving the SDK path was reached here is done by
+      // the global agent-dir discovery and service-creation calls below.
       getAgentDirCalls: 1,
       serviceCreationCalls: 1,
       sessionManagerCreateCalls: 0,
