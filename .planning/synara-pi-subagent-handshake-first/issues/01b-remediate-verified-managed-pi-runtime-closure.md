@@ -14,7 +14,7 @@ staged-artifact AC4 load proof remains required. Decision 0008 additionally
 requires artifact-local `@sinclair/typebox@0.34.49` resolution or qualifying
 exact host-alias supply; the current host alias is not itself sufficient.
 
-**Status:** implementation complete — pending independent review and final acceptance
+**Status:** accepted — Decision 0009
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -115,6 +115,8 @@ Governance decision, 2026-08-21 (“đồng ý, tạo testing seam trước đi�
   `ALFIE_REPO_DIR`, that suite records `1 skipped` explicitly.
 - Lock reproducibility passed with `bun install --frozen-lockfile`; patch
   inspection proves the three scoped aliases absent while required Pi and
-  unscoped aliases remain; `git diff --check` passed. Full independent review
-  and one Supervisor final-acceptance consultation remain required before
-  Ticket 02 can unblock.
+  unscoped aliases remain; `git diff --check` passed.
+- **Acceptance:** the independent feature-level review passed after reproducing
+  AC1–AC6 and an alias-restoration negative control. Decision 0009 accepts
+  Ticket 01b and unblocks Ticket 02; its complete final-acceptance evidence,
+  maintenance boundary, rollback, and reopening conditions are authoritative.

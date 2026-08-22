@@ -3,13 +3,10 @@
 ## Routing metadata
 
 - **Owner:** anhpham99
-- **Lifecycle:** Implementation in progress — Ticket 01 accepted;
-  Ticket 01 runtime-closure remediation (01b) opened by Decision 0006.
-  Decision 0007's host-peer alignment prerequisite was delivered in
-  `799af158a`; Decision 0008 now requires artifact-local TypeBox resolution
-  or qualifying exact host-alias supply before its staged-closure AC4 proof.
-- **Triage status:** 01b implementation complete pending independent review and
-  final acceptance; 03 ready-for-agent; 02 remains blocked by 01b acceptance
+- **Lifecycle:** Implementation in progress — Ticket 01 and its runtime-closure
+  remediation Ticket 01b are accepted. Decision 0009 accepts the complete
+  lock-proven closure, aligned Pi host, and artifact-local TypeBox proof.
+- **Triage status:** 02 and 03 ready-for-agent; 04 remains blocked by 02 + 03
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -44,6 +41,9 @@
   — binding Supervisor reassessment: the Pi loader's host alias for normal
   `@sinclair/typebox` cannot satisfy AC4 unless it is exact lock-identical or
   upstream-authoritatively compatible; prefer artifact-local resolution.
+- [decisions/0009-t01b-final-acceptance.md](decisions/0009-t01b-final-acceptance.md)
+  — binding final acceptance: Ticket 01b AC1–AC6 are accepted; Ticket 02 is
+  unblocked while retaining its exclusive runtime/bootstrap ownership.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -56,20 +56,17 @@
 - **01 — Package and fail-close the managed Pi artifact** is accepted by
   Decision 0005 (fail-close boundary; not reopened). Its runtime-closure
   remediation is tracked as Ticket 01b.
-- **01b — Remediate the verified managed Pi runtime closure** has a complete
-  implementation candidate. Decision 0007's host alignment was delivered in
-  `799af158a`; Decision 0008's normal-dependency alias remediation and real
-  staged-closure AC4 proof were delivered in `75a12e40c`. AC1–AC6 focused
-  evidence is recorded in the ticket; independent review and exactly one
-  Supervisor final-acceptance consultation are now required. Ticket 02 remains
-  blocked until that acceptance completes.
+- **01b — Remediate the verified managed Pi runtime closure** is accepted by
+  Decision 0009. It closes the remediation opened by Decision 0006: the
+  release artifact has a lock-proven, manifest-verified real runtime closure
+  and artifact-local TypeBox resolution under the aligned 0.83.0 Pi host.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
-  lifecycle** is blocked by 01b per Decisions 0006 and 0007. Its real-runtime
-  acceptance (AC1–AC4) is stopped; existing implementation remains
-  in-progress work and no AC is complete. It retains its other
-  responsibilities unchanged.
+  lifecycle** is unblocked by Decision 0009. It retains exclusive ownership of
+  controlled-runtime construction, user authentication/model configuration,
+  mandatory lifecycle handshake, and managed Agent-wrapper exposure; its own
+  acceptance criteria remain unproven.
 - **03 — Present durable execution-card truth** is unblocked and
   ready-for-agent.
 - **04 — Prove desktop production composition and complete acceptance** is
-  blocked by tickets 01b, 02, and 03; it remains packaged desktop/server
+  blocked by tickets 02 and 03; it remains packaged desktop/server
   final composition only and does not absorb the remediation.
