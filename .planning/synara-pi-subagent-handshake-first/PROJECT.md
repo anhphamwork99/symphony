@@ -6,8 +6,10 @@
 - **Lifecycle:** Implementation in progress — Ticket 01 accepted;
   Ticket 01 runtime-closure remediation (01b) opened by Decision 0006.
   Decision 0007's host-peer alignment prerequisite was delivered in
-  `799af158a`; its staged-closure AC4 proof remains pending.
-- **Triage status:** 01b active; 03 ready-for-agent; 02 blocked by 01b
+  `799af158a`; Decision 0008 now requires artifact-local TypeBox resolution
+  or qualifying exact host-alias supply before its staged-closure AC4 proof.
+- **Triage status:** 01b active with AC4 TypeBox-alias remediation; 03 ready-for-agent;
+  02 blocked by 01b
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -38,6 +40,10 @@
   — binding Supervisor reassessment: the real pinned artifact declares Pi
   peers `>=0.83.0`, while the current packaged host is `0.81.1`; AC4 requires
   host alignment or an Alfie-source-authoritative exact-tuple exception.
+- [decisions/0008-t01b-normal-dependency-host-alias-reassessment.md](decisions/0008-t01b-normal-dependency-host-alias-reassessment.md)
+  — binding Supervisor reassessment: the Pi loader's host alias for normal
+  `@sinclair/typebox` cannot satisfy AC4 unless it is exact lock-identical or
+  upstream-authoritatively compatible; prefer artifact-local resolution.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -53,9 +59,10 @@
 - **01b — Remediate the verified managed Pi runtime closure** is the active
   frontier. Decision 0007's default host-alignment route was delivered in
   `799af158a`: the production Pi host family resolves coherently at `0.83.0`.
-  The real staged-closure AC4 proof and remaining 01b acceptance work are
-  still pending; Ticket 01b must be accepted before Ticket 02 can claim
-  completion.
+  Decision 0008 additionally requires artifact-local TypeBox resolution or
+  qualifying exact host-alias supply. The real staged-closure AC4 proof and
+  remaining 01b acceptance work are still pending; Ticket 01b must be accepted
+  before Ticket 02 can claim completion.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
   lifecycle** is blocked by 01b per Decisions 0006 and 0007. Its real-runtime
   acceptance (AC1–AC4) is stopped; existing implementation remains
