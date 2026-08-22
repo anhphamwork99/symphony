@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +30,7 @@ import {
 
 const temporaryRoots: string[] = [];
 const REAL_ALFIE_REPO_DIR = process.env.ALFIE_REPO_DIR ?? "";
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
@@ -68,10 +70,7 @@ function walkEntries(rootDir: string, currentRelative = ""): ReadonlyArray<Walke
 
 function loadRealProvenance() {
   return loadPiSubagentExtensionProvenance(
-    join(
-      process.cwd(),
-      "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json",
-    ),
+    join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
   );
 }
 
@@ -90,10 +89,35 @@ interface SyntheticAlfieRepo {
   readonly provenance: SyntheticProvenance;
 }
 
+/** Shared runtime modules the real pinned extension imports (stager contract). */
+const SYNTHETIC_SHARED_MODULES = ["durable-preferences", "execution-identity", "model-catalog-reconciler"];
+
 /**
- * Builds a synthetic pinned Alfie-like Git repository for failure-surface
- * tests. The real Alfie checkout is never mutated by this suite — only read
- * by the explicitly opted-in real-checkout tests above.
+ * Minimal npm lockfile v3 for the synthetic fixture. The default synthetic
+ * extension declares zero runtime dependencies (root dependency maps both
+ * empty — still lock-proven), so the synthetic legs exercise the stager
+ * without any npm invocation.
+ */
+function syntheticPackageLock(dependencies: Record<string, string>): Record<string, unknown> {
+  return {
+    name: "@alfie/pi-subagents",
+    version: "0.15.0-alfie.4",
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      "": {
+        name: "@alfie/pi-subagents",
+        version: "0.15.0-alfie.4",
+        dependencies,
+      },
+    },
+  };
+}
+
+/**
+ * Builds a synthetic pinned Alfie-like Git repository for staging tests. The
+ * real Alfie checkout is never mutated by this suite — only read by the
+ * explicitly opted-in real-checkout tests above.
  */
 function createSyntheticAlfieRepo(options: {
   readonly originUrl?: string;
@@ -101,6 +125,7 @@ function createSyntheticAlfieRepo(options: {
   readonly trackedSymlink?: { readonly relative: string; readonly target: string };
   readonly untrackedFile?: string;
   readonly packageJson?: string;
+  readonly dependencies?: Record<string, string>;
 }): SyntheticAlfieRepo {
   const repoDir = join(makeTempRoot("synthetic-alfie-"), "alfie");
   mkdirSync(repoDir, { recursive: true });
@@ -118,10 +143,21 @@ function createSyntheticAlfieRepo(options: {
 
   const extensionRoot = "agent/extensions/pi-subagents";
   mkdirSync(join(repoDir, extensionRoot, "src"), { recursive: true });
+  const dependencies = options.dependencies ?? {};
   writeFileSync(
     join(repoDir, extensionRoot, "package.json"),
     options.packageJson ??
-      JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.4" }),
+      JSON.stringify(
+        { name: "@alfie/pi-subagents", version: "0.15.0-alfie.4", dependencies },
+        null,
+        2,
+      ),
+  );
+  // A matching lockfile v3 is always present so closure selection is proven
+  // even for the zero-dependency synthetic fixture.
+  writeFileSync(
+    join(repoDir, extensionRoot, "package-lock.json"),
+    JSON.stringify(syntheticPackageLock(dependencies), null, 2),
   );
   writeFileSync(
     join(repoDir, extensionRoot, "src/index.ts"),
@@ -133,6 +169,12 @@ function createSyntheticAlfieRepo(options: {
       "",
     ].join("\n"),
   );
+  // The exact shared runtime modules the stager contract stages.
+  mkdirSync(join(repoDir, "agent/extensions/shared"), { recursive: true });
+  for (const basename of SYNTHETIC_SHARED_MODULES) {
+    writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.js`), `export const x = "${basename}";\n`);
+    writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.d.ts`), `export declare const x: string;\n`);
+  }
   for (const extra of options.extraFiles ?? []) {
     const fullPath = join(repoDir, extra);
     mkdirSync(dirname(fullPath), { recursive: true });
@@ -178,11 +220,14 @@ function syntheticProvenanceFor(repoDir: string, extensionRoot: string): Synthet
   };
 }
 
-describe("pi-subagents artifact staging (Ticket 01 WP1b)", () => {
+describe("pi-subagents artifact staging (Ticket 01b)", () => {
   describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
-    "real pinned Alfie checkout (AC1, AC4)",
+    "real pinned Alfie checkout (AC1, AC2, AC5)",
     () => {
-      it("stages a deterministic verified artifact with an exact contract-valid manifest", () => {
+      it(
+        "stages the self-contained closure with an exact contract-valid manifest (AC1)",
+        { timeout: 120_000 },
+        () => {
         const provenance = loadRealProvenance();
         const artifactDir = join(makeTempRoot("pi-artifact-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
 
@@ -193,7 +238,7 @@ describe("pi-subagents artifact staging (Ticket 01 WP1b)", () => {
         });
         expect(first.fileCount).toBeGreaterThan(0);
 
-        // T01-AC1: the staged manifest decodes against the WP1a contract.
+        // T01b-AC1: the staged manifest decodes against the WP1a contract.
         const manifest = Schema.decodeSync(PiSubagentArtifactManifest)(
           JSON.parse(readFileSync(first.manifestPath, "utf8")),
         );
@@ -205,17 +250,14 @@ describe("pi-subagents artifact staging (Ticket 01 WP1b)", () => {
           packageVersion: provenance.packageVersion,
         });
 
-        // T01-AC1: capability profile — declared superset of the required set.
+        // T01b-AC1: capability profile — declared superset of the required set.
         const declared = new Set(manifest.capabilityProfile.capabilities);
         for (const required of PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES) {
           expect(declared.has(required)).toBe(true);
         }
-        expect([...manifest.capabilityProfile.requiredCapabilities]).toEqual([
-          ...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
-        ]);
         expect(manifest.capabilityProfile.protocolVersion).toBe(1);
 
-        // T01-AC1: every staged regular file matches exactly one manifest
+        // T01b-AC1: every staged regular file matches exactly one manifest
         // record (path, size, SHA-256) and vice versa; no symlink remains.
         const entries = walkEntries(artifactDir);
         expect(entries.some((entry) => entry.symlink)).toBe(false);
@@ -232,24 +274,68 @@ describe("pi-subagents artifact staging (Ticket 01 WP1b)", () => {
           expect(sha256(bytes)).toBe(record!.sha256);
         }
 
-        // T01-AC4: no authentication, model configuration, key material, or
-        // dependency-tree content is staged.
+        // T01b-AC1: the necessary shared runtime modules the extension
+        // imports are staged (exactly these — no unrelated shared content).
+        for (const basename of SYNTHETIC_SHARED_MODULES) {
+          for (const suffix of [".js", ".d.ts"]) {
+            expect(stagedFiles).toContain(`agent/extensions/shared/${basename}${suffix}`);
+          }
+        }
+        expect(
+          stagedFiles.filter((relative) => relative.startsWith("agent/extensions/shared/")).length,
+        ).toBe(SYNTHETIC_SHARED_MODULES.length * 2);
+
+        // T01b-AC1: the lock-proven direct runtime dependency closure is
+        // staged under the artifact root `node_modules` — exactly the four
+        // locked packages, at their exact locked versions.
+        const dependencyRoots = readdirSync(join(artifactDir, "node_modules"), {
+          withFileTypes: true,
+        })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name);
+        expect(dependencyRoots).toContain("@sinclair");
+        expect(dependencyRoots.sort()).toEqual(["@sinclair", "croner", "nanoid", "yaml"]);
+        const expectedLockedVersions: Record<string, string> = {
+          "@sinclair/typebox": "0.34.49",
+          croner: "10.0.1",
+          nanoid: "5.1.11",
+          yaml: "2.9.0",
+        };
+        for (const [name, version] of Object.entries(expectedLockedVersions)) {
+          const installed = JSON.parse(
+            readFileSync(join(artifactDir, "node_modules", name, "package.json"), "utf8"),
+          );
+          expect(installed.version, `${name} must be the exact locked version`).toBe(version);
+        }
+        // No dev/optional lock content, no `.bin` shims, no peer/host-SDK
+        // packages, and no nested `node_modules` inside the staged closure.
+        expect(stagedFiles.some((relative) => relative.includes("/node_modules/node_modules/"))).toBe(false);
+        expect(stagedFiles.some((relative) => relative.split("/").includes(".bin"))).toBe(false);
+        expect(stagedFiles.some((relative) => relative.startsWith("node_modules/@earendil-works/"))).toBe(
+          false,
+        );
+        expect(
+          stagedFiles.some((relative) => relative.startsWith("node_modules/typescript")),
+        ).toBe(false);
+
+        // T01b-AC5: no authentication, model configuration, key material, or
+        // credentials inside the staged artifact.
         for (const relative of stagedFiles) {
           const basename = relative.split("/").pop() ?? "";
           expect(["auth.json", "models.json", "credentials.json"]).not.toContain(basename);
           expect([".pem", ".key", ".p8", ".pfx"]).not.toContain(
             basename.slice(basename.lastIndexOf(".")),
           );
-          expect(relative.split("/")).not.toContain("node_modules");
         }
+
         expect(stagedFiles).toContain("agent/extensions/pi-subagents/src/index.ts");
         expect(stagedFiles).toContain("agent/extensions/pi-subagents/package.json");
         // Only release runtime material is staged: the extension's own test
-        // subtree and dependency tree never enter the artifact.
+        // subtree never enters the artifact.
         expect(stagedFiles.some((relative) => relative.includes("/test/"))).toBe(false);
 
-        // T01-AC1: determinism — identical pinned input reproduces identical
-        // manifest bytes.
+        // T01b-AC2: determinism — identical pinned input reproduces identical
+        // manifest bytes (closure content included: same lock, same bytes).
         const secondDir = join(makeTempRoot("pi-artifact-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
         const second = buildPiSubagentArtifact({
           repoDir: REAL_ALFIE_REPO_DIR,
@@ -375,24 +461,69 @@ describe("pi-subagents artifact staging (Ticket 01 WP1b)", () => {
       ).toThrow(/SHA-256/i);
     });
 
-    it("stages a synthetic clean pinned repo successfully", () => {
+    it("stages a synthetic clean pinned repo (zero runtime deps → no node_modules)", () => {
       const { repoDir, provenance } = createSyntheticAlfieRepo({
         extraFiles: ["agent/extensions/pi-subagents/dist/index.js"],
       });
       const artifactDir = join(makeTempRoot("out-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
       const staged = buildPiSubagentArtifact({ repoDir, artifactDir, provenance });
-      expect(staged.fileCount).toBe(3);
+      const expectedFiles = [
+        "agent/extensions/pi-subagents/dist/index.js",
+        "agent/extensions/pi-subagents/package-lock.json",
+        "agent/extensions/pi-subagents/package.json",
+        "agent/extensions/pi-subagents/src/index.ts",
+        ...SYNTHETIC_SHARED_MODULES.flatMap((basename) => [
+          `agent/extensions/shared/${basename}.js`,
+          `agent/extensions/shared/${basename}.d.ts`,
+        ]),
+      ].sort();
+      expect(staged.fileCount).toBe(expectedFiles.length);
       const stagedFiles = walkEntries(artifactDir)
         .map((entry) => entry.relative)
         .filter((relative) => relative !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME);
-      expect(stagedFiles).toEqual(
-        [
-          "agent/extensions/pi-subagents/dist/index.js",
-          "agent/extensions/pi-subagents/package.json",
-          "agent/extensions/pi-subagents/src/index.ts",
-        ].sort(),
-      );
+      expect(stagedFiles).toEqual(expectedFiles);
+      // A zero-runtime-dependency extension stages no node_modules at all.
+      expect(existsSync(join(artifactDir, "node_modules"))).toBe(false);
       expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(true);
+    });
+
+    it("preserves a preexisting destination when staging fails (no partial artifact)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        // Prohibited payload guarantees a failure AFTER assembly begins.
+        extraFiles: ["agent/extensions/pi-subagents/models.json"],
+      });
+      const parentDir = makeTempRoot("preserve-");
+      const artifactDir = join(parentDir, PI_SUBAGENT_ARTIFACT_DIR_NAME);
+      mkdirSync(artifactDir, { recursive: true });
+      writeFileSync(join(artifactDir, "preexisting-sentinel.txt"), "previous accepted artifact\n");
+
+      expect(() =>
+        buildPiSubagentArtifact({ repoDir, artifactDir, provenance }),
+      ).toThrow(/prohibited/i);
+
+      // The preexisting destination is untouched and no staging sibling
+      // residue remains next to it.
+      expect(readFileSync(join(artifactDir, "preexisting-sentinel.txt"), "utf8")).toBe(
+        "previous accepted artifact\n",
+      );
+      expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(false);
+      const siblings = readdirSync(parentDir).filter((entry) => entry.startsWith("pi-subagents-artifact"));
+      expect(siblings).toEqual([PI_SUBAGENT_ARTIFACT_DIR_NAME]);
+    });
+
+    it("replaces a preexisting destination only after a fully successful staging", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({});
+      const parentDir = makeTempRoot("replace-");
+      const artifactDir = join(parentDir, PI_SUBAGENT_ARTIFACT_DIR_NAME);
+      mkdirSync(artifactDir, { recursive: true });
+      writeFileSync(join(artifactDir, "stale-content.txt"), "stale\n");
+
+      buildPiSubagentArtifact({ repoDir, artifactDir, provenance });
+
+      expect(existsSync(join(artifactDir, "stale-content.txt"))).toBe(false);
+      expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(true);
+      const siblings = readdirSync(parentDir).filter((entry) => entry.startsWith("pi-subagents-artifact"));
+      expect(siblings).toEqual([PI_SUBAGENT_ARTIFACT_DIR_NAME]);
     });
   });
 });

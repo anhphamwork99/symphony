@@ -352,6 +352,10 @@ export function materializeNpmRuntimeClosure(input: {
     copyFileSync(packageLockJsonPath, join(installRoot, "package-lock.json"));
 
     const npm = input.npmCommand ?? "npm";
+    // The install runs with `cwd` AT the isolated install root (never with
+    // `--prefix`, which breaks `npm ci` root-name resolution): npm reads only
+    // the two copied manifest files there and never the checkout's ambient
+    // `node_modules`.
     const result = spawnSync(
       npm,
       [
@@ -361,16 +365,15 @@ export function materializeNpmRuntimeClosure(input: {
         "--no-fund",
         "--omit=dev",
         "--omit=optional",
-        "--prefix",
-        installRoot,
+        "--no-workspaces",
       ],
-      { encoding: "utf8", maxBuffer: 64 * 1_024 * 1_024 },
+      { cwd: installRoot, encoding: "utf8", maxBuffer: 64 * 1_024 * 1_024 },
     );
     if (result.error || result.status !== 0) {
       const stderr = (result.stderr ?? "").trim();
       throw new PiSubagentNpmRuntimeClosureError(
         "install_failed",
-        `Fresh lock install of the pinned extension dependency graph failed: ${result.error ?? stderr || "unknown npm failure"}.`,
+        `Fresh lock install of the pinned extension dependency graph failed: ${(result.error ?? stderr) || "unknown npm failure"}.`,
       );
     }
 
@@ -385,19 +388,31 @@ export function materializeNpmRuntimeClosure(input: {
     // Post-install verification: every selected package must exist with the
     // EXACT locked version — proving selection and install agree.
     for (const pkg of selection.packages) {
-      const installedManifestPath = join(installedRoot, pkg.lockPath, "package.json");
+      // `pkg.lockPath` already carries the `node_modules/` prefix, so this
+      // must join from the INSTALL ROOT, not from `installedRoot` (which
+      // already ends in `node_modules`) — joining both would double it.
+      const installedManifestPath = join(installRoot, pkg.lockPath, "package.json");
       if (!existsSync(installedManifestPath)) {
         throw new PiSubagentNpmRuntimeClosureError(
           "install_output_invalid",
           `Fresh lock install is missing selected package '${pkg.name}'.`,
         );
       }
-      const installedManifest = asRecord(
-        JSON.parse(readFileSync(installedManifestPath, "utf8")),
+      let installedManifest: unknown;
+      try {
+        installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8"));
+      } catch (cause) {
+        throw new PiSubagentNpmRuntimeClosureError(
+          "install_output_invalid",
+          `Installed '${pkg.name}' manifest is not parseable JSON: ${cause instanceof Error ? cause.message : String(cause)}.`,
+        );
+      }
+      const manifestRecord = asRecord(
+        installedManifest,
         "install_output_invalid",
         `Installed ${pkg.name} manifest`,
       );
-      if (installedManifest.version !== pkg.version) {
+      if (manifestRecord.version !== pkg.version) {
         throw new PiSubagentNpmRuntimeClosureError(
           "install_output_invalid",
           `Installed '${pkg.name}' version does not match the locked selection.`,
@@ -410,9 +425,14 @@ export function materializeNpmRuntimeClosure(input: {
     const artifactNodeModules = join(input.artifactDir, destinationDirName);
     let stagedFileCount = 0;
     for (const pkg of selection.packages) {
-      const sourcePackageDir = join(installedRoot, pkg.lockPath);
-      const destinationPackageDir = join(artifactNodeModules, pkg.lockPath);
-      const files = listRegularFilesRecursive(sourcePackageDir, pkg.lockPath);
+      // `pkg.lockPath` is install-root-relative (it starts with
+      // `node_modules/`), so join from `installRoot` — not from
+      // `installedRoot`, which already appends `node_modules`.
+      const sourcePackageDir = join(installRoot, pkg.lockPath);
+      // Recorded paths are relative to the installed/artifact `node_modules`
+      // root, so the package's own directory segment stays in the path.
+      const packageRootPrefix = pkg.lockPath.slice("node_modules/".length);
+      const files = listRegularFilesRecursive(sourcePackageDir, pkg.lockPath, packageRootPrefix);
       if (files.length === 0) {
         throw new PiSubagentNpmRuntimeClosureError(
           "install_output_invalid",
@@ -441,13 +461,23 @@ export function materializeNpmRuntimeClosure(input: {
   }
 }
 
-/** Regular files under a package directory, sorted, rejecting symlinks/specials. */
-function listRegularFilesRecursive(rootDir: string, packageLabel: string): ReadonlyArray<string> {
+/**
+ * Regular files under a package directory, sorted, rejecting symlinks/specials.
+ * `.bin` shim directories are excluded at ANY depth (root-level npm bins and
+ * bins nested inside a shipped package alike): executable shims are never
+ * release runtime closure content. Returned paths are prefixed with
+ * `pathPrefix` so they are relative to the `node_modules` root.
+ */
+function listRegularFilesRecursive(
+  rootDir: string,
+  packageLabel: string,
+  pathPrefix: string,
+): ReadonlyArray<string> {
   const collected: string[] = [];
   const walk = (dir: string, prefix: string): void => {
     for (const entry of readdirSync(dir).sort()) {
-      if (entry === ".bin" && prefix === "") {
-        // `.bin` symlinks are never staged.
+      if (entry === ".bin") {
+        // `.bin` content is categorically never staged.
         continue;
       }
       const absolute = join(dir, entry);
@@ -462,7 +492,9 @@ function listRegularFilesRecursive(rootDir: string, packageLabel: string): Reado
       if (stats.isDirectory()) {
         walk(absolute, relative);
       } else if (stats.isFile()) {
-        collected.push(`node_modules/${relative}`);
+        // Paths are relative to the installed `node_modules` root — the same
+        // frame the artifact `node_modules` root uses.
+        collected.push(pathPrefix ? `${pathPrefix}/${relative}` : relative);
       } else {
         throw new PiSubagentNpmRuntimeClosureError(
           "staged_entry_invalid",
