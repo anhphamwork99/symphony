@@ -35,6 +35,13 @@ import {
 } from "@synara/contracts";
 import { Schema } from "effect";
 
+import {
+  materializeNpmRuntimeClosure,
+  npmClosureSourcePaths,
+  PiSubagentNpmRuntimeClosureError,
+  selectNpmRuntimeClosure,
+} from "./piSubagentNpmRuntimeClosure.ts";
+
 /** Staged artifact directory name inside desktop resources. */
 export const PI_SUBAGENT_ARTIFACT_DIR_NAME = "pi-subagents-artifact";
 
@@ -50,6 +57,21 @@ export const PI_SUBAGENT_EXTENSION_PROVENANCE_FIXTURE_RELATIVE_PATH =
 
 /** Extension subtree inside the Alfie repository that forms the artifact. */
 const EXTENSION_RELATIVE_ROOT = "agent/extensions/pi-subagents";
+
+/**
+ * Ticket 01b (Decision 0006): the sibling shared modules the pinned extension
+ * imports at load. Exactly these shared files are staged (the extension
+ * imports nothing else from `agent/extensions/shared`), each `.js` runtime
+ * file plus its `.d.ts` declaration so TS-hosted consumers stay coherent.
+ */
+const EXTENSION_SHARED_MODULE_BASENAMES = [
+  "durable-preferences",
+  "execution-identity",
+  "model-catalog-reconciler",
+] as const;
+
+/** Shared subtree root inside the Alfie repository. */
+const SHARED_RELATIVE_ROOT = "agent/extensions/shared";
 
 /**
  * The extension's own development-test subtree is not release runtime
@@ -92,6 +114,7 @@ export type PiSubagentArtifactStagingErrorCode =
   | "prohibited_payload"
   | "symlink_in_source"
   | "capability_profile_invalid"
+  | "dependency_closure_invalid"
   | "staging_output_invalid";
 
 export class PiSubagentArtifactStagingError extends Error {
@@ -272,6 +295,20 @@ export function verifyAlfieExtensionProvenance(input: {
     );
   }
 
+  // Ticket 01b: the shared modules the extension imports must be proven at
+  // the same pinned clean commit before their bytes enter the artifact.
+  const sharedStatusRaw = git(repoDir, ["status", "--porcelain", SHARED_RELATIVE_ROOT]).trim();
+  const sharedStatusLines = sharedStatusRaw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (sharedStatusLines.length > 0) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_unclean",
+      `Managed pi-subagents shared tree '${SHARED_RELATIVE_ROOT}' has uncommitted changes; refusing to stage unclean shared bytes.`,
+    );
+  }
+
   const packageManifestPath = join(repoDir, provenance.packageManifestRelativePath);
   if (!existsSync(packageManifestPath)) {
     throw new PiSubagentArtifactStagingError(
@@ -314,6 +351,15 @@ export function verifyAlfieExtensionProvenance(input: {
   };
 }
 
+/**
+ * Allowlist of lock-proven runtime dependency package directory prefixes
+ * that may be staged under the artifact `node_modules` root (Ticket 01b,
+ * Decision 0006 Binding decision 2). Populated during staging from the
+ * selected npm runtime closure; any other `node_modules` content remains
+ * `prohibited_payload`.
+ */
+let allowedNodeModulesPackagePrefixes: ReadonlyArray<string> = [];
+
 function assertNoProhibitedPayload(relativePath: string): void {
   const segments = relativePath.split("/");
   const basename = segments[segments.length - 1] ?? "";
@@ -330,11 +376,24 @@ function assertNoProhibitedPayload(relativePath: string): void {
       `Managed pi-subagents artifact would stage prohibited key material '${basename}' at '${relativePath}'.`,
     );
   }
-  if (segments.includes("node_modules")) {
-    throw new PiSubagentArtifactStagingError(
-      "prohibited_payload",
-      `Managed pi-subagents artifact would stage dependency tree content at '${relativePath}'; only pinned release-controlled bytes may be staged.`,
-    );
+  const nodeModulesIndex = segments.indexOf("node_modules");
+  if (nodeModulesIndex !== -1) {
+    // `node_modules` content is staging-legal ONLY inside one of the
+    // lock-proven closure package roots selected by this build. Everything
+    // else — ambient installs, `.bin` shims, floating extras — stays rejected.
+    if (segments[nodeModulesIndex + 1] === ".bin") {
+      throw new PiSubagentArtifactStagingError(
+        "prohibited_payload",
+        `Managed pi-subagents artifact would stage a .bin shim at '${relativePath}'; executable shims are never release runtime content.`,
+      );
+    }
+    const afterNodeModules = segments.slice(nodeModulesIndex + 1).join("/");
+    if (!allowedNodeModulesPackagePrefixes.some((prefix) => afterNodeModules === prefix || afterNodeModules.startsWith(`${prefix}/`))) {
+      throw new PiSubagentArtifactStagingError(
+        "prohibited_payload",
+        `Managed pi-subagents artifact would stage dependency-tree content at '${relativePath}' outside the lock-proven runtime closure; only selected release-owned packages may be staged.`,
+      );
+    }
   }
 }
 
@@ -382,6 +441,26 @@ function extractDeclaredCapabilityProfile(
   }
 
   return { protocolVersion, capabilities };
+}
+
+/** Lists the exact shared runtime module files the pinned extension imports. */
+function listSharedRuntimeFiles(repoDir: string): ReadonlyArray<string> {
+  const relativePaths: string[] = [];
+  for (const basename of EXTENSION_SHARED_MODULE_BASENAMES) {
+    for (const suffix of [".js", ".d.ts"] as const) {
+      const relativePath = `${SHARED_RELATIVE_ROOT}/${basename}${suffix}`;
+      if (!existsSync(join(repoDir, relativePath))) {
+        throw new PiSubagentArtifactStagingError(
+          "extension_tree_missing",
+          `Pinned shared runtime module '${relativePath}' is missing from the managed pi-subagents source tree.`,
+        );
+      }
+      relativePaths.push(relativePath);
+    }
+  }
+  // Shared runtime material is exactly the enumerated files — never a
+  // directory walk, so unrelated shared-tree content can never enter.
+  return relativePaths.sort();
 }
 
 /** Lists the exact Git-tracked release-runtime files of the extension. */
@@ -459,6 +538,7 @@ export function buildPiSubagentArtifact(input: {
   mkdirSync(artifactDir, { recursive: true });
 
   const trackedFiles = listTrackedExtensionFiles(verified.repoDir);
+  const sharedFiles = listSharedRuntimeFiles(verified.repoDir);
   const entrySourcePath = join(verified.repoDir, input.provenance.extensionEntryRelativePath);
   if (!existsSync(entrySourcePath)) {
     throw new PiSubagentArtifactStagingError(
@@ -468,8 +548,41 @@ export function buildPiSubagentArtifact(input: {
   }
   const declaredProfile = extractDeclaredCapabilityProfile(readFileSync(entrySourcePath, "utf8"));
 
+  // Ticket 01b (Decision 0006 Binding decision 2): select the lock-proven
+  // runtime closure BEFORE staging so the `node_modules` allowlist is exact,
+  // then materialize it from a fresh isolated lock install (never ambient
+  // source bytes) into the artifact root-level `node_modules`.
+  const { packageJsonPath, packageLockJsonPath } = npmClosureSourcePaths({
+    repoDir: verified.repoDir,
+    packageRootRelative: EXTENSION_RELATIVE_ROOT,
+  });
+  const selection = selectNpmRuntimeClosure({
+    packageJson: JSON.parse(readFileSync(packageJsonPath, "utf8")),
+    packageLockJson: JSON.parse(readFileSync(packageLockJsonPath, "utf8")),
+  });
+  allowedNodeModulesPackagePrefixes = selection.packages.map((pkg) =>
+    pkg.lockPath.slice("node_modules/".length),
+  );
+  try {
+    materializeNpmRuntimeClosure({
+      repoDir: verified.repoDir,
+      packageRootRelative: EXTENSION_RELATIVE_ROOT,
+      destinationDirName: "node_modules",
+      artifactDir,
+      selection,
+    });
+  } catch (cause) {
+    if (cause instanceof PiSubagentNpmRuntimeClosureError) {
+      throw new PiSubagentArtifactStagingError(
+        "dependency_closure_invalid",
+        `Managed pi-subagents runtime dependency closure failed (${cause.code}): ${cause.message}`,
+      );
+    }
+    throw cause;
+  }
+
   const fileRecords: Array<{ path: string; sizeBytes: number; sha256: string }> = [];
-  for (const relativePath of trackedFiles) {
+  const stageFile = (relativePath: string): void => {
     assertNoProhibitedPayload(relativePath);
 
     const sourcePath = join(verified.repoDir, relativePath);
@@ -517,7 +630,42 @@ export function buildPiSubagentArtifact(input: {
       sizeBytes: stagedBytes.length,
       sha256: computeSha256Bytes(stagedBytes),
     });
+  };
+
+  for (const relativePath of [...trackedFiles, ...sharedFiles].sort()) {
+    stageFile(relativePath);
   }
+
+  // Manifest-record the materialized dependency closure: every regular file
+  // under the artifact `node_modules` root, digest-verified, `.bin` absent.
+  const nodeModulesRoot = join(artifactDir, "node_modules");
+  if (existsSync(nodeModulesRoot)) {
+    const dependencyFiles = walkRegularFiles(nodeModulesRoot, "node_modules");
+    for (const relativePath of dependencyFiles.sort()) {
+      assertNoProhibitedPayload(relativePath);
+      const stagedPath = join(artifactDir, relativePath);
+      const stagedStats = lstatSync(stagedPath);
+      if (!stagedStats.isFile() || stagedStats.size > MAX_FILE_BYTES) {
+        throw new PiSubagentArtifactStagingError(
+          "staging_output_invalid",
+          `Staged dependency entry '${relativePath}' is not a bounded regular file.`,
+        );
+      }
+      const stagedBytes = readFileSync(stagedPath);
+      fileRecords.push({
+        path: relativePath,
+        sizeBytes: stagedBytes.length,
+        sha256: computeSha256Bytes(stagedBytes),
+      });
+    }
+  }
+  if (fileRecords.length > MAX_FILE_ENTRIES) {
+    throw new PiSubagentArtifactStagingError(
+      "staging_output_invalid",
+      `Managed pi-subagents artifact would stage ${fileRecords.length} files, over the bounded cap of ${MAX_FILE_ENTRIES}.`,
+    );
+  }
+  allowedNodeModulesPackagePrefixes = [];
 
   const manifest: typeof PiSubagentArtifactManifest.Type = {
     schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
