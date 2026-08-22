@@ -112,7 +112,15 @@ import {
 } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
 import { captureCatalogObserverEnv, makePiCatalogObserver } from "../piCatalogObserver.ts";
-import { evaluatePiSubagentDesktopArtifactGate } from "../piSubagentDesktopArtifactGate.ts";
+import {
+  evaluatePiSubagentDesktopArtifactGate,
+  type PiSubagentDesktopArtifactGateResult,
+} from "../piSubagentDesktopArtifactGate.ts";
+import {
+  negotiatePiSubagentDesktopManagedBridge,
+  piSubagentDesktopManagedBootstrapFailureDetail,
+  piSubagentDesktopManagedExtensionDir,
+} from "../piSubagentManagedRuntimeBinding.ts";
 import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
@@ -598,6 +606,16 @@ export interface PiAdapterLiveOptions {
    * gate. Production captures the backend process environment.
    */
   readonly piSubagentDesktopArtifactGateEnv?: NodeJS.ProcessEnv;
+  /**
+   * Ticket 02 test seam: the user's normal Pi agent directory that supplies
+   * the desktop managed runtime's EXPLICIT auth/model paths
+   * (`<dir>/auth.json`, `<dir>/models.json`). Production leaves this
+   * undefined so the Pi SDK's own `getAgentDir()` resolution supplies the
+   * user's normal directory; extension discovery is NEVER pointed at it
+   * (Decision 0003 — the controlled agentDir stays the verified artifact's
+   * `agent` subtree).
+   */
+  readonly piSubagentDesktopUserAgentDir?: string;
   /**
    * Ticket 23 test seam: clock for the managed-progress server coalescer.
    * Production leaves this undefined (real timers); deterministic tests
@@ -2370,20 +2388,49 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       },
     );
 
-    const assertDesktopPiArtifactGate = async (method: string): Promise<void> => {
-      const result = await evaluatePiSubagentDesktopArtifactGate(serverConfig.mode, {
-        env: options?.piSubagentDesktopArtifactGateEnv ?? process.env,
-      });
-      if (result.kind === "pass") return;
-      throw new ProviderAdapterRequestError({
+    const toDesktopGateUnavailableError = (
+      method: string,
+      result: Extract<PiSubagentDesktopArtifactGateResult, { kind: "unavailable" }>,
+    ) =>
+      new ProviderAdapterRequestError({
         provider: PROVIDER,
         method,
         detail: `Managed Pi subagents are unavailable (${result.reason}): ${result.detail}`,
       });
+
+    /**
+     * Shared desktop managed-artifact gate evaluation. Returns the pass
+     * (non-desktop, or desktop with the Ticket 02 trusted controlled-runtime
+     * binding) or throws the fail-closed denial before any Pi SDK import.
+     */
+    const evaluateDesktopPiArtifactGate = async (
+      method: string,
+    ): Promise<PiSubagentDesktopArtifactGateResult> => {
+      const result = await evaluatePiSubagentDesktopArtifactGate(serverConfig.mode, {
+        env: options?.piSubagentDesktopArtifactGateEnv ?? process.env,
+      });
+      if (result.kind === "unavailable") {
+        throw toDesktopGateUnavailableError(method, result);
+      }
+      return result;
     };
 
-    const loadPiSdkPromise = async (method: string): Promise<PiCodingAgentModule> => {
-      await assertDesktopPiArtifactGate(method);
+    const assertDesktopPiArtifactGate = async (method: string): Promise<void> => {
+      await evaluateDesktopPiArtifactGate(method);
+    };
+
+    const loadPiSdkPromise = async (
+      method: string,
+      precomputedGate?: PiSubagentDesktopArtifactGateResult,
+    ): Promise<PiCodingAgentModule> => {
+      // A caller that already evaluated the gate (startSession needs the
+      // trusted binding) passes its result here so the artifact tree is
+      // verified exactly once per session start.
+      if (precomputedGate === undefined) {
+        await assertDesktopPiArtifactGate(method);
+      } else if (precomputedGate.kind === "unavailable") {
+        throw toDesktopGateUnavailableError(method, precomputedGate);
+      }
       return loadPiCodingAgentModule();
     };
 
@@ -2397,9 +2444,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             cause,
           });
 
-    const loadPiSdk = (method: string) =>
+    const loadPiSdk = (method: string, precomputedGate?: PiSubagentDesktopArtifactGateResult) =>
       Effect.tryPromise({
-        try: () => loadPiSdkPromise(method),
+        try: () => loadPiSdkPromise(method, precomputedGate),
         catch: (cause) => toPiSdkRequestError(method, cause, "Failed to load Pi SDK."),
       });
 
@@ -3217,15 +3264,48 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       modelId?: string;
       thinkingLevel?: ThinkingLevel;
       processSupervisor: PiBashProcessSupervisor;
+      /**
+       * Ticket 02 desktop managed bootstrap (Decision 0003): when present,
+       * `agentDir` is the verified artifact's controlled `agent` subtree while
+       * the model/auth runtime reads the USER's normal Pi agent directory
+       * directly (explicit `auth.json`/`models.json` paths — never copied,
+       * never a broad directory), extension loading is isolated to the
+       * release-controlled extension directory only (no user-global/project/
+       * settings-injected extensions, no caller-supplied factories), and the
+       * caller must still complete the mandatory handshake before publishing.
+       */
+      desktopManaged?: {
+        readonly userAgentDir: string;
+        readonly extensionPath: string;
+      };
     }) => {
-      const modelRuntime = await createPiModelRuntime(input.agentDir, input.sdk);
+      const modelRuntime = await createPiModelRuntime(
+        input.desktopManaged?.userAgentDir ?? input.agentDir,
+        input.sdk,
+      );
       const synaraMcp = makePiSynaraMcpDormantExtension();
       // The live options accept opaque caller-supplied factories (tests and
       // measurement drivers pass real InlineExtension factories, incl. the
       // synara.pi.subagents.bridge brand symbol); narrow to the loader's
-      // expected shape at this seam.
+      // expected shape at this seam. Desktop managed sessions load ONLY the
+      // release-controlled artifact extension plus the server-internal
+      // dormant Synara MCP extension — caller factories are not an alternate
+      // desktop Agent path (Decision 0003 / spec Implementation Decision 3).
       const extraExtensionFactories = (options?.extensionFactories ??
         []) as readonly InlineExtension[];
+      const resourceLoaderOptions = input.desktopManaged
+        ? {
+            // Direct SDK-supported extension isolation: with noExtensions,
+            // the loader resolves ONLY the explicitly provided extension
+            // paths — no user-global tree, no project `.pi` auto-discovery,
+            // no settings/packages injection.
+            noExtensions: true,
+            additionalExtensionPaths: [input.desktopManaged.extensionPath],
+            extensionFactories: [synaraMcp.extension],
+          }
+        : {
+            extensionFactories: [synaraMcp.extension, ...extraExtensionFactories],
+          };
       const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         cwd,
         agentDir,

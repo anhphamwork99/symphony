@@ -2,7 +2,10 @@
 // Purpose: Pure managed-artifact early gate for the desktop runtime mode —
 // the shared denial point that must run before any Pi SDK import,
 // makeAgentDir()/global agent-directory discovery, or durable subagent side
-// effect (Ticket 01 / T01-AC3, Decision 0004 §4-§6).
+// effect (Ticket 01 / T01-AC3, Decision 0004 §4-§6). A VALID desktop
+// verification now returns the trusted controlled-runtime binding (Ticket 02
+// WP1 / Decision 0003): the controlled `agentDir` `<verified-root>/agent` plus
+// bounded trusted metadata, and nothing else.
 // Layer: Server provider seam (pure decision function — no PiAdapter wiring).
 // Depends: the Ticket 01 production verifier contract only. This module must
 // never import Pi SDK modules, touch Git or the network, read user Pi files,
@@ -10,11 +13,14 @@
 // injectable verifier seam.
 // Exports: the gate decision function and its result types.
 
+import path from "node:path";
+
 import type { RuntimeMode } from "../config.ts";
 import type { PiSubagentArtifactVerificationCategory } from "@synara/contracts";
 import {
   verifyPiSubagentArtifact,
   type PiSubagentArtifactVerification,
+  type PiSubagentArtifactVerifiedMetadata,
 } from "./piSubagentArtifactVerifier.ts";
 
 /**
@@ -25,22 +31,21 @@ import {
 export const SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV = "SYNARA_PI_SUBAGENT_ARTIFACT_DIR";
 
 /**
- * Ticket 02 boundary (Decision 0004 §6): a verified artifact alone does not
- * create a usable controlled Pi runtime. Until Ticket 02 supplies the
- * explicit controlled-runtime binding, a valid artifact is still
- * managed-subagent-unavailable — never a legacy/unmanaged fallback.
+ * Controlled sub-directory INSIDE the verified artifact root that becomes
+ * the desktop managed Pi `agentDir` (Ticket 02 / Decision 0003): the staged
+ * artifact places the extension tree at `agent/extensions/...`, so the
+ * controlled agent directory is `<verified-root>/agent` — never the artifact
+ * root itself and never a user/request-supplied directory.
  */
-export const PI_SUBAGENT_MANAGED_RUNTIME_UNAVAILABLE_REASON = "managed_runtime_binding_unavailable";
+export const PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT = "agent";
 
 /**
  * Closed failure-reason vocabulary for the gate. `locator_missing` is
  * produced by the gate itself; every other reason is the verifier's closed
- * `PiSubagentArtifactVerificationCategory` (AC2) or the Ticket 02 boundary
- * marker.
+ * `PiSubagentArtifactVerificationCategory` (AC2).
  */
 export type PiSubagentDesktopArtifactGateUnavailableReason =
   | "locator_missing"
-  | "managed_runtime_binding_unavailable"
   | PiSubagentArtifactVerificationCategory;
 
 /**
@@ -49,6 +54,28 @@ export type PiSubagentDesktopArtifactGateUnavailableReason =
  */
 export interface PiSubagentDesktopArtifactGatePass {
   readonly kind: "pass";
+}
+
+/**
+ * Trusted controlled-runtime binding a VALID desktop verification now
+ * supplies (Ticket 02 / Decision 0004 §6-§7). `agentDir` is the controlled
+ * `<verified-root>/agent` directory the desktop managed session must use for
+ * extension discovery; `metadata` is the verifier's already-validated
+ * bounded trusted metadata (never a diagnostic surface). It contains no
+ * absolute user paths and no credential/model material.
+ */
+export interface PiSubagentDesktopArtifactGateManagedBinding {
+  readonly agentDir: string;
+  readonly metadata: PiSubagentArtifactVerifiedMetadata;
+}
+
+/**
+ * Pass outcome for desktop with a verified artifact — the only shape that
+ * may unlock the desktop managed bootstrap (Ticket 02 WP1).
+ */
+export interface PiSubagentDesktopArtifactGateManagedPass {
+  readonly kind: "pass";
+  readonly managed: PiSubagentDesktopArtifactGateManagedBinding;
 }
 
 /**
@@ -68,6 +95,7 @@ export interface PiSubagentDesktopArtifactGateUnavailable {
 
 export type PiSubagentDesktopArtifactGateResult =
   | PiSubagentDesktopArtifactGatePass
+  | PiSubagentDesktopArtifactGateManagedPass
   | PiSubagentDesktopArtifactGateUnavailable;
 
 /** Injectable verifier seam (deterministic tests; default = production). */
@@ -84,8 +112,6 @@ const DEFAULT_VERIFY: PiSubagentArtifactVerifier = (root) => verifyPiSubagentArt
 
 /** Fixed detail strings — identical for every environment and input. */
 const DETAIL_LOCATOR_MISSING = "managed pi artifact locator is absent or blank";
-const DETAIL_MANAGED_RUNTIME_UNAVAILABLE =
-  "managed pi runtime binding is not available in this build";
 const DETAIL_ARTIFACT_INVALID_PREFIX = "managed pi artifact verification failed: ";
 
 /**
@@ -134,10 +160,13 @@ const invalidDetail = (
  *  3. Desktop locator present → evaluate it with the shared verifier.
  *     invalid result → unavailable carrying the verifier's closed category
  *     verbatim plus a safe bounded detail (AC2).
- *  4. Valid artifact → STILL unavailable
- *     `managed_runtime_binding_unavailable`: Ticket 02 has not built the
- *     controlled runtime, and desktop never falls back to unmanaged
- *     discovery (Decision 0002 / 0004 §6).
+ *  4. Valid artifact → PASS carrying the trusted controlled-runtime binding:
+ *     the controlled `agentDir` is exactly `<verified-root>/agent` (the
+ *     staged `agent/extensions/...` layout), plus the verifier's trusted
+ *     metadata. Desktop never falls back to unmanaged discovery (Decision
+ *     0002 / 0004 §6-§7); the consumer must still complete the Ticket 02
+ *     bootstrap (controlled runtime, artifact-only extensions, mandatory
+ *     7-capability handshake) before publishing a managed session.
  *
  * The function is side-effect free and never throws for control flow: the
  * injected verifier is expected to return its closed result union rather
@@ -165,8 +194,10 @@ export async function evaluatePiSubagentDesktopArtifactGate(
     };
   }
   return {
-    kind: "unavailable",
-    reason: PI_SUBAGENT_MANAGED_RUNTIME_UNAVAILABLE_REASON,
-    detail: DETAIL_MANAGED_RUNTIME_UNAVAILABLE,
+    kind: "pass",
+    managed: {
+      agentDir: path.join(locator, PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT),
+      metadata: verification.metadata,
+    },
   };
 }
