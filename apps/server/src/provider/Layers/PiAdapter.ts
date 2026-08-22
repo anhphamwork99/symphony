@@ -3316,9 +3316,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           cwd,
           agentDir,
           modelRuntime,
-          resourceLoaderOptions: {
-            extensionFactories: [synaraMcp.extension, ...extraExtensionFactories],
-          },
+          resourceLoaderOptions,
         });
         const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
         const model = findModelInRegistry(registry, input.modelId);
@@ -3366,7 +3364,36 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const startSession: PiAdapterShape["startSession"] = (input) =>
       Effect.gen(function* () {
         const cwd = trimToUndefined(input.cwd) ?? serverConfig.cwd;
-        const piSdk = yield* loadPiSdk("session/start");
+        // Ticket 02: evaluate the desktop managed-artifact gate exactly once
+        // per session start, BEFORE the Pi SDK import. In desktop mode the
+        // pass carries the trusted controlled-runtime binding (verified
+        // artifact root → controlled `<root>/agent` agentDir + trusted
+        // metadata); every other mode passes through unchanged (Decision
+        // 0004 §4-§6 / Decision 0003).
+        const gateResult = yield* Effect.tryPromise({
+          try: () => evaluateDesktopPiArtifactGate("session/start"),
+          catch: (cause) =>
+            toPiSdkRequestError("session/start", cause, "Failed to load Pi SDK."),
+        });
+        const piSdk = yield* loadPiSdk("session/start", gateResult);
+        // Ticket 02 desktop managed bootstrap inputs (Decision 0003): the
+        // controlled agentDir is the verified artifact's `agent` subtree —
+        // NEVER a user/request-supplied directory; extension loading is
+        // isolated to the release-controlled extension directory inside it;
+        // the model/auth runtime reads the USER's normal Pi agent directory
+        // directly (explicit auth.json/models.json paths, never a copy).
+        const desktopManagedBinding =
+          gateResult.kind === "pass" && "managed" in gateResult
+            ? {
+                agentDir: gateResult.managed.agentDir,
+                userAgentDir:
+                  trimToUndefined(options?.piSubagentDesktopUserAgentDir) ??
+                  piSdk.getAgentDir(),
+                extensionPath: piSubagentDesktopManagedExtensionDir(
+                  gateResult.managed.agentDir,
+                ),
+              }
+            : undefined;
         const processSupervisor = makePiBashProcessSupervisor({
           getShellConfig: () => piSdk.getShellConfig(),
           ...(options?.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
@@ -3374,7 +3401,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             ? { teardownProcessTree: options.teardownProcessTree }
             : {}),
         });
-        const agentDir = makeAgentDir(input.providerOptions?.pi?.agentDir, piSdk);
+        const agentDir = desktopManagedBinding
+          ? desktopManagedBinding.agentDir
+          : makeAgentDir(input.providerOptions?.pi?.agentDir, piSdk);
         const sessionFile = extractResumeSessionFile(input.resumeCursor);
         const sessionManager = sessionFile
           ? piSdk.SessionManager.open(sessionFile, undefined, cwd)
@@ -3412,6 +3441,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               ...(modelId ? { modelId } : {}),
               ...(thinkingLevel ? { thinkingLevel } : {}),
               processSupervisor,
+              ...(desktopManagedBinding
+                ? {
+                    desktopManaged: {
+                      userAgentDir: desktopManagedBinding.userAgentDir,
+                      extensionPath: desktopManagedBinding.extensionPath,
+                    },
+                  }
+                : {}),
             }),
           catch: (cause) =>
             new ProviderAdapterRequestError({
@@ -3512,57 +3549,136 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         context.unsubscribe = runtime.session.subscribe((event) =>
           handleSessionEvent(context, event),
         );
-        sessions.set(input.threadId, context);
-        yield* Effect.tryPromise({
-          try: () =>
-            runtime.session.bindExtensions({ uiContext: makePiExtensionUIContext(context) }),
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "extension/bind",
-              detail: toMessage(cause, "Failed to bind Pi extensions."),
-              cause,
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.gen(function* () {
-              yield* Effect.tryPromise({
-                try: () => disposeSessionContext(context),
-                catch: (cause) =>
-                  new ProviderAdapterRequestError({
+        // Ticket 02 desktop managed bootstrap ordering (spec Implementation
+        // Decision 5 / Decision 0002): the mandatory seven-capability
+        // handshake runs AFTER extension binding but BEFORE any session
+        // publication (`sessions.set`), capability callback, or managed
+        // Agent exposure. A desktop handshake failure is FATAL at this
+        // boundary — the staged runtime is disposed, no durable/session
+        // side effect remains, and there is NO legacy warning fallback.
+        // Non-desktop keeps the historical order exactly (publish → bind →
+        // non-fatal default three-capability probe with warning fallback).
+        if (desktopManagedBinding) {
+          yield* Effect.tryPromise({
+            try: async () => {
+              await runtime.session.bindExtensions({
+                uiContext: makePiExtensionUIContext(context),
+              });
+              const capability = await negotiatePiSubagentDesktopManagedBridge(
+                runtime.session,
+              );
+              if (!capability.isManaged) {
+                throw new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/start",
+                  detail: piSubagentDesktopManagedBootstrapFailureDetail(capability),
+                });
+              }
+              return capability;
+            },
+            catch: (cause) =>
+              cause instanceof ProviderAdapterRequestError
+                ? cause
+                : new ProviderAdapterRequestError({
                     provider: PROVIDER,
-                    method: "session/start-cleanup",
-                    detail: toMessage(cause, "Failed to prove Pi startup cleanup completed."),
+                    method: "extension/bind",
+                    detail: toMessage(cause, "Failed to bind Pi extensions."),
                     cause,
                   }),
-              });
-              if (sessions.get(input.threadId) === context) {
-                sessions.delete(input.threadId);
-                coordinatorEligibleThreads.delete(String(input.threadId));
-              }
-              return yield* Effect.fail(error);
-            }),
-          ),
-        );
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                yield* Effect.tryPromise({
+                  try: () => disposeSessionContext(context),
+                  catch: (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "session/start-cleanup",
+                      detail: toMessage(cause, "Failed to prove Pi startup cleanup completed."),
+                      cause,
+                    }),
+                });
+                if (sessions.get(input.threadId) === context) {
+                  sessions.delete(input.threadId);
+                  coordinatorEligibleThreads.delete(String(input.threadId));
+                }
+                return yield* Effect.fail(error);
+              }),
+            ),
+          );
+          sessions.set(input.threadId, context);
+        } else {
+          sessions.set(input.threadId, context);
+          yield* Effect.tryPromise({
+            try: () =>
+              runtime.session.bindExtensions({ uiContext: makePiExtensionUIContext(context) }),
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "extension/bind",
+                detail: toMessage(cause, "Failed to bind Pi extensions."),
+                cause,
+              }),
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                yield* Effect.tryPromise({
+                  try: () => disposeSessionContext(context),
+                  catch: (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "session/start-cleanup",
+                      detail: toMessage(cause, "Failed to prove Pi startup cleanup completed."),
+                      cause,
+                  }),
+                });
+                if (sessions.get(input.threadId) === context) {
+                  sessions.delete(input.threadId);
+                  coordinatorEligibleThreads.delete(String(input.threadId));
+                }
+                return yield* Effect.fail(error);
+              }),
+            ),
+          );
+        }
         options?.onSynaraMcpSession?.({
           threadId: input.threadId,
           adapter: synaraMcp.adapter,
           coordinator: synaraMcpCoordinator,
         });
-        const subagentCapability: PiSubagentNegotiatedCapability = yield* Effect.tryPromise({
-          try: () => probePiSubagentBridge(runtime.session),
-          catch: (cause): PiSubagentNegotiatedCapability => ({
-            status: "bridge_error",
-            diagnosticCode: "pi_subagent_bridge_error",
-            isManaged: false,
-            diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
-          }),
-        }).pipe(
-          // A failed probe is capability DATA (bridge_error), not a session-start
-          // failure: recover it into the success channel so the session still
-          // starts and managed execution is disabled downstream.
-          Effect.catch((error) => Effect.succeed(error)),
-        );
+        const subagentCapability: PiSubagentNegotiatedCapability = desktopManagedBinding
+          ? // Desktop managed: the mandatory seven-capability handshake already
+            // completed successfully above (fatal otherwise). Its result is the
+            // session's capability truth — no second probe, no cached legacy
+            // probe, no warning fallback.
+            (yield* Effect.tryPromise({
+              try: () => negotiatePiSubagentDesktopManagedBridge(runtime.session),
+              catch: (cause): PiSubagentNegotiatedCapability => ({
+                status: "bridge_error",
+                diagnosticCode: "pi_subagent_bridge_error",
+                isManaged: false,
+                diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
+              }),
+            }).pipe(
+              // A failed probe is capability DATA (bridge_error), not a session-start
+              // failure: recover it into the success channel so the session still
+              // starts and managed execution is disabled downstream.
+              Effect.catch((error) => Effect.succeed(error)),
+            ))
+          : (yield* Effect.tryPromise({
+              try: () => probePiSubagentBridge(runtime.session),
+              catch: (cause): PiSubagentNegotiatedCapability => ({
+                status: "bridge_error",
+                diagnosticCode: "pi_subagent_bridge_error",
+                isManaged: false,
+                diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
+              }),
+            }).pipe(
+              // A failed probe is capability DATA (bridge_error), not a session-start
+              // failure: recover it into the success channel so the session still
+              // starts and managed execution is disabled downstream.
+              Effect.catch((error) => Effect.succeed(error)),
+            ));
         context.subagentCapability = subagentCapability;
         registerPiSubagentOwnedTeardownOwner(context);
         options?.onSubagentCapability?.({
@@ -3584,11 +3700,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           coordinatorEligibleThreads.add(hydratedThreadId);
           piSubagentCompletionCoordinator.onManagedSessionHydrated(hydratedThreadId);
         }
+        // Decision 0002 (Ticket 02): the legacy warning fallback below is
+        // NON-DESKTOP ONLY. A desktop managed session whose handshake did not
+        // succeed never reaches this point — it failed fatally above before
+        // publication, with no legacy/unmanaged fallback.
         if (
-          subagentCapability.status === "unsupported_version" ||
-          subagentCapability.status === "capability_mismatch" ||
-          subagentCapability.status === "bridge_malformed_response" ||
-          subagentCapability.status === "bridge_error"
+          !desktopManagedBinding &&
+          (subagentCapability.status === "unsupported_version" ||
+            subagentCapability.status === "capability_mismatch" ||
+            subagentCapability.status === "bridge_malformed_response" ||
+            subagentCapability.status === "bridge_error")
         ) {
           offerRuntimeEvent({
             ...makeEventBase(context, { includeTurnId: false }),
