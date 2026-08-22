@@ -7,9 +7,13 @@ resolve, and its runtime dependencies resolve from release-owned
 manifest-verified files. No user-global tree, ambient `node_modules`, symlink,
 or post-verify mutation is ever used to complete it.
 
-**Blocked by:** None — Ticket 01 remediation ticket; may start immediately.
+**Blocked by:** Decision 0007 host-peer compatibility prerequisite for AC4.
+The pinned Alfie artifact declares `@earendil-works/pi-* >=0.83.0`; Synara's
+current packaged host is `0.81.1`. Align the packaged host family or obtain an
+Alfie-source-authoritative exact-version compatibility assertion before AC4 can
+be accepted.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -27,11 +31,12 @@ or post-verify mutation is ever used to complete it.
   `node_modules` fail with the existing bounded categories, before Pi SDK
   import and global discovery, with no partial trust and no
   sensitive-diagnostic disclosure.
-- [ ] **AC4:** The real pinned extension entry loads from the staged
-  artifact alone — with global/ambient dependency resolution excluded and no
-  post-verify mutation — and its `shared` and dependency imports resolve; if
-  the real-checkout input is unavailable, the leg records an explicit skip,
-  never a silent pass.
+- [ ] **AC4:** After satisfying the Decision 0007 supported host-peer
+  prerequisite, the real pinned extension entry loads from the staged artifact
+  alone — with global/ambient dependency resolution excluded and no post-verify
+  mutation — and its `shared` and dependency imports resolve; if the
+  real-checkout input is unavailable, the leg records an explicit skip, never
+  a silent pass.
 - [ ] **AC5:** Exclusion proof: the artifact contains no user
   authentication, model configuration, credentials, key material, or
   user-global extension content.
@@ -85,7 +90,9 @@ Governance decision, 2026-08-21 (“đồng ý, tạo testing seam trước đi�
 
 ## Completion evidence
 
-- **Governing decision:** [Decision 0006 — Ticket 01 runtime-closure
-  reassessment](../decisions/0006-t01-runtime-closure-reassessment.md).
-- Pending implementation. Ticket 02 remains blocked until this ticket is
-  accepted.
+- **Governing decisions:** [Decision 0006 — Ticket 01 runtime-closure
+  reassessment](../decisions/0006-t01-runtime-closure-reassessment.md) and
+  [Decision 0007 — host-peer compatibility reassessment](../decisions/0007-t01b-host-peer-compatibility-reassessment.md).
+- Pending implementation. AC4 cannot be accepted until the Decision 0007
+  host-peer prerequisite is delivered. Ticket 02 remains blocked until this
+  ticket is accepted.
