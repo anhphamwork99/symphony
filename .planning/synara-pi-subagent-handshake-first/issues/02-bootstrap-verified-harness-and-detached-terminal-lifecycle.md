@@ -5,7 +5,7 @@ only after the official extension, user runtime configuration, and mandatory
 handshake are ready. The same detached child remains observable in the
 background and settles through exactly one fenced committed terminal outcome.
 
-**Blocked by:** 01 — Package and fail-close the managed Pi artifact.
+**Blocked by:** None — Ticket 01 was accepted by Decision 0005.
 
 **Status:** ready-for-agent
 

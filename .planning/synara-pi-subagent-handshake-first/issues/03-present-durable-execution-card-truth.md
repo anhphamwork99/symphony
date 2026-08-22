@@ -5,7 +5,7 @@ work is attached, running in the background, cancelling, cancellation
 unverified, orphaned, succeeded, or failed based on current durable evidence
 and offers only the actions that remain honest.
 
-**Blocked by:** 01 — Package and fail-close the managed Pi artifact.
+**Blocked by:** None — Ticket 01 was accepted by Decision 0005.
 
 **Status:** ready-for-agent
 

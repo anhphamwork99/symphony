@@ -8,23 +8,35 @@ lifecycle record exists. Synara does not select a user-global extension.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** accepted — final acceptance Decision 0005, 2026-08-22.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
-- [ ] **AC1:** The desktop release pipeline assembles a deterministic managed
+- [x] **AC1:** The desktop release pipeline assembles a deterministic managed
   artifact from the clean, pinned Alfie source and records a machine-verifiable
   manifest, source identity, capability profile, and digest.
-- [ ] **AC2:** Artifact validation rejects missing content, tampered bytes,
+- [x] **AC2:** Artifact validation rejects missing content, tampered bytes,
   malformed manifests, path escape, and symlink escape with bounded actionable
   categories.
-- [ ] **AC3:** Desktop managed-harness initialization with an invalid artifact
+- [x] **AC3:** Desktop managed-harness initialization with an invalid artifact
   fails before child spawn, admission, execution identity, card, lifecycle, or
   outbox creation.
-- [ ] **AC4:** The artifact contains no user authentication, model
+- [x] **AC4:** The artifact contains no user authentication, model
   configuration, API key, or user-global extension content.
-- [ ] **AC5:** Non-desktop Pi behavior remains outside this rollout and
+- [x] **AC5:** Non-desktop Pi behavior remains outside this rollout and
   preserves its existing runtime behavior.
+
+## Completion evidence
+
+- **Accepted decision:** [Decision 0005 — Ticket 01 final acceptance](../decisions/0005-t01-final-acceptance.md).
+- **Candidate:** `dc693b44c..d717ee8e2`; Ticket acceptance and status recorded at `9fa60461a`.
+- **Focused verification:** 89 server tests passed across the artifact verifier,
+  desktop gate, PiAdapter gate integration, and existing PiAdapter suites.
+  Artifact staging passed 8 tests; 2 real-checkout tests were skipped because
+  `ALFIE_REPO_DIR` is not available.
+- **Recorded limitations:** packaged desktop/server composition and whole-project
+  validation remain Ticket 04 responsibilities. A valid Ticket 01 artifact
+  stays unavailable until Ticket 02 provides the controlled runtime binding.
 
 ## Testing Seams
 
