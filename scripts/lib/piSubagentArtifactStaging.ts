@@ -519,7 +519,7 @@ export function buildPiSubagentArtifact(input: {
     });
   }
 
-  const manifest = {
+  const manifest: typeof PiSubagentArtifactManifest.Type = {
     schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
     sourceIdentity: {
       repositoryUrl: input.provenance.expectedRepositoryUrl,

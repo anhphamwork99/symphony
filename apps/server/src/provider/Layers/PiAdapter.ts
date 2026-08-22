@@ -112,6 +112,7 @@ import {
 } from "../piSynaraMcpLifecycle.ts";
 import { disablePiSynaraMcpSession } from "../piSynaraMcpDisable.ts";
 import { captureCatalogObserverEnv, makePiCatalogObserver } from "../piCatalogObserver.ts";
+import { evaluatePiSubagentDesktopArtifactGate } from "../piSubagentDesktopArtifactGate.ts";
 import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
@@ -592,6 +593,11 @@ export interface PiAdapterLiveOptions {
    * so normal runs never enumerate, serialize, or write catalogs.
    */
   readonly catalogObserverEnv?: NodeJS.ProcessEnv;
+  /**
+   * Ticket 01 test seam: environment observed by the desktop managed-artifact
+   * gate. Production captures the backend process environment.
+   */
+  readonly piSubagentDesktopArtifactGateEnv?: NodeJS.ProcessEnv;
   /**
    * Ticket 23 test seam: clock for the managed-progress server coalescer.
    * Production leaves this undefined (real timers); deterministic tests
@@ -2364,16 +2370,37 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       },
     );
 
-    const loadPiSdk = (method: string) =>
-      Effect.tryPromise({
-        try: () => loadPiCodingAgentModule(),
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
+    const assertDesktopPiArtifactGate = async (method: string): Promise<void> => {
+      const result = await evaluatePiSubagentDesktopArtifactGate(serverConfig.mode, {
+        env: options?.piSubagentDesktopArtifactGateEnv ?? process.env,
+      });
+      if (result.kind === "pass") return;
+      throw new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail: `Managed Pi subagents are unavailable (${result.reason}): ${result.detail}`,
+      });
+    };
+
+    const loadPiSdkPromise = async (method: string): Promise<PiCodingAgentModule> => {
+      await assertDesktopPiArtifactGate(method);
+      return loadPiCodingAgentModule();
+    };
+
+    const toPiSdkRequestError = (method: string, cause: unknown, fallback: string) =>
+      cause instanceof ProviderAdapterRequestError
+        ? cause
+        : new ProviderAdapterRequestError({
             provider: PROVIDER,
             method,
-            detail: toMessage(cause, "Failed to load Pi SDK."),
+            detail: toMessage(cause, fallback),
             cause,
-          }),
+          });
+
+    const loadPiSdk = (method: string) =>
+      Effect.tryPromise({
+        try: () => loadPiSdkPromise(method),
+        catch: (cause) => toPiSdkRequestError(method, cause, "Failed to load Pi SDK."),
       });
 
     const makeEventBase = makePiRuntimeEventBase;
@@ -5620,7 +5647,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const listModels: NonNullable<PiAdapterShape["listModels"]> = (input) =>
       Effect.tryPromise({
         try: async () => {
-          const piSdk = await loadPiCodingAgentModule();
+          const piSdk = await loadPiSdkPromise("model/list");
           const agentDir = makeAgentDir(input.agentDir, piSdk);
           const cwd = trimToUndefined(input.cwd) ?? serverConfig.cwd;
           const modelRuntime = await createPiModelRuntime(agentDir, piSdk);
@@ -5644,13 +5671,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             cached: false,
           } satisfies ProviderListModelsResult;
         },
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "model/list",
-            detail: toMessage(cause, "Failed to list Pi models."),
-            cause,
-          }),
+        catch: (cause) => toPiSdkRequestError("model/list", cause, "Failed to list Pi models."),
       });
 
     const listSkills: NonNullable<PiAdapterShape["listSkills"]> = (input) =>
@@ -5667,7 +5688,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             | Awaited<ReturnType<PiCodingAgentModule["createAgentSessionServices"]>>
             | undefined;
           if (!loader) {
-            const piSdk = await loadPiCodingAgentModule();
+            const piSdk = await loadPiSdkPromise("skill/list");
             services = await piSdk.createAgentSessionServices({
               cwd: input.cwd,
               agentDir: makeAgentDir(input.agentDir, piSdk),
@@ -5697,13 +5718,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             cached: false,
           } satisfies ProviderListSkillsResult;
         },
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "skill/list",
-            detail: toMessage(cause, "Failed to list Pi skills."),
-            cause,
-          }),
+        catch: (cause) => toPiSdkRequestError("skill/list", cause, "Failed to list Pi skills."),
       });
 
     const listCommands: NonNullable<PiAdapterShape["listCommands"]> = (input) =>
@@ -5741,7 +5756,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               cached: false,
             } satisfies ProviderListCommandsResult;
           }
-          const piSdk = await loadPiCodingAgentModule();
+          const piSdk = await loadPiSdkPromise("command/list");
           const services = await piSdk.createAgentSessionServices({
             cwd: input.cwd,
             agentDir: makeAgentDir(input.agentDir, piSdk),
@@ -5764,12 +5779,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           } satisfies ProviderListCommandsResult;
         },
         catch: (cause) =>
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "command/list",
-            detail: toMessage(cause, "Failed to list Pi commands."),
-            cause,
-          }),
+          toPiSdkRequestError("command/list", cause, "Failed to list Pi commands."),
       });
 
     const getComposerCapabilities: NonNullable<PiAdapterShape["getComposerCapabilities"]> = () =>

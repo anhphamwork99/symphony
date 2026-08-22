@@ -8,11 +8,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
-  type PiSubagentArtifactVerification,
 } from "@synara/contracts";
 
 import {
   PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
+  type PiSubagentArtifactVerification,
   verifyPiSubagentArtifact,
 } from "./piSubagentArtifactVerifier.ts";
 
@@ -447,7 +447,7 @@ describe("Pi subagent artifact production verifier (Ticket 01, handshake-first)"
       stat: base.stat,
       readFile: base.readFile,
       open: base.open,
-      readdir: async (dir: string, options: { withFileTypes: boolean }) => {
+      readdir: async (dir: string, options: { readonly withFileTypes: true }) => {
         const entries = (await base.readdir(dir, options)) as Array<Dirent>;
         if (dir === root) {
           return [
