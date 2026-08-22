@@ -4,10 +4,10 @@
 
 - **Owner:** anhpham99
 - **Lifecycle:** Implementation in progress — Ticket 01 accepted;
-  Ticket 01 runtime-closure remediation (01b) opened by Decision 0006 and
-  now awaits the Decision 0007 host-peer compatibility prerequisite for AC4
-- **Triage status:** 01b blocked on host-peer alignment for AC4; 03 ready-for-agent;
-  02 blocked by 01b
+  Ticket 01 runtime-closure remediation (01b) opened by Decision 0006.
+  Decision 0007's host-peer alignment prerequisite was delivered in
+  `799af158a`; its staged-closure AC4 proof remains pending.
+- **Triage status:** 01b active; 03 ready-for-agent; 02 blocked by 01b
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -51,10 +51,11 @@
   Decision 0005 (fail-close boundary; not reopened). Its runtime-closure
   remediation is tracked as Ticket 01b.
 - **01b — Remediate the verified managed Pi runtime closure** is the active
-  frontier but is blocked for AC4 by Decision 0007: align the packaged Pi host
-  to the pinned artifact's declared `>=0.83.0` peer floor, or obtain an
-  Alfie-source-authoritative exact-tuple exception. It must be accepted before
-  Ticket 02 can claim completion.
+  frontier. Decision 0007's default host-alignment route was delivered in
+  `799af158a`: the production Pi host family resolves coherently at `0.83.0`.
+  The real staged-closure AC4 proof and remaining 01b acceptance work are
+  still pending; Ticket 01b must be accepted before Ticket 02 can claim
+  completion.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
   lifecycle** is blocked by 01b per Decisions 0006 and 0007. Its real-runtime
   acceptance (AC1–AC4) is stopped; existing implementation remains

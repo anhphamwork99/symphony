@@ -7,13 +7,12 @@ resolve, and its runtime dependencies resolve from release-owned
 manifest-verified files. No user-global tree, ambient `node_modules`, symlink,
 or post-verify mutation is ever used to complete it.
 
-**Blocked by:** Decision 0007 host-peer compatibility prerequisite for AC4.
-The pinned Alfie artifact declares `@earendil-works/pi-* >=0.83.0`; Synara's
-current packaged host is `0.81.1`. Align the packaged host family or obtain an
-Alfie-source-authoritative exact-version compatibility assertion before AC4 can
-be accepted.
+**Blocked by:** None. Decision 0007's default host-peer alignment route was
+completed in `799af158a`: the production Pi host family is declared and locked
+at `0.83.0`, satisfying the pinned artifact's `>=0.83.0` peer floor. The
+staged-artifact AC4 load proof remains required.
 
-**Status:** blocked
+**Status:** active
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -31,12 +30,12 @@ be accepted.
   `node_modules` fail with the existing bounded categories, before Pi SDK
   import and global discovery, with no partial trust and no
   sensitive-diagnostic disclosure.
-- [ ] **AC4:** After satisfying the Decision 0007 supported host-peer
-  prerequisite, the real pinned extension entry loads from the staged artifact
-  alone — with global/ambient dependency resolution excluded and no post-verify
-  mutation — and its `shared` and dependency imports resolve; if the
-  real-checkout input is unavailable, the leg records an explicit skip, never
-  a silent pass.
+- [ ] **AC4:** The Decision 0007 supported host-peer prerequisite is satisfied
+  by the aligned `0.83.0` production host in `799af158a`. The real pinned
+  extension entry must now load from the staged artifact alone — with
+  global/ambient dependency resolution excluded and no post-verify mutation —
+  and its `shared` and dependency imports resolve; if the real-checkout input
+  is unavailable, the leg records an explicit skip, never a silent pass.
 - [ ] **AC5:** Exclusion proof: the artifact contains no user
   authentication, model configuration, credentials, key material, or
   user-global extension content.
@@ -93,6 +92,6 @@ Governance decision, 2026-08-21 (“đồng ý, tạo testing seam trước đi�
 - **Governing decisions:** [Decision 0006 — Ticket 01 runtime-closure
   reassessment](../decisions/0006-t01-runtime-closure-reassessment.md) and
   [Decision 0007 — host-peer compatibility reassessment](../decisions/0007-t01b-host-peer-compatibility-reassessment.md).
-- Pending implementation. AC4 cannot be accepted until the Decision 0007
-  host-peer prerequisite is delivered. Ticket 02 remains blocked until this
-  ticket is accepted.
+- Pending implementation. Decision 0007's host-peer prerequisite was
+  delivered in `799af158a`; AC4 and the other runtime-closure acceptance work
+  remain pending. Ticket 02 remains blocked until this ticket is accepted.
