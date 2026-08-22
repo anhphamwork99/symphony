@@ -434,7 +434,19 @@ const runStartSession = (input: {
     const adapter = yield* PiAdapter;
     const outcome = yield* adapter
       .startSession(startSessionInput as never)
-      .pipe(Effect.either());
+      .pipe(
+        Effect.exit,
+        Effect.map((exit) =>
+          exit._tag === "Success"
+            ? { _tag: "Right" as const, right: exit.value }
+            : {
+                _tag: "Left" as const,
+                left:
+                  exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error ??
+                  new Error("unknown startSession failure"),
+              },
+        ),
+      );
     const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
     const sessions = yield* adapter.listSessions();
     return {
@@ -643,6 +655,13 @@ describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)",
 
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
+
+    // The seven-capability handshake runs EXACTLY ONCE — the successful
+    // pre-publication negotiation is cached as the session's capability
+    // truth; no second negotiation happens after `sessions.set` (a second
+    // attempt could fail after publication and undermine fail-closed
+    // semantics).
+    expect(trace.filter((entry) => entry === "handshake")).toHaveLength(1);
 
     // bindExtensions strictly before the handshake…
     const bindIndex = trace.indexOf("bindExtensions");

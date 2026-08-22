@@ -3558,23 +3558,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // side effect remains, and there is NO legacy warning fallback.
         // Non-desktop keeps the historical order exactly (publish → bind →
         // non-fatal default three-capability probe with warning fallback).
+        let desktopManagedCapability: PiSubagentNegotiatedCapability | undefined;
         if (desktopManagedBinding) {
-          yield* Effect.tryPromise({
+          const capability = yield* Effect.tryPromise({
             try: async () => {
               await runtime.session.bindExtensions({
                 uiContext: makePiExtensionUIContext(context),
               });
-              const capability = await negotiatePiSubagentDesktopManagedBridge(
+              const negotiated = await negotiatePiSubagentDesktopManagedBridge(
                 runtime.session,
               );
-              if (!capability.isManaged) {
+              if (!negotiated.isManaged) {
                 throw new ProviderAdapterRequestError({
                   provider: PROVIDER,
                   method: "session/start",
-                  detail: piSubagentDesktopManagedBootstrapFailureDetail(capability),
+                  detail: piSubagentDesktopManagedBootstrapFailureDetail(negotiated),
                 });
               }
-              return capability;
+              return negotiated;
             },
             catch: (cause) =>
               cause instanceof ProviderAdapterRequestError
@@ -3606,6 +3607,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               }),
             ),
           );
+          desktopManagedCapability = capability;
           sessions.set(input.threadId, context);
         } else {
           sessions.set(input.threadId, context);
@@ -3648,22 +3650,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         });
         const subagentCapability: PiSubagentNegotiatedCapability = desktopManagedBinding
           ? // Desktop managed: the mandatory seven-capability handshake already
-            // completed successfully above (fatal otherwise). Its result is the
-            // session's capability truth — no second probe, no cached legacy
-            // probe, no warning fallback.
-            (yield* Effect.tryPromise({
-              try: () => negotiatePiSubagentDesktopManagedBridge(runtime.session),
-              catch: (cause): PiSubagentNegotiatedCapability => ({
-                status: "bridge_error",
-                diagnosticCode: "pi_subagent_bridge_error",
-                isManaged: false,
-                diagnosticMessage: toMessage(cause, "Failed to probe Pi subagent bridge."),
-              }),
-            }).pipe(
-              // A failed probe is capability DATA (bridge_error), not a session-start
-              // failure: recover it into the success channel so the session still
-              // starts and managed execution is disabled downstream.
-              Effect.catch((error) => Effect.succeed(error)),
+            // completed successfully above (fatal otherwise). Its cached result is
+            // the session's capability truth — no second probe, no cached legacy
+            // probe, no warning fallback, and no post-publication renegotiation
+            // that could fail after the session is already live.
+            desktopManagedCapability ??
+            (yield* Effect.die(
+              new Error(
+                "Pi desktop managed bootstrap invariant violated: missing handshake result.",
+              ),
             ))
           : (yield* Effect.tryPromise({
               try: () => probePiSubagentBridge(runtime.session),
