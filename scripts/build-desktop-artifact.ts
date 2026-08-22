@@ -23,6 +23,11 @@ import {
 } from "./lib/desktop-platform-build-config.ts";
 import { SYNARA_PRODUCTION_BUNDLE_ID } from "@synara/shared/desktopIdentity";
 import { parseBooleanEnvValue } from "./lib/env-bool.ts";
+import {
+  PI_SUBAGENT_ARTIFACT_DIR_NAME,
+  PiSubagentArtifactStagingError,
+  stagePiSubagentArtifactIntoDesktopResources,
+} from "./lib/piSubagentArtifactStaging.ts";
 import { finalizeSignedMacDmg } from "./lib/mac-dmg-finalize.ts";
 import { finalizeMacUpdateZip } from "./lib/mac-update-zip-finalize.ts";
 import {
@@ -1033,6 +1038,33 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
 
   yield* assertPlatformBuildResources(options.platform, stageResourcesDir, options.verbose);
+
+  // Ticket 01 WP1b: stage the release-controlled official pi-subagents
+  // artifact from the clean pinned Alfie checkout into desktop resources so
+  // the existing release-artifact provenance includes it. The build fails
+  // closed when the pinned source cannot be proven (Decision 0001/0004).
+  const stagedPiSubagentArtifact = yield* Effect.try({
+    try: () =>
+      stagePiSubagentArtifactIntoDesktopResources({
+        repoRoot,
+        desktopResourcesDir: stageResourcesDir,
+      }),
+    catch: (cause) =>
+      new BuildScriptError({
+        message:
+          cause instanceof PiSubagentArtifactStagingError
+            ? `Managed pi-subagents artifact staging failed (${cause.code}): ${cause.message}`
+            : `Managed pi-subagents artifact staging failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        cause,
+      }),
+  });
+  yield* Effect.log(
+    `[desktop-artifact] Staged managed pi-subagents artifact (${stagedPiSubagentArtifact.fileCount} files, commit ${stagedPiSubagentArtifact.manifest.sourceIdentity.pinnedCommit.slice(0, 12)}).`,
+  ).pipe(
+    Effect.annotateLogs({
+      piSubagentArtifactDir: path.join(stageResourcesDir, PI_SUBAGENT_ARTIFACT_DIR_NAME),
+    }),
+  );
 
   if (options.platform === "mac") {
     yield* stageMacAppSnapHelper(stageAppDir, options.arch, options.verbose);

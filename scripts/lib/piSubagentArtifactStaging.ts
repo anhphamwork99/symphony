@@ -1,0 +1,594 @@
+// FILE: piSubagentArtifactStaging.ts
+// Purpose: Build-time staging of the release-controlled official `pi-subagents`
+// extension artifact into desktop resources, with a deterministic
+// machine-verifiable manifest (Ticket 01 WP1b, AC1/AC4).
+// Layer: Release/build helper
+// Depends: clean pinned Alfie checkout (see
+// apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json)
+// and the WP1a manifest contracts in @synara/contracts.
+//
+// Build-time only. Git is used HERE to prove the source is the exact pinned
+// clean checkout (Decision 0004 §3 forbids Git at production runtime — that
+// belongs to the Ticket 01 verifier WP, not this module). User `~/.pi` files,
+// credentials, auth/models configuration, and user-global extensions are
+// never read, copied, or mutated: the only read surface is the pinned
+// extension subtree of the supplied Alfie repository.
+
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+import {
+  PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+  PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
+  PiSubagentArtifactManifest,
+} from "@synara/contracts";
+import { Schema } from "effect";
+
+/** Staged artifact directory name inside desktop resources. */
+export const PI_SUBAGENT_ARTIFACT_DIR_NAME = "pi-subagents-artifact";
+
+/** Generated manifest file name inside the staged artifact directory. */
+export const PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME = "manifest.json";
+
+/**
+ * Path of the pin fixture relative to the Synara repository root. The fixture
+ * is authoritative and read-only for this module.
+ */
+export const PI_SUBAGENT_EXTENSION_PROVENANCE_FIXTURE_RELATIVE_PATH =
+  "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json";
+
+/** Extension subtree inside the Alfie repository that forms the artifact. */
+const EXTENSION_RELATIVE_ROOT = "agent/extensions/pi-subagents";
+
+/**
+ * The extension's own development-test subtree is not release runtime
+ * material and is never staged. Everything else Git-tracks under the
+ * extension root (package manifests, `src/`, `dist/`, root entry scripts,
+ * package docs) is staged.
+ */
+const EXTENSION_EXCLUDED_SUBTREES = [`${EXTENSION_RELATIVE_ROOT}/test/`];
+
+/** Extension entry whose literals declare the artifact capability profile. */
+const EXTENSION_ENTRY_RELATIVE_PATH = `${EXTENSION_RELATIVE_ROOT}/src/index.ts`;
+
+/** Contract caps mirrored for bounded enumeration before schema validation. */
+const MAX_FILE_ENTRIES = 8_192;
+const MAX_FILE_BYTES = 64 * 1_024 * 1_024;
+
+/**
+ * Prohibited payload vocabulary (Ticket 01 AC4). User authentication, model
+ * configuration, API keys, and user-global extension content must never be
+ * staged into the release artifact. Names are matched against the staged
+ * relative path's basename (exact) and extension (exact, lower-cased).
+ */
+const PROHIBITED_BASENAMES = new Set(["auth.json", "models.json", "credentials.json"]);
+const PROHIBITED_EXTENSIONS = new Set([".pem", ".key", ".p8", ".pfx"]);
+
+/**
+ * Bounded staging failure with a stable machine-readable code. Codes are the
+ * build-time mirror of the verifier category vocabulary: they name the class
+ * of problem without leaking user file contents.
+ */
+export type PiSubagentArtifactStagingErrorCode =
+  | "alfie_repo_unresolved"
+  | "not_a_git_repository"
+  | "origin_mismatch"
+  | "pinned_commit_mismatch"
+  | "extension_tree_unclean"
+  | "extension_tree_missing"
+  | "package_identity_mismatch"
+  | "pinned_hash_mismatch"
+  | "prohibited_payload"
+  | "symlink_in_source"
+  | "capability_profile_invalid"
+  | "staging_output_invalid";
+
+export class PiSubagentArtifactStagingError extends Error {
+  readonly code: PiSubagentArtifactStagingErrorCode;
+
+  constructor(code: PiSubagentArtifactStagingErrorCode, message: string) {
+    super(message);
+    this.name = "PiSubagentArtifactStagingError";
+    this.code = code;
+  }
+}
+
+/** Shape of the read-only pin fixture (see the JSON fixture for the source). */
+export interface PiSubagentExtensionProvenanceFixture {
+  readonly expectedRepositoryUrl: string;
+  readonly pinnedCommit: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly extensionEntryRelativePath: string;
+  readonly packageManifestRelativePath: string;
+  readonly hashes: Readonly<Record<string, string>>;
+}
+
+/** Result of proving the supplied Alfie checkout is the pinned clean source. */
+export interface VerifiedAlfieExtensionSource {
+  readonly repoDir: string;
+  readonly commit: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+}
+
+/** Result of staging the official artifact. */
+export interface StagedPiSubagentArtifact {
+  readonly artifactDir: string;
+  readonly manifestPath: string;
+  readonly manifest: typeof PiSubagentArtifactManifest.Type;
+  readonly fileCount: number;
+}
+
+function git(repoDir: string, args: ReadonlyArray<string>): string {
+  const result = spawnSync("git", args as string[], {
+    cwd: repoDir,
+    encoding: "buffer",
+    maxBuffer: 64 * 1_024 * 1_024,
+  });
+  if (result.error || result.status !== 0) {
+    const stderr = result.stderr ? result.stderr.toString("utf8").trim() : "";
+    throw new PiSubagentArtifactStagingError(
+      "not_a_git_repository",
+      `Git command failed in the Alfie checkout (${args[0]}): ${stderr || result.error || "unknown git failure"}.`,
+    );
+  }
+  return result.stdout.toString("utf8");
+}
+
+function normalizeGitUrl(url: string): string {
+  let normalized = url.trim().toLowerCase();
+  if (normalized.endsWith(".git")) {
+    normalized = normalized.slice(0, -4);
+  }
+  if (normalized.startsWith("git@github.com:")) {
+    normalized = `https://github.com/${normalized.slice("git@github.com:".length)}`;
+  }
+  return normalized;
+}
+
+function computeSha256Bytes(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function computeSha256File(filePath: string): string {
+  return computeSha256Bytes(readFileSync(filePath));
+}
+
+/**
+ * Loads the read-only pin fixture that defines the exact clean Alfie source.
+ */
+export function loadPiSubagentExtensionProvenance(
+  fixturePath: string,
+): PiSubagentExtensionProvenanceFixture {
+  if (!existsSync(fixturePath)) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_missing",
+      `Pi subagent extension provenance fixture not found at ${fixturePath}.`,
+    );
+  }
+  return JSON.parse(readFileSync(fixturePath, "utf8")) as PiSubagentExtensionProvenanceFixture;
+}
+
+/**
+ * Resolves the Alfie repository directory, following the real-Pi test locator
+ * convention: an explicit `ALFIE_REPO_DIR` wins; otherwise a version-controlled
+ * `alfie` checkout sitting next to the Synara repository root is accepted.
+ */
+export function resolveAlfieRepoDir(repoRoot: string): string {
+  const candidates = [
+    process.env.ALFIE_REPO_DIR,
+    process.env.ALFIE_EXTENSION_DIR
+      ? resolve(process.env.ALFIE_EXTENSION_DIR, "../../..")
+      : undefined,
+    join(repoRoot, "..", "alfie"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    const dir = resolve(candidate);
+    if (existsSync(join(dir, ".git"))) {
+      return dir;
+    }
+  }
+  throw new PiSubagentArtifactStagingError(
+    "alfie_repo_unresolved",
+    "Could not locate the version-controlled Alfie repository for the managed pi-subagents artifact. Set ALFIE_REPO_DIR to the clean pinned checkout.",
+  );
+}
+
+/**
+ * Proves the supplied directory is the exact clean pinned Alfie source
+ * (build-time only; mirrors the provenance discipline of
+ * `apps/server/src/provider/piSubagentRealExtension.test.ts`):
+ *
+ * 1. it is a Git work tree whose origin matches the fixture;
+ * 2. HEAD is exactly the pinned commit;
+ * 3. the extension subtree has no uncommitted changes;
+ * 4. the package name/version match the pin;
+ * 5. every pinned per-file SHA-256 matches.
+ *
+ * A source outside the pinned commit or an unclean extension tree fails with
+ * a bounded diagnostic before any staging output is accepted.
+ */
+export function verifyAlfieExtensionProvenance(input: {
+  readonly repoDir: string;
+  readonly provenance: PiSubagentExtensionProvenanceFixture;
+}): VerifiedAlfieExtensionSource {
+  const { provenance } = input;
+  const repoDir = resolve(input.repoDir);
+
+  const insideWorkTree = git(repoDir, ["rev-parse", "--is-inside-work-tree"]).trim();
+  if (insideWorkTree !== "true") {
+    throw new PiSubagentArtifactStagingError(
+      "not_a_git_repository",
+      `Managed pi-subagents artifact source '${repoDir}' is not a Git work tree.`,
+    );
+  }
+
+  const originUrl = git(repoDir, ["config", "--get", "remote.origin.url"]).trim();
+  if (normalizeGitUrl(originUrl) !== normalizeGitUrl(provenance.expectedRepositoryUrl)) {
+    throw new PiSubagentArtifactStagingError(
+      "origin_mismatch",
+      "Managed pi-subagents artifact source repository origin does not match the pinned provenance fixture.",
+    );
+  }
+
+  const headCommit = git(repoDir, ["rev-parse", "HEAD"]).trim().toLowerCase();
+  if (headCommit !== provenance.pinnedCommit.toLowerCase()) {
+    throw new PiSubagentArtifactStagingError(
+      "pinned_commit_mismatch",
+      "Managed pi-subagents artifact source HEAD does not match the pinned commit; refusing to stage unpinned extension bytes.",
+    );
+  }
+
+  const extensionDir = join(repoDir, EXTENSION_RELATIVE_ROOT);
+  if (!existsSync(join(extensionDir, "package.json"))) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_missing",
+      `Managed pi-subagents extension tree not found at '${EXTENSION_RELATIVE_ROOT}' in the pinned source.`,
+    );
+  }
+
+  const statusRaw = git(repoDir, ["status", "--porcelain", EXTENSION_RELATIVE_ROOT]).trim();
+  const statusLines = statusRaw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.includes("node_modules"));
+  if (statusLines.length > 0) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_unclean",
+      `Managed pi-subagents extension tree '${EXTENSION_RELATIVE_ROOT}' has uncommitted changes; refusing to stage unclean extension bytes.`,
+    );
+  }
+
+  const packageManifestPath = join(repoDir, provenance.packageManifestRelativePath);
+  if (!existsSync(packageManifestPath)) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_missing",
+      `Managed pi-subagents package manifest missing at '${provenance.packageManifestRelativePath}'.`,
+    );
+  }
+  const pkg = JSON.parse(readFileSync(packageManifestPath, "utf8")) as {
+    name?: unknown;
+    version?: unknown;
+  };
+  if (pkg.name !== provenance.packageName || pkg.version !== provenance.packageVersion) {
+    throw new PiSubagentArtifactStagingError(
+      "package_identity_mismatch",
+      "Managed pi-subagents package name/version does not match the pinned provenance fixture.",
+    );
+  }
+
+  for (const [relativePath, expectedHash] of Object.entries(provenance.hashes)) {
+    const fullPath = join(repoDir, relativePath);
+    if (!existsSync(fullPath)) {
+      throw new PiSubagentArtifactStagingError(
+        "pinned_hash_mismatch",
+        `Pinned file '${relativePath}' is missing from the managed pi-subagents source tree.`,
+      );
+    }
+    if (computeSha256File(fullPath) !== expectedHash) {
+      throw new PiSubagentArtifactStagingError(
+        "pinned_hash_mismatch",
+        `Pinned file '${relativePath}' does not match its recorded SHA-256; refusing to stage tampered extension bytes.`,
+      );
+    }
+  }
+
+  return {
+    repoDir,
+    commit: headCommit,
+    packageName: pkg.name as string,
+    packageVersion: pkg.version as string,
+  };
+}
+
+function assertNoProhibitedPayload(relativePath: string): void {
+  const segments = relativePath.split("/");
+  const basename = segments[segments.length - 1] ?? "";
+  const extension = basename.slice(basename.lastIndexOf(".")).toLowerCase();
+  if (PROHIBITED_BASENAMES.has(basename)) {
+    throw new PiSubagentArtifactStagingError(
+      "prohibited_payload",
+      `Managed pi-subagents artifact would stage prohibited payload '${basename}' at '${relativePath}'; user authentication/model configuration must never enter the release artifact.`,
+    );
+  }
+  if (PROHIBITED_EXTENSIONS.has(extension)) {
+    throw new PiSubagentArtifactStagingError(
+      "prohibited_payload",
+      `Managed pi-subagents artifact would stage prohibited key material '${basename}' at '${relativePath}'.`,
+    );
+  }
+  if (segments.includes("node_modules")) {
+    throw new PiSubagentArtifactStagingError(
+      "prohibited_payload",
+      `Managed pi-subagents artifact would stage dependency tree content at '${relativePath}'; only pinned release-controlled bytes may be staged.`,
+    );
+  }
+}
+
+/**
+ * Extracts the artifact-declared protocol version and capability list from
+ * the pinned extension entry source. The handshake literals in
+ * `src/index.ts` (`PI_SUBAGENTS_PROTOCOL_VERSION`, `PI_SUBAGENT_CAPABILITIES`)
+ * are the extension's own declaration, so the manifest profile is derived from
+ * the pinned bytes instead of a duplicated host-side list that could drift.
+ */
+function extractDeclaredCapabilityProfile(
+  entrySource: string,
+): { protocolVersion: number; capabilities: ReadonlyArray<string> } {
+  const protocolMatch = /const\s+PI_SUBAGENTS_PROTOCOL_VERSION\s*=\s*(\d+)\s*;/.exec(entrySource);
+  const capabilitiesMatch =
+    /const\s+PI_SUBAGENT_CAPABILITIES\s*=\s*\[([\s\S]*?)\]\s*(?:as\s+const)?\s*;/.exec(entrySource);
+
+  if (!protocolMatch || !capabilitiesMatch) {
+    throw new PiSubagentArtifactStagingError(
+      "capability_profile_invalid",
+      "Could not derive the declared capability profile from the pinned pi-subagents extension entry source.",
+    );
+  }
+
+  const protocolVersion = Number.parseInt(protocolMatch[1] as string, 10);
+  const capabilities = [...capabilitiesMatch[1]!.matchAll(/"([^"\n]+)"/g)].map(
+    (match) => match[1] as string,
+  );
+
+  if (!Number.isInteger(protocolVersion) || protocolVersion < 1 || capabilities.length === 0) {
+    throw new PiSubagentArtifactStagingError(
+      "capability_profile_invalid",
+      "The pinned pi-subagents extension entry source declares an unusable capability profile.",
+    );
+  }
+
+  const missing = PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES.filter(
+    (required) => !capabilities.includes(required),
+  );
+  if (missing.length > 0) {
+    throw new PiSubagentArtifactStagingError(
+      "capability_profile_invalid",
+      `The pinned pi-subagents extension does not declare required capabilities: ${missing.join(", ")}.`,
+    );
+  }
+
+  return { protocolVersion, capabilities };
+}
+
+/** Lists the exact Git-tracked release-runtime files of the extension. */
+function listTrackedExtensionFiles(repoDir: string): ReadonlyArray<string> {
+  const output = git(repoDir, ["ls-files", "-z", "--", EXTENSION_RELATIVE_ROOT]);
+  const relativePaths = output
+    .split("\0")
+    .map((entry) => entry.replace(/^"|"$/g, ""))
+    .filter((entry) => entry.length > 0)
+    .filter((entry) => !EXTENSION_EXCLUDED_SUBTREES.some((excluded) => entry.startsWith(excluded)))
+    .sort();
+  if (relativePaths.length === 0) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_missing",
+      `The pinned source tracks no files under '${EXTENSION_RELATIVE_ROOT}'.`,
+    );
+  }
+  if (relativePaths.length > MAX_FILE_ENTRIES) {
+    throw new PiSubagentArtifactStagingError(
+      "staging_output_invalid",
+      `Managed pi-subagents artifact would stage ${relativePaths.length} files, over the bounded cap of ${MAX_FILE_ENTRIES}.`,
+    );
+  }
+  return relativePaths;
+}
+
+function walkRegularFiles(rootDir: string, currentRelative = ""): ReadonlyArray<string> {
+  const collected: string[] = [];
+  for (const entry of readdirSync(rootDir).sort()) {
+    const absolute = join(rootDir, entry);
+    const relative = currentRelative ? `${currentRelative}/${entry}` : entry;
+    const stats = lstatSync(absolute);
+    if (stats.isDirectory()) {
+      collected.push(...walkRegularFiles(absolute, relative));
+    } else if (stats.isFile()) {
+      collected.push(relative);
+    } else {
+      throw new PiSubagentArtifactStagingError(
+        "symlink_in_source",
+        `Staged artifact contains a non-regular entry at '${relative}'.`,
+      );
+    }
+  }
+  return collected;
+}
+
+/**
+ * Assembles the deterministic official managed Pi subagent artifact (AC1)
+ * from the verified pinned source into `artifactDir`:
+ *
+ * - enumerates exactly the Git-tracked extension runtime files (clean pinned
+ *   bytes; `node_modules`, untracked content, and the extension's own test
+ *   subtree can never enter);
+ * - rejects prohibited payload (AC4) and symlinked sources;
+ * - copies each file as a regular file and proves the staged bytes match the
+ *   recorded size and SHA-256;
+ * - emits `manifest.json` (not itself a manifest entry) carrying source
+ *   identity, capability profile, and one exact record per staged file,
+ *   serialized deterministically and validated against the WP1a contract.
+ *
+ * Identical pinned input reproduces byte-identical manifest output.
+ */
+export function buildPiSubagentArtifact(input: {
+  readonly repoDir: string;
+  readonly artifactDir: string;
+  readonly provenance: PiSubagentExtensionProvenanceFixture;
+}): StagedPiSubagentArtifact {
+  const verified = verifyAlfieExtensionProvenance({
+    repoDir: input.repoDir,
+    provenance: input.provenance,
+  });
+
+  const artifactDir = resolve(input.artifactDir);
+  rmSync(artifactDir, { recursive: true, force: true });
+  mkdirSync(artifactDir, { recursive: true });
+
+  const trackedFiles = listTrackedExtensionFiles(verified.repoDir);
+  const entrySourcePath = join(verified.repoDir, input.provenance.extensionEntryRelativePath);
+  if (!existsSync(entrySourcePath)) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_missing",
+      `Managed pi-subagents extension entry source missing at '${input.provenance.extensionEntryRelativePath}'.`,
+    );
+  }
+  const declaredProfile = extractDeclaredCapabilityProfile(readFileSync(entrySourcePath, "utf8"));
+
+  const fileRecords: Array<{ path: string; sizeBytes: number; sha256: string }> = [];
+  for (const relativePath of trackedFiles) {
+    assertNoProhibitedPayload(relativePath);
+
+    const sourcePath = join(verified.repoDir, relativePath);
+    const sourceStats = lstatSync(sourcePath);
+    if (sourceStats.isSymbolicLink()) {
+      throw new PiSubagentArtifactStagingError(
+        "symlink_in_source",
+        `Pinned pi-subagents source tracks a symbolic link at '${relativePath}'; staged records must be exact regular files.`,
+      );
+    }
+    if (!sourceStats.isFile()) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Pinned pi-subagents source tracks a non-regular entry at '${relativePath}'.`,
+      );
+    }
+    if (sourceStats.size > MAX_FILE_BYTES) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Pinned file '${relativePath}' exceeds the bounded per-file cap of ${MAX_FILE_BYTES} bytes.`,
+      );
+    }
+
+    const stagedPath = join(artifactDir, relativePath);
+    mkdirSync(dirname(stagedPath), { recursive: true });
+    copyFileSync(sourcePath, stagedPath);
+
+    // Prove the staged copy is an exact regular file with identical bytes.
+    const stagedStats = lstatSync(stagedPath);
+    if (!stagedStats.isFile()) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Staged entry '${relativePath}' is not a regular file.`,
+      );
+    }
+    const stagedBytes = readFileSync(stagedPath);
+    if (stagedBytes.length !== stagedStats.size) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Staged entry '${relativePath}' changed while staging; refusing inconsistent output.`,
+      );
+    }
+    fileRecords.push({
+      path: relativePath,
+      sizeBytes: stagedBytes.length,
+      sha256: computeSha256Bytes(stagedBytes),
+    });
+  }
+
+  const manifest = {
+    schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
+    sourceIdentity: {
+      repositoryUrl: input.provenance.expectedRepositoryUrl,
+      pinnedCommit: verified.commit,
+      packageName: verified.packageName,
+      packageVersion: verified.packageVersion,
+    },
+    capabilityProfile: {
+      protocolVersion: declaredProfile.protocolVersion,
+      capabilities: [...declaredProfile.capabilities],
+      requiredCapabilities: [...PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES],
+    },
+    files: fileRecords,
+  };
+
+  // Self-check: the generated manifest must decode against the WP1a contract
+  // before the output is accepted.
+  let validatedManifest: typeof PiSubagentArtifactManifest.Type;
+  try {
+    validatedManifest = Schema.decodeSync(PiSubagentArtifactManifest)(manifest);
+  } catch (cause) {
+    throw new PiSubagentArtifactStagingError(
+      "staging_output_invalid",
+      `Generated pi-subagents artifact manifest failed contract validation: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+
+  const manifestPath = join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  // Exactness in both directions: every staged regular file (the manifest
+  // itself excepted) must be listed, and every record must still exist.
+  const stagedEntries = walkRegularFiles(artifactDir).filter(
+    (relative) => relative !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
+  );
+  const listedPaths = new Set(validatedManifest.files.map((record) => record.path));
+  if (stagedEntries.length !== listedPaths.size || !stagedEntries.every((path) => listedPaths.has(path))) {
+    throw new PiSubagentArtifactStagingError(
+      "staging_output_invalid",
+      "Staged pi-subagents artifact content does not exactly match the generated manifest.",
+    );
+  }
+
+  return {
+    artifactDir,
+    manifestPath,
+    manifest: validatedManifest,
+    fileCount: validatedManifest.files.length,
+  };
+}
+
+/**
+ * One-call desktop integration helper: resolves the Alfie checkout and stages
+ * the verified official artifact under
+ * `<desktopResourcesDir>/pi-subagents-artifact`.
+ */
+export function stagePiSubagentArtifactIntoDesktopResources(input: {
+  readonly repoRoot: string;
+  readonly desktopResourcesDir: string;
+  readonly alfieRepoDir?: string;
+}): StagedPiSubagentArtifact {
+  const repoRoot = resolve(input.repoRoot);
+  const provenance = loadPiSubagentExtensionProvenance(
+    join(repoRoot, PI_SUBAGENT_EXTENSION_PROVENANCE_FIXTURE_RELATIVE_PATH),
+  );
+  const repoDir = input.alfieRepoDir ? resolve(input.alfieRepoDir) : resolveAlfieRepoDir(repoRoot);
+  return buildPiSubagentArtifact({
+    repoDir,
+    provenance,
+    artifactDir: join(resolve(input.desktopResourcesDir), PI_SUBAGENT_ARTIFACT_DIR_NAME),
+  });
+}
