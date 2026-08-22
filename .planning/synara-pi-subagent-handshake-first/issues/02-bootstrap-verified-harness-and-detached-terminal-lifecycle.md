@@ -5,17 +5,27 @@ only after the official extension, user runtime configuration, and mandatory
 handshake are ready. The same detached child remains observable in the
 background and settles through exactly one fenced committed terminal outcome.
 
-**Blocked by:** 01b — Remediate the verified managed Pi runtime closure.
-Decision 0006 found the accepted Ticket 01 artifact an insufficient runtime
-closure for the real pinned Alfie extension (missing
-`agent/extensions/shared` and the lock-proven release-owned `node_modules`
-dependency closure). Ticket 02 may not claim completion until remediation
-01b is accepted.
+**Blocked by:** 01c — Remediate the verified managed Pi prompt closure.
+Decision 0010 found the Decision-0009 accepted Ticket 01b artifact not a
+complete executable closure for real child spawn: the pinned Alfie
+extension's `prompts.ts` resolves `<artifact>/agent/system/*` prompt
+templates (`subagent-system.md`, `tool-guidelines.md`, `skill-rules.md`,
+`working-style.md`) that current manifest-exact staging omits, and the
+verifier correctly forbids adding files after verification. Ticket 02 may
+not claim real-runtime acceptance until remediation 01c is accepted.
 
-**Status:** blocked — real-runtime acceptance (AC1–AC4) stopped by
-[Decision 0006](../decisions/0006-t01-runtime-closure-reassessment.md).
+**Status:** blocked — real-runtime acceptance stopped by
+[Decision 0010](../decisions/0010-t01c-prompt-closure-reassessment.md).
 Existing implementation code and tests remain as in-progress work toward
-this ticket; no acceptance criterion is complete until 01b is accepted.
+this ticket; no acceptance criterion is complete until 01c is accepted.
+
+**Explicitly permitted while blocked (test-only):** repairing the AC2/AC5
+SQLite live-WAL observation defect — read ledger counts through the live
+repository, or dispose the repository before opening an external read-only
+`DatabaseSync` — within Ticket 02's approved write set, without marking any
+AC done and without fabricating prompt content or claiming acceptance. After
+Ticket 01c acceptance, the complete real controlled-artifact Ticket 02 suite
+must be rerun.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
