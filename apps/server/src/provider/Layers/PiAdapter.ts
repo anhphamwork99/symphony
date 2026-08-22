@@ -118,6 +118,7 @@ import {
 } from "../piSubagentDesktopArtifactGate.ts";
 import {
   negotiatePiSubagentDesktopManagedBridge,
+  PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
   piSubagentDesktopManagedBootstrapFailureDetail,
   piSubagentDesktopManagedExtensionDir,
 } from "../piSubagentManagedRuntimeBinding.ts";
@@ -3451,12 +3452,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 : {}),
             }),
           catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "session/start",
-              detail: toMessage(cause, "Failed to start Pi session."),
-              cause,
-            }),
+            // Ticket 02 WP-B (AC5): a DESKTOP-ONLY runtime creation failure —
+            // the empirically real vector is an explicitly selected model id
+            // unavailable from the registry, whose raw message embeds the
+            // user's model id — maps to the fixed bounded detail with NO
+            // retained cause/stack/error object. Non-desktop sessions keep
+            // the historical raw behavior (message + cause) exactly.
+            desktopManagedBinding
+              ? new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/start",
+                  detail: PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+                })
+              : new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/start",
+                  detail: toMessage(cause, "Failed to start Pi session."),
+                  cause,
+                }),
         });
         // One lifecycle coordinator per Pi session, created with the dormant
         // extension and owned for the whole session lifetime: safe-boundary

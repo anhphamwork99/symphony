@@ -34,6 +34,7 @@ import {
   SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
   PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
 } from "../piSubagentDesktopArtifactGate";
+import { PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL } from "../piSubagentManagedRuntimeBinding";
 
 /**
  * What this suite proves that the two existing focused suites cannot:
@@ -88,6 +89,14 @@ const sdkHarness = vi.hoisted(() => ({
   disposeCalls: 0,
   /** Caller-supplied extension factories observed in the loader options. */
   observedExtensionFactories: [] as unknown[],
+  /**
+   * Ticket 02 WP-B: the empirically real runtime-configuration failure
+   * vector. An explicitly selected model id unavailable from the registry
+   * throws from inside the runtime factory (`createSdkRuntime`'s
+   * `findModelInRegistry` guard) — a raw hostile message that must never
+   * escape a desktop managed start.
+   */
+  unavailableModelSelections: [] as string[],
 }));
 
 /**
@@ -104,6 +113,13 @@ const bridgeState = vi.hoisted(() => ({
         ) => Promise<Record<string, unknown> | never> | Record<string, unknown>),
   /** Whether the loader reports ANY artifact extension at all. */
   artifactExtensionLoaded: true,
+  /**
+   * Ticket 02 WP-B mock seam: model ids the mock registry must report as
+   * UNAVAILABLE. Production's `findModelInRegistry` then throws the raw
+   * unavailable-model error from inside the runtime factory — the exact
+   * Pi SDK 0.83.0 failure vector the empirical probe identified.
+   */
+  unavailableModelIds: null as null | ReadonlyArray<string>,
 }));
 
 /** Hostile strings a bridge/extension could try to leak into diagnostics. */
@@ -130,6 +146,7 @@ const hostileHandshakeMessage = (): string =>
 const resetScenario = (input?: {
   readonly handshake?: typeof bridgeState.handshake;
   readonly artifactExtensionLoaded?: boolean;
+  readonly unavailableModelIds?: ReadonlyArray<string>;
 }) => {
   trace.splice(0);
   sdkHarness.getAgentDirCalls = 0;
@@ -138,8 +155,10 @@ const resetScenario = (input?: {
   sdkHarness.runtimeCreates.splice(0);
   sdkHarness.disposeCalls = 0;
   sdkHarness.observedExtensionFactories.splice(0);
+  sdkHarness.unavailableModelSelections.splice(0);
   bridgeState.handshake = input?.handshake ?? null;
   bridgeState.artifactExtensionLoaded = input?.artifactExtensionLoaded ?? true;
+  bridgeState.unavailableModelIds = input?.unavailableModelIds ?? null;
 };
 
 /** A bridge object answering the desktop profile handshake successfully. */
@@ -239,10 +258,24 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     },
     ModelRegistry: class MockModelRegistry {
       constructor(private readonly modelRuntime: unknown) {}
-      find() {
-        return undefined;
+      find(provider: string, modelId: string) {
+        // Ticket 02 WP-B mock seam: a configured-unavailable explicit model
+        // selection resolves to undefined so production's registry guard
+        // throws the raw unavailable-model error inside the runtime factory.
+        if (
+          bridgeState.unavailableModelIds !== null &&
+          bridgeState.unavailableModelIds.includes(modelId)
+        ) {
+          sdkHarness.unavailableModelSelections.push(modelId);
+          return undefined;
+        }
+        return { id: modelId, provider, api: "openai-completions" };
       }
       getAll() {
+        // The provider-less lookup path mirrors the real registry with builtin
+        // models REMOVED (the isolated user models.json contributes nothing
+        // here): a bare explicit id resolves to undefined — the same raw
+        // unavailable-model throw production emits for a bare slug.
         return [];
       }
       getAvailable() {
@@ -375,6 +408,7 @@ const makeAdapterLayer = (input: {
   readonly userAgentDir?: string;
   readonly observers: HarnessObservers;
   readonly extensionFactories?: readonly unknown[];
+  readonly modelSelection?: { provider: "pi"; model: string };
 }) =>
   makePiAdapterLive({
     piSubagentDesktopArtifactGateEnv: input.gateEnv,
@@ -437,10 +471,20 @@ const runStartSession = (input: {
   readonly userAgentDir?: string;
   readonly observers: HarnessObservers;
   readonly extensionFactories?: readonly unknown[];
+  /** Explicit model selection forwarded through the production seam. */
+  readonly modelSelection?: { provider: "pi"; model: string };
 }): Promise<RunResult> =>
   Effect.gen(function* () {
     const adapter = yield* PiAdapter;
-    const outcome = yield* Effect.exit(adapter.startSession(startSessionInput as never));
+    const outcome = yield* Effect.exit(
+      adapter.startSession(
+        (
+          input.modelSelection === undefined
+            ? startSessionInput
+            : { ...startSessionInput, modelSelection: input.modelSelection }
+        ) as never,
+      ),
+    );
     const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
     const sessions = yield* adapter.listSessions();
     return {
@@ -819,5 +863,170 @@ describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)",
     expect(sdkHarness.getAgentDirCalls).toBeGreaterThanOrEqual(1);
     // The scoped harness disposes only after the successful session lifecycle.
     expect(trace.indexOf("runtime.dispose")).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC5 fallback — desktop-managed user runtime/model configuration failure
+// ---------------------------------------------------------------------------
+
+/**
+ * The empirically real Pi SDK 0.83.0 failure vector (probe, 2026-08-22):
+ * malformed/schema-invalid `models.json` and auth inputs do NOT throw during
+ * ModelRuntime/services creation — they populate composition errors while
+ * builtin models remain. What actually escapes the runtime boundary is an
+ * explicitly selected model id unavailable from the registry: the runtime
+ * factory throws a raw message embedding that id (plus whatever hostile
+ * material the user's model slug carries). These tests harden exactly that
+ * vector with hostile canaries.
+ */
+describe("PiAdapter desktop managed bootstrap — unavailable explicit model (T02-AC5 fallback)", () => {
+  /**
+   * Mirrors production `parseModelReference`: the id the registry guard
+   * actually receives for a provider-qualified slug (everything after the
+   * FIRST separator, including any further separators).
+   */
+  const registryIdFor = (selection: string): string => {
+    const separator = selection.includes("/") ? "/" : ":";
+    const separatorIndex = selection.indexOf(separator);
+    return separatorIndex >= 0 ? selection.slice(separatorIndex + 1) : selection;
+  };
+
+  const hostileModelSelections = [
+    CANARY.modelId,
+    `${CANARY.userAgentDir}/../${CANARY.modelId}`,
+    `${CANARY.apiKey}:${CANARY.modelId}`,
+    `openai/${CANARY.modelId}`,
+    `${CANARY.prompt}/${CANARY.stackFragment}/${CANARY.baseUrl}`,
+  ] as const;
+
+  it.for(hostileModelSelections)(
+    "fails closed with the fixed detail and zero canary leak for model selection '%s'",
+    async (modelSelection) => {
+      resetScenario({
+        handshake: managedHandshake(),
+        unavailableModelIds: [registryIdFor(modelSelection)],
+      });
+      const observers = makeObservers();
+
+      const result = await runStartSession({
+        mode: "desktop",
+        gateEnv: desktopGateEnv(artifactRoot),
+        userAgentDir,
+        observers,
+        modelSelection: { provider: "pi", model: modelSelection },
+      });
+
+      // The failure fired at the CORRECT boundary: the runtime factory was
+      // reached (services created against the controlled agent dir).
+      expect(sdkHarness.serviceCreations).toHaveLength(1);
+      expect(sdkHarness.serviceCreations[0]!.agentDir).toBe(expectedControlledAgentDir());
+      // The provider-qualified lookups actually hit the unavailable seam.
+      if (modelSelection.includes("/") || modelSelection.includes(":")) {
+        expect(sdkHarness.unavailableModelSelections.length).toBeGreaterThanOrEqual(1);
+      }
+
+      // EXACTLY the fixed bounded detail — never a raw cause chain.
+      expect(result.failure).toBeDefined();
+      const failure = result.failure!;
+      expect(failure).toMatchObject({
+        _tag: "ProviderAdapterRequestError",
+        provider: "pi",
+      });
+      expect((failure as { detail: string }).detail).toBe(
+        PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+      );
+
+      // NO retained raw cause/stack/error object on the desktop failure.
+      const record = failure as unknown as { cause?: unknown };
+      expect(record.cause).toBeUndefined();
+      const serialized = failureSurface(failure);
+      expectNoCanaryLeak(serialized);
+
+      // No session/callback/admission/repository side effects survived.
+      expect(result.hasSession).toBe(false);
+      expect(result.listSessionCount).toBe(0);
+      expect(observers.subagentCapability).toEqual([]);
+      expect(observers.synaraMcpSessions).toEqual([]);
+      expect(observers.subagentAdmissions).toEqual([]);
+      expect(observers.repository.writes).toEqual([]);
+
+      // Partial runtime state was cleaned: the failure happened INSIDE the
+      // runtime factory, so no runtime handle was ever published to dispose —
+      // and no handshake/binding ever ran on the staged partial state.
+      expect(trace).not.toContain("bindExtensions");
+      expect(trace).not.toContain("handshake");
+      expect(trace).not.toContain("runtime.dispose");
+      expect(sdkHarness.disposeCalls).toBe(0);
+    },
+  );
+
+  it("keeps schema-valid user auth/models wiring intact while only the selection is unavailable", async () => {
+    // Same user dir, same verified artifact, but the selection resolves —
+    // proving the failure above came from the SELECTION vector, not from
+    // broken auth/models wiring.
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "desktop",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+      modelSelection: { provider: "pi", model: "openai/synara-available-model" },
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result.hasSession).toBe(true);
+    expect(sdkHarness.modelRuntimeCreates).toEqual([
+      {
+        authPath: path.join(userAgentDir, "auth.json"),
+        modelsPath: path.join(userAgentDir, "models.json"),
+      },
+    ]);
+  });
+});
+
+describe("PiAdapter non-desktop regression — unavailable explicit model keeps raw behavior (T02-AC5)", () => {
+  /** Same production parse as the desktop suite above. */
+  const registryIdFor = (selection: string): string => {
+    const separator = selection.includes("/") ? "/" : ":";
+    const separatorIndex = selection.indexOf(separator);
+    return separatorIndex >= 0 ? selection.slice(separatorIndex + 1) : selection;
+  };
+
+  it("preserves the historical raw error with retained cause in web mode for the same hostile failure", async () => {
+    resetScenario({
+      handshake: managedHandshake(),
+      unavailableModelIds: [registryIdFor(CANARY.modelId)],
+    });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "web",
+      gateEnv: desktopGateEnv("/this/locator/is/ignored/in/web/mode"),
+      userAgentDir,
+      observers,
+      modelSelection: { provider: "pi", model: CANARY.modelId },
+    });
+
+    // Web mode keeps the HISTORICAL raw surface: the unavailable-model
+    // message (including the model id) and a retained cause. This is the
+    // pre-change behavior — desktop-only redaction must not leak into it.
+    expect(result.failure).toBeDefined();
+    const failure = result.failure!;
+    expect(failure).toMatchObject({
+      _tag: "ProviderAdapterRequestError",
+      provider: "pi",
+    });
+    expect((failure as { detail: string }).detail).toContain(CANARY.modelId);
+    expect((failure as { detail: string }).detail).toContain("is not available");
+    const record = failure as unknown as { cause?: unknown };
+    expect(record.cause).toBeDefined();
+
+    // No session or side effects — the failure is still fatal for the start.
+    expect(result.hasSession).toBe(false);
+    expect(result.listSessionCount).toBe(0);
+    expect(observers.repository.writes).toEqual([]);
   });
 });

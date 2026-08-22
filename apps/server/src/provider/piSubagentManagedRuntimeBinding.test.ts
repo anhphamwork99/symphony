@@ -7,6 +7,7 @@ import {
   createPiSubagentDesktopManagedHandshakeRequest,
   negotiatePiSubagentDesktopManagedBridge,
   PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES,
+  PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
   piSubagentDesktopManagedBootstrapFailureDetail,
   piSubagentDesktopManagedExtensionDir,
 } from "./piSubagentManagedRuntimeBinding.ts";
@@ -166,6 +167,40 @@ describe("negotiatePiSubagentDesktopManagedBridge", () => {
     }));
     const capability = await negotiatePiSubagentDesktopManagedBridge(target);
     expect(capability).toMatchObject({ status: "unsupported_version", isManaged: false });
+  });
+});
+
+describe("PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL", () => {
+  it("is the exact fixed bounded desktop runtime-configuration failure detail", () => {
+    // Ticket 02 WP-B (AC5 fallback): the detail PiAdapter must use — verbatim —
+    // for a desktop-managed-only runtime/model configuration failure. Fixed
+    // text: bounded by construction, carries no status/code interpolation,
+    // and is safe to embed in any diagnostic surface.
+    expect(PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL).toBe(
+      "Managed Pi subagent user runtime configuration failed",
+    );
+    expect(PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL.length).toBeLessThanOrEqual(
+      512,
+    );
+  });
+
+  it("carries no secret/path/prompt/provider shape by construction", () => {
+    const detail = PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL;
+    // The hostile-material vocabulary from the bootstrap suite: none of these
+    // shapes can appear because the constant is a fixed literal with no
+    // interpolation at all.
+    for (const hostile of [
+      "sk-",
+      "/Users/",
+      "auth.json",
+      "models.json",
+      "prompt",
+      "https://",
+      "stack",
+      "synara-canary",
+    ]) {
+      expect(detail).not.toContain(hostile);
+    }
   });
 });
 

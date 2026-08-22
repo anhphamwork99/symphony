@@ -10,7 +10,8 @@
 // closed capability vocabulary in `@synara/contracts`.
 // Exports: the mandatory desktop capability set, the desktop handshake
 // request factory, the controlled extension-directory helper, the desktop
-// bridge negotiation entry point, and the safe failure-detail builder.
+// bridge negotiation entry point, the safe failure-detail builder, and the
+// fixed desktop user runtime/model configuration failure detail.
 
 import {
   PI_SUBAGENT_CAPABILITIES,
@@ -102,6 +103,24 @@ export async function negotiatePiSubagentDesktopManagedBridge(
 
 /** Upper bound for the bounded desktop bootstrap failure detail. */
 const MAX_DESKTOP_BOOTSTRAP_FAILURE_DETAIL_CHARS = 512;
+
+/**
+ * Fixed, bounded detail for desktop-managed user runtime/model
+ * configuration failures (AC5 fallback; Ticket 02 WP-B).
+ *
+ * The empirically real failure vector (Pi SDK 0.83.0 probe, 2026-08-22):
+ * malformed or schema-invalid `models.json`/auth inputs do NOT throw during
+ * ModelRuntime/services creation — they populate composition errors while
+ * builtin models remain usable. The failure that actually escapes the
+ * runtime boundary is an explicitly selected model id unavailable from the
+ * registry (`createSdkRuntime` throws a raw message embedding that id). A
+ * desktop managed session start must surface that vector as EXACTLY this
+ * constant: no raw message, no model id, no path, no credential, no stack,
+ * and no retained cause object. Non-desktop sessions keep the historical
+ * raw `toMessage` behavior unchanged.
+ */
+export const PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL =
+  "Managed Pi subagent user runtime configuration failed";
 
 /**
  * Bounded, redacted desktop bootstrap failure detail (AC5 / user story 18).
