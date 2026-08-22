@@ -5,9 +5,17 @@ only after the official extension, user runtime configuration, and mandatory
 handshake are ready. The same detached child remains observable in the
 background and settles through exactly one fenced committed terminal outcome.
 
-**Blocked by:** None — Ticket 01 was accepted by Decision 0005.
+**Blocked by:** 01b — Remediate the verified managed Pi runtime closure.
+Decision 0006 found the accepted Ticket 01 artifact an insufficient runtime
+closure for the real pinned Alfie extension (missing
+`agent/extensions/shared` and the lock-proven release-owned `node_modules`
+dependency closure). Ticket 02 may not claim completion until remediation
+01b is accepted.
 
-**Status:** ready-for-agent
+**Status:** blocked — real-runtime acceptance (AC1–AC4) stopped by
+[Decision 0006](../decisions/0006-t01-runtime-closure-reassessment.md).
+Existing implementation code and tests remain as in-progress work toward
+this ticket; no acceptance criterion is complete until 01b is accepted.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
