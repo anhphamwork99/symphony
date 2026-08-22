@@ -8,8 +8,8 @@
   Decision 0007's host-peer alignment prerequisite was delivered in
   `799af158a`; Decision 0008 now requires artifact-local TypeBox resolution
   or qualifying exact host-alias supply before its staged-closure AC4 proof.
-- **Triage status:** 01b active with AC4 TypeBox-alias remediation; 03 ready-for-agent;
-  02 blocked by 01b
+- **Triage status:** 01b implementation complete pending independent review and
+  final acceptance; 03 ready-for-agent; 02 remains blocked by 01b acceptance
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -56,13 +56,13 @@
 - **01 — Package and fail-close the managed Pi artifact** is accepted by
   Decision 0005 (fail-close boundary; not reopened). Its runtime-closure
   remediation is tracked as Ticket 01b.
-- **01b — Remediate the verified managed Pi runtime closure** is the active
-  frontier. Decision 0007's default host-alignment route was delivered in
-  `799af158a`: the production Pi host family resolves coherently at `0.83.0`.
-  Decision 0008 additionally requires artifact-local TypeBox resolution or
-  qualifying exact host-alias supply. The real staged-closure AC4 proof and
-  remaining 01b acceptance work are still pending; Ticket 01b must be accepted
-  before Ticket 02 can claim completion.
+- **01b — Remediate the verified managed Pi runtime closure** has a complete
+  implementation candidate. Decision 0007's host alignment was delivered in
+  `799af158a`; Decision 0008's normal-dependency alias remediation and real
+  staged-closure AC4 proof were delivered in `75a12e40c`. AC1–AC6 focused
+  evidence is recorded in the ticket; independent review and exactly one
+  Supervisor final-acceptance consultation are now required. Ticket 02 remains
+  blocked until that acceptance completes.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
   lifecycle** is blocked by 01b per Decisions 0006 and 0007. Its real-runtime
   acceptance (AC1–AC4) is stopped; existing implementation remains

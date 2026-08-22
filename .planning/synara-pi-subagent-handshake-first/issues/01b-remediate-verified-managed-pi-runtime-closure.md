@@ -14,25 +14,25 @@ staged-artifact AC4 load proof remains required. Decision 0008 additionally
 requires artifact-local `@sinclair/typebox@0.34.49` resolution or qualifying
 exact host-alias supply; the current host alias is not itself sufficient.
 
-**Status:** active
+**Status:** implementation complete — pending independent review and final acceptance
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
-- [ ] **AC1:** Staging from the clean pinned Alfie checkout assembles the
+- [x] **AC1:** Staging from the clean pinned Alfie checkout assembles the
   self-contained artifact — `agent/extensions/pi-subagents`, the necessary
   `agent/extensions/shared` content it imports, and the lock-proven
   release-owned `node_modules` regular-file dependency closure — with every
   regular file recorded in the deterministic manifest with size and
   SHA-256 digest.
-- [ ] **AC2:** Repeat staging of the same pinned input yields an identical
+- [x] **AC2:** Repeat staging of the same pinned input yields an identical
   manifest, and dependency selection is proven from the lockfile rather than
   a floating range or an ambient/user install.
-- [ ] **AC3:** Verification covers the expanded closure: missing, tampered,
+- [x] **AC3:** Verification covers the expanded closure: missing, tampered,
   unlisted, path-escaping, or symlinked entries anywhere in `shared` or
   `node_modules` fail with the existing bounded categories, before Pi SDK
   import and global discovery, with no partial trust and no
   sensitive-diagnostic disclosure.
-- [ ] **AC4:** The Decision 0007 supported host-peer prerequisite is satisfied
+- [x] **AC4:** The Decision 0007 supported host-peer prerequisite is satisfied
   by the aligned `0.83.0` production host in `799af158a`. Per Decision 0008,
   the real pinned extension entry must load from the staged artifact alone with
   `@sinclair/typebox@0.34.49` resolving artifact-locally (or from qualifying
@@ -40,10 +40,10 @@ exact host-alias supply; the current host alias is not itself sufficient.
   mutation; its `shared` and remaining dependency imports must resolve. If the
   real-checkout input is unavailable, the leg records an explicit skip, never
   a silent pass.
-- [ ] **AC5:** Exclusion proof: the artifact contains no user
+- [x] **AC5:** Exclusion proof: the artifact contains no user
   authentication, model configuration, credentials, key material, or
   user-global extension content.
-- [ ] **AC6:** The desktop fail-close ordering proof is rerun against the
+- [x] **AC6:** The desktop fail-close ordering proof is rerun against the
   expanded closure: an invalid artifact rejects
   `managed-subagent-unavailable` before Pi SDK import, agent-directory/global
   discovery, and durable side effects, with no fallback.
@@ -97,7 +97,24 @@ Governance decision, 2026-08-21 (“đồng ý, tạo testing seam trước đi�
   reassessment](../decisions/0006-t01-runtime-closure-reassessment.md),
   [Decision 0007 — host-peer compatibility reassessment](../decisions/0007-t01b-host-peer-compatibility-reassessment.md), and
   [Decision 0008 — normal-dependency host-alias reassessment](../decisions/0008-t01b-normal-dependency-host-alias-reassessment.md).
-- Pending implementation. Decision 0007's host-peer prerequisite was
-  delivered in `799af158a`; Decision 0008's TypeBox alias remediation, AC4,
-  and other runtime-closure acceptance work remain pending. Ticket 02 remains
-  blocked until this ticket is accepted.
+- **AC1/AC2/AC5:** `fd229b1ab`, `f156d8d8f`, and `6976942ae` build the
+  deterministic lock-proven regular-file closure, prove repeatable manifests,
+  and exclude user/auth/model material. The focused staging suite passes
+  (`12/12`) with `ALFIE_REPO_DIR=/Users/anhpham99/alfie`.
+- **AC3/AC6:** `6976942ae` proves expanded-tree verification and fail-close
+  ordering; the production verifier focused suite passes (`39/39`).
+- **AC4:** `75a12e40c` pins a Bun patch for the exact packaged
+  `@earendil-works/pi-coding-agent@0.83.0` loader. It removes only the three
+  normal-dependency `@sinclair/typebox*` aliases from both executable loader
+  alias tables, retaining Pi-peer and unscoped `typebox` aliases. The real
+  staged-load suite passes (`1/1`) from the pinned Alfie checkout: it verifies
+  the artifact before and after load, uses `noExtensions` plus only the staged
+  path, observes the real `Agent` tool, proves artifact-local
+  `@sinclair/typebox@0.34.49`, ordinary dependency and shared-module closure
+  resolution, and rejects NODE_PATH/user/global/ancestor canaries. Without
+  `ALFIE_REPO_DIR`, that suite records `1 skipped` explicitly.
+- Lock reproducibility passed with `bun install --frozen-lockfile`; patch
+  inspection proves the three scoped aliases absent while required Pi and
+  unscoped aliases remain; `git diff --check` passed. Full independent review
+  and one Supervisor final-acceptance consultation remain required before
+  Ticket 02 can unblock.
