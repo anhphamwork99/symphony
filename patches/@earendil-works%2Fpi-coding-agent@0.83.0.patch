@@ -1,0 +1,24 @@
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+index 099e74e87220ed9c57990771d0466416184d4304..592c3c02eb7cf0758781f812d91b283ceed42ffa 100644
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -32,9 +32,6 @@ const VIRTUAL_MODULES = {
+     typebox: _bundledTypebox,
+     "typebox/compile": _bundledTypeboxCompile,
+     "typebox/value": _bundledTypeboxValue,
+-    "@sinclair/typebox": _bundledTypebox,
+-    "@sinclair/typebox/compile": _bundledTypeboxCompile,
+-    "@sinclair/typebox/value": _bundledTypeboxValue,
+     "@earendil-works/pi-agent-core": _bundledPiAgentCore,
+     "@earendil-works/pi-tui": _bundledPiTui,
+     // Extensions resolve the pi-ai root to the compat entrypoint (a strict
+@@ -102,9 +99,6 @@ function getAliases() {
+         typebox: typeboxEntry,
+         "typebox/compile": typeboxCompileEntry,
+         "typebox/value": typeboxValueEntry,
+-        "@sinclair/typebox": typeboxEntry,
+-        "@sinclair/typebox/compile": typeboxCompileEntry,
+-        "@sinclair/typebox/value": typeboxValueEntry,
+     };
+     return _aliases;
+ }
