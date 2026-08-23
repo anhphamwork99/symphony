@@ -7,28 +7,27 @@ and offers only the actions that remain honest.
 
 **Blocked by:** None — Ticket 01 was accepted by Decision 0005.
 
-**Status:** implemented; final acceptance withheld by
-[Decision 0013](../decisions/0013-t03-final-acceptance-non-acceptance.md)
-(2026-08-23). Owner-authorized verification remediations `03cfdc8c8` and
-`ea2fd5e00` now make `bun fmt`, `bun lint`, and workspace `bun typecheck`
-pass; the original independent review passes AC1–AC5 and its remediation
-addendum finds no behavior or security regression. Ticket 03 awaits a binding
-Decision-0013 Reassessment; Ticket 04 remains blocked until that decision.
+**Status:** accepted — [Decision 0014](../decisions/0014-t03-mandatory-check-reassessment-and-final-acceptance.md)
+(2026-08-23) supersedes Decision 0013's rejection after owner-authorized
+remediations `03cfdc8c8` and `ea2fd5e00` made `bun fmt`, `bun lint`, and
+workspace `bun typecheck` pass. The original independent review passes AC1–AC5
+and its remediation addendum finds no behavior or security regression. Ticket
+04 is ready/unblocked but not accepted.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
-- [ ] **AC1:** Card projection includes bounded current-generation attachment
+- [x] **AC1:** Card projection includes bounded current-generation attachment
   and teardown-evidence data derived from existing durable state without a
   migration or schema rewrite.
-- [ ] **AC2:** A card presents `Running in background` only for a current
+- [x] **AC2:** A card presents `Running in background` only for a current
   detached execution with a verified live owner.
-- [ ] **AC3:** Desired cancellation overrides an observed `running` label;
+- [x] **AC3:** Desired cancellation overrides an observed `running` label;
   teardown uncertainty presents `Cancellation unverified` without a false
   stopped claim.
-- [ ] **AC4:** Ownerless/no-terminal execution presents `Outcome unknown
+- [x] **AC4:** Ownerless/no-terminal execution presents `Outcome unknown
   (orphaned)`, has no spinner or Cancel action, and offers explicit Resume
   only.
-- [ ] **AC5:** Terminal and resumed generations do not inherit stale attachment
+- [x] **AC5:** Terminal and resumed generations do not inherit stale attachment
   or teardown data; snapshot, replay, reconnect, card strip, and details agree
   on the same presentation.
 
@@ -56,10 +55,10 @@ Decision-0013 Reassessment; Ticket 04 remains blocked until that decision.
 
 ## Implementation Report
 
-**Implementation state:** implemented at candidate `236d4119b`; the one
-independent Ticket-03 review passes AC1–AC5. Decision 0013 withholds final
-acceptance pending reassessment of the now-complete mandatory workspace-check
-evidence.
+**Implementation state:** accepted by Decision 0014 at source candidate
+`236d4119b`, with verification remediations `03cfdc8c8` and `ea2fd5e00`.
+Decision 0013 remains the historical one final-acceptance consultation; its
+rejection is superseded by the binding Reassessment.
 
 ### Delivered behavior
 
