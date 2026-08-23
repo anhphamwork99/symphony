@@ -11,6 +11,10 @@ import {
   MAC_INHERITED_ENTITLEMENTS_PATH,
   MICROPHONE_USAGE_DESCRIPTION,
   NODE_PTY_ASAR_UNPACK_GLOBS,
+  PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION,
+  PI_SUBAGENT_ARTIFACT_DIR_NAME,
+  PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES,
+  PI_SUBAGENT_ARTIFACT_STAGED_PATH,
   validateDesktopNativeBuildHost,
   WINDOWS_INSTALLER_GUID,
 } from "./lib/desktop-platform-build-config.ts";
@@ -43,8 +47,16 @@ describe("createDesktopPlatformBuildConfig", () => {
       MAC_APPSNAP_HELPER_STAGE_PATH,
       "apps/desktop/native/appsnap/build/synara-appsnap-helper",
     );
-    assert.equal(MAC_APPSNAP_HELPER_ASAR_EXCLUSION, "!apps/desktop/native/appsnap/build/**");
-    assert.deepStrictEqual(config.files, ["**/*", MAC_APPSNAP_HELPER_ASAR_EXCLUSION]);
+    assert.equal(
+      MAC_APPSNAP_HELPER_ASAR_EXCLUSION,
+      "!apps/desktop/native/appsnap/build/**",
+    );
+    assert.deepStrictEqual(config.files, [
+      "**/*",
+      MAC_APPSNAP_HELPER_ASAR_EXCLUSION,
+      PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION,
+    ]);
+    assert.deepStrictEqual(config.extraResources, PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES);
     assert.deepStrictEqual(config.extraFiles, [
       {
         from: "apps/desktop/native/appsnap/build/synara-appsnap-helper",
@@ -83,6 +95,8 @@ describe("createDesktopPlatformBuildConfig", () => {
     assert.equal(linux.mac, undefined);
     assert.equal(linux.extraFiles, undefined);
     assert.deepStrictEqual(linux.asarUnpack, ["node_modules/node-pty/**"]);
+    assert.deepStrictEqual(linux.files, [PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION]);
+    assert.deepStrictEqual(linux.extraResources, PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES);
     assert.deepStrictEqual(linux.linux, {
       target: ["AppImage"],
       executableName: "synara",
@@ -98,6 +112,8 @@ describe("createDesktopPlatformBuildConfig", () => {
     assert.equal(win.mac, undefined);
     assert.equal(win.extraFiles, undefined);
     assert.deepStrictEqual(win.asarUnpack, ["node_modules/node-pty/**"]);
+    assert.deepStrictEqual(win.files, [PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION]);
+    assert.deepStrictEqual(win.extraResources, PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES);
     assert.equal(WINDOWS_INSTALLER_GUID, "368107a8-afe6-5db5-ab3b-d4f331684868");
     assert.deepStrictEqual(win.nsis, {
       guid: WINDOWS_INSTALLER_GUID,
@@ -108,6 +124,50 @@ describe("createDesktopPlatformBuildConfig", () => {
       publisherName: "Synara",
       azureSignOptions: { publisherName: "Synara" },
     });
+  });
+
+  it("ships the managed pi-subagents artifact outside app.asar on every platform", () => {
+    const configs = [
+      createDesktopPlatformBuildConfig({ platform: "mac", target: "dmg" }),
+      createDesktopPlatformBuildConfig({ platform: "linux", target: "AppImage" }),
+      createDesktopPlatformBuildConfig({ platform: "win", target: "nsis" }),
+    ] as const;
+
+    // Staged source and locator directory must match staging + the desktop
+    // runtime locator's `process.resourcesPath/pi-subagents-artifact` candidate.
+    assert.equal(PI_SUBAGENT_ARTIFACT_DIR_NAME, "pi-subagents-artifact");
+    assert.equal(
+      PI_SUBAGENT_ARTIFACT_STAGED_PATH,
+      "apps/desktop/prod-resources/pi-subagents-artifact",
+    );
+    assert.equal(
+      PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION,
+      "!apps/desktop/prod-resources/pi-subagents-artifact{,/**/*}",
+    );
+    assert.deepStrictEqual(PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES, [
+      {
+        from: "apps/desktop/prod-resources/pi-subagents-artifact",
+        to: "pi-subagents-artifact",
+        filter: ["**/*", "!node_modules{,/**/*}"],
+      },
+      {
+        from: "apps/desktop/prod-resources/pi-subagents-artifact/node_modules",
+        to: "pi-subagents-artifact/node_modules",
+      },
+    ]);
+
+    for (const config of configs) {
+      const files = config.files;
+      assert.ok(files !== undefined, "every platform must declare files to exclude the artifact");
+      // Exclusion must cover both the directory entry and every nested file so
+      // the always-incomplete ASAR duplicate cannot survive.
+      assert.ok(files.includes(PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION));
+      const exclusionIndex = files.indexOf(PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION);
+      // Keep the exclusion last so no later positive matcher can re-include
+      // the controlled tree (mac's `**/*` correctly precedes it).
+      assert.equal(exclusionIndex, files.length - 1);
+      assert.deepStrictEqual(config.extraResources, PI_SUBAGENT_ARTIFACT_EXTRA_RESOURCES);
+    }
   });
 
   it("omits Azure signing options for unsigned build-only artifacts", () => {
