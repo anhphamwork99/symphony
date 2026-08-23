@@ -150,7 +150,7 @@ function createMockOpenCodeRuntime(options?: {
         options?.children
           ? options.children(input)
           : { data: options?.childrenBySessionId?.[input.sessionID] ?? [] },
-      get: async () => ({ data: { directory: process.cwd(), ...(options?.session ?? {}) } }),
+      get: async () => ({ data: { directory: process.cwd(), ...options?.session } }),
       revert: async () => ({ data: null }),
       summarize: async () => ({ data: null }),
       fork: async (input: { sessionID: string }) => {
@@ -3606,6 +3606,7 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
     const connectedQueue = createSubscribedEventQueue();
     const endedStream = {
       async *[Symbol.asyncIterator]() {
+        yield* [];
         return;
       },
     };

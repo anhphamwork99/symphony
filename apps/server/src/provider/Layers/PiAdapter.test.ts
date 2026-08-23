@@ -49,6 +49,16 @@ import {
   SYNARA_MCP_DISABLED_ERROR_CODE,
 } from "../piSynaraMcpToolExecution";
 
+const defineTool = (tool: any) => tool;
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const deferred = <T = void>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 describe("Pi native Synara gateway tools", () => {
   it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {
     const requests: Array<{ readonly token: string | null; readonly body: any }> = [];
@@ -80,7 +90,6 @@ describe("Pi native Synara gateway tools", () => {
               },
       });
     };
-    const defineTool = (tool: any) => tool;
     const firstConnection = {
       url: "http://127.0.0.1:3773/mcp",
       bearerToken: "token-a",
@@ -352,8 +361,6 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
     };
   }
 
-  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
   async function activateAndCommit(harness: CoordinatorHarness): Promise<void> {
     const activation = harness.coordinator.activate({});
     await flush();
@@ -597,14 +604,6 @@ describe("makePiSessionSynaraMcpCoordinator", () => {
   });
 
   describe("disablePiSynaraMcpSession at the Pi provider/session boundary (impl-07 AC1)", () => {
-    const deferred = <T = void>() => {
-      let resolve!: (value: T) => void;
-      const promise = new Promise<T>((res) => {
-        resolve = res;
-      });
-      return { promise, resolve };
-    };
-
     it("fences new calls synchronously and settles in-flight executions with the structured disabled error", async () => {
       const harness = makeCoordinatorHarness({ mcpAuthority: AUTHORITY_BINDING });
       await activateAndCommit(harness);

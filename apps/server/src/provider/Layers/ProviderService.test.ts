@@ -936,7 +936,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const defaultStart = routing.codex.startSession.getMockImplementation();
       if (!defaultStart) assert.fail("Expected the fake adapter start implementation");
-      let releaseDelayedStart: () => void = () => undefined;
+      let releaseDelayedStart!: () => void;
       const delayedStart = new Promise<void>((resolve) => {
         releaseDelayedStart = resolve;
       });
@@ -977,7 +977,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
   staleSettlementRouting.layer("ProviderServiceLive stale-generation settlement", (it) => {
     it.effect("processes stale terminal events when no lifecycle generation is current", () =>
       Effect.gen(function* () {
-        const provider = yield* ProviderService;
         const threadId = asThreadId("thread-stale-terminal-no-generation");
         yield* staleSettlementRouting.codex.waitForRuntimeSubscribers();
 
@@ -1165,7 +1164,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const defaultCodexStart = routing.codex.startSession.getMockImplementation();
       if (!defaultCodexStart) assert.fail("Expected the fake Codex start implementation");
 
-      let releaseSameProviderStart: () => void = () => undefined;
+      let releaseSameProviderStart!: () => void;
       const delayedSameProviderStart = new Promise<void>((resolve) => {
         releaseSameProviderStart = resolve;
       });
@@ -1285,7 +1284,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const defaultCodexStart = routing.codex.startSession.getMockImplementation();
       if (!defaultCodexStart) assert.fail("Expected the fake Codex start implementation");
-      let releaseRecovery: () => void = () => undefined;
+      let releaseRecovery!: () => void;
       const delayedRecovery = new Promise<void>((resolve) => {
         releaseRecovery = resolve;
       });
@@ -4645,7 +4644,7 @@ idleCleanup.layer("ProviderServiceLive idle cleanup", (it) => {
       // whether new work displaced it.
       const defaultHasSession = idleCleanup.codex.hasSession.getMockImplementation();
       if (!defaultHasSession) assert.fail("Expected the fake adapter hasSession implementation");
-      let releaseIdleStop: () => void = () => undefined;
+      let releaseIdleStop!: () => void;
       const parkedIdleStop = new Promise<void>((resolve) => {
         releaseIdleStop = resolve;
       });

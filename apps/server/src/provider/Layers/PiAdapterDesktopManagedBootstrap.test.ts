@@ -28,7 +28,7 @@ import type { PiSubagentExecutionRepositoryShape } from "../../persistence/Servi
 import type { ProviderAdapterError } from "../Errors";
 import { PI_SUBAGENT_BRIDGE_KEY } from "../piSubagentBridge";
 import type { PiSubagentHandshakeRequest } from "@synara/contracts";
-import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter";
+import { PiAdapter } from "../Services/PiAdapter";
 import { makePiAdapterLive } from "./PiAdapter";
 import {
   SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
@@ -74,6 +74,13 @@ const LEGACY_THREE_CAPABILITIES = [
 /** Ordered global trace of every observable bootstrap step. */
 const trace: string[] = [];
 
+/** Same production parse as the desktop suite above. */
+const registryIdFor = (selection: string): string => {
+  const separator = selection.includes("/") ? "/" : ":";
+  const separatorIndex = selection.indexOf(separator);
+  return separatorIndex >= 0 ? selection.slice(separatorIndex + 1) : selection;
+};
+
 const sdkHarness = vi.hoisted(() => ({
   getAgentDirCalls: 0,
   modelRuntimeCreates: [] as Array<{ readonly authPath: string; readonly modelsPath: string }>,
@@ -105,12 +112,11 @@ const sdkHarness = vi.hoisted(() => ({
  */
 const bridgeState = vi.hoisted(() => ({
   /** Response factory for the artifact extension's bridge handshake. */
-  handshake:
-    null as
-      | null
-      | ((
-          request: PiSubagentHandshakeRequest,
-        ) => Promise<Record<string, unknown> | never> | Record<string, unknown>),
+  handshake: null as
+    | null
+    | ((
+        request: PiSubagentHandshakeRequest,
+      ) => Promise<Record<string, unknown> | never> | Record<string, unknown>),
   /** Whether the loader reports ANY artifact extension at all. */
   artifactExtensionLoaded: true,
   /**
@@ -478,11 +484,9 @@ const runStartSession = (input: {
     const adapter = yield* PiAdapter;
     const outcome = yield* Effect.exit(
       adapter.startSession(
-        (
-          input.modelSelection === undefined
-            ? startSessionInput
-            : { ...startSessionInput, modelSelection: input.modelSelection }
-        ) as never,
+        (input.modelSelection === undefined
+          ? startSessionInput
+          : { ...startSessionInput, modelSelection: input.modelSelection }) as never,
       ),
     );
     const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
@@ -495,11 +499,7 @@ const runStartSession = (input: {
       hasSession,
       listSessionCount: sessions.length,
     } satisfies RunResult;
-  }).pipe(
-    Effect.provide(makeAdapterLayer(input)),
-    Effect.scoped,
-    Effect.runPromise,
-  );
+  }).pipe(Effect.provide(makeAdapterLayer(input)), Effect.scoped, Effect.runPromise);
 
 // ---------------------------------------------------------------------------
 // Real verified mini artifact fixture
@@ -509,8 +509,7 @@ let fixtureRoot: string;
 let artifactRoot: string;
 let userAgentDir: string;
 
-const sha256 = (content: string): string =>
-  createHash("sha256").update(content).digest("hex");
+const sha256 = (content: string): string => createHash("sha256").update(content).digest("hex");
 
 const ARTIFACT_FILES = [
   {
@@ -710,9 +709,7 @@ describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)",
     const disposeIndex = trace.indexOf("runtime.dispose");
     expect(disposeIndex).toBeGreaterThan(capabilityIndex);
     // The published capability is the managed seven-capability truth.
-    expect(observers.subagentCapability).toEqual([
-      { status: "managed_enabled", isManaged: true },
-    ]);
+    expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
   });
 });
 
@@ -732,14 +729,13 @@ describe("PiAdapter desktop managed bootstrap — fatal denial matrix (T02-AC2/A
           return { totally: "not a handshake response" } as Record<string, unknown>;
         },
       },
-      expectedDetailFragment:
-        "(bridge_malformed_response:pi_subagent_bridge_malformed_response)",
+      expectedDetailFragment: "(bridge_malformed_response:pi_subagent_bridge_malformed_response)",
     },
     {
       label: "bridge reports an unsupported protocol version",
       scenario: {
         artifactExtensionLoaded: true,
-        handshake: async (request: PiSubagentHandshakeRequest) => {
+        handshake: async (_request: PiSubagentHandshakeRequest) => {
           trace.push("handshake");
           return {
             ok: true,
@@ -844,9 +840,7 @@ describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)",
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
     expect(result.listSessionCount).toBe(1);
-    expect(observers.subagentCapability).toEqual([
-      { status: "managed_enabled", isManaged: true },
-    ]);
+    expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
 
     // The historical non-desktop loader shape is preserved (no noExtensions
     // isolation; caller factories are an alternate Agent path).
@@ -881,17 +875,6 @@ describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)",
  * vector with hostile canaries.
  */
 describe("PiAdapter desktop managed bootstrap — unavailable explicit model (T02-AC5 fallback)", () => {
-  /**
-   * Mirrors production `parseModelReference`: the id the registry guard
-   * actually receives for a provider-qualified slug (everything after the
-   * FIRST separator, including any further separators).
-   */
-  const registryIdFor = (selection: string): string => {
-    const separator = selection.includes("/") ? "/" : ":";
-    const separatorIndex = selection.indexOf(separator);
-    return separatorIndex >= 0 ? selection.slice(separatorIndex + 1) : selection;
-  };
-
   const hostileModelSelections = [
     CANARY.modelId,
     `${CANARY.userAgentDir}/../${CANARY.modelId}`,
@@ -988,13 +971,6 @@ describe("PiAdapter desktop managed bootstrap — unavailable explicit model (T0
 });
 
 describe("PiAdapter non-desktop regression — unavailable explicit model keeps raw behavior (T02-AC5)", () => {
-  /** Same production parse as the desktop suite above. */
-  const registryIdFor = (selection: string): string => {
-    const separator = selection.includes("/") ? "/" : ":";
-    const separatorIndex = selection.indexOf(separator);
-    return separatorIndex >= 0 ? selection.slice(separatorIndex + 1) : selection;
-  };
-
   it("preserves the historical raw error with retained cause in web mode for the same hostile failure", async () => {
     resetScenario({
       handshake: managedHandshake(),

@@ -422,6 +422,22 @@ interface ClaudeSessionContext {
   };
 }
 
+type PendingInteractionSettlementScope =
+  | { readonly type: "session" }
+  | { readonly type: "foregroundTurn"; readonly turnId: TurnId };
+
+function pendingBelongsToSettlementScope(
+  context: ClaudeSessionContext,
+  pending: Pick<PendingApproval, "agentId" | "turnId">,
+  scope: PendingInteractionSettlementScope,
+): boolean {
+  return (
+    scope.type === "session" ||
+    (pending.turnId === scope.turnId &&
+      (pending.agentId === undefined || context.terminalTaskIds.has(pending.agentId)))
+  );
+}
+
 interface ClaudeStopSessionOptions {
   readonly emitExitEvent?: boolean;
   // A terminal SDK message is handled on the stream fiber itself. In that
@@ -2604,19 +2620,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return result;
         }),
       );
-
-    type PendingInteractionSettlementScope =
-      | { readonly type: "session" }
-      | { readonly type: "foregroundTurn"; readonly turnId: TurnId };
-
-    const pendingBelongsToSettlementScope = (
-      context: ClaudeSessionContext,
-      pending: Pick<PendingApproval, "agentId" | "turnId">,
-      scope: PendingInteractionSettlementScope,
-    ): boolean =>
-      scope.type === "session" ||
-      (pending.turnId === scope.turnId &&
-        (pending.agentId === undefined || context.terminalTaskIds.has(pending.agentId)));
 
     const settlePendingHumanInteractions = (
       context: ClaudeSessionContext,
