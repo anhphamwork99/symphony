@@ -87,11 +87,13 @@ export interface DerivedPromptClosure {
   readonly promptPaths: ReadonlyArray<string>;
 }
 
-const fail = (code: PiSubagentPromptClosureErrorCode, detail: string): never => {
+function fail(code: PiSubagentPromptClosureErrorCode, detail: string): never {
   throw new PiSubagentPromptClosureError(code, detail);
-};
+}
 
-const unsupported = (detail: string): never => fail("prompt_closure_unsupported", detail);
+function unsupported(detail: string): never {
+  fail("prompt_closure_unsupported", detail);
+}
 
 // ─── Source seam adapters ─────────────────────────────────────────────────────
 
@@ -102,16 +104,24 @@ export function filesystemSourceSeam(repoDir: string): PromptClosureSourceSeam {
     readSource: (modulePath) => {
       const target = resolve(root, modulePath);
       if (!target.startsWith(`${root}${sep}`)) {
-        fail("prompt_closure_invalid", `Prompt-closure source read escapes the pinned repository at '${modulePath}'.`);
+        fail(
+          "prompt_closure_invalid",
+          `Prompt-closure source read escapes the pinned repository at '${modulePath}'.`,
+        );
       }
       if (!fsSync.existsSync(target)) {
-        fail("prompt_closure_invalid", `Prompt-closure source module '${modulePath}' is missing from the pinned tree.`);
+        fail(
+          "prompt_closure_invalid",
+          `Prompt-closure source module '${modulePath}' is missing from the pinned tree.`,
+        );
       }
       return fsSync.readFileSync(target, "utf8");
     },
     resolveImport: (fromModule, specifier) => {
       if (!specifier.startsWith(".")) {
-        unsupported(`Prompt-closure analysis requires relative imports; module '${fromModule}' imports '${specifier}'.`);
+        unsupported(
+          `Prompt-closure analysis requires relative imports; module '${fromModule}' imports '${specifier}'.`,
+        );
       }
       const baseDir = posix.dirname(fromModule);
       const joined = posix.normalize(posix.join(baseDir, specifier));
@@ -235,8 +245,7 @@ function readerParameterOf(fn: ts.FunctionDeclaration): ts.ParameterDeclaration 
           ? callee.name.text
           : "";
       const firstArg = node.arguments[0];
-      const appliesToParam =
-        !!firstArg && ts.isIdentifier(firstArg) && firstArg.text === paramName;
+      const appliesToParam = !!firstArg && ts.isIdentifier(firstArg) && firstArg.text === paramName;
       if (calleeName === "existsSync" && appliesToParam) hasExistsGuard = true;
       if (calleeName === "readFileSync" && appliesToParam) hasRead = true;
       if (calleeName === "trim" || calleeName === "clean") hasNonEmptyCheck = true;
@@ -265,7 +274,13 @@ function readerParameterOf(fn: ts.FunctionDeclaration): ts.ParameterDeclaration 
 }
 
 function analyzeModule(modulePath: string, source: string): ModuleFacts {
-  const sourceFile = ts.createSourceFile(modulePath, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    modulePath,
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS,
+  );
 
   const constBindings = new Map<string, ReadonlyArray<string>>();
   const functionsByName = new Map<string, ts.FunctionDeclaration>();
@@ -298,10 +313,7 @@ function analyzeModule(modulePath: string, source: string): ModuleFacts {
     }
     if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
-        if (
-          !ts.isIdentifier(declaration.name) ||
-          declaration.initializer === undefined
-        ) {
+        if (!ts.isIdentifier(declaration.name) || declaration.initializer === undefined) {
           continue;
         }
         // Only `const` bindings participate: a mutable binding is not a
@@ -349,6 +361,40 @@ function enclosingFunction(node: ts.Node): ts.FunctionLikeDeclaration | undefine
 }
 
 /**
+ * Function-like value declarations that can bind local names (parameters,
+ * local variables, nested functions) between an identifier and module top
+ * level. Exact same kind set as the TypeScript-internal
+ * `isFunctionLikeDeclaration` helper: FunctionDeclaration, MethodDeclaration,
+ * Constructor, GetAccessor, SetAccessor, FunctionExpression, ArrowFunction.
+ * Deliberately NOT `ts.isFunctionLike`, whose wider signature-kind set
+ * (MethodSignature, CallSignature, IndexSignature, FunctionType…) would
+ * treat type-only signature nodes as local-binding scopes.
+ */
+function isFunctionLikeDeclaration(
+  node: ts.Node,
+): node is
+  | ts.FunctionDeclaration
+  | ts.MethodDeclaration
+  | ts.ConstructorDeclaration
+  | ts.GetAccessorDeclaration
+  | ts.SetAccessorDeclaration
+  | ts.FunctionExpression
+  | ts.ArrowFunction {
+  switch (node.kind) {
+    case ts.SyntaxKind.FunctionDeclaration:
+    case ts.SyntaxKind.MethodDeclaration:
+    case ts.SyntaxKind.Constructor:
+    case ts.SyntaxKind.GetAccessor:
+    case ts.SyntaxKind.SetAccessor:
+    case ts.SyntaxKind.FunctionExpression:
+    case ts.SyntaxKind.ArrowFunction:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
  * Resolves a callee identifier lexically inside a module: a module-level
  * function declaration, or a named import binding. Shadowing inside nested
  * scopes is treated as unresolved (conservative fail-closed).
@@ -359,12 +405,20 @@ function resolveReference(module: ModuleFacts, identifier: ts.Identifier): Resol
   // proving the absence of such a binder statically requires scope walking —
   // conservatively reject identifiers that declare a like-named local
   // anywhere in the enclosing function chain.
-  for (let scope: ts.Node | undefined = identifier.parent; scope !== undefined; scope = scope.parent) {
-    if (ts.isFunctionDeclaration(scope) && scope.name?.text === identifier.text && functionsContains(module, scope)) {
+  for (
+    let scope: ts.Node | undefined = identifier.parent;
+    scope !== undefined;
+    scope = scope.parent
+  ) {
+    if (
+      ts.isFunctionDeclaration(scope) &&
+      scope.name?.text === identifier.text &&
+      functionsContains(module, scope)
+    ) {
       return { kind: "module_function", declaration: scope };
     }
     const shadows =
-      (ts.isFunctionLikeDeclaration(scope) || ts.isBlock(scope)) &&
+      (isFunctionLikeDeclaration(scope) || ts.isBlock(scope)) &&
       declaresLocalName(scope, identifier.text);
     if (shadows) return { kind: "unresolved" };
   }
@@ -375,7 +429,11 @@ function resolveReference(module: ModuleFacts, identifier: ts.Identifier): Resol
     return { kind: "imported_function", importName: identifier.text, specifier: relativeSpecifier };
   }
   if (module.externalImports.has(identifier.text)) {
-    return { kind: "imported_function", importName: identifier.text, specifier: module.externalImports.get(identifier.text)! };
+    return {
+      kind: "imported_function",
+      importName: identifier.text,
+      specifier: module.externalImports.get(identifier.text)!,
+    };
   }
   return { kind: "unresolved" };
 }
@@ -392,7 +450,8 @@ function declaresLocalName(scope: ts.Node, name: string): boolean {
   let found = false;
   const visit = (node: ts.Node): void => {
     if (found) return;
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) found = true;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name)
+      found = true;
     if (ts.isParameter(node) && ts.isIdentifier(node.name) && node.name.text === name) found = true;
     if (ts.isFunctionDeclaration(node) && node.name?.text === name) found = true;
     ts.forEachChild(node, visit);
@@ -449,7 +508,11 @@ interface WalkContext {
  * merely reuses a reader's parameter name is a distinct binding and fails
  * closed here.
  */
-function accountRawReadsOfModule(modulePath: string, module: ModuleFacts, context: WalkContext): void {
+function accountRawReadsOfModule(
+  modulePath: string,
+  module: ModuleFacts,
+  context: WalkContext,
+): void {
   if (context.visitedModules.has(modulePath)) return;
   context.visitedModules.add(modulePath);
 
@@ -468,7 +531,11 @@ function accountRawReadsOfModule(modulePath: string, module: ModuleFacts, contex
       if (calleeName === "readFileSync" && firstArg !== undefined) {
         const enclosing = enclosingFunction(node);
         const routedThroughRecognizedReader = (() => {
-          if (enclosing === undefined || !ts.isFunctionDeclaration(enclosing) || enclosing.name === undefined) {
+          if (
+            enclosing === undefined ||
+            !ts.isFunctionDeclaration(enclosing) ||
+            enclosing.name === undefined
+          ) {
             return false;
           }
           const declaration = module.functionsByName.get(enclosing.name.text);
@@ -487,10 +554,13 @@ function accountRawReadsOfModule(modulePath: string, module: ModuleFacts, contex
           if (firstArg.text !== readerParam.name.getText()) {
             return false;
           }
-          for (let scope: ts.Node | undefined = node.parent; scope !== undefined && scope !== declaration; scope = scope.parent) {
+          for (
+            let scope: ts.Node | undefined = node.parent;
+            scope !== undefined && scope !== declaration;
+            scope = scope.parent
+          ) {
             const binder =
-              (ts.isFunctionLikeDeclaration(scope) || ts.isBlock(scope)) &&
-              scope !== enclosing;
+              (isFunctionLikeDeclaration(scope) || ts.isBlock(scope)) && scope !== enclosing;
             if (binder && declaresLocalName(scope, firstArg.text)) {
               return false;
             }
@@ -607,28 +677,30 @@ export function derivePromptClosure(seam: PromptClosureSourceSeam): DerivedPromp
   // Resolve the prompt-builder import from the entry module.
   let promptModulePath: string | undefined;
   for (const statement of entryFile.statements) {
-    const declarations = ts.isImportDeclaration(statement)
-      ? statement.importClause?.namedBindings !== undefined &&
-          ts.isNamedImports(statement.importClause.namedBindings)
+    const declarations =
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.importClause?.namedBindings !== undefined &&
+      ts.isNamedImports(statement.importClause.namedBindings)
         ? [[statement.importClause.namedBindings, statement.moduleSpecifier.text] as const]
-        : []
-      : ts.isVariableStatement(statement)
-        ? statement.declarationList.declarations
-            .filter(
-              (declaration): declaration is ts.VariableDeclaration & { initializer: ts.CallExpression } =>
-                declaration.initializer !== undefined && ts.isCallExpression(declaration.initializer),
-            )
-            .map((declaration) => {
-              const call = declaration.initializer;
-              const specifierArg = call.arguments[0];
-              const specifier = specifierArg && ts.isStringLiteral(specifierArg) ? specifierArg.text : "";
-              const named = declaration.name;
-              return [
-                ts.isObjectBindingPattern(named) ? named : undefined,
-                specifier,
-              ] as const;
-            })
-        : [];
+        : ts.isVariableStatement(statement)
+          ? statement.declarationList.declarations
+              .filter(
+                (
+                  declaration,
+                ): declaration is ts.VariableDeclaration & { initializer: ts.CallExpression } =>
+                  declaration.initializer !== undefined &&
+                  ts.isCallExpression(declaration.initializer),
+              )
+              .map((declaration) => {
+                const call = declaration.initializer;
+                const specifierArg = call.arguments[0];
+                const specifier =
+                  specifierArg && ts.isStringLiteral(specifierArg) ? specifierArg.text : "";
+                const named = declaration.name;
+                return [ts.isObjectBindingPattern(named) ? named : undefined, specifier] as const;
+              })
+          : [];
     for (const [bindings, specifier] of declarations) {
       if (!bindings) continue;
       const importsBuilder = bindings.elements.some(
@@ -660,10 +732,17 @@ export function derivePromptClosure(seam: PromptClosureSourceSeam): DerivedPromp
     walkedFunctions: new Set<string>(),
     collected: new Set<string>(),
   };
-  walkReachableFunction({ modulePath: promptModulePath, module: promptFacts, fn: builder, context });
+  walkReachableFunction({
+    modulePath: promptModulePath,
+    module: promptFacts,
+    fn: builder,
+    context,
+  });
 
   if (context.collected.size === 0) {
-    unsupported(`No required prompt reads found in '${PROMPT_BUILDER_NAME}' within '${promptModulePath}'.`);
+    unsupported(
+      `No required prompt reads found in '${PROMPT_BUILDER_NAME}' within '${promptModulePath}'.`,
+    );
   }
 
   return { promptPaths: [...context.collected].sort() };
@@ -685,11 +764,7 @@ export function derivePromptClosureFromRepo(input: {
   const validated: string[] = [];
   for (const relativePath of closure.promptPaths) {
     const absolute = resolve(root, relativePath);
-    if (
-      absolute === root ||
-      !absolute.startsWith(`${root}${sep}`) ||
-      relativePath.includes("..")
-    ) {
+    if (absolute === root || !absolute.startsWith(`${root}${sep}`) || relativePath.includes("..")) {
       fail(
         "prompt_closure_invalid",
         `Derived prompt dependency '${relativePath}' escapes the pinned repository root.`,

@@ -96,6 +96,7 @@ interface LockPackagesEntry {
   readonly optional?: unknown;
   readonly link?: unknown;
   readonly dependencies?: Record<string, string> | undefined;
+  readonly peerDependencies?: Record<string, string> | undefined;
 }
 
 interface LockfileShape {
@@ -113,7 +114,11 @@ interface PackageManifestShape {
   readonly peerDependencies?: Record<string, string> | undefined;
 }
 
-function readJsonFile(filePath: string, errorCode: PiSubagentNpmRuntimeClosureErrorCode, label: string): unknown {
+function readJsonFile(
+  filePath: string,
+  errorCode: PiSubagentNpmRuntimeClosureErrorCode,
+  label: string,
+): unknown {
   if (!existsSync(filePath)) {
     throw new PiSubagentNpmRuntimeClosureError(errorCode, `${label} not found at '${filePath}'.`);
   }
@@ -127,9 +132,16 @@ function readJsonFile(filePath: string, errorCode: PiSubagentNpmRuntimeClosureEr
   }
 }
 
-function asRecord(value: unknown, errorCode: PiSubagentNpmRuntimeClosureErrorCode, label: string): Record<string, unknown> {
+function asRecord(
+  value: unknown,
+  errorCode: PiSubagentNpmRuntimeClosureErrorCode,
+  label: string,
+): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new PiSubagentNpmRuntimeClosureError(errorCode, `${label} is malformed (expected an object).`);
+    throw new PiSubagentNpmRuntimeClosureError(
+      errorCode,
+      `${label} is malformed (expected an object).`,
+    );
   }
   return value as Record<string, unknown>;
 }
@@ -157,10 +169,14 @@ export function assertLockRootMatchesPackageManifest(input: {
   const pkgDeps = normalizeDependencyMap(input.packageManifest.dependencies);
   const pkgPeers = normalizeDependencyMap(input.packageManifest.peerDependencies) ?? {};
 
-  const sameMap = (a: Record<string, string> | undefined, b: Record<string, string> | undefined): boolean => {
+  const sameMap = (
+    a: Record<string, string> | undefined,
+    b: Record<string, string> | undefined,
+  ): boolean => {
     const aKeys = Object.keys(a ?? {}).sort();
     const bKeys = Object.keys(b ?? {}).sort();
-    if (aKeys.length !== bKeys.length || aKeys.some((key, index) => key !== bKeys[index])) return false;
+    if (aKeys.length !== bKeys.length || aKeys.some((key, index) => key !== bKeys[index]))
+      return false;
     return aKeys.every((key) => (a ?? {})[key] === (b ?? {})[key]);
   };
 
@@ -196,8 +212,16 @@ export function selectNpmRuntimeClosure(input: {
   readonly packageJson: unknown;
   readonly packageLockJson: unknown;
 }): NpmRuntimeClosureSelection {
-  const packageManifest = asRecord(input.packageJson, "lock_malformed", "Extension package.json") as PackageManifestShape;
-  const lock = asRecord(input.packageLockJson, "lock_malformed", "Extension package-lock.json") as LockfileShape;
+  const packageManifest = asRecord(
+    input.packageJson,
+    "lock_malformed",
+    "Extension package.json",
+  ) as PackageManifestShape;
+  const lock = asRecord(
+    input.packageLockJson,
+    "lock_malformed",
+    "Extension package-lock.json",
+  ) as LockfileShape;
 
   if (lock.lockfileVersion !== 3) {
     throw new PiSubagentNpmRuntimeClosureError(
@@ -205,13 +229,17 @@ export function selectNpmRuntimeClosure(input: {
       `Unsupported lockfileVersion ${String(lock.lockfileVersion)}; expected npm lockfileVersion 3.`,
     );
   }
-  const packages = asRecord(lock.packages, "lock_malformed", "Extension package-lock.json packages tree") as Record<
-    string,
-    LockPackagesEntry
-  >;
+  const packages = asRecord(
+    lock.packages,
+    "lock_malformed",
+    "Extension package-lock.json packages tree",
+  ) as Record<string, LockPackagesEntry>;
   const lockRoot = packages[""];
   if (lockRoot === undefined) {
-    throw new PiSubagentNpmRuntimeClosureError("lock_malformed", "Lockfile has no root package entry.");
+    throw new PiSubagentNpmRuntimeClosureError(
+      "lock_malformed",
+      "Lockfile has no root package entry.",
+    );
   }
 
   assertLockRootMatchesPackageManifest({ lockRootPackagesEntry: lockRoot, packageManifest });
@@ -270,19 +298,26 @@ export function selectNpmRuntimeClosure(input: {
 
     selected.set(name, { name, lockPath, version, integrity, resolved });
 
-    for (const transitiveName of Object.keys(normalizeDependencyMap(entry.dependencies) ?? {}).sort()) {
+    for (const transitiveName of Object.keys(
+      normalizeDependencyMap(entry.dependencies) ?? {},
+    ).sort()) {
       if (!visited.has(transitiveName)) queue.push(transitiveName);
     }
   }
 
   return {
-    packages: [...selected.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+    packages: [...selected.values()].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    ),
     lockRootVersion: typeof lockRoot.version === "string" ? lockRoot.version : "",
   };
 }
 
 /** Absolute source paths the closure reads from the pinned checkout. */
-export function npmClosureSourcePaths(input: { readonly repoDir: string; readonly packageRootRelative: string }): {
+export function npmClosureSourcePaths(input: {
+  readonly repoDir: string;
+  readonly packageRootRelative: string;
+}): {
   readonly packageJsonPath: string;
   readonly packageLockJsonPath: string;
 } {
@@ -334,7 +369,11 @@ export function materializeNpmRuntimeClosure(input: {
     packageRootRelative: input.packageRootRelative,
   });
   const packageJson = readJsonFile(packageJsonPath, "lock_missing", "Extension package.json");
-  const packageLockJson = readJsonFile(packageLockJsonPath, "lock_missing", "Extension package-lock.json");
+  const packageLockJson = readJsonFile(
+    packageLockJsonPath,
+    "lock_missing",
+    "Extension package-lock.json",
+  );
   const selection = input.selection ?? selectNpmRuntimeClosure({ packageJson, packageLockJson });
   if (selection.packages.length === 0) {
     throw new PiSubagentNpmRuntimeClosureError(

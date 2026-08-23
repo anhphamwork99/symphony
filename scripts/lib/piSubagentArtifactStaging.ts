@@ -435,9 +435,10 @@ function assertNoProhibitedPayload(
  * are the extension's own declaration, so the manifest profile is derived from
  * the pinned bytes instead of a duplicated host-side list that could drift.
  */
-function extractDeclaredCapabilityProfile(
-  entrySource: string,
-): { protocolVersion: number; capabilities: ReadonlyArray<string> } {
+function extractDeclaredCapabilityProfile(entrySource: string): {
+  protocolVersion: number;
+  capabilities: ReadonlyArray<string>;
+} {
   const protocolMatch = /const\s+PI_SUBAGENTS_PROTOCOL_VERSION\s*=\s*(\d+)\s*;/.exec(entrySource);
   const capabilitiesMatch =
     /const\s+PI_SUBAGENT_CAPABILITIES\s*=\s*\[([\s\S]*?)\]\s*(?:as\s+const)?\s*;/.exec(entrySource);
@@ -530,7 +531,11 @@ function derivePromptClosureInputs(repoDir: string): ReadonlyArray<string> {
   // The whole agent/system subtree must be clean so derived bytes provably
   // come from the pinned commit (an untracked or modified prompt input is
   // ambient checkout state, never release content).
-  const systemStatusRaw = git(repoDir, ["status", "--porcelain", PROMPT_SYSTEM_RELATIVE_ROOT]).trim();
+  const systemStatusRaw = git(repoDir, [
+    "status",
+    "--porcelain",
+    PROMPT_SYSTEM_RELATIVE_ROOT,
+  ]).trim();
   const systemStatusLines = systemStatusRaw
     .split("\n")
     .map((line) => line.trim())
@@ -542,12 +547,7 @@ function derivePromptClosureInputs(repoDir: string): ReadonlyArray<string> {
     );
   }
 
-  const trackedOutput = git(repoDir, [
-    "ls-files",
-    "-z",
-    "--",
-    PROMPT_SYSTEM_RELATIVE_ROOT,
-  ]);
+  const trackedOutput = git(repoDir, ["ls-files", "-z", "--", PROMPT_SYSTEM_RELATIVE_ROOT]);
   const trackedSet = new Set(
     trackedOutput
       .split("\0")
@@ -685,7 +685,7 @@ export function buildPiSubagentArtifact(input: {
       stagingArtifactDir,
       verified,
       provenance: input.provenance,
-      npmCommand: input.npmCommand,
+      ...(input.npmCommand !== undefined ? { npmCommand: input.npmCommand } : {}),
     });
 
     // Atomic publish: only now, with the manifest validated and the staged
@@ -698,7 +698,11 @@ export function buildPiSubagentArtifact(input: {
       rmSync(artifactDir, { recursive: true, force: true });
     }
     renameSync(stagingArtifactDir, artifactDir);
-    return { ...staged, artifactDir, manifestPath: join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME) };
+    return {
+      ...staged,
+      artifactDir,
+      manifestPath: join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
+    };
   } finally {
     rmSync(stagingArtifactDir, { recursive: true, force: true });
   }
@@ -755,7 +759,7 @@ function assembleArtifactInto(input: {
         destinationDirName: "node_modules",
         artifactDir,
         selection,
-        npmCommand: input.npmCommand,
+        ...(input.npmCommand !== undefined ? { npmCommand: input.npmCommand } : {}),
       });
     } catch (cause) {
       if (cause instanceof PiSubagentNpmRuntimeClosureError) {
@@ -828,7 +832,7 @@ function assembleArtifactInto(input: {
   const nodeModulesRoot = join(artifactDir, "node_modules");
   if (existsSync(nodeModulesRoot)) {
     const dependencyFiles = walkRegularFiles(nodeModulesRoot, "node_modules");
-    for (const relativePath of dependencyFiles.sort()) {
+    for (const relativePath of [...dependencyFiles].sort()) {
       assertNoProhibitedPayload(relativePath, allowedNodeModulesPackagePrefixes);
       const stagedPath = join(artifactDir, relativePath);
       const stagedStats = lstatSync(stagedPath);
@@ -890,7 +894,10 @@ function assembleArtifactInto(input: {
     (relative) => relative !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
   );
   const listedPaths = new Set(validatedManifest.files.map((record) => record.path));
-  if (stagedEntries.length !== listedPaths.size || !stagedEntries.every((path) => listedPaths.has(path))) {
+  if (
+    stagedEntries.length !== listedPaths.size ||
+    !stagedEntries.every((path) => listedPaths.has(path))
+  ) {
     throw new PiSubagentArtifactStagingError(
       "staging_output_invalid",
       "Staged pi-subagents artifact content does not exactly match the generated manifest.",

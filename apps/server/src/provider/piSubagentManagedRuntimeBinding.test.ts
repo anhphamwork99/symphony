@@ -77,11 +77,11 @@ describe("createPiSubagentDesktopManagedHandshakeRequest", () => {
   it("keeps every non-required known capability optional (nothing silently dropped)", () => {
     const request = createPiSubagentDesktopManagedHandshakeRequest();
     const required = new Set<string>(request.requiredCapabilities);
-    const optional = new Set<string>(request.optionalCapabilities);
+    const optional = new Set<string>(request.optionalCapabilities ?? []);
     for (const capability of PI_SUBAGENT_CAPABILITIES) {
       expect(required.has(capability) || optional.has(capability)).toBe(true);
     }
-    for (const capability of request.optionalCapabilities) {
+    for (const capability of request.optionalCapabilities ?? []) {
       expect(required.has(capability)).toBe(false);
     }
   });
@@ -223,7 +223,9 @@ describe("piSubagentDesktopManagedBootstrapFailureDetail", () => {
         isManaged: false,
         diagnosticMessage: "Pi subagent bridge not found; using legacy unmanaged behavior",
       }),
-    ).toBe("Managed Pi subagent harness bootstrap failed (bridge_absent:pi_subagent_bridge_absent)");
+    ).toBe(
+      "Managed Pi subagent harness bootstrap failed (bridge_absent:pi_subagent_bridge_absent)",
+    );
   });
 
   it("lists missing capabilities from the closed vocabulary only", () => {

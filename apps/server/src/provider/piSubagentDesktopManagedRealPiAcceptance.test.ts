@@ -23,12 +23,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  CommandId,
-  MessageId,
-  ProjectId,
-  ThreadId,
-} from "@synara/contracts";
+import type { Json, JsonObject } from "effect/Schema";
+
+import { CommandId, MessageId, ProjectId, ThreadId } from "@synara/contracts";
 
 import {
   buildPiSubagentArtifact,
@@ -120,7 +117,10 @@ function readdirStable(rootDir: string): string[] {
   return entries;
 }
 
-function installUserGlobalCanary(userAgentDir: string): { readonly dir: string; readonly snapshot: TreeSnapshot } {
+function installUserGlobalCanary(userAgentDir: string): {
+  readonly dir: string;
+  readonly snapshot: TreeSnapshot;
+} {
   const canaryDir = join(userAgentDir, "extensions", "pi-subagents");
   mkdirSync(join(canaryDir, "src"), { recursive: true });
   writeFileSync(
@@ -217,7 +217,10 @@ function loadedAgentExtensionPath(harness: RealPiWsHarness, threadId: ThreadId):
     | undefined;
   const extensions = session?.resourceLoader?.getExtensions?.().extensions ?? [];
   const loaded = extensions.find(
-    (candidate) => typeof candidate.path === "string" && candidate.tools instanceof Map && candidate.tools.has("Agent"),
+    (candidate) =>
+      typeof candidate.path === "string" &&
+      candidate.tools instanceof Map &&
+      candidate.tools.has("Agent"),
   );
   if (!loaded?.path) {
     throw new Error(`No loaded Agent-bearing extension found for thread '${threadId}'.`);
@@ -234,7 +237,8 @@ function readPiLedgerCounts(dbPath: string): {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const count = (table: string) =>
-      (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { readonly count: number }).count;
+      (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { readonly count: number })
+        .count;
     return {
       executions: count("pi_subagent_executions"),
       journal: count("pi_subagent_lifecycle_journal"),
@@ -297,7 +301,12 @@ async function createThreadHarnessState(
   return { projectId, threadId };
 }
 
-async function startTurn(harness: RealPiWsHarness, threadId: ThreadId, suffix: string, text: string): Promise<void> {
+async function startTurn(
+  harness: RealPiWsHarness,
+  threadId: ThreadId,
+  suffix: string,
+  text: string,
+): Promise<void> {
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
     commandId: CommandId.makeUnsafe(`cmd-t02-wpc-turn-${suffix}`),
@@ -314,14 +323,31 @@ async function startTurn(harness: RealPiWsHarness, threadId: ThreadId, suffix: s
   });
 }
 
-async function waitForTurnStartFailureDetail(harness: RealPiWsHarness, threadId: ThreadId): Promise<string> {
+/** Narrows a Schema.Json activity payload to an object carrying a string `detail`. */
+function isJsonObjectWithDetail(
+  payload: Json | undefined,
+): payload is JsonObject & { readonly detail: string } {
+  return (
+    payload !== null &&
+    payload !== undefined &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    typeof (payload as JsonObject).detail === "string"
+  );
+}
+
+async function waitForTurnStartFailureDetail(
+  harness: RealPiWsHarness,
+  threadId: ThreadId,
+): Promise<string> {
   const detail = await waitFor(
     async () => {
       const thread = (await harness.client.getThreadDetailSnapshot(String(threadId)))?.thread;
       const failed = thread?.activities.find(
         (activity) => activity.kind === "provider.turn.start.failed",
       );
-      return typeof failed?.payload?.detail === "string" ? failed.payload.detail : undefined;
+      const payload = failed?.payload;
+      return isJsonObjectWithDetail(payload) ? payload.detail : undefined;
     },
     (value) => value.length > 0,
     45_000,
@@ -470,476 +496,475 @@ afterAll(async () => {
 });
 
 describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
-  it(
-    "AC1 + AC3: desktop managed loads only the staged artifact extension, ignores user/global and settings decoys, uses the real Agent tool, and commits exactly one durable admission",
-    async () => {
-      const harness = await makeDesktopHarness(copyArtifactForRun("ac1-ac3"));
-      try {
-        if (harness.desktop === undefined) {
-          throw new Error("Desktop harness did not expose controlled desktop paths.");
-        }
-        rewriteDecoyParentAgentDir(harness.parentAgentDir);
-        const userCanary = installUserGlobalCanary(harness.desktop.userAgentDir);
-
-        const settings = await harness.client.getServerSettings();
-        expect(settings.providers.pi?.agentDir).toBe(harness.parentAgentDir);
-
-        const { threadId } = await createThreadHarnessState(harness, "ac1-ac3", DETERMINISTIC_DRIVER_MODEL_ID);
-        await startTurn(
-          harness,
-          threadId,
-          "ac1-ac3",
-          "Delegate this desktop managed acceptance task to a researcher subagent.",
-        );
-
-        const capabilityBeforeAdmission = await waitFor(
-          () => {
-            const capability = harness.observedCapabilities().get(String(threadId));
-            const admissions = harness
-              .observedAdmissions()
-              .filter((event) => String(event.threadId) === String(threadId));
-            return capability !== undefined && admissions.length === 0 ? capability : undefined;
-          },
-          (capability) => capability.status === "managed_enabled",
-          45_000,
-          "managed capability before Agent admission",
-        );
-        expect(capabilityBeforeAdmission.isManaged).toBe(true);
-        for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
-          expect(capabilityBeforeAdmission.capabilities).toContain(required);
-        }
-
-        const admission = await waitFor(
-          () =>
-            harness
-              .observedAdmissions()
-              .find((event) => String(event.threadId) === String(threadId)),
-          (value) => value !== undefined && value.result.status !== "rejected",
-          90_000,
-          "single managed admission",
-        );
-        expect(
-          harness
-            .observedAdmissions()
-            .filter((event) => String(event.threadId) === String(threadId)),
-        ).toHaveLength(1);
-
-        const executionId = admission.result.executionId;
-        const durable = await waitFor(
-          () => harness.durable.getById(executionId),
-          (value) => value !== undefined,
-          30_000,
-          "durable admitted row",
-        );
-        const journal = await waitFor(
-          () => harness.durable.listJournalEvents(executionId),
-          (events) => events.some((event) => event.sequence === 2),
-          30_000,
-          "accepted and started journal",
-        );
-        expect(journal[0]?.sequence).toBe(1);
-        expect(journal[0]?.state).toBe("accepted");
-        expect(journal[0]?.attemptId).toBe(durable.attemptId);
-        expect(journal[0]?.generation).toBe(durable.generation);
-        expect(journal[1]?.sequence).toBe(2);
-        expect(journal[1]?.state).toBe("running");
-        expect(journal[1]?.attemptId).toBe(durable.attemptId);
-        expect(journal[1]?.generation).toBe(durable.generation);
-
-        const loadedPath = loadedAgentExtensionPath(harness, threadId);
-        expect(loadedPath.startsWith(resolve(harness.desktop.managedExtensionDir))).toBe(true);
-        expect(loadedPath.startsWith(resolve(userCanary.dir))).toBe(false);
-        expect(loadedPath.startsWith(resolve(harness.parentAgentDir))).toBe(false);
-
-        const card = await harness.waitForExecutionCard(
-          String(threadId),
-          (candidate) => candidate.executionId === executionId,
-          45_000,
-        );
-        expect(card.attemptId).toBe(durable.attemptId);
-        expect(card.generation).toBe(durable.generation);
-
-        const modelRequests = await waitFor(
-          () => harness.modelServer.requests(),
-          (requests) =>
-            requests.some(
-              (request) =>
-                request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
-            ),
-          45_000,
-          "real Agent parent model traffic",
-        );
-        expect(
-          modelRequests.some(
-            (request) =>
-              request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
-          ),
-        ).toBe(true);
-
-        const userCanaryAfter = snapshotTree(userCanary.dir);
-        expect(userCanaryAfter).toEqual(userCanary.snapshot);
-
-        const artifactStillValid = await verifyPiSubagentArtifact(stagedFixture.sourceArtifactDir);
-        expect(artifactStillValid.valid).toBe(true);
-      } finally {
-        await harness.dispose();
-        expect(harness.envWasRestored()).toBe(true);
+  it("AC1 + AC3: desktop managed loads only the staged artifact extension, ignores user/global and settings decoys, uses the real Agent tool, and commits exactly one durable admission", async () => {
+    const harness = await makeDesktopHarness(copyArtifactForRun("ac1-ac3"));
+    try {
+      if (harness.desktop === undefined) {
+        throw new Error("Desktop harness did not expose controlled desktop paths.");
       }
-    },
-    180_000,
-  );
+      rewriteDecoyParentAgentDir(harness.parentAgentDir);
+      const userCanary = installUserGlobalCanary(harness.desktop.userAgentDir);
 
-  it(
-    "AC2: a good desktop session negotiates managed capability before admission, while a separately corrupted artifact fails early with bounded digest diagnostics and zero public side effects",
-    async () => {
-      const goodHarness = await makeDesktopHarness(copyArtifactForRun("ac2-good"));
-      try {
-        const { threadId } = await createThreadHarnessState(goodHarness, "ac2-good", DETERMINISTIC_DRIVER_MODEL_ID);
-        await startTurn(goodHarness, threadId, "ac2-good", "Capability probe ordering check.");
+      const settings = await harness.client.getServerSettings();
+      expect(settings.providers.pi?.agentDir).toBe(harness.parentAgentDir);
 
-        const capability = await waitFor(
-          () => {
-            const value = goodHarness.observedCapabilities().get(String(threadId));
-            const admissions = goodHarness
-              .observedAdmissions()
-              .filter((event) => String(event.threadId) === String(threadId));
-            return value !== undefined && admissions.length === 0 ? value : undefined;
-          },
-          (value) => value.status === "managed_enabled",
-          45_000,
-          "managed capability before any Agent admission",
-        );
-        expect(capability.isManaged).toBe(true);
-        for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
-          expect(capability.capabilities).toContain(required);
-        }
-      } finally {
-        await goodHarness.dispose();
-        expect(goodHarness.envWasRestored()).toBe(true);
-      }
-
-      const corruptArtifactDir = copyArtifactForRun("ac2-bad");
-      writeFileSync(
-        join(corruptArtifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts"),
-        `${readFileSync(
-          join(corruptArtifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts"),
-          "utf8",
-        )}\n// ${CANARY_MARKER}: corrupt copy only\n`,
-        "utf8",
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "ac1-ac3",
+        DETERMINISTIC_DRIVER_MODEL_ID,
       );
-      const corruptVerified = await verifyPiSubagentArtifact(corruptArtifactDir);
-      expect(corruptVerified.valid).toBe(false);
-      expect(corruptVerified.category).toBe("digest_mismatch");
+      await startTurn(
+        harness,
+        threadId,
+        "ac1-ac3",
+        "Delegate this desktop managed acceptance task to a researcher subagent.",
+      );
 
-      const badHarness = await makeDesktopHarness(corruptArtifactDir);
-      try {
-        const { threadId } = await createThreadHarnessState(badHarness, "ac2-bad", DETERMINISTIC_DRIVER_MODEL_ID);
-        await startTurn(
-          badHarness,
-          threadId,
-          "ac2-bad",
-          "This must fail at desktop artifact bootstrap before any Pi Agent work.",
-        );
-
-        const detail = await waitForTurnStartFailureDetail(badHarness, threadId);
-        expect(detail).toContain("Managed Pi subagents are unavailable (digest_mismatch):");
-        expect(detail).toContain("managed pi artifact verification failed: digest_mismatch");
-        expect(detail.length).toBeLessThanOrEqual(1_024);
-        expect(detail).not.toContain(corruptArtifactDir);
-        expect(detail).not.toContain(stagedFixture.sourceArtifactDir);
-
-        const threadDetail = await badHarness.waitForThreadDetail(String(threadId));
-        expect(threadDetail.thread.session).toMatchObject({
-          providerName: "pi",
-          status: "error",
-          activeTurnId: null,
-        });
-        expect(threadDetail.thread.session?.lastError).toContain("digest_mismatch");
-        expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
-        expect(badHarness.observedSessions().size).toBe(0);
-        expect(badHarness.observedCapabilities().size).toBe(0);
-        expect(badHarness.observedAdmissions()).toHaveLength(0);
-        expect(badHarness.modelServer.requestCount()).toBe(0);
-      } finally {
-        // WAL repair (Ticket 02 draft defect): the live repo holds exclusive
-        // WAL access, so readPiLedgerCounts must run only AFTER dispose
-        // releases it (same pattern as piSubagentRealPiAcceptance.test.ts's
-        // post-shutdown closedDatabase read). preserveRootDir keeps the
-        // SQLite file readable until the count check below; every public
-        // WS/no-effects assertion above already ran while the harness was
-        // live.
-        const badDbPath = badHarness.dbPath;
-        await badHarness.dispose({ preserveRootDir: true });
-        expect(badHarness.envWasRestored()).toBe(true);
-
-        const ledger = readPiLedgerCounts(badDbPath);
-        expect(ledger.executions).toBe(0);
-        expect(ledger.journal).toBe(0);
-        expect(ledger.outbox).toBe(0);
-        expect(ledger.batches).toBe(0);
+      const capabilityBeforeAdmission = await waitFor(
+        () => {
+          const capability = harness.observedCapabilities().get(String(threadId));
+          const admissions = harness
+            .observedAdmissions()
+            .filter((event) => String(event.threadId) === String(threadId));
+          return capability !== undefined && admissions.length === 0 ? capability : undefined;
+        },
+        (capability) => capability.status === "managed_enabled",
+        45_000,
+        "managed capability before Agent admission",
+      );
+      expect(capabilityBeforeAdmission.isManaged).toBe(true);
+      for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
+        expect(capabilityBeforeAdmission.capabilities).toContain(required);
       }
-    },
-    180_000,
-  );
 
-  it(
-    "AC4: a slow real child detaches within the bounded foreground window, emits strictly-new progress/heartbeat liveness after the detach journal event, commits exactly one terminal seq-40, and clears the active registry only after handoff",
-    async () => {
-      const harness = await makeDesktopHarness(copyArtifactForRun("ac4"));
-      try {
-        harness.writeSubagentModelPreference("synara-local-echo/echo-slow");
-        writeResearcherSlowPreference(harness.piHomeDir);
-        const { threadId } = await createThreadHarnessState(harness, "ac4", DETERMINISTIC_DRIVER_MODEL_ID);
-        await startTurn(harness, threadId, "ac4", "Delegate the slow desktop child task.");
+      const admission = await waitFor(
+        () =>
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
+        (value) => value !== undefined && value.result.status !== "rejected",
+        90_000,
+        "single managed admission",
+      );
+      expect(
+        harness.observedAdmissions().filter((event) => String(event.threadId) === String(threadId)),
+      ).toHaveLength(1);
 
-        const admission = await waitFor(
-          () =>
-            harness
-              .observedAdmissions()
-              .find((event) => String(event.threadId) === String(threadId)),
-          (value) => value !== undefined && value.result.status !== "rejected",
-          90_000,
-          "slow managed desktop admission",
-        );
-        const executionId = admission.result.executionId;
-        const durable = await waitFor(
-          () => harness.durable.getById(executionId),
-          (value) => value !== undefined,
-          30_000,
-          "durable execution row",
-        );
-        await waitFor(
-          () => harness.modelServer.requests(),
-          (requests) =>
-            requests.some(
-              (request) =>
-                request.model === DETERMINISTIC_SLOW_MODEL_ID && request.hasAgentTool === false,
-            ),
-          45_000,
-          "slow child model request",
-        );
+      const executionId = admission.result.executionId;
+      const durable = await waitFor(
+        () => harness.durable.getById(executionId),
+        (value) => value !== undefined,
+        30_000,
+        "durable admitted row",
+      );
+      const journal = await waitFor(
+        () => harness.durable.listJournalEvents(executionId),
+        (events) => events.some((event) => event.sequence === 2),
+        30_000,
+        "accepted and started journal",
+      );
+      expect(journal[0]?.sequence).toBe(1);
+      expect(journal[0]?.state).toBe("accepted");
+      expect(journal[0]?.attemptId).toBe(durable.attemptId);
+      expect(journal[0]?.generation).toBe(durable.generation);
+      expect(journal[1]?.sequence).toBe(2);
+      expect(journal[1]?.state).toBe("running");
+      expect(journal[1]?.attemptId).toBe(durable.attemptId);
+      expect(journal[1]?.generation).toBe(durable.generation);
 
-        // Finding B (independent review), part 1 — pre-detach liveness
-        // baseline: capture the observation state as of the started (seq-2)
-        // journal event, before the detach event can be observed. With this
-        // harness's deterministic loopback the slow child model answers
-        // only after DETERMINISTIC_SLOW_DELAY_MS = 4_000 ms, while the
-        // foreground budget is 300 ms — so the producer's progress funnel
-        // (`onStreamUpdate`) cannot have fired yet and NO progress
-        // observation may predate detach. (The heartbeat interval is 1_000
-        // ms and starts only after the seq-2 commit, so a pre-detach tick is
-        // equally impossible; it is recorded, not asserted, to avoid a
-        // poll-latency race with the 300 ms window.)
-        await waitFor(
-          () => harness.durable.listJournalEvents(executionId),
-          (events) => events.some((event) => event.sequence === 2),
-          30_000,
-          "started journal event",
-        );
-        const preDetachObservation = await harness.durable.getObservation(executionId);
-        process.stdout.write(
-          `T02-AC4 pre-detach baseline: progress=${preDetachObservation?.lastProgressAt ?? null} heartbeat=${preDetachObservation?.lastHeartbeatAt ?? null}\n`,
-        );
-        expect(preDetachObservation?.lastProgressAt ?? null).toBeNull();
+      const loadedPath = loadedAgentExtensionPath(harness, threadId);
+      expect(loadedPath.startsWith(resolve(harness.desktop.managedExtensionDir))).toBe(true);
+      expect(loadedPath.startsWith(resolve(userCanary.dir))).toBe(false);
+      expect(loadedPath.startsWith(resolve(harness.parentAgentDir))).toBe(false);
 
-        const journal = await waitFor(
-          () => harness.durable.listJournalEvents(executionId),
-          (events) => events.some((event) => event.sequence === 3),
-          30_000,
-          "detach journal",
-        );
-        const accepted = journal.find((event) => event.sequence === 1);
-        const started = journal.find((event) => event.sequence === 2);
-        const detached = journal.find((event) => event.sequence === 3);
-        expect(accepted?.state).toBe("accepted");
-        expect(started?.state).toBe("running");
-        expect(detached?.state).toBe("running");
-        expect(detached?.attemptId).toBe(durable.attemptId);
-        expect(detached?.generation).toBe(durable.generation);
-        expect(detached?.metadata).toMatchObject({
-          phase: "detached",
-          attachmentMode: "foreground",
-          foregroundWaitMs: harness.foregroundWaitMs,
-        });
-        const attachmentMs = Date.parse(detached!.occurredAt) - Date.parse(started!.occurredAt);
-        process.stdout.write(
-          `T02-AC4 detach envelope: attachment=${attachmentMs}ms budget=${harness.foregroundWaitMs}ms\n`,
-        );
-        expect(attachmentMs).toBeGreaterThanOrEqual(harness.foregroundWaitMs - 50);
-        expect(attachmentMs).toBeLessThan(harness.foregroundWaitMs + 500);
+      const card = await harness.waitForExecutionCard(
+        String(threadId),
+        (candidate) => candidate.executionId === executionId,
+        45_000,
+      );
+      expect(card.attemptId).toBe(durable.attemptId);
+      expect(card.generation).toBe(durable.generation);
 
-        const activeBeforeTerminal = await waitFor(
-          () => harness.bridgeActiveExecutions(String(threadId)),
-          (active) =>
-            active.some(
-              (candidate) => candidate.executionId === executionId && candidate.isRunning,
-            ),
-          30_000,
-          "active registry before terminal handoff",
-        );
-        expect(activeBeforeTerminal.some((candidate) => candidate.executionId === executionId)).toBe(true);
+      const modelRequests = await waitFor(
+        () => harness.modelServer.requests(),
+        (requests) =>
+          requests.some(
+            (request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
+          ),
+        45_000,
+        "real Agent parent model traffic",
+      );
+      expect(
+        modelRequests.some(
+          (request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
+        ),
+      ).toBe(true);
 
-        // Finding B, part 2 — post-detach liveness proof. Deterministic
-        // loopback chronology pins the ordering: the slow child's first
-        // response chunk lands ~3.7 s AFTER the 300 ms detach, and the
-        // heartbeat interval (1_000 ms) first ticks ~0.7 s after detach, so
-        // both required observations can only be produced by a reporter
-        // still alive after the detach journal commit. Every timestamp
-        // compared is producer-minted `new Date().toISOString()` from the
-        // SAME extension process clock — the journal `occurredAt` is the
-        // producer-supplied string of the detached observation — so strict
-        // `>` is well defined, and same-ms collisions are excluded by the
-        // deterministic separations above, not by luck. (Waiting for a
-        // NEWER-than-baseline pair would be wrong here: observations stop
-        // exactly-once when the detached child settles, so the first
-        // post-detach pair is frequently also the final one.)
-        const detachedOccurredAtMs = Date.parse(detached!.occurredAt);
-        const observation = await waitFor(
-          () => harness.durable.getObservation(executionId),
-          (value) =>
-            value !== undefined &&
-            value.lastProgressAt !== null &&
-            value.lastHeartbeatAt !== null &&
-            Date.parse(value.lastProgressAt) > detachedOccurredAtMs &&
-            Date.parse(value.lastHeartbeatAt) > detachedOccurredAtMs,
-          60_000,
-          "progress and heartbeat observation strictly after the detach journal event",
-        );
-        process.stdout.write(
-          `T02-AC4 post-detach observation: detached=${detached!.occurredAt} progress=${observation.lastProgressAt} heartbeat=${observation.lastHeartbeatAt}\n`,
-        );
-        expect(Date.parse(observation.lastProgressAt!)).toBeGreaterThan(detachedOccurredAtMs);
-        expect(Date.parse(observation.lastHeartbeatAt!)).toBeGreaterThan(detachedOccurredAtMs);
-        expect(observation.lastProgressJson).not.toBeNull();
-        expect(Date.parse(observation.leaseExpiresAt!)).toBeGreaterThan(
-          Date.parse(observation.lastHeartbeatAt!),
-        );
+      const userCanaryAfter = snapshotTree(userCanary.dir);
+      expect(userCanaryAfter).toEqual(userCanary.snapshot);
 
-        const terminalCard = await harness.waitForExecutionCard(
-          String(threadId),
-          (candidate) =>
-            candidate.executionId === executionId && candidate.observedState === "succeeded",
-          60_000,
-        );
-        expect(terminalCard.attemptId).toBe(durable.attemptId);
-        expect(terminalCard.generation).toBe(durable.generation);
+      const artifactStillValid = await verifyPiSubagentArtifact(stagedFixture.sourceArtifactDir);
+      expect(artifactStillValid.valid).toBe(true);
+    } finally {
+      await harness.dispose();
+      expect(harness.envWasRestored()).toBe(true);
+    }
+  }, 180_000);
 
-        const terminalJournal = await waitFor(
-          () => harness.durable.listJournalEvents(executionId),
-          (events) => events.some((event) => event.sequence === 40),
-          60_000,
-          "terminal seq-40 commit",
-        );
-        const sequence40 = terminalJournal.filter((event) => event.sequence === 40);
-        expect(sequence40).toHaveLength(1);
-        expect(sequence40[0]).toMatchObject({
-          state: "succeeded",
-          attemptId: durable.attemptId,
-          generation: durable.generation,
-        });
+  it("AC2: a good desktop session negotiates managed capability before admission, while a separately corrupted artifact fails early with bounded digest diagnostics and zero public side effects", async () => {
+    const goodHarness = await makeDesktopHarness(copyArtifactForRun("ac2-good"));
+    try {
+      const { threadId } = await createThreadHarnessState(
+        goodHarness,
+        "ac2-good",
+        DETERMINISTIC_DRIVER_MODEL_ID,
+      );
+      await startTurn(goodHarness, threadId, "ac2-good", "Capability probe ordering check.");
 
-        const activeAfterTerminal = await waitFor(
-          () => harness.bridgeActiveExecutions(String(threadId)),
-          (active) => active.every((candidate) => candidate.executionId !== executionId),
-          30_000,
-          "active registry cleanup after terminal handoff",
-        );
-        expect(activeAfterTerminal.some((candidate) => candidate.executionId === executionId)).toBe(false);
-      } finally {
-        await harness.dispose();
-        expect(harness.envWasRestored()).toBe(true);
+      const capability = await waitFor(
+        () => {
+          const value = goodHarness.observedCapabilities().get(String(threadId));
+          const admissions = goodHarness
+            .observedAdmissions()
+            .filter((event) => String(event.threadId) === String(threadId));
+          return value !== undefined && admissions.length === 0 ? value : undefined;
+        },
+        (value) => value.status === "managed_enabled",
+        45_000,
+        "managed capability before any Agent admission",
+      );
+      expect(capability.isManaged).toBe(true);
+      for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
+        expect(capability.capabilities).toContain(required);
       }
-    },
-    180_000,
-  );
+    } finally {
+      await goodHarness.dispose();
+      expect(goodHarness.envWasRestored()).toBe(true);
+    }
 
-  it(
-    "AC5 (selected model): an unavailable hostile selected model surfaces exactly the fixed desktop runtime-config failure detail and produces no session, publication, admission, execution, card, child, or outbox effect",
-    async () => {
-      const harness = await makeDesktopHarness(copyArtifactForRun("ac5"));
-      try {
-        const { threadId } = await createThreadHarnessState(
-          harness,
-          "ac5",
-          HOSTILE_SELECTED_MODEL_ID,
-        );
-        await startTurn(
-          harness,
-          threadId,
-          "ac5",
-          "Attempt to start with a hostile unavailable selected model id.",
-        );
+    const corruptArtifactDir = copyArtifactForRun("ac2-bad");
+    writeFileSync(
+      join(corruptArtifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts"),
+      `${readFileSync(
+        join(corruptArtifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts"),
+        "utf8",
+      )}\n// ${CANARY_MARKER}: corrupt copy only\n`,
+      "utf8",
+    );
+    const corruptVerified = await verifyPiSubagentArtifact(corruptArtifactDir);
+    expect(corruptVerified.valid).toBe(false);
+    if (corruptVerified.valid) {
+      throw new Error(
+        "Expected the corrupted artifact copy to verify as invalid before harness bootstrap.",
+      );
+    }
+    expect(corruptVerified.category).toBe("digest_mismatch");
 
-        // Finding A (independent review): AC5 selected invalid runtime
-        // config must surface EXACTLY the exported runtime-config failure
-        // constant — the closed-vocabulary contract — not a superset detail
-        // that merely contains it. The public activity detail is the reactor's
-        // `Cause.pretty` envelope around the ProviderAdapterRequestError:
-        // line 1 is the error message `Error: Provider adapter request
-        // failed (pi) for session/start: <detail>` followed by its stack, so
-        // the closed-vocabulary rule is asserted on the exact extracted
-        // `<detail>` segment. Only the malformed/unsupported bridge legs keep
-        // their own distinct exact bounded bootstrap details.
-        const detail = await waitForTurnStartFailureDetail(harness, threadId);
-        const RUNTIME_CONFIG_ENVELOPE_PREFIX =
-          "Error: Provider adapter request failed (pi) for session/start: ";
-        const detailFirstLine = detail.split("\n", 1)[0]!;
-        expect(detailFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
-        expect(detailFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
-          PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
-        );
-        for (const forbidden of [
-          HOSTILE_SELECTED_MODEL_ID,
-          stagedFixture.sourceArtifactDir,
-          harness.desktop?.userAgentDir ?? "",
-          "auth.json",
-          "models.json",
-          "synara-local-echo",
-          "apiKey",
-          "baseUrl",
-          "prompt",
-          "cause",
-        ]) {
-          if (forbidden.length > 0) {
-            expect(detail).not.toContain(forbidden);
-          }
+    const badHarness = await makeDesktopHarness(corruptArtifactDir);
+    try {
+      const { threadId } = await createThreadHarnessState(
+        badHarness,
+        "ac2-bad",
+        DETERMINISTIC_DRIVER_MODEL_ID,
+      );
+      await startTurn(
+        badHarness,
+        threadId,
+        "ac2-bad",
+        "This must fail at desktop artifact bootstrap before any Pi Agent work.",
+      );
+
+      const detail = await waitForTurnStartFailureDetail(badHarness, threadId);
+      expect(detail).toContain("Managed Pi subagents are unavailable (digest_mismatch):");
+      expect(detail).toContain("managed pi artifact verification failed: digest_mismatch");
+      expect(detail.length).toBeLessThanOrEqual(1_024);
+      expect(detail).not.toContain(corruptArtifactDir);
+      expect(detail).not.toContain(stagedFixture.sourceArtifactDir);
+
+      const threadDetail = await badHarness.waitForThreadDetail(String(threadId));
+      expect(threadDetail.thread.session).toMatchObject({
+        providerName: "pi",
+        status: "error",
+        activeTurnId: null,
+      });
+      expect(threadDetail.thread.session?.lastError).toContain("digest_mismatch");
+      expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
+      expect(badHarness.observedSessions().size).toBe(0);
+      expect(badHarness.observedCapabilities().size).toBe(0);
+      expect(badHarness.observedAdmissions()).toHaveLength(0);
+      expect(badHarness.modelServer.requestCount()).toBe(0);
+    } finally {
+      // WAL repair (Ticket 02 draft defect): the live repo holds exclusive
+      // WAL access, so readPiLedgerCounts must run only AFTER dispose
+      // releases it (same pattern as piSubagentRealPiAcceptance.test.ts's
+      // post-shutdown closedDatabase read). preserveRootDir keeps the
+      // SQLite file readable until the count check below; every public
+      // WS/no-effects assertion above already ran while the harness was
+      // live.
+      const badDbPath = badHarness.dbPath;
+      await badHarness.dispose({ preserveRootDir: true });
+      expect(badHarness.envWasRestored()).toBe(true);
+
+      const ledger = readPiLedgerCounts(badDbPath);
+      expect(ledger.executions).toBe(0);
+      expect(ledger.journal).toBe(0);
+      expect(ledger.outbox).toBe(0);
+      expect(ledger.batches).toBe(0);
+    }
+  }, 180_000);
+
+  it("AC4: a slow real child detaches within the bounded foreground window, emits strictly-new progress/heartbeat liveness after the detach journal event, commits exactly one terminal seq-40, and clears the active registry only after handoff", async () => {
+    const harness = await makeDesktopHarness(copyArtifactForRun("ac4"));
+    try {
+      harness.writeSubagentModelPreference("synara-local-echo/echo-slow");
+      writeResearcherSlowPreference(harness.piHomeDir);
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "ac4",
+        DETERMINISTIC_DRIVER_MODEL_ID,
+      );
+      await startTurn(harness, threadId, "ac4", "Delegate the slow desktop child task.");
+
+      const admission = await waitFor(
+        () =>
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
+        (value) => value !== undefined && value.result.status !== "rejected",
+        90_000,
+        "slow managed desktop admission",
+      );
+      const executionId = admission.result.executionId;
+      const durable = await waitFor(
+        () => harness.durable.getById(executionId),
+        (value) => value !== undefined,
+        30_000,
+        "durable execution row",
+      );
+      await waitFor(
+        () => harness.modelServer.requests(),
+        (requests) =>
+          requests.some(
+            (request) =>
+              request.model === DETERMINISTIC_SLOW_MODEL_ID && request.hasAgentTool === false,
+          ),
+        45_000,
+        "slow child model request",
+      );
+
+      // Finding B (independent review), part 1 — pre-detach liveness
+      // baseline: capture the observation state as of the started (seq-2)
+      // journal event, before the detach event can be observed. With this
+      // harness's deterministic loopback the slow child model answers
+      // only after DETERMINISTIC_SLOW_DELAY_MS = 4_000 ms, while the
+      // foreground budget is 300 ms — so the producer's progress funnel
+      // (`onStreamUpdate`) cannot have fired yet and NO progress
+      // observation may predate detach. (The heartbeat interval is 1_000
+      // ms and starts only after the seq-2 commit, so a pre-detach tick is
+      // equally impossible; it is recorded, not asserted, to avoid a
+      // poll-latency race with the 300 ms window.)
+      await waitFor(
+        () => harness.durable.listJournalEvents(executionId),
+        (events) => events.some((event) => event.sequence === 2),
+        30_000,
+        "started journal event",
+      );
+      const preDetachObservation = await harness.durable.getObservation(executionId);
+      process.stdout.write(
+        `T02-AC4 pre-detach baseline: progress=${preDetachObservation?.lastProgressAt ?? null} heartbeat=${preDetachObservation?.lastHeartbeatAt ?? null}\n`,
+      );
+      expect(preDetachObservation?.lastProgressAt ?? null).toBeNull();
+
+      const journal = await waitFor(
+        () => harness.durable.listJournalEvents(executionId),
+        (events) => events.some((event) => event.sequence === 3),
+        30_000,
+        "detach journal",
+      );
+      const accepted = journal.find((event) => event.sequence === 1);
+      const started = journal.find((event) => event.sequence === 2);
+      const detached = journal.find((event) => event.sequence === 3);
+      expect(accepted?.state).toBe("accepted");
+      expect(started?.state).toBe("running");
+      expect(detached?.state).toBe("running");
+      expect(detached?.attemptId).toBe(durable.attemptId);
+      expect(detached?.generation).toBe(durable.generation);
+      expect(detached?.metadata).toMatchObject({
+        phase: "detached",
+        attachmentMode: "foreground",
+        foregroundWaitMs: harness.foregroundWaitMs,
+      });
+      const attachmentMs = Date.parse(detached!.occurredAt) - Date.parse(started!.occurredAt);
+      process.stdout.write(
+        `T02-AC4 detach envelope: attachment=${attachmentMs}ms budget=${harness.foregroundWaitMs}ms\n`,
+      );
+      expect(attachmentMs).toBeGreaterThanOrEqual(harness.foregroundWaitMs - 50);
+      expect(attachmentMs).toBeLessThan(harness.foregroundWaitMs + 500);
+
+      const activeBeforeTerminal = await waitFor(
+        () => harness.bridgeActiveExecutions(String(threadId)),
+        (active) =>
+          active.some((candidate) => candidate.executionId === executionId && candidate.isRunning),
+        30_000,
+        "active registry before terminal handoff",
+      );
+      expect(activeBeforeTerminal.some((candidate) => candidate.executionId === executionId)).toBe(
+        true,
+      );
+
+      // Finding B, part 2 — post-detach liveness proof. Deterministic
+      // loopback chronology pins the ordering: the slow child's first
+      // response chunk lands ~3.7 s AFTER the 300 ms detach, and the
+      // heartbeat interval (1_000 ms) first ticks ~0.7 s after detach, so
+      // both required observations can only be produced by a reporter
+      // still alive after the detach journal commit. Every timestamp
+      // compared is producer-minted `new Date().toISOString()` from the
+      // SAME extension process clock — the journal `occurredAt` is the
+      // producer-supplied string of the detached observation — so strict
+      // `>` is well defined, and same-ms collisions are excluded by the
+      // deterministic separations above, not by luck. (Waiting for a
+      // NEWER-than-baseline pair would be wrong here: observations stop
+      // exactly-once when the detached child settles, so the first
+      // post-detach pair is frequently also the final one.)
+      const detachedOccurredAtMs = Date.parse(detached!.occurredAt);
+      const observation = await waitFor(
+        () => harness.durable.getObservation(executionId),
+        (value) =>
+          value !== undefined &&
+          value.lastProgressAt !== null &&
+          value.lastHeartbeatAt !== null &&
+          Date.parse(value.lastProgressAt) > detachedOccurredAtMs &&
+          Date.parse(value.lastHeartbeatAt) > detachedOccurredAtMs,
+        60_000,
+        "progress and heartbeat observation strictly after the detach journal event",
+      );
+      process.stdout.write(
+        `T02-AC4 post-detach observation: detached=${detached!.occurredAt} progress=${observation.lastProgressAt} heartbeat=${observation.lastHeartbeatAt}\n`,
+      );
+      expect(Date.parse(observation.lastProgressAt!)).toBeGreaterThan(detachedOccurredAtMs);
+      expect(Date.parse(observation.lastHeartbeatAt!)).toBeGreaterThan(detachedOccurredAtMs);
+      expect(observation.lastProgressJson).not.toBeNull();
+      expect(Date.parse(observation.leaseExpiresAt!)).toBeGreaterThan(
+        Date.parse(observation.lastHeartbeatAt!),
+      );
+
+      const terminalCard = await harness.waitForExecutionCard(
+        String(threadId),
+        (candidate) =>
+          candidate.executionId === executionId && candidate.observedState === "succeeded",
+        60_000,
+      );
+      expect(terminalCard.attemptId).toBe(durable.attemptId);
+      expect(terminalCard.generation).toBe(durable.generation);
+
+      const terminalJournal = await waitFor(
+        () => harness.durable.listJournalEvents(executionId),
+        (events) => events.some((event) => event.sequence === 40),
+        60_000,
+        "terminal seq-40 commit",
+      );
+      const sequence40 = terminalJournal.filter((event) => event.sequence === 40);
+      expect(sequence40).toHaveLength(1);
+      expect(sequence40[0]).toMatchObject({
+        state: "succeeded",
+        attemptId: durable.attemptId,
+        generation: durable.generation,
+      });
+
+      const activeAfterTerminal = await waitFor(
+        () => harness.bridgeActiveExecutions(String(threadId)),
+        (active) => active.every((candidate) => candidate.executionId !== executionId),
+        30_000,
+        "active registry cleanup after terminal handoff",
+      );
+      expect(activeAfterTerminal.some((candidate) => candidate.executionId === executionId)).toBe(
+        false,
+      );
+    } finally {
+      await harness.dispose();
+      expect(harness.envWasRestored()).toBe(true);
+    }
+  }, 180_000);
+
+  it("AC5 (selected model): an unavailable hostile selected model surfaces exactly the fixed desktop runtime-config failure detail and produces no session, publication, admission, execution, card, child, or outbox effect", async () => {
+    const harness = await makeDesktopHarness(copyArtifactForRun("ac5"));
+    try {
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "ac5",
+        HOSTILE_SELECTED_MODEL_ID,
+      );
+      await startTurn(
+        harness,
+        threadId,
+        "ac5",
+        "Attempt to start with a hostile unavailable selected model id.",
+      );
+
+      // Finding A (independent review): AC5 selected invalid runtime
+      // config must surface EXACTLY the exported runtime-config failure
+      // constant — the closed-vocabulary contract — not a superset detail
+      // that merely contains it. The public activity detail is the reactor's
+      // `Cause.pretty` envelope around the ProviderAdapterRequestError:
+      // line 1 is the error message `Error: Provider adapter request
+      // failed (pi) for session/start: <detail>` followed by its stack, so
+      // the closed-vocabulary rule is asserted on the exact extracted
+      // `<detail>` segment. Only the malformed/unsupported bridge legs keep
+      // their own distinct exact bounded bootstrap details.
+      const detail = await waitForTurnStartFailureDetail(harness, threadId);
+      const RUNTIME_CONFIG_ENVELOPE_PREFIX =
+        "Error: Provider adapter request failed (pi) for session/start: ";
+      const detailFirstLine = detail.split("\n", 1)[0]!;
+      expect(detailFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
+      expect(detailFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
+        PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+      );
+      for (const forbidden of [
+        HOSTILE_SELECTED_MODEL_ID,
+        stagedFixture.sourceArtifactDir,
+        harness.desktop?.userAgentDir ?? "",
+        "auth.json",
+        "models.json",
+        "synara-local-echo",
+        "apiKey",
+        "baseUrl",
+        "prompt",
+        "cause",
+      ]) {
+        if (forbidden.length > 0) {
+          expect(detail).not.toContain(forbidden);
         }
-
-        const threadDetail = await harness.waitForThreadDetail(String(threadId));
-        expect(threadDetail.thread.session).toMatchObject({
-          providerName: "pi",
-          status: "error",
-          activeTurnId: null,
-        });
-        const sessionErrorFirstLine = (threadDetail.thread.session?.lastError ?? "").split(
-          "\n",
-          1,
-        )[0]!;
-        expect(sessionErrorFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
-        expect(sessionErrorFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
-          PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
-        );
-        expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
-        expect(harness.observedSessions().size).toBe(0);
-        expect(harness.observedCapabilities().size).toBe(0);
-        expect(harness.observedAdmissions()).toHaveLength(0);
-        expect(harness.modelServer.requestCount()).toBe(0);
-      } finally {
-        // WAL repair (Ticket 02 draft defect): same post-dispose read as AC2 —
-        // the public WS/no-effects assertions above all ran while live.
-        const ac5DbPath = harness.dbPath;
-        await harness.dispose({ preserveRootDir: true });
-        expect(harness.envWasRestored()).toBe(true);
-
-        const ledger = readPiLedgerCounts(ac5DbPath);
-        expect(ledger.executions).toBe(0);
-        expect(ledger.journal).toBe(0);
-        expect(ledger.outbox).toBe(0);
-        expect(ledger.batches).toBe(0);
       }
-    },
-    180_000,
-  );
+
+      const threadDetail = await harness.waitForThreadDetail(String(threadId));
+      expect(threadDetail.thread.session).toMatchObject({
+        providerName: "pi",
+        status: "error",
+        activeTurnId: null,
+      });
+      const sessionErrorFirstLine = (threadDetail.thread.session?.lastError ?? "").split(
+        "\n",
+        1,
+      )[0]!;
+      expect(sessionErrorFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
+      expect(sessionErrorFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
+        PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+      );
+      expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
+      expect(harness.observedSessions().size).toBe(0);
+      expect(harness.observedCapabilities().size).toBe(0);
+      expect(harness.observedAdmissions()).toHaveLength(0);
+      expect(harness.modelServer.requestCount()).toBe(0);
+    } finally {
+      // WAL repair (Ticket 02 draft defect): same post-dispose read as AC2 —
+      // the public WS/no-effects assertions above all ran while live.
+      const ac5DbPath = harness.dbPath;
+      await harness.dispose({ preserveRootDir: true });
+      expect(harness.envWasRestored()).toBe(true);
+
+      const ledger = readPiLedgerCounts(ac5DbPath);
+      expect(ledger.executions).toBe(0);
+      expect(ledger.journal).toBe(0);
+      expect(ledger.outbox).toBe(0);
+      expect(ledger.batches).toBe(0);
+    }
+  }, 180_000);
 
   // AC5 production mapping note: the selected-model leg above proves the
   // fixed RUNTIME-CONFIG failure detail (`createSdkRuntime` failure). The two
@@ -948,97 +973,91 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
   // at handshake: `piSubagentDesktopManagedBootstrapFailureDetail` maps the
   // negotiated capability's status + diagnosticCode ONLY — never the hostile
   // detail/extensionVersion/version numbers the artifact supplied.
-  it(
-    "AC5 (malformed bridge): a self-consistent verified artifact whose real bridge returns a malformed handshake response fails the public turn start with the bounded closed-vocabulary bootstrap detail and zero effects",
-    async () => {
-      const malformedArtifactDir = patchHostileHandshakeArtifact(
-        "ac5-malformed",
-        // The patched return replaces the guarded anchor exactly; the block
-        // stays syntactically valid and the extension still registers its
-        // real bridge — only the handshake response is hostile.
-        `      // ${CANARY_MARKER}: hostile malformed handshake fixture (test-only copy)
+  it("AC5 (malformed bridge): a self-consistent verified artifact whose real bridge returns a malformed handshake response fails the public turn start with the bounded closed-vocabulary bootstrap detail and zero effects", async () => {
+    const malformedArtifactDir = patchHostileHandshakeArtifact(
+      "ac5-malformed",
+      // The patched return replaces the guarded anchor exactly; the block
+      // stays syntactically valid and the extension still registers its
+      // real bridge — only the handshake response is hostile.
+      `      // ${CANARY_MARKER}: hostile malformed handshake fixture (test-only copy)
       return { totally: "not a handshake response" };`,
+    );
+    const hostileVerified = await verifyPiSubagentArtifact(malformedArtifactDir);
+    expect(hostileVerified.valid).toBe(true);
+
+    const harness = await makeDesktopHarness(malformedArtifactDir);
+    try {
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "ac5-malformed",
+        DETERMINISTIC_DRIVER_MODEL_ID,
       );
-      const hostileVerified = await verifyPiSubagentArtifact(malformedArtifactDir);
-      expect(hostileVerified.valid).toBe(true);
+      await startTurn(
+        harness,
+        threadId,
+        "ac5-malformed",
+        "Attempt to start against a hostile malformed bridge handshake.",
+      );
 
-      const harness = await makeDesktopHarness(malformedArtifactDir);
-      try {
-        const { threadId } = await createThreadHarnessState(
-          harness,
-          "ac5-malformed",
-          DETERMINISTIC_DRIVER_MODEL_ID,
-        );
-        await startTurn(
-          harness,
-          threadId,
-          "ac5-malformed",
-          "Attempt to start against a hostile malformed bridge handshake.",
-        );
-
-        const detail = await waitForTurnStartFailureDetail(harness, threadId);
-        expect(detail).toContain(
-          "Managed Pi subagent harness bootstrap failed (bridge_malformed_response:pi_subagent_bridge_malformed_response)",
-        );
-        expect(detail.length).toBeLessThanOrEqual(512);
-        for (const forbidden of [
-          PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
-          "totally",
-          "not a handshake response",
-          malformedArtifactDir,
-          stagedFixture.sourceArtifactDir,
-          harness.desktop?.userAgentDir ?? "",
-          "auth.json",
-          "models.json",
-          "synara-local-echo",
-          "apiKey",
-          "baseUrl",
-          "prompt",
-          "cause",
-        ]) {
-          if (forbidden.length > 0) {
-            expect(detail).not.toContain(forbidden);
-          }
+      const detail = await waitForTurnStartFailureDetail(harness, threadId);
+      expect(detail).toContain(
+        "Managed Pi subagent harness bootstrap failed (bridge_malformed_response:pi_subagent_bridge_malformed_response)",
+      );
+      expect(detail.length).toBeLessThanOrEqual(512);
+      for (const forbidden of [
+        PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+        "totally",
+        "not a handshake response",
+        malformedArtifactDir,
+        stagedFixture.sourceArtifactDir,
+        harness.desktop?.userAgentDir ?? "",
+        "auth.json",
+        "models.json",
+        "synara-local-echo",
+        "apiKey",
+        "baseUrl",
+        "prompt",
+        "cause",
+      ]) {
+        if (forbidden.length > 0) {
+          expect(detail).not.toContain(forbidden);
         }
-
-        const threadDetail = await harness.waitForThreadDetail(String(threadId));
-        expect(threadDetail.thread.session).toMatchObject({
-          providerName: "pi",
-          status: "error",
-          activeTurnId: null,
-        });
-        expect(threadDetail.thread.session?.lastError).toContain(
-          "(bridge_malformed_response:pi_subagent_bridge_malformed_response)",
-        );
-        expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
-        expect(harness.observedSessions().size).toBe(0);
-        expect(harness.observedCapabilities().size).toBe(0);
-        expect(harness.observedAdmissions()).toHaveLength(0);
-        expect(harness.modelServer.requestCount()).toBe(0);
-      } finally {
-        const malformedDbPath = harness.dbPath;
-        await harness.dispose({ preserveRootDir: true });
-        expect(harness.envWasRestored()).toBe(true);
-
-        const ledger = readPiLedgerCounts(malformedDbPath);
-        expect(ledger.executions).toBe(0);
-        expect(ledger.journal).toBe(0);
-        expect(ledger.outbox).toBe(0);
-        expect(ledger.batches).toBe(0);
       }
-    },
-    180_000,
-  );
 
-  it(
-    "AC5 (unsupported bridge): a self-consistent verified artifact whose real bridge rejects the protocol version fails the public turn start with the bounded closed-vocabulary bootstrap detail and zero effects",
-    async () => {
-      const unsupportedArtifactDir = patchHostileHandshakeArtifact(
-        "ac5-unsupported",
-        // Schema-valid failure response with a hostile version demand; the
-        // production mapping must surface ONLY the closed status/code pair —
-        // never the hostile detail, versions, or extension identity.
-        `      // ${CANARY_MARKER}: hostile unsupported-version handshake fixture (test-only copy)
+      const threadDetail = await harness.waitForThreadDetail(String(threadId));
+      expect(threadDetail.thread.session).toMatchObject({
+        providerName: "pi",
+        status: "error",
+        activeTurnId: null,
+      });
+      expect(threadDetail.thread.session?.lastError).toContain(
+        "(bridge_malformed_response:pi_subagent_bridge_malformed_response)",
+      );
+      expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
+      expect(harness.observedSessions().size).toBe(0);
+      expect(harness.observedCapabilities().size).toBe(0);
+      expect(harness.observedAdmissions()).toHaveLength(0);
+      expect(harness.modelServer.requestCount()).toBe(0);
+    } finally {
+      const malformedDbPath = harness.dbPath;
+      await harness.dispose({ preserveRootDir: true });
+      expect(harness.envWasRestored()).toBe(true);
+
+      const ledger = readPiLedgerCounts(malformedDbPath);
+      expect(ledger.executions).toBe(0);
+      expect(ledger.journal).toBe(0);
+      expect(ledger.outbox).toBe(0);
+      expect(ledger.batches).toBe(0);
+    }
+  }, 180_000);
+
+  it("AC5 (unsupported bridge): a self-consistent verified artifact whose real bridge rejects the protocol version fails the public turn start with the bounded closed-vocabulary bootstrap detail and zero effects", async () => {
+    const unsupportedArtifactDir = patchHostileHandshakeArtifact(
+      "ac5-unsupported",
+      // Schema-valid failure response with a hostile version demand; the
+      // production mapping must surface ONLY the closed status/code pair —
+      // never the hostile detail, versions, or extension identity.
+      `      // ${CANARY_MARKER}: hostile unsupported-version handshake fixture (test-only copy)
       return {
         ok: false,
         error: "unsupported_version",
@@ -1047,77 +1066,75 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         extensionVersion: EXTENSION_VERSION,
         detail: "Hostile extension demands protocol version 99 with secret/path material sk-hostile-99 /private/hostile",
       };`,
+    );
+    const hostileVerified = await verifyPiSubagentArtifact(unsupportedArtifactDir);
+    expect(hostileVerified.valid).toBe(true);
+
+    const harness = await makeDesktopHarness(unsupportedArtifactDir);
+    try {
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "ac5-unsupported",
+        DETERMINISTIC_DRIVER_MODEL_ID,
       );
-      const hostileVerified = await verifyPiSubagentArtifact(unsupportedArtifactDir);
-      expect(hostileVerified.valid).toBe(true);
+      await startTurn(
+        harness,
+        threadId,
+        "ac5-unsupported",
+        "Attempt to start against a hostile unsupported-protocol bridge handshake.",
+      );
 
-      const harness = await makeDesktopHarness(unsupportedArtifactDir);
-      try {
-        const { threadId } = await createThreadHarnessState(
-          harness,
-          "ac5-unsupported",
-          DETERMINISTIC_DRIVER_MODEL_ID,
-        );
-        await startTurn(
-          harness,
-          threadId,
-          "ac5-unsupported",
-          "Attempt to start against a hostile unsupported-protocol bridge handshake.",
-        );
-
-        const detail = await waitForTurnStartFailureDetail(harness, threadId);
-        expect(detail).toContain(
-          "Managed Pi subagent harness bootstrap failed (unsupported_version:pi_subagent_unsupported_version)",
-        );
-        expect(detail.length).toBeLessThanOrEqual(512);
-        for (const forbidden of [
-          PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
-          "Hostile extension demands",
-          "sk-hostile-99",
-          "/private/hostile",
-          "99",
-          unsupportedArtifactDir,
-          stagedFixture.sourceArtifactDir,
-          harness.desktop?.userAgentDir ?? "",
-          "auth.json",
-          "models.json",
-          "synara-local-echo",
-          "apiKey",
-          "baseUrl",
-          "prompt",
-          "cause",
-        ]) {
-          if (forbidden.length > 0) {
-            expect(detail).not.toContain(forbidden);
-          }
+      const detail = await waitForTurnStartFailureDetail(harness, threadId);
+      expect(detail).toContain(
+        "Managed Pi subagent harness bootstrap failed (unsupported_version:pi_subagent_unsupported_version)",
+      );
+      expect(detail.length).toBeLessThanOrEqual(512);
+      for (const forbidden of [
+        PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+        "Hostile extension demands",
+        "sk-hostile-99",
+        "/private/hostile",
+        "99",
+        unsupportedArtifactDir,
+        stagedFixture.sourceArtifactDir,
+        harness.desktop?.userAgentDir ?? "",
+        "auth.json",
+        "models.json",
+        "synara-local-echo",
+        "apiKey",
+        "baseUrl",
+        "prompt",
+        "cause",
+      ]) {
+        if (forbidden.length > 0) {
+          expect(detail).not.toContain(forbidden);
         }
-
-        const threadDetail = await harness.waitForThreadDetail(String(threadId));
-        expect(threadDetail.thread.session).toMatchObject({
-          providerName: "pi",
-          status: "error",
-          activeTurnId: null,
-        });
-        expect(threadDetail.thread.session?.lastError).toContain(
-          "(unsupported_version:pi_subagent_unsupported_version)",
-        );
-        expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
-        expect(harness.observedSessions().size).toBe(0);
-        expect(harness.observedCapabilities().size).toBe(0);
-        expect(harness.observedAdmissions()).toHaveLength(0);
-        expect(harness.modelServer.requestCount()).toBe(0);
-      } finally {
-        const unsupportedDbPath = harness.dbPath;
-        await harness.dispose({ preserveRootDir: true });
-        expect(harness.envWasRestored()).toBe(true);
-
-        const ledger = readPiLedgerCounts(unsupportedDbPath);
-        expect(ledger.executions).toBe(0);
-        expect(ledger.journal).toBe(0);
-        expect(ledger.outbox).toBe(0);
-        expect(ledger.batches).toBe(0);
       }
-    },
-    180_000,
-  );
+
+      const threadDetail = await harness.waitForThreadDetail(String(threadId));
+      expect(threadDetail.thread.session).toMatchObject({
+        providerName: "pi",
+        status: "error",
+        activeTurnId: null,
+      });
+      expect(threadDetail.thread.session?.lastError).toContain(
+        "(unsupported_version:pi_subagent_unsupported_version)",
+      );
+      expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
+      expect(harness.observedSessions().size).toBe(0);
+      expect(harness.observedCapabilities().size).toBe(0);
+      expect(harness.observedAdmissions()).toHaveLength(0);
+      expect(harness.modelServer.requestCount()).toBe(0);
+    } finally {
+      const unsupportedDbPath = harness.dbPath;
+      await harness.dispose({ preserveRootDir: true });
+      expect(harness.envWasRestored()).toBe(true);
+
+      const ledger = readPiLedgerCounts(unsupportedDbPath);
+      expect(ledger.executions).toBe(0);
+      expect(ledger.journal).toBe(0);
+      expect(ledger.outbox).toBe(0);
+      expect(ledger.batches).toBe(0);
+    }
+  }, 180_000);
 });

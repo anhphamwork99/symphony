@@ -18,7 +18,10 @@ import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES, PiSubagentArtifactManifest } from "@synara/contracts";
+import {
+  PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
+  PiSubagentArtifactManifest,
+} from "@synara/contracts";
 
 import {
   PI_SUBAGENT_ARTIFACT_DIR_NAME,
@@ -90,7 +93,11 @@ interface SyntheticAlfieRepo {
 }
 
 /** Shared runtime modules the real pinned extension imports (stager contract). */
-const SYNTHETIC_SHARED_MODULES = ["durable-preferences", "execution-identity", "model-catalog-reconciler"];
+const SYNTHETIC_SHARED_MODULES = [
+  "durable-preferences",
+  "execution-identity",
+  "model-catalog-reconciler",
+];
 
 /** The current pin's exact derived child-prompt closure (stager contract). */
 const SYNTHETIC_PROMPT_FILES = [
@@ -120,9 +127,7 @@ function syntheticPromptModules(options: {
   const dynamicRead = options.dynamicRead
     ? "    readRequiredPrompt(join(SYSTEM_DIR, `dyn-${Date.now()}.md`)),\n"
     : "";
-  const importedHelperRead = options.importedHelperRead
-    ? "    readImportedExtraPrompt(),\n"
-    : "";
+  const importedHelperRead = options.importedHelperRead ? "    readImportedExtraPrompt(),\n" : "";
   const importedHelperImport =
     options.importedHelperRead !== undefined
       ? 'import { readImportedExtraPrompt } from "./imported-prompts.js";\n'
@@ -165,7 +170,7 @@ export function readImportedExtraPrompt(): string {
   return {
     agentRunner: `import { buildAgentPrompt } from "./prompts.js";\nexport function runAgent(): string {\n  return buildAgentPrompt();\n}\n`,
     prompts: `import { existsSync, readFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\n${importedHelperImport}\nconst __dirname = dirname(fileURLToPath(import.meta.url));\nconst SYSTEM_DIR = join(__dirname, "../../../system");\nconst SUBAGENT_SYSTEM_TEMPLATE_PATH = join(SYSTEM_DIR, "subagent-system.md");\nconst TOOL_GUIDELINES_PATH = join(SYSTEM_DIR, "tool-guidelines.md");\nconst SKILL_RULES_PATH = join(SYSTEM_DIR, "skill-rules.md");\nconst WORKING_STYLE_PATH = join(SYSTEM_DIR, "working-style.md");\n${extraConst}${sameNameSideLoad}function clean(value: unknown): string {\n  return String(value ?? "").trim();\n}\n\nfunction readRequiredPrompt(path: string): string {\n  if (!existsSync(path)) {\n    throw new Error(\`Required subagent prompt file missing: \${path}\`);\n  }\n  const body = clean(readFileSync(path, "utf-8"));\n  if (!body) {\n    throw new Error(\`Required subagent prompt file is empty: \${path}\`);\n  }\n  return body;\n}\n\nexport function buildAgentPrompt(): string {\n  return [\n    readRequiredPrompt(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n    readRequiredPrompt(TOOL_GUIDELINES_PATH),\n    readRequiredPrompt(SKILL_RULES_PATH),\n    readRequiredPrompt(WORKING_STYLE_PATH),\n${extraRead}${dynamicRead}${importedHelperRead}${sameNameSideLoadCall}  ].join("\\n");\n}\n`,
-    importedPrompts,
+    ...(importedPrompts !== undefined ? { importedPrompts } : {}),
   };
 }
 
@@ -226,7 +231,12 @@ function createSyntheticAlfieRepo(options: {
   run(["init", "--initial-branch=main"]);
   run(["config", "user.email", "staging-test@example.invalid"]);
   run(["config", "user.name", "Staging Test"]);
-  run(["remote", "add", "origin", options.originUrl ?? "https://github.com/anhphamwork99/alfie.git"]);
+  run([
+    "remote",
+    "add",
+    "origin",
+    options.originUrl ?? "https://github.com/anhphamwork99/alfie.git",
+  ]);
 
   const extensionRoot = "agent/extensions/pi-subagents";
   mkdirSync(join(repoDir, extensionRoot, "src"), { recursive: true });
@@ -259,28 +269,48 @@ function createSyntheticAlfieRepo(options: {
   // The exact shared runtime modules the stager contract stages.
   mkdirSync(join(repoDir, "agent/extensions/shared"), { recursive: true });
   for (const basename of SYNTHETIC_SHARED_MODULES) {
-    writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.js`), `export const x = "${basename}";\n`);
-    writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.d.ts`), `export declare const x: string;\n`);
+    writeFileSync(
+      join(repoDir, "agent/extensions/shared", `${basename}.js`),
+      `export const x = "${basename}";\n`,
+    );
+    writeFileSync(
+      join(repoDir, "agent/extensions/shared", `${basename}.d.ts`),
+      `export declare const x: string;\n`,
+    );
   }
   // Ticket 01c: the derivation-walked prompt modules + the agent/system
   // content, exactly the pinned shape the mechanical closure resolves.
   const promptModules = syntheticPromptModules({
-    extraLiteralRead: options.promptShape?.extraLiteralRead,
-    dynamicRead: options.promptShape?.dynamicRead,
-    importedHelperRead: options.promptShape?.importedHelperRead,
-    sameNameSideLoad: options.promptShape?.sameNameSideLoad,
+    ...(options.promptShape?.extraLiteralRead !== undefined
+      ? { extraLiteralRead: options.promptShape.extraLiteralRead }
+      : {}),
+    ...(options.promptShape?.dynamicRead !== undefined
+      ? { dynamicRead: options.promptShape.dynamicRead }
+      : {}),
+    ...(options.promptShape?.importedHelperRead !== undefined
+      ? { importedHelperRead: options.promptShape.importedHelperRead }
+      : {}),
+    ...(options.promptShape?.sameNameSideLoad !== undefined
+      ? { sameNameSideLoad: options.promptShape.sameNameSideLoad }
+      : {}),
   });
   writeFileSync(join(repoDir, extensionRoot, "src/agent-runner.ts"), promptModules.agentRunner);
   writeFileSync(join(repoDir, extensionRoot, "src/prompts.ts"), promptModules.prompts);
   if (promptModules.importedPrompts !== undefined) {
-    writeFileSync(join(repoDir, extensionRoot, "src/imported-prompts.ts"), promptModules.importedPrompts);
+    writeFileSync(
+      join(repoDir, extensionRoot, "src/imported-prompts.ts"),
+      promptModules.importedPrompts,
+    );
   }
   mkdirSync(join(repoDir, "agent/system"), { recursive: true });
   const extraPromptReads = [
     options.promptShape?.extraLiteralRead,
     options.promptShape?.importedHelperRead,
   ].filter((name): name is string => name !== undefined);
-  const promptFiles = [...SYNTHETIC_PROMPT_FILES, ...extraPromptReads.map((name) => `agent/system/${name}`)];
+  const promptFiles = [
+    ...SYNTHETIC_PROMPT_FILES,
+    ...extraPromptReads.map((name) => `agent/system/${name}`),
+  ];
   for (const relative of promptFiles) {
     if (options.missingPromptFile === relative) continue;
     if (options.trackedPromptSymlink?.relative === relative) continue;
@@ -349,124 +379,128 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
         "stages the self-contained closure with an exact contract-valid manifest (AC1)",
         { timeout: 120_000 },
         () => {
-        const provenance = loadRealProvenance();
-        const artifactDir = join(makeTempRoot("pi-artifact-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+          const provenance = loadRealProvenance();
+          const artifactDir = join(makeTempRoot("pi-artifact-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
 
-        const first = buildPiSubagentArtifact({
-          repoDir: REAL_ALFIE_REPO_DIR,
-          artifactDir,
-          provenance,
-        });
-        expect(first.fileCount).toBeGreaterThan(0);
+          const first = buildPiSubagentArtifact({
+            repoDir: REAL_ALFIE_REPO_DIR,
+            artifactDir,
+            provenance,
+          });
+          expect(first.fileCount).toBeGreaterThan(0);
 
-        // T01b-AC1: the staged manifest decodes against the WP1a contract.
-        const manifest = Schema.decodeSync(PiSubagentArtifactManifest)(
-          JSON.parse(readFileSync(first.manifestPath, "utf8")),
-        );
-        expect(manifest.schemaVersion).toBe(1);
-        expect(manifest.sourceIdentity).toEqual({
-          repositoryUrl: provenance.expectedRepositoryUrl,
-          pinnedCommit: provenance.pinnedCommit,
-          packageName: provenance.packageName,
-          packageVersion: provenance.packageVersion,
-        });
+          // T01b-AC1: the staged manifest decodes against the WP1a contract.
+          const manifest = Schema.decodeSync(PiSubagentArtifactManifest)(
+            JSON.parse(readFileSync(first.manifestPath, "utf8")),
+          );
+          expect(manifest.schemaVersion).toBe(1);
+          expect(manifest.sourceIdentity).toEqual({
+            repositoryUrl: provenance.expectedRepositoryUrl,
+            pinnedCommit: provenance.pinnedCommit,
+            packageName: provenance.packageName,
+            packageVersion: provenance.packageVersion,
+          });
 
-        // T01b-AC1: capability profile — declared superset of the required set.
-        const declared = new Set(manifest.capabilityProfile.capabilities);
-        for (const required of PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES) {
-          expect(declared.has(required)).toBe(true);
-        }
-        expect(manifest.capabilityProfile.protocolVersion).toBe(1);
-
-        // T01b-AC1: every staged regular file matches exactly one manifest
-        // record (path, size, SHA-256) and vice versa; no symlink remains.
-        const entries = walkEntries(artifactDir);
-        expect(entries.some((entry) => entry.symlink)).toBe(false);
-        const stagedFiles = entries
-          .map((entry) => entry.relative)
-          .filter((relative) => relative !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME);
-        const recordsByPath = new Map(manifest.files.map((record) => [record.path, record]));
-        expect(stagedFiles.length).toBe(recordsByPath.size);
-        for (const relative of stagedFiles) {
-          const record = recordsByPath.get(relative);
-          expect(record, `missing manifest record for ${relative}`).toBeDefined();
-          const bytes = readFileSync(join(artifactDir, relative));
-          expect(bytes.length).toBe(record!.sizeBytes);
-          expect(sha256(bytes)).toBe(record!.sha256);
-        }
-
-        // T01b-AC1: the necessary shared runtime modules the extension
-        // imports are staged (exactly these — no unrelated shared content).
-        for (const basename of SYNTHETIC_SHARED_MODULES) {
-          for (const suffix of [".js", ".d.ts"]) {
-            expect(stagedFiles).toContain(`agent/extensions/shared/${basename}${suffix}`);
+          // T01b-AC1: capability profile — declared superset of the required set.
+          const declared = new Set(manifest.capabilityProfile.capabilities);
+          for (const required of PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES) {
+            expect(declared.has(required)).toBe(true);
           }
-        }
-        expect(
-          stagedFiles.filter((relative) => relative.startsWith("agent/extensions/shared/")).length,
-        ).toBe(SYNTHETIC_SHARED_MODULES.length * 2);
+          expect(manifest.capabilityProfile.protocolVersion).toBe(1);
 
-        // T01b-AC1: the lock-proven direct runtime dependency closure is
-        // staged under the artifact root `node_modules` — exactly the four
-        // locked packages, at their exact locked versions.
-        const dependencyRoots = readdirSync(join(artifactDir, "node_modules"), {
-          withFileTypes: true,
-        })
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => entry.name);
-        expect(dependencyRoots).toContain("@sinclair");
-        expect(dependencyRoots.sort()).toEqual(["@sinclair", "croner", "nanoid", "yaml"]);
-        const expectedLockedVersions: Record<string, string> = {
-          "@sinclair/typebox": "0.34.49",
-          croner: "10.0.1",
-          nanoid: "5.1.11",
-          yaml: "2.9.0",
-        };
-        for (const [name, version] of Object.entries(expectedLockedVersions)) {
-          const installed = JSON.parse(
-            readFileSync(join(artifactDir, "node_modules", name, "package.json"), "utf8"),
+          // T01b-AC1: every staged regular file matches exactly one manifest
+          // record (path, size, SHA-256) and vice versa; no symlink remains.
+          const entries = walkEntries(artifactDir);
+          expect(entries.some((entry) => entry.symlink)).toBe(false);
+          const stagedFiles = entries
+            .map((entry) => entry.relative)
+            .filter((relative) => relative !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME);
+          const recordsByPath = new Map(manifest.files.map((record) => [record.path, record]));
+          expect(stagedFiles.length).toBe(recordsByPath.size);
+          for (const relative of stagedFiles) {
+            const record = recordsByPath.get(relative);
+            expect(record, `missing manifest record for ${relative}`).toBeDefined();
+            const bytes = readFileSync(join(artifactDir, relative));
+            expect(bytes.length).toBe(record!.sizeBytes);
+            expect(sha256(bytes)).toBe(record!.sha256);
+          }
+
+          // T01b-AC1: the necessary shared runtime modules the extension
+          // imports are staged (exactly these — no unrelated shared content).
+          for (const basename of SYNTHETIC_SHARED_MODULES) {
+            for (const suffix of [".js", ".d.ts"]) {
+              expect(stagedFiles).toContain(`agent/extensions/shared/${basename}${suffix}`);
+            }
+          }
+          expect(
+            stagedFiles.filter((relative) => relative.startsWith("agent/extensions/shared/"))
+              .length,
+          ).toBe(SYNTHETIC_SHARED_MODULES.length * 2);
+
+          // T01b-AC1: the lock-proven direct runtime dependency closure is
+          // staged under the artifact root `node_modules` — exactly the four
+          // locked packages, at their exact locked versions.
+          const dependencyRoots = readdirSync(join(artifactDir, "node_modules"), {
+            withFileTypes: true,
+          })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+          expect(dependencyRoots).toContain("@sinclair");
+          expect(dependencyRoots.sort()).toEqual(["@sinclair", "croner", "nanoid", "yaml"]);
+          const expectedLockedVersions: Record<string, string> = {
+            "@sinclair/typebox": "0.34.49",
+            croner: "10.0.1",
+            nanoid: "5.1.11",
+            yaml: "2.9.0",
+          };
+          for (const [name, version] of Object.entries(expectedLockedVersions)) {
+            const installed = JSON.parse(
+              readFileSync(join(artifactDir, "node_modules", name, "package.json"), "utf8"),
+            );
+            expect(installed.version, `${name} must be the exact locked version`).toBe(version);
+          }
+          // No dev/optional lock content, no `.bin` shims, no peer/host-SDK
+          // packages, and no nested `node_modules` inside the staged closure.
+          expect(
+            stagedFiles.some((relative) => relative.includes("/node_modules/node_modules/")),
+          ).toBe(false);
+          expect(stagedFiles.some((relative) => relative.split("/").includes(".bin"))).toBe(false);
+          expect(
+            stagedFiles.some((relative) => relative.startsWith("node_modules/@earendil-works/")),
+          ).toBe(false);
+          expect(
+            stagedFiles.some((relative) => relative.startsWith("node_modules/typescript")),
+          ).toBe(false);
+
+          // T01b-AC5: no authentication, model configuration, key material, or
+          // credentials inside the staged artifact.
+          for (const relative of stagedFiles) {
+            const basename = relative.split("/").pop() ?? "";
+            expect(["auth.json", "models.json", "credentials.json"]).not.toContain(basename);
+            expect([".pem", ".key", ".p8", ".pfx"]).not.toContain(
+              basename.slice(basename.lastIndexOf(".")),
+            );
+          }
+
+          expect(stagedFiles).toContain("agent/extensions/pi-subagents/src/index.ts");
+          expect(stagedFiles).toContain("agent/extensions/pi-subagents/package.json");
+          // Only release runtime material is staged: the extension's own test
+          // subtree never enters the artifact.
+          expect(stagedFiles.some((relative) => relative.includes("/test/"))).toBe(false);
+
+          // T01b-AC2: determinism — identical pinned input reproduces identical
+          // manifest bytes (closure content included: same lock, same bytes).
+          const secondDir = join(makeTempRoot("pi-artifact-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+          const second = buildPiSubagentArtifact({
+            repoDir: REAL_ALFIE_REPO_DIR,
+            artifactDir: secondDir,
+            provenance,
+          });
+          expect(readFileSync(second.manifestPath, "utf8")).toBe(
+            readFileSync(first.manifestPath, "utf8"),
           );
-          expect(installed.version, `${name} must be the exact locked version`).toBe(version);
-        }
-        // No dev/optional lock content, no `.bin` shims, no peer/host-SDK
-        // packages, and no nested `node_modules` inside the staged closure.
-        expect(stagedFiles.some((relative) => relative.includes("/node_modules/node_modules/"))).toBe(false);
-        expect(stagedFiles.some((relative) => relative.split("/").includes(".bin"))).toBe(false);
-        expect(stagedFiles.some((relative) => relative.startsWith("node_modules/@earendil-works/"))).toBe(
-          false,
-        );
-        expect(
-          stagedFiles.some((relative) => relative.startsWith("node_modules/typescript")),
-        ).toBe(false);
-
-        // T01b-AC5: no authentication, model configuration, key material, or
-        // credentials inside the staged artifact.
-        for (const relative of stagedFiles) {
-          const basename = relative.split("/").pop() ?? "";
-          expect(["auth.json", "models.json", "credentials.json"]).not.toContain(basename);
-          expect([".pem", ".key", ".p8", ".pfx"]).not.toContain(
-            basename.slice(basename.lastIndexOf(".")),
-          );
-        }
-
-        expect(stagedFiles).toContain("agent/extensions/pi-subagents/src/index.ts");
-        expect(stagedFiles).toContain("agent/extensions/pi-subagents/package.json");
-        // Only release runtime material is staged: the extension's own test
-        // subtree never enters the artifact.
-        expect(stagedFiles.some((relative) => relative.includes("/test/"))).toBe(false);
-
-        // T01b-AC2: determinism — identical pinned input reproduces identical
-        // manifest bytes (closure content included: same lock, same bytes).
-        const secondDir = join(makeTempRoot("pi-artifact-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
-        const second = buildPiSubagentArtifact({
-          repoDir: REAL_ALFIE_REPO_DIR,
-          artifactDir: secondDir,
-          provenance,
-        });
-        expect(readFileSync(second.manifestPath, "utf8")).toBe(
-          readFileSync(first.manifestPath, "utf8"),
-        );
-      });
+        },
+      );
 
       it("verifies the real checkout provenance without mutating it", () => {
         const provenance = loadRealProvenance();
@@ -621,9 +655,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       mkdirSync(artifactDir, { recursive: true });
       writeFileSync(join(artifactDir, "preexisting-sentinel.txt"), "previous accepted artifact\n");
 
-      expect(() =>
-        buildPiSubagentArtifact({ repoDir, artifactDir, provenance }),
-      ).toThrow(/prohibited/i);
+      expect(() => buildPiSubagentArtifact({ repoDir, artifactDir, provenance })).toThrow(
+        /prohibited/i,
+      );
 
       // The preexisting destination is untouched and no staging sibling
       // residue remains next to it.
@@ -631,7 +665,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
         "previous accepted artifact\n",
       );
       expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(false);
-      const siblings = readdirSync(parentDir).filter((entry) => entry.startsWith("pi-subagents-artifact"));
+      const siblings = readdirSync(parentDir).filter((entry) =>
+        entry.startsWith("pi-subagents-artifact"),
+      );
       expect(siblings).toEqual([PI_SUBAGENT_ARTIFACT_DIR_NAME]);
     });
 
@@ -646,7 +682,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
 
       expect(existsSync(join(artifactDir, "stale-content.txt"))).toBe(false);
       expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(true);
-      const siblings = readdirSync(parentDir).filter((entry) => entry.startsWith("pi-subagents-artifact"));
+      const siblings = readdirSync(parentDir).filter((entry) =>
+        entry.startsWith("pi-subagents-artifact"),
+      );
       expect(siblings).toEqual([PI_SUBAGENT_ARTIFACT_DIR_NAME]);
     });
   });
@@ -749,7 +787,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
           artifactDir: join(makeTempRoot("t01c-sideload-"), "artifact"),
           provenance,
         }),
-      ).toThrow(/prompt-closure derivation failed \(prompt_closure_unsupported\).*outside the recognized required-prompt reader shape/);
+      ).toThrow(
+        /prompt-closure derivation failed \(prompt_closure_unsupported\).*outside the recognized required-prompt reader shape/,
+      );
     });
 
     it("synthetic: a dynamic required prompt read fails staging (AC2)", () => {
@@ -804,7 +844,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
           artifactDir: join(makeTempRoot("t01c-missing-"), "artifact"),
           provenance,
         }),
-      ).toThrow(/not tracked by the pinned commit|missing from the managed pi-subagents (source )?tree|is missing/i);
+      ).toThrow(
+        /not tracked by the pinned commit|missing from the managed pi-subagents (source )?tree|is missing/i,
+      );
     });
 
     it("synthetic: an empty derived prompt input fails staging (AC2)", () => {
