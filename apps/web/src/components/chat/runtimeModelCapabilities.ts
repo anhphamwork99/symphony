@@ -127,17 +127,14 @@ export function getRuntimeAwareModelCapabilities(input: {
 
   const runtimeOptions: EffortOption[] = runtimeEfforts.map((effort) => {
     const description = trimOrNull(effort.description);
-    const option: EffortOption = {
-      value: effort.value,
-      label: trimOrNull(effort.label) ?? runtimeEffortLabel(effort.value),
-    };
-    if (description) {
-      option.description = description;
-    }
-    if (effort.value === runtimeDefaultEffort) {
-      option.isDefault = true;
-    }
-    return option;
+    return Object.assign(
+      {
+        value: effort.value,
+        label: trimOrNull(effort.label) ?? runtimeEffortLabel(effort.value),
+      },
+      description ? { description } : {},
+      effort.value === runtimeDefaultEffort ? { isDefault: true as const } : {},
+    );
   });
 
   if (input.provider === "kilo" || input.provider === "opencode") {
