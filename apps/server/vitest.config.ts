@@ -1,13 +1,20 @@
 import { defineConfig, mergeConfig } from "vitest/config";
 
+import { WALLCLOCK_TESTS } from "./scripts/wallclock-tests.ts";
+
 import baseConfig from "../../vitest.config";
 
 // Ticket 22 remediation (WP-08): the wall-clock-sensitive pi-subagent suites
 // assert Decision 0006 §5's `budget + 500 ms` detach envelope against real-Pi
-// sessions. These four files run in the `wallclock` project while everything
-// else stays in `unit`; the groups execute strictly sequentially with
-// wallclock first. No assertion or timeout was widened; Decision 0006 is
+// sessions. The manifest files run in the `wallclock` project while everything
+// else stays in `unit`. No assertion or timeout was widened; Decision 0006 is
 // unchanged.
+//
+// The WALLCLOCK_TESTS manifest is imported by BOTH this config and
+// `scripts/run-tests.ts`, so the wallclock file list has one source. The
+// package `test` script runs that orchestrator: one `unit` run, then each
+// manifest file in its OWN standalone `vitest run` process — the
+// owner-adjudicated envelope acceptance method.
 //
 // WP-08's challenge evidence (2026-08-17, /tmp copy preserved in the ticket)
 // proved two things: (1) vitest 4's default `forks` pool + `isolate: true`
@@ -20,28 +27,6 @@ import baseConfig from "../../vitest.config";
 // keep this isolation config as a strict harness improvement, and verify the
 // envelope via per-file standalone invocations. Do not widen the envelope or
 // remove these files from this project without re-adjudication.
-const WALLCLOCK_TESTS = [
-  "src/provider/piSubagentForegroundAcceptance.test.ts",
-  "src/provider/piSubagentForegroundReopen.test.ts",
-  "src/provider/piSubagentForegroundLifecycle.test.ts",
-  "src/provider/piSubagentRealExtension.test.ts",
-  "src/provider/piSubagentProgressAcceptance.test.ts",
-  "src/provider/piSubagentIntegratedAcceptance.test.ts",
-  "src/provider/piSubagentCancellationAcceptance.test.ts",
-  "src/provider/piSubagentTerminalAcceptance.test.ts",
-  "src/provider/piSubagentRestartAcceptance.test.ts",
-  "src/provider/piSubagentResumeAcceptance.test.ts",
-  "src/provider/piSubagentCompletionOwnershipAcceptance.test.ts",
-  "src/provider/piSubagentWatchdogAcceptance.test.ts",
-  // Ticket 17 slice 1: the integrated real-Pi acceptance smoke (stages 0–2)
-  // chains the production WS composition against the pinned Alfie extension;
-  // its stage-2 `budget + 500 ms` detach envelope requires the same
-  // standalone per-file wall-clock method as the suites above.
-  "src/provider/piSubagentRealPiAcceptance.test.ts",
-  "src/provider/piSubagentDesktopManagedRealPiAcceptance.test.ts",
-  "src/provider/piSubagentDesktopProductionCompositionAcceptance.test.ts",
-];
-
 const wallclockProject = defineConfig({
   test: {
     name: "wallclock",
