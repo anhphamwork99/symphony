@@ -84,6 +84,9 @@ export function ToolCallDetailsContent({
           <div className="space-y-3">
             {details.edits.map((edit, index) => (
               <div
+                // Edit order is display-order for one invocation; entries can repeat the
+                // same path, so the positional index is the only unique identity.
+                // oxlint-disable-next-line no-array-index-key
                 key={`${edit.path ?? "edit"}:${index}`}
                 className="overflow-hidden rounded-lg border border-border/45 bg-background/58"
               >
@@ -307,6 +310,9 @@ function DiffCodeBlock({ children }: { children: string }) {
     <pre className="max-h-[min(52vh,34rem)] overflow-auto rounded-lg border border-border/45 bg-background/70 px-0 py-2 font-chat-code text-[11px] leading-relaxed">
       {lines.map((line, index) => (
         <span
+          // Diff lines have no stable identity; repeated identical lines must not
+          // collapse, so the line number is the data-dependent key.
+          // oxlint-disable-next-line no-array-index-key
           key={`${index}:${line.slice(0, 24)}`}
           className={cn(
             "block min-w-max whitespace-pre-wrap break-words px-3",

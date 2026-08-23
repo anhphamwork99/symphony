@@ -44,6 +44,9 @@ function StaleContainers({ handleRef }: { handleRef: { current: HarnessHandle | 
     <div style={{ position: "relative", height: 400, width: 300 }}>
       {rowHeights.map((height, index) => (
         <div
+          // The fixture's slot index is the row identity (queried back via
+          // data-overlap-container), so the index is the intended key.
+          // oxlint-disable-next-line no-array-index-key
           key={index}
           data-overlap-container={index}
           style={{
