@@ -5,6 +5,14 @@
 import { ThreadId, type AutomationDefinition } from "@synara/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const depsEqual = (
+  left: readonly unknown[] | undefined,
+  right: readonly unknown[],
+): boolean =>
+  left !== undefined &&
+  left.length === right.length &&
+  left.every((value, index) => Object.is(value, right[index]));
+
 const reactHarness = vi.hoisted(() => {
   interface HookSlot {
     value?: unknown;
@@ -21,10 +29,7 @@ const reactHarness = vi.hoisted(() => {
     slots[index] ??= {};
     return slots[index]!;
   };
-  const depsEqual = (left: readonly unknown[] | undefined, right: readonly unknown[]) =>
-    left !== undefined &&
-    left.length === right.length &&
-    left.every((value, index) => Object.is(value, right[index]));
+
   const useEffect = (effect: () => void | (() => void), deps: readonly unknown[]) => {
     const slot = nextSlot();
     if (depsEqual(slot.deps, deps)) return;
