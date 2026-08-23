@@ -16,6 +16,11 @@ const RECT = { left: 0, top: 0, width: 100, height: 100 };
 const THREAD_A = ThreadId.makeUnsafe("thread-a");
 const THREAD_B = ThreadId.makeUnsafe("thread-b");
 
+type DropZoneName = "top" | "bottom" | "left" | "right";
+
+const onlyVertical = (zone: DropZoneName) => zone === "top" || zone === "bottom";
+const onlyHorizontal = (zone: DropZoneName) => zone === "left" || zone === "right";
+
 describe("getDropZoneFromPointer", () => {
   it("returns top when the pointer is near the top edge", () => {
     expect(getDropZoneFromPointer(RECT, 50, 5)).toBe("top");
@@ -52,11 +57,6 @@ describe("getDropZoneFromPointer", () => {
   });
 
   it("chooses the nearest allowed edge when some directions are disabled", () => {
-    const onlyVertical = (zone: "top" | "bottom" | "left" | "right") =>
-      zone === "top" || zone === "bottom";
-    const onlyHorizontal = (zone: "top" | "bottom" | "left" | "right") =>
-      zone === "left" || zone === "right";
-
     expect(getDropZoneFromPointer(RECT, 5, 55, onlyVertical)).toBe("bottom");
     expect(getDropZoneFromPointer(RECT, 60, 5, onlyHorizontal)).toBe("right");
   });

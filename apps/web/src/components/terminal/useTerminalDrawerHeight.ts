@@ -3,7 +3,13 @@
 // Layer: Terminal interaction hook
 // Depends on: thread terminal sizing defaults and React pointer lifecycle hooks.
 
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { DEFAULT_THREAD_TERMINAL_HEIGHT } from "../../types";
 
@@ -67,12 +73,12 @@ export function useTerminalDrawerHeight(options: {
     drawerHeightRef.current = drawerHeight;
   }, [drawerHeight]);
 
-  const syncHeight = (nextHeight: number) => {
+  const syncHeight = useCallback((nextHeight: number) => {
     const clampedHeight = clampTerminalDrawerHeight(nextHeight);
     if (lastSyncedHeightRef.current === clampedHeight) return;
     lastSyncedHeightRef.current = clampedHeight;
     onHeightChangeRef.current(clampedHeight);
-  };
+  }, []);
 
   // Ref-only mirror of an external height/reset change (ref writes in effects
   // are compiler-safe); the rendered height itself is derived above.

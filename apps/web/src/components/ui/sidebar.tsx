@@ -859,6 +859,11 @@ function SidebarRail({
   }, [resolvedResizable?.storageKey]);
 
   React.useEffect(() => {
+    // Capture the ref's `.current` inside the effect body: the cleanup runs
+    // after later renders may have swapped the mirrored options object. The
+    // session-handle ref itself is a caller-owned mutable box — copying the box
+    // (not its `.current`) keeps the unmount clear pointing at the same box.
+    const sessionHandleBox = resolvedResizableRef.current?.sessionHandleRef ?? null;
     return () => {
       const resizeState = resizeStateRef.current;
       if (resizeState) {
@@ -881,8 +886,8 @@ function SidebarRail({
         }
         resizeStateRef.current = null;
       }
-      if (resolvedResizableRef.current?.sessionHandleRef) {
-        resolvedResizableRef.current.sessionHandleRef.current = null;
+      if (sessionHandleBox) {
+        sessionHandleBox.current = null;
       }
       restoreTransitionTargets();
       document.body.style.removeProperty("cursor");

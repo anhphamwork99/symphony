@@ -149,6 +149,11 @@ export function screenGeometry(kind: DeviceKind = "iPhone", pixelW?: number, pix
   };
 }
 
+/** Clamp a path coordinate to 3 decimals so the emitted `d` attribute stays compact. */
+function round3(v: number): number {
+  return +v.toFixed(3);
+}
+
 /**
  * Continuous ("squircle") rounded rectangle. Each corner is three cubic Béziers
  * rather than an arc — that curvature ramp is what makes it read as an Apple
@@ -167,25 +172,24 @@ function squirclePath(x: number, y: number, w: number, h: number, radius: number
 
   const right = x + w;
   const bottom = y + h;
-  const n = (v: number) => +v.toFixed(3);
   const C = (a: number, b: number, c: number, d: number, e: number, f: number) =>
-    `C${n(a)} ${n(b)} ${n(c)} ${n(d)} ${n(e)} ${n(f)}`;
+    `C${round3(a)} ${round3(b)} ${round3(c)} ${round3(d)} ${round3(e)} ${round3(f)}`;
 
   return [
-    `M${n(x + c1)} ${n(y)}`,
-    `L${n(right - c1)} ${n(y)}`,
+    `M${round3(x + c1)} ${round3(y)}`,
+    `L${round3(right - c1)} ${round3(y)}`,
     C(right - c2, y, right - c3, y, right - c4, y + c7),
     C(right - c5, y + c6, right - c6, y + c5, right - c7, y + c4),
     C(right, y + c3, right, y + c2, right, y + c1),
-    `L${n(right)} ${n(bottom - c1)}`,
+    `L${round3(right)} ${round3(bottom - c1)}`,
     C(right, bottom - c2, right, bottom - c3, right - c7, bottom - c4),
     C(right - c6, bottom - c5, right - c5, bottom - c6, right - c4, bottom - c7),
     C(right - c3, bottom, right - c2, bottom, right - c1, bottom),
-    `L${n(x + c1)} ${n(bottom)}`,
+    `L${round3(x + c1)} ${round3(bottom)}`,
     C(x + c2, bottom, x + c3, bottom, x + c4, bottom - c7),
     C(x + c5, bottom - c6, x + c6, bottom - c5, x + c7, bottom - c4),
     C(x, bottom - c3, x, bottom - c2, x, bottom - c1),
-    `L${n(x)} ${n(y + c1)}`,
+    `L${round3(x)} ${round3(y + c1)}`,
     C(x, y + c2, x, y + c3, x + c7, y + c4),
     C(x + c6, y + c5, x + c5, y + c6, x + c4, y + c7),
     C(x + c3, y, x + c2, y, x + c1, y),
