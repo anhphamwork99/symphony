@@ -9,9 +9,11 @@ and offers only the actions that remain honest.
 
 **Status:** implemented; final acceptance withheld by
 [Decision 0013](../decisions/0013-t03-final-acceptance-non-acceptance.md)
-(2026-08-23) solely pending owner-authorized `bun fmt`, `bun lint`, and
-`bun typecheck` evidence. The independent review passes AC1–AC5; Ticket 04
-remains blocked.
+(2026-08-23). The owner-authorized verification remediation at `03cfdc8c8`
+fixed every Ticket-03-attributable workspace-check error; `bun fmt` and
+`bun lint` pass, while the workspace `bun typecheck` remains blocked by 22
+pre-existing Ticket-01c/02 errors outside Ticket 03's authorized write set.
+The independent review passes AC1–AC5; Ticket 04 remains blocked.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -131,5 +133,34 @@ acceptance solely for missing mandatory workspace-check evidence.
   is outside this change surface; the Ticket-03 browser journey passed both in
   the full run and in the targeted rerun.
 
-`bun fmt`, `bun lint`, and `bun typecheck` were not run because the owner did
-not authorize those heavyweight checks in this conversation.
+The initial candidate verification did not run `bun fmt`, `bun lint`, or
+`bun typecheck` before owner authorization; the subsequent authorized results
+are recorded below.
+
+### Verification remediation update
+
+The owner authorized the bundled workspace checks later on 2026-08-23.
+Ticket-03 remediation commit `03cfdc8c8` fixes all Ticket-03-attributable
+typecheck failures and applies formatter output only to the seven affected
+Ticket-03 files. Formatter rewrites outside the Ticket-03 write set were
+isolated and not merged.
+
+Final check evidence after that remediation:
+
+- `bun fmt` — pass.
+- `bun lint` — pass with 0 errors and 615 existing warnings.
+- Ticket-03-focused typechecks and verification — contracts 34/34, server
+  card surface 17/17, web focused 40/40, details browser 6/6, and targeted
+  orphan/Resume browser journey 1/1 all pass.
+- Workspace `bun typecheck` — still fails outside Ticket 03 with 22
+  pre-existing errors: 18 in Ticket-01c-owned
+  `scripts/lib/piSubagentArtifactStaging*`,
+  `piSubagentNpmRuntimeClosure.ts`, and
+  `piSubagentPromptClosureDerivation.ts`; 4 in Ticket-01b/01c/02-owned
+  `piSubagentDesktopManagedRealPiAcceptance.test.ts` and
+  `piSubagentManagedRuntimeBinding.test.ts`.
+
+Those out-of-scope failures were reproduced against the pristine pre-remediation
+tip `28036c6e4`. They are not caused by Ticket 03, but Decision 0013 requires
+the workspace typecheck to pass before a binding reassessment can accept the
+ticket.
