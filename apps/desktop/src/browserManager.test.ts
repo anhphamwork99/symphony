@@ -24,17 +24,24 @@ vi.mock("electron", () => ({
     userAgentFallback:
       "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Electron/40.0.0 Safari/537.36",
   },
-  BrowserWindow: class {},
+  // Standalone functions carry the same callable + .prototype surfaces as
+  // the empty classes they replace; the manager never constructs them.
+  BrowserWindow: emptyElectronConstructor,
   clipboard: { writeImage: vi.fn(), writeText: vi.fn() },
   nativeImage: { createFromBuffer: vi.fn() },
   session: {
     fromPartition: () => browserSession,
   },
   webContents: { fromId: rendererWebContentsFromId },
-  WebContentsView: class {},
+  WebContentsView: emptyElectronConstructor,
 }));
 
 import { DesktopBrowserManager } from "./browserManager";
+
+// Callable stand-in for Electron constructors the manager only treats as
+// presence-checks (never constructed in these suites): a standalone function
+// exposes the same typeof/function and .prototype surfaces as an empty class.
+function emptyElectronConstructor(): void {}
 
 interface WindowOpenDetails {
   url: string;

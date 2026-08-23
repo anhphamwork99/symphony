@@ -34,9 +34,11 @@ describe("shouldAllowMediaPermissionRequest", () => {
   });
 });
 
-describe("isTrustedMediaPermissionRequest", () => {
-  const requester = (destroyed = false) => ({ isDestroyed: () => destroyed });
+// Trivial destroyed/alive requester factory used across the trust checks
+// below; it captures nothing, so it lives at module scope.
+const requester = (destroyed = false) => ({ isDestroyed: () => destroyed });
 
+describe("isTrustedMediaPermissionRequest", () => {
   it("allows microphone capture only from the exact trusted live renderer", () => {
     const trusted = requester();
 

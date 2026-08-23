@@ -23,6 +23,10 @@ type FakeChildProcess = ChildProcess.ChildProcessWithoutNullStreams & {
   stderr: PassThrough;
 };
 
+// Fixed clock for the pending-capture recovery test: the helper PNG is
+// pre-dated so listPendingCaptures must recover it regardless of wall time.
+const fixedRecoveryClock = () => new Date("2026-07-13T23:30:00.000Z");
+
 function createFakeChildProcess(): FakeChildProcess {
   const child = new EventEmitter() as FakeChildProcess;
   Object.assign(child, {
@@ -860,7 +864,7 @@ describe("AppSnap helper protocol", () => {
     const helperPath = join(captureDirectory, `appsnap-${captureId}.png`);
     const captureBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
     writeFileSync(helperPath, captureBytes);
-    const now = () => new Date("2026-07-13T23:30:00.000Z");
+    const now = fixedRecoveryClock;
     const manager = new DesktopAppSnapManager({
       platform: "darwin",
       helperPath: process.execPath,

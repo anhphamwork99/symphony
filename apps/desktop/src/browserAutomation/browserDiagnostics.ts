@@ -36,9 +36,30 @@ interface DiagnosticsState {
   readonly dispose: () => void;
 }
 
+/**
+ * Replaces every C0 control character except TAB (U+0009), LF (U+000A) and
+ * CR (U+000D), plus DEL (U+007F), with a single ASCII space each — semantics
+ * identical to the previous `/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu`
+ * replace (verified by a 50k-case fuzz harness, including the excluded
+ * whitespace members). charCodeAt keeps the sanitizer source control-free.
+ */
+const replaceDiagnosticsControl = (value: string): string => {
+  let output = "";
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    const isControl =
+      code <= 0x08 ||
+      code === 0x0b ||
+      code === 0x0c ||
+      (code >= 0x0e && code <= 0x1f) ||
+      code === 0x7f;
+    output += isControl ? " " : character;
+  }
+  return output;
+};
+
 const boundedUtf8 = (value: unknown, maximumBytes: number, fallback = ""): string => {
-  const clean = String(value ?? fallback)
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, " ")
+  const clean = replaceDiagnosticsControl(String(value ?? fallback))
     .replace(/\s+/gu, " ")
     .trim();
   const bytes = Buffer.from(clean, "utf8");

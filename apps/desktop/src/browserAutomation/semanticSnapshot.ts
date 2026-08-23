@@ -464,17 +464,27 @@ export const captureSemanticSnapshot = async (
     truncationReasons,
   };
 
+  // Drop trailing elements until the JSON encoding fits the byte cap. The
+  // payload is still measured in full (every field counts toward the cap);
+  // only the two varying members are rewritten per pass through a mutable
+  // view, which avoids re-spreading the whole accumulator (O(n^2) churn).
+  // The view is safe because this object is freshly built above and never
+  // aliased before the final return.
+  const mutableContent = structuredContent as {
+    elements: BrowserSnapshotOutput["elements"];
+    truncationReasons: BrowserSnapshotOutput["truncationReasons"];
+  };
   while (
     Buffer.byteLength(JSON.stringify(structuredContent), "utf8") > MAX_STRUCTURED_SNAPSHOT_BYTES &&
     structuredContent.elements.length > 0
   ) {
-    structuredContent = {
-      ...structuredContent,
-      elements: structuredContent.elements.slice(0, -1),
-      truncationReasons: structuredContent.truncationReasons.includes("structured-byte-limit")
-        ? structuredContent.truncationReasons
-        : [...structuredContent.truncationReasons, "structured-byte-limit"],
-    };
+    mutableContent.elements = mutableContent.elements.slice(0, -1);
+    if (!mutableContent.truncationReasons.includes("structured-byte-limit")) {
+      mutableContent.truncationReasons = [
+        ...mutableContent.truncationReasons,
+        "structured-byte-limit",
+      ];
+    }
   }
   if (
     Buffer.byteLength(JSON.stringify(structuredContent), "utf8") > MAX_STRUCTURED_SNAPSHOT_BYTES
