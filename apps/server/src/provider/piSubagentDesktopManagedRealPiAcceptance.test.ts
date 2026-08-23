@@ -646,10 +646,10 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         "Reply with a short acknowledgment only. Do not delegate.",
       );
 
-        // The session is live and the initial model selection is in effect.
-        await waitFor(
-          () => harness.modelServer.requests(),
-          (requests) => requests.some((request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID),
+      // The session is live and the initial model selection is in effect.
+      await waitFor(
+        () => harness.modelServer.requests(),
+        (requests) => requests.some((request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID),
         45_000,
         "initial driver model traffic",
       );

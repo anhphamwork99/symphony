@@ -342,11 +342,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       // manager itself for desktop sessions.
       inMemory: () => {
         sdkHarness.settingsManagerCreates.push("inMemory");
-                const writes: Array<{
-                  provider: string;
-                  modelId: string;
-                  settingsPath: string;
-                }> = [];
+        const writes: Array<{ provider: string; modelId: string }> = [];
         return {
           kind: "inMemory" as const,
           writes,
@@ -390,7 +386,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         input.settingsManager === undefined
           ? (() => {
               const settingsPath = path.join(input.agentDir, "settings.json");
-              const writes: Array<{ provider: string; modelId: string }> = [];
+              const writes: Array<{
+                provider: string;
+                modelId: string;
+                settingsPath: string;
+              }> = [];
               bridgeState.fileSettingsWrites.push({ settingsPath, writes });
               return {
                 kind: "file" as const,
