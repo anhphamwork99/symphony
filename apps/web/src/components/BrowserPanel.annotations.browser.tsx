@@ -99,9 +99,10 @@ function AnnotationHarness(props: {
   const [annotations, setAnnotations] = useState<BrowserAnnotationDraft[]>([]);
   const [browserStateVersion, setBrowserStateVersion] = useState(1);
   const [activeTabId, setActiveTabId] = useState<string | null>("tab-a");
+  const { onAdd } = props;
   const addAnnotation = useCallback(
     (_threadId: ThreadId, annotation: Omit<BrowserAnnotationDraft, "ordinal">) => {
-      props.onAdd(annotation);
+      onAdd(annotation);
       setAnnotations((current) => [
         ...current,
         {
@@ -111,7 +112,7 @@ function AnnotationHarness(props: {
       ]);
       return true;
     },
-    [props.onAdd],
+    [onAdd],
   );
   const controller = useBrowserAnnotations({
     methods: props.harness.methods,

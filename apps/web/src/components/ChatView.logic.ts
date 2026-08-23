@@ -1028,10 +1028,11 @@ export function createWorktreeSetupSnapshot(
   const stepDefinitions = worktreeSetupStepDefinitions(activeStepId, options);
   const activeIndex = stepDefinitions.findIndex((step) => step.id === activeStepId);
   return {
-    steps: stepDefinitions.map((step, index) => ({
-      ...step,
-      status: index < activeIndex ? "done" : index === activeIndex ? "active" : "pending",
-    })),
+    steps: stepDefinitions.map((step, index) =>
+      Object.assign({}, step, {
+        status: index < activeIndex ? ("done" as const) : index === activeIndex ? ("active" as const) : ("pending" as const),
+      }),
+    ),
   };
 }
 
@@ -1077,7 +1078,7 @@ export interface WorktreeSetupResolution {
 
 export function createWorktreeSetupResolution(): WorktreeSetupResolution {
   let action: WorktreeSetupResolutionAction | null = null;
-  let settle: (resolved: WorktreeSetupResolutionAction) => void = () => {};
+  let settle: ((resolved: WorktreeSetupResolutionAction) => void) | undefined;
   const promise = new Promise<WorktreeSetupResolutionAction>((resolve) => {
     settle = resolve;
   });
@@ -1091,7 +1092,7 @@ export function createWorktreeSetupResolution(): WorktreeSetupResolution {
         return;
       }
       action = next;
-      settle(next);
+      settle?.(next);
     },
   };
 }

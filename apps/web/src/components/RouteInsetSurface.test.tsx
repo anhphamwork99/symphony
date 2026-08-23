@@ -39,6 +39,8 @@ function renderRouteSurface(route: string, open: boolean): string {
 describe("RouteInsetSurface", () => {
   it.each(
     DEFAULT_ROUTE_SURFACES.flatMap((route) =>
+      // Two fresh objects per route; copy-on-write is clearer than Object.assign here.
+      // oxlint-disable-next-line no-map-spread
       SIDEBAR_STATES.map((state) => ({
         route,
         ...state,

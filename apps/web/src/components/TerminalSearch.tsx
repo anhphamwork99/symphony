@@ -4,7 +4,7 @@
 // Exports: TerminalSearch
 
 import type { SearchAddon, ISearchOptions } from "@xterm/addon-search";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconButton } from "~/components/ui/icon-button";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
@@ -32,11 +32,14 @@ export function TerminalSearch({ searchAddon, isOpen, onClose }: TerminalSearchP
   const [hasResults, setHasResults] = useState<boolean | null>(null);
   const [caseSensitive, setCaseSensitive] = useState(false);
 
-  const searchOptions: ISearchOptions = {
-    caseSensitive,
-    regex: false,
-    decorations: SEARCH_DECORATIONS as NonNullable<ISearchOptions["decorations"]>,
-  };
+  const searchOptions: ISearchOptions = useMemo(
+    () => ({
+      caseSensitive,
+      regex: false,
+      decorations: SEARCH_DECORATIONS as NonNullable<ISearchOptions["decorations"]>,
+    }),
+    [caseSensitive],
+  );
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -64,11 +67,11 @@ export function TerminalSearch({ searchAddon, isOpen, onClose }: TerminalSearchP
     setHasResults(found);
   };
 
-  const clearSearchTimer = () => {
+  const clearSearchTimer = useCallback(() => {
     if (searchTimerRef.current === null) return;
     window.clearTimeout(searchTimerRef.current);
     searchTimerRef.current = null;
-  };
+  }, []);
 
   const scheduleSearch = (nextQuery: string) => {
     clearSearchTimer();
