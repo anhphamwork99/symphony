@@ -420,3 +420,106 @@ layer("ProjectWorkspaceStore", (it) => {
       }),
   );
 });
+
+// ── WP4: transactional-context Project workspace deletion ───────────
+
+layer("ProjectWorkspaceStore.deleteProjectWorkspace", (it) => {
+  const projectDeleteSettled = ProjectId.makeUnsafe("project-delete-settled");
+  const projectDeleteAbsent = ProjectId.makeUnsafe("project-delete-absent");
+  const projectDeleteNeighbor = ProjectId.makeUnsafe("project-delete-neighbor");
+
+  it.effect("deletes every slice and the publication marker for one Project", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const store = yield* ProjectWorkspaceStore;
+
+      yield* store.stageAndPublish({
+        projectId: projectDeleteSettled,
+        slices: completeSlices(projectDeleteSettled),
+        publishedAt: PUBLISHED_AT,
+        provenance: null,
+      });
+      yield* store.stageAndPublish({
+        projectId: projectDeleteNeighbor,
+        slices: completeSlices(projectDeleteNeighbor),
+        publishedAt: PUBLISHED_AT,
+        provenance: null,
+      });
+
+      yield* store.deleteProjectWorkspace({ projectId: projectDeleteSettled });
+
+      const sliceCount = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM project_workspace_slices WHERE project_id = ${projectDeleteSettled}
+      `;
+      assert.strictEqual(sliceCount[0]?.count, 0);
+      const markerCount = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM project_workspace_publications WHERE project_id = ${projectDeleteSettled}
+      `;
+      assert.strictEqual(markerCount[0]?.count, 0);
+      const read = yield* store.readProjectWorkspace({ projectId: projectDeleteSettled });
+      assert.deepStrictEqual(read, { kind: "unpublished", reason: "marker-absent" });
+    }),
+  );
+
+  it.effect("is idempotent: deleting an absent Project workspace succeeds as a no-op", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectWorkspaceStore;
+      yield* store.deleteProjectWorkspace({ projectId: projectDeleteAbsent });
+      yield* store.deleteProjectWorkspace({ projectId: projectDeleteAbsent });
+      const read = yield* store.readProjectWorkspace({ projectId: projectDeleteAbsent });
+      assert.deepStrictEqual(read, { kind: "unpublished", reason: "marker-absent" });
+    }),
+  );
+
+  it.effect("never deletes another Project's workspace state", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectWorkspaceStore;
+      yield* store.stageAndPublish({
+        projectId: projectDeleteNeighbor,
+        slices: completeSlices(projectDeleteNeighbor),
+        publishedAt: PUBLISHED_AT,
+        provenance: null,
+      });
+
+      yield* store.deleteProjectWorkspace({ projectId: projectDeleteSettled });
+
+      const neighborRead = yield* store.readProjectWorkspace({
+        projectId: projectDeleteNeighbor,
+      });
+      assert.strictEqual(neighborRead.kind, "published-current");
+    }),
+  );
+
+  it.effect("joins the caller's transaction: a rollback restores the workspace atomically", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const store = yield* ProjectWorkspaceStore;
+
+      yield* store.stageAndPublish({
+        projectId: projectDeleteSettled,
+        slices: completeSlices(projectDeleteSettled),
+        publishedAt: PUBLISHED_AT,
+        provenance: null,
+      });
+
+      // Simulate the engine's deletion transaction failing AFTER the workspace
+      // delete: the deletes must roll back with the aborted transaction, so the
+      // deleted Project's workspace is never orphaned half-deleted.
+      const rolledBack = yield* Effect.flip(
+        sql.withTransaction(
+          Effect.gen(function* () {
+            yield* store.deleteProjectWorkspace({ projectId: projectDeleteSettled });
+            yield* new ProjectWorkspaceStagingInvalidError({
+              projectId: projectDeleteSettled,
+              detail: "injected post-delete transaction failure",
+            });
+          }),
+        ),
+      );
+      assert.isTrue(rolledBack instanceof ProjectWorkspaceStagingInvalidError);
+
+      const read = yield* store.readProjectWorkspace({ projectId: projectDeleteSettled });
+      assert.strictEqual(read.kind, "published-current");
+    }),
+  );
+});

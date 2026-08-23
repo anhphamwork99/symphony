@@ -256,3 +256,105 @@ it.effect("rejects push envelopes when channel payload does not match the channe
     assert.strictEqual(result._tag, "Failure");
   }),
 );
+
+// ── WP4: Project-owned terminal method registration ─────────────────
+
+it.effect("accepts project terminal open requests keyed by real ProjectId", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(WebSocketRequest, {
+      id: "req-terminal-project-open-1",
+      body: {
+        _tag: WS_METHODS.terminalProjectOpen,
+        projectId: "project-1",
+        terminalId: "default",
+        cwd: "/repo",
+        cols: 120,
+        rows: 30,
+      },
+    });
+    assert.strictEqual(parsed.body._tag, WS_METHODS.terminalProjectOpen);
+    if (parsed.body._tag === WS_METHODS.terminalProjectOpen) {
+      assert.strictEqual(parsed.body.projectId, "project-1");
+      assert.strictEqual(parsed.body.cwd, "/repo");
+    }
+  }),
+);
+
+it.effect("defaults project terminal id and accepts write/close without a pseudo thread", () =>
+  Effect.gen(function* () {
+    const write = yield* decode(WebSocketRequest, {
+      id: "req-terminal-project-write-1",
+      body: {
+        _tag: WS_METHODS.terminalProjectWrite,
+        projectId: "project-1",
+        data: "ls\r",
+      },
+    });
+    const close = yield* decode(WebSocketRequest, {
+      id: "req-terminal-project-close-1",
+      body: {
+        _tag: WS_METHODS.terminalProjectClose,
+        projectId: "project-1",
+      },
+    });
+    const list = yield* decode(WebSocketRequest, {
+      id: "req-terminal-project-list-1",
+      body: {
+        _tag: WS_METHODS.terminalProjectList,
+        projectId: "project-1",
+      },
+    });
+
+    assert.strictEqual(write.body._tag, WS_METHODS.terminalProjectWrite);
+    if (write.body._tag === WS_METHODS.terminalProjectWrite) {
+      // The Project terminal default mirrors the thread surface: omitted
+      // terminalId decodes to "default" rather than a synthetic thread key.
+      assert.strictEqual(write.body.terminalId, "default");
+    }
+    assert.strictEqual(close.body._tag, WS_METHODS.terminalProjectClose);
+    assert.strictEqual(list.body._tag, WS_METHODS.terminalProjectList);
+    // A Project terminal open without its ProjectId is not decodable: the
+    // owning Project must be identified explicitly, never inferred.
+    const rejected = yield* Effect.exit(
+      decode(WebSocketRequest, {
+        id: "req-terminal-project-reject-1",
+        body: {
+          _tag: WS_METHODS.terminalProjectOpen,
+          cwd: "/repo",
+        },
+      }),
+    );
+    assert.strictEqual(rejected._tag, "Failure");
+  }),
+);
+
+it.effect("decodes project terminal push events on their own channel", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(WsResponse, {
+      type: "push",
+      sequence: 7,
+      channel: WS_CHANNELS.terminalProjectEvent,
+      data: {
+        type: "started",
+        projectId: "project-1",
+        terminalId: "default",
+        createdAt: "2026-08-24T00:00:00.000Z",
+        snapshot: {
+          projectId: "project-1",
+          terminalId: "default",
+          cwd: "/repo",
+          status: "running",
+          pid: 123,
+          history: "",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: "2026-08-24T00:00:00.000Z",
+        },
+      },
+    });
+    assert.strictEqual(parsed.type, "push");
+    if (parsed.type === "push") {
+      assert.strictEqual(parsed.channel, WS_CHANNELS.terminalProjectEvent);
+    }
+  }),
+);

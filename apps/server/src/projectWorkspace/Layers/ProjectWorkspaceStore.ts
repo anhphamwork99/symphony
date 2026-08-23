@@ -301,6 +301,23 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
         ),
       );
 
+    const deleteProjectWorkspace: ProjectWorkspaceStoreShape["deleteProjectWorkspace"] = ({
+      projectId,
+    }) =>
+      Effect.gen(function* () {
+        // Deliberately NO withTransaction here: the orchestration engine invokes
+        // this inside the SAME transaction that appends `project.deleted` and
+        // projects it, so these deletes join that transaction and roll back with
+        // it if the commit fails. Standalone callers get per-statement atomicity,
+        // which is acceptable for an idempotent postcondition cleanup.
+        yield* sql`DELETE FROM project_workspace_slices WHERE project_id = ${projectId}`;
+        yield* sql`DELETE FROM project_workspace_publications WHERE project_id = ${projectId}`;
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectWorkspaceStore.deleteProjectWorkspace:query"),
+        ),
+      );
+
     return {
       readProjectWorkspace: (input) =>
         readProjectWorkspace(input).pipe(
@@ -313,6 +330,7 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
         ),
       readPublishedTarget,
       stageAndPublish,
+      deleteProjectWorkspace,
     } satisfies ProjectWorkspaceStoreShape;
     }),
   );

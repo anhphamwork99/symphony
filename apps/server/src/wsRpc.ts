@@ -5,6 +5,7 @@ import {
   DEFAULT_TERMINAL_ID,
   DEVICE_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
+  ProjectId,
   ThreadId,
   WS_BOOTSTRAP_METHOD,
   WS_BOOTSTRAP_PATH,
@@ -1145,6 +1146,40 @@ const makeWsRpcHandlersLayer = () =>
       // critical section below (same pattern as the impl-08 reconcile path).
       const mcpSessionAuthority = yield* McpSessionAuthority;
 
+      // Admission (review remediation): the OWNING Project must exist and not
+      // be deleted in the authoritative orchestration read model — the Project
+      // terminal workspace is owned by a real Project record, so a nonexistent
+      // or deleted ProjectId is rejected before the terminal runtime is
+      // touched. `list`/`close`/subscription stay admission-free: they are the
+      // truthful surfaces the deletion flow itself uses.
+      const requireActiveProjectForTerminal = (projectId: ProjectId) =>
+        orchestrationEngine.getReadModel().pipe(
+          Effect.flatMap((readModel) => {
+            const project = readModel.projects.find(
+              (candidate) => candidate.id === projectId && candidate.kind === "project",
+            );
+            if (project === undefined) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' does not exist; project terminals require an existing Project.`,
+                  code: "PROJECT_NOT_FOUND",
+                  retryable: false,
+                }),
+              );
+            }
+            if (project.deletedAt !== null) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' was deleted; its terminal workspace no longer exists.`,
+                  code: "PROJECT_DELETED",
+                  retryable: false,
+                }),
+              );
+            }
+            return Effect.void;
+          }),
+        );
+
       return AdmittedWsFeatureRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           rpcEffect(
@@ -1915,6 +1950,78 @@ const makeWsRpcHandlersLayer = () =>
             Stream.callback((queue) =>
               Effect.gen(function* () {
                 const unsubscribe = yield* terminalManager.subscribe((event) => {
+                  Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                });
+                yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+              }),
+            ),
+          ),
+
+        // ── Project-owned terminal routes (Decision 0002) ──────────────
+        // Same runtime machinery as the thread routes above, keyed by the
+        // real ProjectId. Project terminals never touch the thread title
+        // tracker: their lifetime is the Project workspace, not a
+        // conversation, so conversation rename side effects do not apply.
+        [WS_METHODS.terminalProjectOpen]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.openProject(input)),
+            ),
+            "Failed to open project terminal",
+          ),
+        [WS_METHODS.terminalProjectWrite]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.writeProject(input)),
+            ),
+            "Failed to write project terminal",
+          ),
+        [WS_METHODS.terminalProjectAckOutput]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.ackOutputProject(input)),
+            ),
+            "Failed to acknowledge project terminal output",
+          ),
+        [WS_METHODS.terminalProjectResize]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.resizeProject(input)),
+            ),
+            "Failed to resize project terminal",
+          ),
+        [WS_METHODS.terminalProjectClear]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.clearProject(input)),
+            ),
+            "Failed to clear project terminal",
+          ),
+        [WS_METHODS.terminalProjectRestart]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.restartProject(input)),
+            ),
+            "Failed to restart project terminal",
+          ),
+        [WS_METHODS.terminalProjectClose]: (input) =>
+          rpcEffect(terminalManager.closeProject(input), "Failed to close project terminal"),
+        [WS_METHODS.terminalProjectList]: (input) =>
+          // Preflight surface for the WP6 delete-confirmation warning: the
+          // client lists the Project's terminals (with truthful exited/
+          // running state) before warning about active work.
+          rpcEffect(
+            terminalManager.listProjectTerminals({ projectId: input.projectId }),
+            "Failed to list project terminals",
+          ),
+        [WS_METHODS.subscribeTerminalProjectEvents]: (_, { clientId }) =>
+          // Lossless for the same reason as thread terminal events.
+          streamAdmission.guard(
+            clientId,
+            { key: "terminal.project.events" },
+            Stream.callback((queue) =>
+              Effect.gen(function* () {
+                const unsubscribe = yield* terminalManager.subscribeProject((event) => {
                   Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
                 });
                 yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));

@@ -1289,7 +1289,9 @@ describe("TerminalManager", () => {
 
     const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
     const keys = [...sessions.keys()];
-    expect(keys).toEqual(["thread-2\u0000default"]);
+    // Owner-kind namespaced key: thread-owned sessions carry the kind
+    // discriminator so a Project owner key can never collide with a Thread one.
+    expect(keys).toEqual(["thread\u0000thread-2\u0000default"]);
 
     manager.dispose();
   });

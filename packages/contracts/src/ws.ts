@@ -69,6 +69,15 @@ import {
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
+  TerminalProjectAckOutputInput,
+  TerminalProjectClearInput,
+  TerminalProjectCloseInput,
+  TerminalProjectEvent,
+  TerminalProjectInput,
+  TerminalProjectOpenInput,
+  TerminalProjectResizeInput,
+  TerminalProjectRestartInput,
+  TerminalProjectWriteInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalWriteInput,
@@ -232,6 +241,18 @@ export const WS_METHODS = {
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
+  // Project-owned terminal methods (WP1 schemas; the Right-sidebar terminal
+  // workspace belongs to the Project, Decision 0002). Keyed by the real
+  // ProjectId — never a pseudo-ThreadId or the currently selected thread.
+  terminalProjectOpen: "terminal.project.open",
+  terminalProjectWrite: "terminal.project.write",
+  terminalProjectAckOutput: "terminal.project.ackOutput",
+  terminalProjectResize: "terminal.project.resize",
+  terminalProjectClear: "terminal.project.clear",
+  terminalProjectRestart: "terminal.project.restart",
+  terminalProjectClose: "terminal.project.close",
+  terminalProjectList: "terminal.project.list",
+
   // Server meta
   serverGetConfig: "server.getConfig",
   serverGetEnvironment: "server.getEnvironment",
@@ -263,6 +284,7 @@ export const WS_METHODS = {
 
   // Streaming subscriptions
   subscribeTerminalEvents: "terminal.subscribeEvents",
+  subscribeTerminalProjectEvents: "terminal.project.subscribeEvents",
   subscribeOrchestrationDomainEvents: "orchestration.subscribeDomainEvents",
 
   // Provider discovery
@@ -298,6 +320,7 @@ export const WS_CHANNELS = {
   gitWorktreeSetupProgress: "git.worktreeSetupProgress",
   projectProvisionProgress: "project.provisionProgress",
   terminalEvent: "terminal.event",
+  terminalProjectEvent: "terminal.project.event",
   projectDevServerEvent: "project.devServerEvent",
   serverWelcome: "server.welcome",
   serverMaintenanceUpdated: "server.maintenanceUpdated",
@@ -445,6 +468,17 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
 
+  // Project-owned terminal methods (WP1 TerminalProject schemas)
+  tagRequestBody(WS_METHODS.terminalProjectOpen, TerminalProjectOpenInput),
+  tagRequestBody(WS_METHODS.terminalProjectWrite, TerminalProjectWriteInput),
+  tagRequestBody(WS_METHODS.terminalProjectAckOutput, TerminalProjectAckOutputInput),
+  tagRequestBody(WS_METHODS.terminalProjectResize, TerminalProjectResizeInput),
+  tagRequestBody(WS_METHODS.terminalProjectClear, TerminalProjectClearInput),
+  tagRequestBody(WS_METHODS.terminalProjectRestart, TerminalProjectRestartInput),
+  tagRequestBody(WS_METHODS.terminalProjectClose, TerminalProjectCloseInput),
+  tagRequestBody(WS_METHODS.terminalProjectList, TerminalProjectInput),
+  tagRequestBody(WS_METHODS.subscribeTerminalProjectEvents, Schema.Struct({})),
+
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetEnvironment, Schema.Struct({})),
@@ -537,6 +571,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.gitWorktreeSetupProgress]: typeof GitWorktreeSetupProgressEvent.Type;
   readonly [WS_CHANNELS.projectProvisionProgress]: typeof GitHubProjectProvisionProgressEvent.Type;
   readonly [WS_CHANNELS.terminalEvent]: typeof TerminalEvent.Type;
+  readonly [WS_CHANNELS.terminalProjectEvent]: typeof TerminalProjectEvent.Type;
   readonly [WS_CHANNELS.projectDevServerEvent]: typeof ProjectDevServerEvent.Type;
   readonly [DEVICE_WS_CHANNELS.event]: typeof DeviceEvent.Type;
   readonly [ORCHESTRATION_WS_CHANNELS.domainEvent]: OrchestrationEvent;
@@ -592,6 +627,10 @@ export const WsPushProjectProvisionProgress = makeWsPushSchema(
   GitHubProjectProvisionProgressEvent,
 );
 export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
+export const WsPushTerminalProjectEvent = makeWsPushSchema(
+  WS_CHANNELS.terminalProjectEvent,
+  TerminalProjectEvent,
+);
 export const WsPushProjectDevServerEvent = makeWsPushSchema(
   WS_CHANNELS.projectDevServerEvent,
   ProjectDevServerEvent,
@@ -621,6 +660,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.serverSettingsUpdated,
   WS_CHANNELS.automationEvent,
   WS_CHANNELS.terminalEvent,
+  WS_CHANNELS.terminalProjectEvent,
   WS_CHANNELS.projectDevServerEvent,
   DEVICE_WS_CHANNELS.event,
   ORCHESTRATION_WS_CHANNELS.domainEvent,
@@ -640,6 +680,7 @@ export const WsPush = Schema.Union([
   WsPushGitWorktreeSetupProgress,
   WsPushProjectProvisionProgress,
   WsPushTerminalEvent,
+  WsPushTerminalProjectEvent,
   WsPushProjectDevServerEvent,
   WsPushDeviceEvent,
   WsPushOrchestrationDomainEvent,

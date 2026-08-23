@@ -103,6 +103,20 @@ export interface ProjectWorkspaceStoreShape {
     readonly publishedAt: string;
     readonly provenance: ProjectWorkspaceMigrationProvenance | null;
   }) => Effect.Effect<void, ProjectWorkspaceStoreError | ProjectWorkspaceStagingInvalidError>;
+
+  /**
+   * Delete every persisted workspace slice AND the publication marker for one
+   * Project (WP4 Project-deletion settlement). Idempotent: deleting an absent
+   * Project workspace is a no-op success.
+   *
+   * Runs on the caller's current SQL transaction context WITHOUT opening its
+   * own transaction: the orchestration engine calls this INSIDE the same
+   * transaction that persists `project.deleted`, so the workspace delete and
+   * the deletion event commit — or roll back — atomically.
+   */
+  readonly deleteProjectWorkspace: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<void, ProjectWorkspaceStoreError>;
 }
 
 export class ProjectWorkspaceStore extends ServiceMap.Service<
