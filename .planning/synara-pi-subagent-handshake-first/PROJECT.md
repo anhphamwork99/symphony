@@ -6,11 +6,10 @@
 - **Lifecycle:** Implementation in progress — Ticket 01, its runtime-closure
   remediation Ticket 01b, its prompt-closure remediation Ticket 01c, and
   Ticket 02 are accepted. Ticket 03 is implemented and behaviorally passes
-  AC1–AC5. Its authorized remediation at `03cfdc8c8` makes `bun fmt` and
-  `bun lint` pass and clears every Ticket-03 type error, but Decision 0013
-  continues to withhold final acceptance because workspace `bun typecheck`
-  is blocked by 22 pre-existing Ticket-01c/02 errors outside Ticket 03's
-  current write authority.
+  AC1–AC5. Owner-authorized remediations `03cfdc8c8` and `ea2fd5e00` make
+  `bun fmt`, `bun lint`, and workspace `bun typecheck` pass while preserving
+  the accepted artifact/runtime boundaries. Ticket 03 awaits a binding
+  Reassessment of Decision 0013.
 - **Triage status:** 02 accepted; 03 needs verification remediation; 04
   remains blocked by 03.
 - **Tracker:** Local Markdown
@@ -110,11 +109,11 @@
   one normal durable admission, post-detach liveness through one fenced
   terminal commit, and redacted zero-effect bootstrap/runtime failures.
 - **03 — Present durable execution-card truth** is implemented at
-  `236d4119b`, with verification remediation at `03cfdc8c8`; its independent
-  review passes AC1–AC5, `bun fmt` and `bun lint` pass, and all Ticket-03
-  type errors are fixed. Decision 0013 still withholds final acceptance until
-  the 22 pre-existing out-of-scope Ticket-01c/02 workspace typecheck errors are
-  remediated and the complete `bun typecheck` passes.
+  `236d4119b`, with verification remediations at `03cfdc8c8` and
+  `ea2fd5e00`; its independent review passes AC1–AC5 and the complete
+  `bun fmt` / `bun lint` / `bun typecheck` gate now passes. Decision 0013
+  still withholds final acceptance until its binding Reassessment is
+  persisted.
 - **04 — Prove desktop production composition and complete acceptance** is
   blocked by Ticket 03; it remains packaged desktop/server final composition
   only and does not absorb the verification remediation.

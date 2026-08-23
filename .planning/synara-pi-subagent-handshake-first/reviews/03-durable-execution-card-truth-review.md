@@ -85,3 +85,63 @@ because proven teardown settles cancellation and advances the generation.
 - The evidence package is sufficient for the one Ticket-03 Supervisor
   final-acceptance consultation, carrying the findings and missing heavyweight
   check evidence explicitly.
+
+## Verification remediation addendum
+
+- **Date:** 2026-08-23
+- **Remediation commits:** `03cfdc8c8`, `ea2fd5e00`
+- **Addendum verdict:** PASS WITH GAPS
+- **Scope:** Mandatory workspace-check remediation only; this is not a second
+  feature-level review and does not reopen the AC1–AC5 PASS verdict.
+
+The remediation review audited the six-file
+`f8c3a267d..ea2fd5e00` artifact-closure/typecheck diff separately from its
+mechanical formatter churn. All semantic edits are behavior- and
+security-equivalent:
+
+- optional values are omitted rather than passed as `undefined`;
+- readonly inputs are sorted through a copy;
+- the lock entry type now declares the peer dependency map that runtime
+  equality logic already reads;
+- TypeScript control-flow and AST predicates use current compiler APIs while
+  preserving the same lexical-shadowing and fail-closed behavior;
+- test-only JSON, union, and optional-capability values are narrowed without
+  weakening assertions.
+
+Fail-close codes and messages, manifest and prompt-closure ownership, lock
+dependency/peer equality, artifact pinning, handshake/admission semantics, and
+Ticket-03 presentation behavior are unchanged.
+
+Independent verification reproduced the original 22 diagnostics at
+`f8c3a267d` and zero at `ea2fd5e00`. Scripts and server package typechecks
+pass; root typecheck reports 7/7 successful packages. Root lint exits with 0
+errors and 615 warnings. Formatter exits successfully; its unrelated
+workspace churn is not part of the six-file commit.
+
+Focused remediation tests pass:
+
+- prompt closure 21/21;
+- artifact staging 22/22;
+- npm runtime closure 20/20;
+- managed runtime binding 20/20;
+- artifact verifier 47/47;
+- desktop artifact gate 30/30;
+- artifact-closure real load 3/3.
+
+The desktop real-Pi wall-clock suite remains load-sensitive: candidate runs
+produce 4/6 while the pristine baseline in the same environment produces 3/6.
+The diff changes no admission path, wait count, timeout value, or lifecycle
+behavior, so this is not a remediation regression or reassessment blocker.
+
+### Addendum findings
+
+1. **Medium — formatter exit versus zero-diff.** `bun fmt` exits successfully
+   but formats additional pre-existing files. Repository authority requires
+   the command to pass, not a zero-diff check. Unrelated formatter output was
+   deliberately excluded from the remediation commit.
+2. **Low — refactor-proof narrowing.** A future cleanup could add explicit
+   `return unsupported(...)` calls, but the current function-declaration
+   `never` helpers narrow correctly under the installed TypeScript version.
+
+The remediation commit plus the original feature-level PASS review are
+sufficient material evidence for a binding Reassessment of Decision 0013.

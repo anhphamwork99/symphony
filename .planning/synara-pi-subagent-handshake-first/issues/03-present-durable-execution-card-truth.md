@@ -9,11 +9,11 @@ and offers only the actions that remain honest.
 
 **Status:** implemented; final acceptance withheld by
 [Decision 0013](../decisions/0013-t03-final-acceptance-non-acceptance.md)
-(2026-08-23). The owner-authorized verification remediation at `03cfdc8c8`
-fixed every Ticket-03-attributable workspace-check error; `bun fmt` and
-`bun lint` pass, while the workspace `bun typecheck` remains blocked by 22
-pre-existing Ticket-01c/02 errors outside Ticket 03's authorized write set.
-The independent review passes AC1–AC5; Ticket 04 remains blocked.
+(2026-08-23). Owner-authorized verification remediations `03cfdc8c8` and
+`ea2fd5e00` now make `bun fmt`, `bun lint`, and workspace `bun typecheck`
+pass; the original independent review passes AC1–AC5 and its remediation
+addendum finds no behavior or security regression. Ticket 03 awaits a binding
+Decision-0013 Reassessment; Ticket 04 remains blocked until that decision.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -58,7 +58,8 @@ The independent review passes AC1–AC5; Ticket 04 remains blocked.
 
 **Implementation state:** implemented at candidate `236d4119b`; the one
 independent Ticket-03 review passes AC1–AC5. Decision 0013 withholds final
-acceptance solely for missing mandatory workspace-check evidence.
+acceptance pending reassessment of the now-complete mandatory workspace-check
+evidence.
 
 ### Delivered behavior
 
@@ -164,3 +165,31 @@ Those out-of-scope failures were reproduced against the pristine pre-remediation
 tip `28036c6e4`. They are not caused by Ticket 03, but Decision 0013 requires
 the workspace typecheck to pass before a binding reassessment can accept the
 ticket.
+
+### Artifact-closure typecheck remediation completion
+
+The owner expanded the remediation authority to the six Ticket-01c/02 files
+that carried the 22 pre-existing blockers. Commit `ea2fd5e00` repairs those
+diagnostics without changing package versions, locks, manifests, artifact
+pins, diagnostic categories, fail-close behavior, prompt dependency
+derivation, admission semantics, or Ticket-03 source.
+
+Final material evidence:
+
+- `bun run --cwd scripts typecheck` — pass, 0 errors.
+- `bun run --cwd apps/server typecheck` — pass, 0 errors.
+- `bun typecheck` — 7/7 workspace packages pass.
+- `bun fmt` — exit 0; formatter churn outside the authorized write set was
+  isolated and not committed.
+- `bun lint` — exit 0, 0 errors and 615 existing warnings.
+- Prompt closure, artifact staging, and npm runtime closure — 21/21, 22/22,
+  and 20/20 pass against the clean pinned Alfie checkout.
+- Managed runtime binding, artifact verifier, desktop artifact gate, and
+  artifact-closure real load — 20/20, 47/47, 30/30, and 3/3 pass.
+
+The real desktop wall-clock suite produced 4/6 under load, with AC1+AC3 and
+AC4 timing out while waiting for admission. The pristine baseline under the
+same environment produced 3/6 with the same two failures plus one additional
+failure. An independent remediation review found no admission path, timeout,
+or lifecycle semantic change in `ea2fd5e00`; the timing result is therefore
+recorded as pre-existing load sensitivity, not remediation regression.
