@@ -39,6 +39,7 @@ const WALLCLOCK_TESTS = [
   // standalone per-file wall-clock method as the suites above.
   "src/provider/piSubagentRealPiAcceptance.test.ts",
   "src/provider/piSubagentDesktopManagedRealPiAcceptance.test.ts",
+  "src/provider/piSubagentDesktopProductionCompositionAcceptance.test.ts",
 ];
 
 const wallclockProject = defineConfig({
