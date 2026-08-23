@@ -110,7 +110,9 @@ function syntheticPromptModules(options: {
   readonly extraLiteralRead?: string;
   readonly dynamicRead?: boolean;
   readonly emptyPromptFile?: string;
-}): { readonly agentRunner: string; readonly prompts: string } {
+  readonly importedHelperRead?: string;
+  readonly sameNameSideLoad?: boolean;
+}): { readonly agentRunner: string; readonly prompts: string; readonly importedPrompts?: string } {
   const extraConst = options.extraLiteralRead
     ? `const EXTRA_PATH = join(SYSTEM_DIR, "${options.extraLiteralRead}");\n`
     : "";
@@ -118,9 +120,52 @@ function syntheticPromptModules(options: {
   const dynamicRead = options.dynamicRead
     ? "    readRequiredPrompt(join(SYSTEM_DIR, `dyn-${Date.now()}.md`)),\n"
     : "";
+  const importedHelperRead = options.importedHelperRead
+    ? "    readImportedExtraPrompt(),\n"
+    : "";
+  const importedHelperImport =
+    options.importedHelperRead !== undefined
+      ? 'import { readImportedExtraPrompt } from "./imported-prompts.js";\n'
+      : "";
+  const sameNameSideLoad = options.sameNameSideLoad
+    ? `function sideLoad(path: string): string {
+  return readFileSync(path, "utf-8");
+}
+
+`
+    : "";
+  const sameNameSideLoadCall = options.sameNameSideLoad
+    ? "    sideLoad(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n"
+    : "";
+  const importedPrompts =
+    options.importedHelperRead !== undefined
+      ? `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const IMPORTED_SYSTEM_DIR = join(__dirname, "../../../system");
+const IMPORTED_EXTRA_PATH = join(IMPORTED_SYSTEM_DIR, "${options.importedHelperRead}");
+function readImportedRequiredPrompt(path: string): string {
+  if (!existsSync(path)) {
+    throw new Error(\`Required subagent prompt file missing: \${path}\`);
+  }
+  const body = String(readFileSync(path, "utf-8") ?? "").trim();
+  if (!body) {
+    throw new Error(\`Required subagent prompt file is empty: \${path}\`);
+  }
+  return body;
+}
+
+export function readImportedExtraPrompt(): string {
+  return readImportedRequiredPrompt(IMPORTED_EXTRA_PATH);
+}
+`
+      : undefined;
   return {
     agentRunner: `import { buildAgentPrompt } from "./prompts.js";\nexport function runAgent(): string {\n  return buildAgentPrompt();\n}\n`,
-    prompts: `import { existsSync, readFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\n\nconst __dirname = dirname(fileURLToPath(import.meta.url));\nconst SYSTEM_DIR = join(__dirname, "../../../system");\nconst SUBAGENT_SYSTEM_TEMPLATE_PATH = join(SYSTEM_DIR, "subagent-system.md");\nconst TOOL_GUIDELINES_PATH = join(SYSTEM_DIR, "tool-guidelines.md");\nconst SKILL_RULES_PATH = join(SYSTEM_DIR, "skill-rules.md");\nconst WORKING_STYLE_PATH = join(SYSTEM_DIR, "working-style.md");\n${extraConst}function clean(value: unknown): string {\n  return String(value ?? "").trim();\n}\n\nfunction readRequiredPrompt(path: string): string {\n  if (!existsSync(path)) {\n    throw new Error(\`Required subagent prompt file missing: \${path}\`);\n  }\n  const body = clean(readFileSync(path, "utf-8"));\n  if (!body) {\n    throw new Error(\`Required subagent prompt file is empty: \${path}\`);\n  }\n  return body;\n}\n\nexport function buildAgentPrompt(): string {\n  return [\n    readRequiredPrompt(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n    readRequiredPrompt(TOOL_GUIDELINES_PATH),\n    readRequiredPrompt(SKILL_RULES_PATH),\n    readRequiredPrompt(WORKING_STYLE_PATH),\n${extraRead}${dynamicRead}  ].join("\\n");\n}\n`,
+    prompts: `import { existsSync, readFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\n${importedHelperImport}\nconst __dirname = dirname(fileURLToPath(import.meta.url));\nconst SYSTEM_DIR = join(__dirname, "../../../system");\nconst SUBAGENT_SYSTEM_TEMPLATE_PATH = join(SYSTEM_DIR, "subagent-system.md");\nconst TOOL_GUIDELINES_PATH = join(SYSTEM_DIR, "tool-guidelines.md");\nconst SKILL_RULES_PATH = join(SYSTEM_DIR, "skill-rules.md");\nconst WORKING_STYLE_PATH = join(SYSTEM_DIR, "working-style.md");\n${extraConst}${sameNameSideLoad}function clean(value: unknown): string {\n  return String(value ?? "").trim();\n}\n\nfunction readRequiredPrompt(path: string): string {\n  if (!existsSync(path)) {\n    throw new Error(\`Required subagent prompt file missing: \${path}\`);\n  }\n  const body = clean(readFileSync(path, "utf-8"));\n  if (!body) {\n    throw new Error(\`Required subagent prompt file is empty: \${path}\`);\n  }\n  return body;\n}\n\nexport function buildAgentPrompt(): string {\n  return [\n    readRequiredPrompt(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n    readRequiredPrompt(TOOL_GUIDELINES_PATH),\n    readRequiredPrompt(SKILL_RULES_PATH),\n    readRequiredPrompt(WORKING_STYLE_PATH),\n${extraRead}${dynamicRead}${importedHelperRead}${sameNameSideLoadCall}  ].join("\\n");\n}\n`,
+    importedPrompts,
   };
 }
 
@@ -161,6 +206,8 @@ function createSyntheticAlfieRepo(options: {
   readonly promptShape?: {
     readonly extraLiteralRead?: string;
     readonly dynamicRead?: boolean;
+    readonly importedHelperRead?: string;
+    readonly sameNameSideLoad?: boolean;
   };
   readonly emptyPromptFile?: string;
   readonly missingPromptFile?: string;
@@ -220,13 +267,20 @@ function createSyntheticAlfieRepo(options: {
   const promptModules = syntheticPromptModules({
     extraLiteralRead: options.promptShape?.extraLiteralRead,
     dynamicRead: options.promptShape?.dynamicRead,
+    importedHelperRead: options.promptShape?.importedHelperRead,
+    sameNameSideLoad: options.promptShape?.sameNameSideLoad,
   });
   writeFileSync(join(repoDir, extensionRoot, "src/agent-runner.ts"), promptModules.agentRunner);
   writeFileSync(join(repoDir, extensionRoot, "src/prompts.ts"), promptModules.prompts);
+  if (promptModules.importedPrompts !== undefined) {
+    writeFileSync(join(repoDir, extensionRoot, "src/imported-prompts.ts"), promptModules.importedPrompts);
+  }
   mkdirSync(join(repoDir, "agent/system"), { recursive: true });
-  const promptFiles = options.promptShape?.extraLiteralRead
-    ? [...SYNTHETIC_PROMPT_FILES, `agent/system/${options.promptShape.extraLiteralRead}`]
-    : SYNTHETIC_PROMPT_FILES;
+  const extraPromptReads = [
+    options.promptShape?.extraLiteralRead,
+    options.promptShape?.importedHelperRead,
+  ].filter((name): name is string => name !== undefined);
+  const promptFiles = [...SYNTHETIC_PROMPT_FILES, ...extraPromptReads.map((name) => `agent/system/${name}`)];
   for (const relative of promptFiles) {
     if (options.missingPromptFile === relative) continue;
     if (options.trackedPromptSymlink?.relative === relative) continue;
@@ -660,6 +714,42 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       expect(systemEntries).toEqual(
         [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].sort(),
       );
+    });
+
+    it("synthetic P1 regression: a FIFTH literal required read inside an IMPORTED helper module is staged automatically", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        promptShape: { importedHelperRead: "orchestration-rules.md" },
+      });
+      const artifactDir = join(makeTempRoot("t01c-imp-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+      const staged = buildPiSubagentArtifact({ repoDir, artifactDir, provenance });
+      const manifest = JSON.parse(readFileSync(staged.manifestPath, "utf8")) as {
+        readonly files: ReadonlyArray<{ readonly path: string }>;
+      };
+      const systemEntries = manifest.files
+        .map((record) => record.path)
+        .filter((path) => path.startsWith("agent/system/"))
+        .sort();
+      expect(systemEntries).toEqual(
+        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].sort(),
+      );
+      // The imported helper module itself is part of the tracked extension
+      // tree and therefore staged with the artifact.
+      expect(manifest.files.map((record) => record.path)).toContain(
+        "agent/extensions/pi-subagents/src/imported-prompts.ts",
+      );
+    });
+
+    it("synthetic P1 regression: a same-NAME parameter raw readFileSync in the prompt module fails staging (never silently staged four)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        promptShape: { sameNameSideLoad: true },
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-sideload-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/prompt-closure derivation failed \(prompt_closure_unsupported\).*outside the recognized required-prompt reader shape/);
     });
 
     it("synthetic: a dynamic required prompt read fails staging (AC2)", () => {

@@ -396,16 +396,65 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
 const DETERMINISTIC_MODEL_PROVIDER_ID = "synara-local-echo";
 const DETERMINISTIC_ECHO_MODEL_ID = "echo";
 
-/** Distinctive literal substrings of the four STAGED prompt files (the pin). */
-const STAGED_PROMPT_MARKERS = {
-  subagentSystem: "You are a delegated specialist subagent. Be precise, evidence-driven, and scoped to the delegation packet.",
-  toolGuidelines: "**Codebase -> Use Semantic Tools**",
-  skillRules: "### Lazy Skill Loading Protocol",
-  workingStyle: "Prefer boring standards over clever frameworks.",
-} as const;
-
 /** Marker that must appear in NO request body: decoys never supplied prompts. */
 const DECOY_PROMPT_MARKER = "DECOY-PROMPT-MARKER-MUST-NEVER-REACH-A-MODEL-REQUEST";
+
+/**
+ * Distinctive marker derived from the ACTUAL staged prompt bytes (Ticket 01c
+ * review remediation: no manually authored marker strings). The marker for
+ * each staged file is a stable distinctive substring of the staged file's
+ * own bytes — the longest non-template line — so the request-body proof is
+ * tied to exactly what `buildPiSubagentArtifact` staged, and any alteration
+ * of the staged bytes changes the derived marker set.
+ */
+interface StagedPromptMarkerProof {
+  /** repo-relative staged path → derived distinctive substring of its bytes. */
+  readonly markersByPath: ReadonlyMap<string, string>;
+}
+
+function deriveStagedPromptMarker(stagedBytes: string): string {
+  const lines = stagedBytes.split(/\r?\n/);
+  const candidates = lines
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed.length < 24) return false;
+      // Template placeholders are substituted at runtime — a marker must be
+      // literal staged bytes that survive into the built prompt verbatim.
+      if (trimmed.includes("{{") || trimmed.includes("}}")) return false;
+      return true;
+    })
+    .sort((a, b) => b.length - a.length);
+  const best = candidates[0]?.trim();
+  if (best === undefined) {
+    throw new Error("Could not derive a distinctive marker from staged prompt bytes (no qualifying line).");
+  }
+  return best;
+}
+
+/**
+ * Reads the staged `agent/system/*.md` files AFTER `buildPiSubagentArtifact`
+ * (paths enumerated from the staged manifest — never a hardcoded list) and
+ * derives one distinctive marker per file from the staged bytes.
+ */
+function deriveStagedPromptMarkers(artifactDir: string): StagedPromptMarkerProof {
+  const manifest = JSON.parse(
+    readFileSync(join(artifactDir, "manifest.json"), "utf8"),
+  ) as {
+    readonly files: ReadonlyArray<{ readonly path: string }>;
+  };
+  const promptPaths = manifest.files
+    .map((record) => record.path)
+    .filter((path) => path.startsWith("agent/system/"))
+    .sort();
+  if (promptPaths.length === 0) {
+    throw new Error("Staged artifact carries no agent/system prompt entries.");
+  }
+  const markersByPath = new Map<string, string>();
+  for (const relative of promptPaths) {
+    markersByPath.set(relative, deriveStagedPromptMarker(readFileSync(join(artifactDir, relative), "utf8")));
+  }
+  return { markersByPath };
+}
 
 interface LoopbackModelServer {
   readonly baseUrl: string;
@@ -619,6 +668,32 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
         const stagedExtensionDir = join(staged.artifactDir, "agent/extensions/pi-subagents");
         const manifestBeforeLoad = readFileSync(staged.manifestPath, "utf8");
 
+        // Runtime-derived prompt-byte provenance (review P2): markers come
+        // from the ACTUAL staged `agent/system/*.md` bytes — paths enumerated
+        // from the staged manifest, never copied static strings.
+        const stagedMarkers = deriveStagedPromptMarkers(staged.artifactDir);
+        expect(stagedMarkers.markersByPath.size).toBeGreaterThanOrEqual(1);
+        const subagentSystemPath = [...stagedMarkers.markersByPath.keys()].find((path) =>
+          path.endsWith("subagent-system.md"),
+        );
+        if (subagentSystemPath === undefined) {
+          throw new Error("staged prompt closure lacks subagent-system.md");
+        }
+        const subagentSystemMarker = stagedMarkers.markersByPath.get(subagentSystemPath)!;
+
+        // Marker-derivation is sensitive to staged byte alteration: a
+        // same-length tamper of the staged subagent-system bytes must yield a
+        // marker that no longer matches the untampered staged bytes (the
+        // request-body proof demonstrably fails if staged bytes change).
+        const stagedSystemBytes = readFileSync(join(staged.artifactDir, subagentSystemPath), "utf8");
+        const tamperedBytes = stagedSystemBytes.replace(subagentSystemMarker, subagentSystemMarker.replace("e", "x"));
+        expect(Buffer.byteLength(tamperedBytes)).toBe(Buffer.byteLength(stagedSystemBytes));
+        expect(tamperedBytes).not.toBe(stagedSystemBytes);
+        expect(deriveStagedPromptMarker(tamperedBytes)).not.toBe(subagentSystemMarker);
+        // And the marker really is a substring of the staged file's bytes
+        // read back from disk (evidence tied to the staged files, not copies).
+        expect(stagedSystemBytes).toContain(subagentSystemMarker);
+
         // Verify BEFORE loading (AC5): the expanded prompt closure verifies.
         const verifiedBefore = await verifyPiSubagentArtifact(staged.artifactDir);
         expect(verifiedBefore.valid).toBe(true);
@@ -745,14 +820,15 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
           // ── The real deterministic CHILD model request happened ──
           expect(modelServer.bodies.length).toBeGreaterThanOrEqual(1);
           // Agent-tool LOAD alone proves nothing: the prompt bytes of the
-          // staged `agent/system` closure must be IN the request body.
+          // staged `agent/system` closure must be IN the request body. Every
+          // runtime-derived marker of every staged prompt file must appear.
           const childBody = modelServer.bodies.find((body) =>
-            body.includes(STAGED_PROMPT_MARKERS.subagentSystem),
+            body.includes(subagentSystemMarker),
           );
           expect(childBody).toBeDefined();
-          expect(childBody).toContain(STAGED_PROMPT_MARKERS.toolGuidelines);
-          expect(childBody).toContain(STAGED_PROMPT_MARKERS.skillRules);
-          expect(childBody).toContain(STAGED_PROMPT_MARKERS.workingStyle);
+          for (const [stagedPath, marker] of stagedMarkers.markersByPath) {
+            expect(childBody, `marker of staged ${stagedPath} missing from child request body`).toContain(marker);
+          }
           // No decoy prompt location supplied any prompt byte.
           for (const body of modelServer.bodies) {
             expect(body.includes(DECOY_PROMPT_MARKER)).toBe(false);
@@ -787,6 +863,7 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
           join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
         );
         const modelServer = await startLoopbackModelServer();
+        try {
         const workspaceRoot = makeTempRoot("pi-t01c-neg-");
         const goodArtifactDir = join(workspaceRoot, "good-artifact");
         const parentAgentDir = join(workspaceRoot, "agent-home");
@@ -816,6 +893,18 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
         const manifestBytes = readFileSync(staged.manifestPath, "utf8");
         const verifiedGood = await verifyPiSubagentArtifact(staged.artifactDir);
         expect(verifiedGood.valid).toBe(true);
+
+        // Runtime-derived victim marker (review P2): the tamper control flips
+        // bytes inside a marker derived from the staged file's own bytes, not
+        // a copied static string.
+        const stagedMarkers = deriveStagedPromptMarkers(staged.artifactDir);
+        const subagentSystemPath = [...stagedMarkers.markersByPath.keys()].find((path) =>
+          path.endsWith("subagent-system.md"),
+        );
+        if (subagentSystemPath === undefined) {
+          throw new Error("staged prompt closure lacks subagent-system.md");
+        }
+        const subagentSystemMarker = stagedMarkers.markersByPath.get(subagentSystemPath)!;
 
         // Canary/decoy no-side-effect baseline.
         const canaryPaths = [
@@ -855,9 +944,9 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
             mutate: (dir: string) => {
               const victim = join(dir, victimRelative);
               const original = readFileSync(victim, "utf8");
-              // Same-length byte flip inside a distinctive line.
-              const marker = STAGED_PROMPT_MARKERS.subagentSystem;
-              const tamperedLine = marker.replace("delegated", "delegatex");
+              // Same-length byte flip inside the runtime-derived marker line.
+              const marker = subagentSystemMarker;
+              const tamperedLine = marker.replace("e", "x");
               expect(Buffer.byteLength(tamperedLine)).toBe(Buffer.byteLength(marker));
               expect(original).toContain(marker);
               writeFileSync(victim, original.replace(marker, tamperedLine), "utf8");
@@ -910,8 +999,12 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
         expect(readFileSync(staged.manifestPath, "utf8")).toBe(manifestBytes);
         const verifiedGoodAfter = await verifyPiSubagentArtifact(staged.artifactDir);
         expect(verifiedGoodAfter.valid).toBe(true);
-
-        await modelServer.close();
+        } finally {
+          // Review P2 cleanup: the loopback model server (and with it the
+          // hermetic session resources it serves) shuts down on ANY outcome —
+          // setup or assertion failure included — never only on success.
+          await modelServer.close();
+        }
       },
     );
   },

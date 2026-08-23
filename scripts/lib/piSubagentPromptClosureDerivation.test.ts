@@ -50,6 +50,8 @@ function promptsModule(options: {
   readonly templateRead?: boolean;
   readonly unresolvedImportRead?: boolean;
   readonly nonLiteralSegments?: boolean;
+  readonly importedHelperRead?: string;
+  readonly sameNameSideLoad?: boolean;
 }): string {
   const extra = options.extraLiteralRead
     ? `const EXTRA_PATH = join(SYSTEM_DIR, "${options.extraLiteralRead}");\n`
@@ -64,21 +66,37 @@ function promptsModule(options: {
   const unresolvedImportRead = options.unresolvedImportRead
     ? "  readRequiredPrompt(pathFromElsewhere),\n"
     : "";
+  const importedHelperRead = options.importedHelperRead
+    ? "  readImportedExtraPrompt(),\n"
+    : "";
+  const importedHelperImport =
+    options.importedHelperRead !== undefined
+      ? 'import { readImportedExtraPrompt } from "./imported-prompts.js";\n'
+      : "";
+  const sameNameSideLoad = options.sameNameSideLoad
+    ? `function sideLoad(path: string): string {
+  return readFileSync(path, "utf-8");
+}
+
+`
+    : "";
+  const sameNameSideLoadCall = options.sameNameSideLoad
+    ? "  sideLoad(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n"
+    : "";
   const systemDir = options.nonLiteralSegments
     ? 'const SYSTEM_DIR = join(__dirname, "../../../" + computedBase());'
     : 'const SYSTEM_DIR = join(__dirname, "../../../system");';
   return `import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+${importedHelperImport}
 const __dirname = dirname(fileURLToPath(import.meta.url));
 ${systemDir}
 const SUBAGENT_SYSTEM_TEMPLATE_PATH = join(SYSTEM_DIR, "subagent-system.md");
 const TOOL_GUIDELINES_PATH = join(SYSTEM_DIR, "tool-guidelines.md");
 const SKILL_RULES_PATH = join(SYSTEM_DIR, "skill-rules.md");
 const WORKING_STYLE_PATH = join(SYSTEM_DIR, "working-style.md");
-${extra}
-function clean(value: unknown): string {
+${extra}${sameNameSideLoad}function clean(value: unknown): string {
   return String(value ?? "").trim();
 }
 
@@ -99,7 +117,7 @@ export function buildAgentPrompt(): string {
     readRequiredPrompt(TOOL_GUIDELINES_PATH),
     readRequiredPrompt(SKILL_RULES_PATH),
     readRequiredPrompt(WORKING_STYLE_PATH),
-${extraRead}${dynamicRead}${templateRead}${unresolvedImportRead}  ].join("\\n");
+${extraRead}${dynamicRead}${templateRead}${unresolvedImportRead}${importedHelperRead}${sameNameSideLoadCall}  ].join("\\n");
 }
 `;
 }
@@ -111,6 +129,58 @@ export function runAgent(): string {
 }
 `;
 }
+
+/**
+ * A SEPARATE module the prompt-builder imports a helper from (Ticket 01c
+ * review remediation: the reachable prompt-read graph must traverse relative
+ * imports; helper reads resolve in the IMPORTING module's own scope).
+ */
+function importedPromptsModule(options: {
+  readonly literalRead?: string;
+  readonly rawRead?: boolean;
+  readonly dynamicRead?: boolean;
+}): string {
+  const literal = options.literalRead
+    ? `const IMPORTED_EXTRA_PATH = join(IMPORTED_SYSTEM_DIR, "${options.literalRead}");\n`
+    : "";
+  const reader = `function readImportedRequiredPrompt(path: string): string {
+  if (!existsSync(path)) {
+    throw new Error(\`missing \${path}\`);
+  }
+  const body = String(readFileSync(path, "utf-8") ?? "").trim();
+  if (!body) {
+    throw new Error(\`empty \${path}\`);
+  }
+  return body;
+}
+`;
+  const exportedLiteralCall = options.literalRead
+    ? `export function readImportedExtraPrompt(): string {
+  return readImportedRequiredPrompt(IMPORTED_EXTRA_PATH);
+}
+`
+    : "";
+  const exportedRawCall = options.rawRead
+    ? `export function readImportedExtraPrompt(path: string): string {
+  return readFileSync(path, "utf-8");
+}
+`
+    : "";
+  const exportedDynamicCall = options.dynamicRead
+    ? `export function readImportedExtraPrompt(): string {
+  return readImportedRequiredPrompt(join(IMPORTED_SYSTEM_DIR, \`dyn-\${Date.now()}.md\`));
+}
+`
+    : "";
+  return `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const IMPORTED_SYSTEM_DIR = join(__dirname, "../../../system");
+${literal}${reader}${exportedLiteralCall}${exportedRawCall}${exportedDynamicCall}`;
+}
+
 
 /** Synthetic pure source seam over in-memory module text. */
 function seamFor(modules: ReadonlyMap<string, string>): PromptClosureSourceSeam {
@@ -135,13 +205,16 @@ function seamFor(modules: ReadonlyMap<string, string>): PromptClosureSourceSeam 
 
 function syntheticSeam(
   promptsOptions: Parameters<typeof promptsModule>[0] = {},
+  importedPromptsOptions?: Parameters<typeof importedPromptsModule>[0],
 ): PromptClosureSourceSeam {
-  return seamFor(
-    new Map([
-      [`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()],
-      [`${EXT_SRC}/prompts.ts`, promptsModule(promptsOptions)],
-    ]),
-  );
+  const modules = new Map<string, string>([
+    [`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()],
+    [`${EXT_SRC}/prompts.ts`, promptsModule(promptsOptions)],
+  ]);
+  if (importedPromptsOptions !== undefined) {
+    modules.set(`${EXT_SRC}/imported-prompts.ts`, importedPromptsModule(importedPromptsOptions));
+  }
+  return seamFor(modules);
 }
 
 const CURRENT_FOUR = [
@@ -212,6 +285,53 @@ describe("pi-subagents prompt closure derivation (Ticket 01c, AC1)", () => {
     expect(() => derivePromptClosure(syntheticSeam({ nonLiteralSegments: true }))).toThrow(
       PiSubagentPromptClosureError,
     );
+  });
+
+  it("P1 regression: a FIFTH literal required read inside an IMPORTED helper module is derived automatically", () => {
+    const closure = derivePromptClosure(
+      syntheticSeam(
+        { importedHelperRead: "orchestration-rules.md" },
+        { literalRead: "orchestration-rules.md" },
+      ),
+    );
+    expect(closure.promptPaths).toEqual(
+      [...CURRENT_FOUR, "agent/system/orchestration-rules.md"].sort(),
+    );
+  });
+
+  it("P1 regression: a same-NAME parameter raw readFileSync (sideLoad reusing the reader's parameter name) is rejected, not silently ignored", () => {
+    // `readRequiredPrompt(path)` and `sideLoad(path)` share the parameter
+    // NAME 'path'; only the reader's own binding may route the read. The
+    // sideLoad read must fail closed (bounded diagnostic, no host paths).
+    expect(() => derivePromptClosure(syntheticSeam({ sameNameSideLoad: true }))).toThrow(
+      PiSubagentPromptClosureError,
+    );
+    try {
+      derivePromptClosure(syntheticSeam({ sameNameSideLoad: true }));
+    } catch (error) {
+      const closureError = error as PiSubagentPromptClosureError;
+      expect(closureError.code).toBe("prompt_closure_unsupported");
+      expect(closureError.message).toContain(
+        "outside the recognized required-prompt reader shape",
+      );
+      expect(closureError.message).not.toContain(tmpdir());
+    }
+  });
+
+  it("P1 regression: an imported helper whose own read is NOT the required-prompt reader shape fails unsupported", () => {
+    expect(() =>
+      derivePromptClosure(
+        syntheticSeam({ importedHelperRead: "ignored.md" }, { rawRead: true }),
+      ),
+    ).toThrow(/outside the recognized required-prompt reader shape/);
+  });
+
+  it("P1 regression: an imported helper with a dynamic required read fails unsupported (no silent omission)", () => {
+    expect(() =>
+      derivePromptClosure(
+        syntheticSeam({ importedHelperRead: "ignored.md" }, { dynamicRead: true }),
+      ),
+    ).toThrow(/dynamic or unresolved path expression/);
   });
 
   it("AC2: a raw readFileSync outside the recognized reader shape fails unsupported", () => {
