@@ -121,6 +121,11 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
     expect(restored.desiredState).toBe("running");
     expect(restored.leaseExpiresAt ?? null).toBeNull();
     expect(restored.droppedProgressCount).toBe(0);
+    // Ticket 03 (T03-AC5): the old-shape reconnect fixture carries NEITHER
+    // new field — the store normalizes it to the conservative null defaults
+    // without churning the snapshot.
+    expect(restored.currentAttachment ?? null).toBeNull();
+    expect(restored.currentTeardownEvidence ?? null).toBeNull();
 
     // Idempotent hydration: an identical second snapshot keeps the same
     // reference (no churn on reconnect storms).
@@ -215,5 +220,98 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
     );
     const evicted = getThreadFromState(state, reconnectThreadId);
     expect(evicted?.piSubagentExecutions ?? []).toHaveLength(0);
+  });
+
+  it("Ticket 03: fresh whole-card truth survives snapshot, replay, and idempotent upsert (T03-AC5)", () => {
+    const freshCard = decodeReconnectCard();
+    const detachedCard: PiSubagentExecutionCardType = {
+      ...freshCard,
+      currentAttachment: "detached",
+      currentTeardownEvidence: "none",
+    };
+
+    // A snapshot carrying explicit whole-card truth hydrates it verbatim —
+    // the reconnecting tab presents Running in background from the snapshot
+    // alone, and a second identical snapshot keeps the same reference (no
+    // churn on reconnect storms).
+    const first = normalizeThreadFromReadModel(makeReconnectThreadDetail(detachedCard), undefined);
+    expect(first.piSubagentExecutions![0]!.currentAttachment).toBe("detached");
+    expect(first.piSubagentExecutions![0]!.currentTeardownEvidence).toBe("none");
+    const again = normalizeThreadFromReadModel(
+      makeReconnectThreadDetail(detachedCard) as never,
+      first,
+    );
+    expect(again).toBe(first);
+
+    // Full read-model sync writes the same truth into the store slice.
+    let state = syncServerReadModel(
+      makeState(makeThread({ id: reconnectThreadId })),
+      {
+        snapshotSequence: 7,
+        spaces: [],
+        projects: [],
+        updatedAt: "2026-08-19T18:10:56.000Z",
+        threads: [
+          {
+            ...makeThread({ id: reconnectThreadId }),
+            deletedAt: null,
+            checkpoints: [],
+            piSubagentExecutions: [detachedCard],
+          } as never,
+        ],
+      } as never,
+    );
+    expect(
+      getThreadFromState(state, reconnectThreadId)?.piSubagentExecutions![0]!.currentAttachment,
+    ).toBe("detached");
+
+    // A replayed duplicate event (same identity, same content) is idempotent:
+    // the slice keeps the SAME array reference.
+    const event = executionUpdatedEvent(detachedCard, 12);
+    const beforeReplay = state.piSubagentExecutionsByThreadId?.[reconnectThreadId];
+    state = applyOrchestrationEvents(state, [event]);
+    expect(state.piSubagentExecutionsByThreadId?.[reconnectThreadId]).toBe(beforeReplay);
+
+    // A NEW event identity carrying uncertainty replaces the card whole:
+    // the new fields project through the reducer with the state change.
+    state = applyOrchestrationEvents(state, [
+      executionUpdatedEvent(
+        {
+          ...detachedCard,
+          desiredState: "cancelling",
+          currentTeardownEvidence: "survivors",
+        },
+        13,
+      ),
+    ]);
+    const uncertain = getThreadFromState(state, reconnectThreadId)?.piSubagentExecutions![0]!;
+    expect(uncertain.currentTeardownEvidence).toBe("survivors");
+    expect(uncertain.desiredState).toBe("cancelling");
+    expect(uncertain.observedState).toBe("running");
+  });
+
+  it("Ticket 03: an old-shape snapshot decodes/hydrates null whole-card truth without churn (T03-AC5)", () => {
+    const card = decodeReconnectCard();
+    // The fixture carries NEITHER field — the exact pre-Ticket-03 persisted
+    // replay shape a reconnecting browser receives from the event store. The
+    // contract decoding default resolves them to explicit null.
+    expect(card.currentAttachment ?? null).toBeNull();
+    expect(card.currentTeardownEvidence ?? null).toBeNull();
+
+    const normalized = normalizeThreadFromReadModel(makeReconnectThreadDetail(card), undefined);
+    const restored = normalized.piSubagentExecutions![0]!;
+    expect(restored.currentAttachment ?? null).toBeNull();
+    expect(restored.currentTeardownEvidence ?? null).toBeNull();
+
+    // Replaying the old-shape card through the event reducer hydrates the
+    // same conservative null truth (no derived relabel, no churn).
+    const state = applyOrchestrationEvents(
+      makeState(makeThread({ id: reconnectThreadId })),
+      [executionUpdatedEvent(card, 3)],
+    );
+    const projected = getThreadFromState(state, reconnectThreadId)?.piSubagentExecutions![0]!;
+    expect(projected.observedState).toBe("running");
+    expect(projected.currentAttachment ?? null).toBeNull();
+    expect(projected.currentTeardownEvidence ?? null).toBeNull();
   });
 });

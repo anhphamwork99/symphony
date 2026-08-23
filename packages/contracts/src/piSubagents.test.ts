@@ -786,6 +786,96 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
     expect(eventFields).not.toContain("resultContent");
     expect(eventFields).not.toContain("transcriptContent");
   });
+
+  it("Ticket 03: old-shape execution cards decode with null current-generation defaults (T03-AC1)", () => {
+    // A pre-Ticket-03 persisted card event carries NEITHER new field. Strict
+    // event-store decoding must still accept it (no upcaster exists), with
+    // both bounded truth fields decoding to null so the web presents the
+    // conservative ordinary observed state.
+    const oldShapeCard = {
+      executionId: "exec_t03_legacy",
+      attemptId: "exec_t03_legacy_att1",
+      generation: 1,
+      projectId: "project-1",
+      parentThreadId: "thread-1",
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: "running",
+      observedState: "running",
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:01.000Z",
+    };
+    const decoded = Schema.decodeSync(PiSubagentExecutionCard)(oldShapeCard);
+    expect(decoded.currentAttachment).toBeNull();
+    expect(decoded.currentTeardownEvidence).toBeNull();
+
+    // Explicit nulls (fresh terminal/orphan cards) decode to null as well.
+    const explicitNull = Schema.decodeSync(PiSubagentExecutionCard)({
+      ...oldShapeCard,
+      currentAttachment: null,
+      currentTeardownEvidence: null,
+    });
+    expect(explicitNull.currentAttachment).toBeNull();
+    expect(explicitNull.currentTeardownEvidence).toBeNull();
+  });
+
+  it("Ticket 03: fresh current-generation card literals decode and invalid literals reject (T03-AC1)", () => {
+    const baseCard = {
+      executionId: "exec_t03_fresh",
+      attemptId: "exec_t03_fresh_att1",
+      generation: 1,
+      projectId: "project-1",
+      parentThreadId: "thread-1",
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground",
+      cancellationScope: "parent_turn",
+      desiredState: "running",
+      observedState: "running",
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:01.000Z",
+    };
+    for (const attachment of ["attached", "detached"] as const) {
+      expect(
+        Schema.decodeSync(PiSubagentExecutionCard)({
+          ...baseCard,
+          currentAttachment: attachment,
+        }).currentAttachment,
+      ).toBe(attachment);
+    }
+    for (const evidence of ["none", "requested", "survivors", "owner_unproven"] as const) {
+      expect(
+        Schema.decodeSync(PiSubagentExecutionCard)({
+          ...baseCard,
+          currentTeardownEvidence: evidence,
+        }).currentTeardownEvidence,
+      ).toBe(evidence);
+    }
+    // Closed vocabulary: anything outside the literal sets must reject so a
+    // malformed persisted value cannot silently reach the web presentation.
+    expect(() =>
+      Schema.decodeSync(PiSubagentExecutionCard)({
+        ...baseCard,
+        currentAttachment: "running_in_background",
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentExecutionCard)({
+        ...baseCard,
+        currentTeardownEvidence: "proven",
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentExecutionCard)({
+        ...baseCard,
+        currentTeardownEvidence: 76,
+      }),
+    ).toThrow();
+  });
 });
 
 // Keep the sibling Ticket 06 cancel-command conventions pinned: the teardown

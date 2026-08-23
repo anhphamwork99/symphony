@@ -266,6 +266,81 @@ const telemetryMetric = (value: number | undefined): number =>
   Math.max(0, Math.round(Number.isFinite(value) ? (value ?? 0) : 0));
 
 /**
+ * Ticket 03 live-aggregate gate for current-generation card truth (T03-AC1).
+ * Terminal and orphaned aggregates carry NO attachment/teardown-evidence
+ * truth: a settled or ownerless execution must not inherit stale live-work
+ * fields (T03-AC5).
+ */
+const CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES = [
+  "requested",
+  "accepted",
+  "queued",
+  "running",
+  "cancelling",
+] as const;
+
+/**
+ * Ticket 03 current-generation derived card columns (T03-AC1), emitted by
+ * every card SQL path. Both derivations are fenced by the exact
+ * execution/attempt/generation triple, so a resumed or fenced generation
+ * never inherits a prior generation's detach/teardown evidence (T03-AC5).
+ *
+ * Attachment: `detached` for a durable background admission (`mode` is a
+ * durable admission fact) or an exact seq-3 `phase=detached` journal row;
+ * `attached` for any other live aggregate; NULL for terminal/orphaned.
+ *
+ * Teardown evidence: exact-identity journal bands only — `survivors` (77)
+ * takes precedence over `owner_unproven` (78) when both exist, `requested`
+ * (75) alone reports intent, otherwise `none`. Band 76 (`proven`) is
+ * intentionally excluded: proven teardown settles cancellation and ADVANCES
+ * the generation, so it can never describe the current generation.
+ */
+export const piSubagentCardCurrentTruthColumns = (sql: SqlClient.SqlClient) => sql`
+            CASE
+              WHEN base.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
+              WHEN base.mode = 'background' THEN 'detached'
+              WHEN EXISTS (
+                SELECT 1
+                FROM pi_subagent_lifecycle_journal AS detach
+                WHERE detach.execution_id = base.execution_id
+                  AND detach.attempt_id = base.attempt_id
+                  AND detach.generation = base.generation
+                  AND detach.sequence = 3
+                  AND json_extract(detach.metadata_json, '$.phase') = 'detached'
+              ) THEN 'detached'
+              ELSE 'attached'
+            END AS "currentAttachment",
+            CASE
+              WHEN base.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
+              WHEN EXISTS (
+                SELECT 1
+                FROM pi_subagent_lifecycle_journal AS survivors
+                WHERE survivors.execution_id = base.execution_id
+                  AND survivors.attempt_id = base.attempt_id
+                  AND survivors.generation = base.generation
+                  AND survivors.sequence = 77
+              ) THEN 'survivors'
+              WHEN EXISTS (
+                SELECT 1
+                FROM pi_subagent_lifecycle_journal AS unproven
+                WHERE unproven.execution_id = base.execution_id
+                  AND unproven.attempt_id = base.attempt_id
+                  AND unproven.generation = base.generation
+                  AND unproven.sequence = 78
+              ) THEN 'owner_unproven'
+              WHEN EXISTS (
+                SELECT 1
+                FROM pi_subagent_lifecycle_journal AS requested
+                WHERE requested.execution_id = base.execution_id
+                  AND requested.attempt_id = base.attempt_id
+                  AND requested.generation = base.generation
+                  AND requested.sequence = 75
+              ) THEN 'requested'
+              ELSE 'none'
+            END AS "currentTeardownEvidence"
+`;
+
+/**
  * Ticket 11 joined card row (T11-AC1): execution aggregate + observation
  * columns + terminal evidence + current completion-outbox delivery state.
  * Module scope so the orchestration snapshot query can reuse the exact
@@ -293,6 +368,24 @@ export interface PiSubagentExecutionCardRow {
   readonly terminalSummary: string | null;
   readonly terminalTranscriptRef: string | null;
   readonly deliveryState: PiSubagentCompletionDeliveryState | null;
+  /**
+   * Ticket 03 current-generation attachment truth (T03-AC1). Derived by the
+   * card SQL from exact current execution/attempt/generation durable
+   * evidence; null for terminal/orphaned/non-live aggregates.
+   */
+  readonly currentAttachment: "attached" | "detached" | null;
+  /**
+   * Ticket 03 current-generation teardown evidence (T03-AC1): derived only
+   * from exact-identity journal bands (75 requested / 77 survivors /
+   * 78 owner_unproven; 76 proven is excluded — it settles and advances the
+   * generation). Null for terminal/orphaned aggregates.
+   */
+  readonly currentTeardownEvidence:
+    | "none"
+    | "requested"
+    | "survivors"
+    | "owner_unproven"
+    | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -340,6 +433,11 @@ export function piSubagentExecutionCardRowToCard(
         }
       : {}),
     ...(row.deliveryState !== null ? { deliveryState: row.deliveryState } : {}),
+    // Ticket 03: fresh cards always emit explicit current-generation truth
+    // (T03-AC1); a null row value (legacy/unknown) maps to explicit null so
+    // the contract's decoding default never has to fire for fresh reads.
+    currentAttachment: row.currentAttachment ?? null,
+    currentTeardownEvidence: row.currentTeardownEvidence ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -1006,6 +1104,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             base.terminal_summary AS "terminalSummary",
             base.terminal_transcript_ref AS "terminalTranscriptRef",
             outbox.delivery_state AS "deliveryState",
+            ${piSubagentCardCurrentTruthColumns(sql)},
             base.created_at AS "createdAt",
             base.updated_at AS "updatedAt"
           FROM (
@@ -1061,6 +1160,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
           base.terminal_summary AS "terminalSummary",
           base.terminal_transcript_ref AS "terminalTranscriptRef",
           outbox.delivery_state AS "deliveryState",
+          ${piSubagentCardCurrentTruthColumns(sql)},
           base.created_at AS "createdAt",
           base.updated_at AS "updatedAt"
         FROM pi_subagent_executions AS base
@@ -3991,6 +4091,15 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   // (no lifecycle truth changed) — so the repository object wires the base
   // seam directly. Only a PROVEN teardown outcome changes observed/desired
   // state (cancelled + fence), so it notifies on its band (76).
+  //
+  // Ticket 03 (T03-AC1): an UNCERTAIN teardown outcome (77 survivors / 78
+  // owner_unproven) also changes committed card truth — it is exactly the
+  // `currentTeardownEvidence` the card must carry live (Cancellation
+  // unverified) — so a RECORDED uncertain band notifies on its own band too.
+  // Band 76 `proven` stays excluded from the uncertain branch: proven settles
+  // and fences, and its settled card is already covered by the proven branch.
+  // `already_applied` and `stale_generation` results journal nothing new, so
+  // they must NOT notify (no false publication of an unchanged card).
   const recordTeardownOutcome: PiSubagentExecutionRepositoryShape["recordTeardownOutcome"] = (
     input,
   ) =>
@@ -3998,6 +4107,9 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       Effect.tap((result) => {
         if (result.kind === "recorded" && input.outcome === "proven") {
           return notifyIfLifecycleTruthChanged(result, 76);
+        }
+        if (result.kind === "recorded" && (input.outcome === "survivors" || input.outcome === "owner_unproven")) {
+          return notifyIfLifecycleTruthChanged(result, input.outcome === "survivors" ? 77 : 78);
         }
         return Effect.void;
       }),

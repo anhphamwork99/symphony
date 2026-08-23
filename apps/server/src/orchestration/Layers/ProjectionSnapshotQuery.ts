@@ -76,6 +76,7 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 import {
+  piSubagentCardCurrentTruthColumns,
   piSubagentExecutionCardRowToCard,
   type PiSubagentExecutionCardRow,
 } from "../../persistence/Layers/PiSubagentExecutionRepository.ts";
@@ -822,6 +823,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       base.terminal_summary AS "terminalSummary",
       base.terminal_transcript_ref AS "terminalTranscriptRef",
       outbox.delivery_state AS "deliveryState",
+      ${piSubagentCardCurrentTruthColumns(sql)},
       base.created_at AS "createdAt",
       base.updated_at AS "updatedAt"
     FROM (
@@ -865,6 +867,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ranked.terminal_summary AS "terminalSummary",
       ranked.terminal_transcript_ref AS "terminalTranscriptRef",
       outbox.delivery_state AS "deliveryState",
+      ${piSubagentCardCurrentTruthColumns(sql)},
       ranked.created_at AS "createdAt",
       ranked.updated_at AS "updatedAt"
     FROM (

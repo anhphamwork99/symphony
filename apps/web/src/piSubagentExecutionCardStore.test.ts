@@ -88,6 +88,66 @@ describe("Ticket 11 execution-card store reducer", () => {
     expect(after.piSubagentExecutions![0]!.observedState).toBe("cancelling");
   });
 
+  it("Ticket 03: new whole-card fields project through the upsert idempotently (T03-AC5)", () => {
+    const freshCard = makeCard({
+      observedState: "running",
+      desiredState: "running",
+      currentAttachment: "detached",
+      currentTeardownEvidence: "none",
+    });
+    let state = applyOrchestrationEvents(makeState(makeThread({ id: threadId })), [
+      executionUpdatedEvent(freshCard, { sequence: 5 }),
+    ]);
+    let after = getThreadFromState(state, threadId) as {
+      piSubagentExecutions?: PiSubagentExecutionCard[];
+    };
+    expect(after.piSubagentExecutions![0]!.currentAttachment).toBe("detached");
+    expect(after.piSubagentExecutions![0]!.currentTeardownEvidence).toBe("none");
+
+    // Duplicate identity, identical content: one projection effect — the
+    // slice keeps the same reference while carrying the new fields.
+    const firstProjection = state.piSubagentExecutionsByThreadId?.[threadId];
+    state = applyOrchestrationEvents(state, [executionUpdatedEvent(freshCard, { sequence: 5 })]);
+    expect(state.piSubagentExecutionsByThreadId?.[threadId]).toBe(firstProjection);
+
+    // A new identity advancing the whole-card truth replaces, not appends.
+    state = applyOrchestrationEvents(state, [
+      executionUpdatedEvent(
+        makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "owner_unproven",
+        }),
+        { sequence: 6 },
+      ),
+    ]);
+    after = getThreadFromState(state, threadId) as {
+      piSubagentExecutions?: PiSubagentExecutionCard[];
+    };
+    expect(after.piSubagentExecutions).toHaveLength(1);
+    expect(after.piSubagentExecutions![0]!.currentTeardownEvidence).toBe("owner_unproven");
+  });
+
+  it("Ticket 03: an old-shape card (absent fields) projects conservative null truth without churn", () => {
+    const oldShape = makeCard() as unknown as Record<string, unknown>;
+    delete oldShape.currentAttachment;
+    delete oldShape.currentTeardownEvidence;
+    const card = oldShape as unknown as PiSubagentExecutionCard;
+    const event = executionUpdatedEvent(card, { sequence: 5 });
+
+    const state = applyOrchestrationEvents(makeState(makeThread({ id: threadId })), [event]);
+    const after = getThreadFromState(state, threadId) as {
+      piSubagentExecutions?: PiSubagentExecutionCard[];
+    };
+    expect(after.piSubagentExecutions).toHaveLength(1);
+    // Conservative hydration: the web treats absent truth as null (ordinary
+    // observed-state presentation) and never fabricates attachment or
+    // teardown evidence.
+    expect(after.piSubagentExecutions![0]!.currentAttachment ?? null).toBeNull();
+    expect(after.piSubagentExecutions![0]!.currentTeardownEvidence ?? null).toBeNull();
+  });
+
   it("T11-AC4: every managed lifecycle state projects onto the card slice", () => {
     const states = [
       "requested",

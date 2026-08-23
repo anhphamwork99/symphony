@@ -3853,7 +3853,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("Managed subagent executions");
-          expect(document.body.textContent).toContain("Orphaned");
+          expect(document.body.textContent).toContain("Outcome unknown (orphaned)");
         },
         { timeout: 8_000, interval: 50 },
       );

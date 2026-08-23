@@ -1,13 +1,19 @@
 // FILE: PiSubagentExecutionCardStrip.tsx
 // Purpose: Ticket 11 (T11-AC4/AC5/AC6/AC8) reconnectable execution-card strip
 // stacked above the composer: one row per managed Pi subagent execution of the
-// active thread (live states first, then terminal). Rows render the lifecycle
-// state (all eight states), the bounded diagnostics, the terminal summary, and
-// the completion-delivery badge; an authorized Cancel button dispatches the
-// durable per-execution cancel command and stays visibly `cancelling` until
-// the server's journal-first acknowledgement projects a new card. Card state
-// changes never touch the transcript auto-follow path (T11-AC7) — the strip is
-// composer chrome, not a transcript message.
+// active thread (live states first, then terminal). Rows render the Ticket 03
+// WHOLE-CARD presentation (Running in background / Cancelling / Cancellation
+// unverified / Outcome unknown (orphaned) / ordinary lifecycle labels), the
+// bounded diagnostics, the terminal summary, and the completion-delivery
+// badge; an authorized Cancel button dispatches the durable per-execution
+// cancel command and stays visibly `cancelling` until the server's
+// journal-first acknowledgement projects a new card. Card state changes never
+// touch the transcript auto-follow path (T11-AC7) — the strip is composer
+// chrome, not a transcript message. Ticket 03 (T03-AC2–AC5): ordering,
+// initial live expansion, label/dot/spinner, and the Cancel/Resume
+// affordances all consume `piSubagentExecutionCardPresentation` — local
+// cancel/resume pending state only disables an already-allowed action and
+// never changes the durable label or creates controls.
 // Layer: Chat composer UI
 // Exports: PiSubagentExecutionCardStrip
 
@@ -17,7 +23,7 @@ import { useEffect, useState } from "react";
 import { FileIcon, LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
 import {
   PI_SUBAGENT_LEGACY_UNMANAGED_LABEL,
-  piSubagentExecutionStatePresentation,
+  piSubagentExecutionCardPresentation,
 } from "~/lib/piSubagentExecutionCardPresentation";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -25,11 +31,11 @@ import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
 import { ComposerStackedPanel } from "./ComposerStackedPanel";
 
-/** Live-first, oldest-first ordering for stable rendering. */
+/** Live-first, oldest-first ordering for stable rendering (T03-AC5). */
 function orderCards(cards: ReadonlyArray<PiSubagentExecutionCard>): PiSubagentExecutionCard[] {
   return [...cards].toSorted((left, right) => {
-    const leftLive = piSubagentExecutionStatePresentation(left.observedState).live ? 0 : 1;
-    const rightLive = piSubagentExecutionStatePresentation(right.observedState).live ? 0 : 1;
+    const leftLive = piSubagentExecutionCardPresentation(left).live ? 0 : 1;
+    const rightLive = piSubagentExecutionCardPresentation(right).live ? 0 : 1;
     if (leftLive !== rightLive) {
       return leftLive - rightLive;
     }
@@ -71,7 +77,7 @@ function ExecutionRow({
   resumePending,
   onOpenDetails,
 }: ExecutionRowProps) {
-  const presentation = piSubagentExecutionStatePresentation(card.observedState);
+  const presentation = piSubagentExecutionCardPresentation(card);
   const diagnostic =
     card.diagnosticMessage ??
     (card.diagnosticCode !== undefined ? String(card.diagnosticCode) : null);
@@ -79,12 +85,14 @@ function ExecutionRow({
     diagnostic !== null ||
     card.terminalSummary != null ||
     card.lastProgressSummary != null ||
+    presentation.detailMessage !== null ||
     card.droppedProgressCount !== undefined;
-  const cancelVisible = presentation.live;
-  // `cancelling` desired state (or observed) keeps the cancel affordance
-  // disabled: the durable intent is recorded and the card stays visibly
-  // cancelling until the server acknowledges (T11-AC6).
-  const cancelling = card.desiredState === "cancelling" || card.observedState === "cancelling";
+  // Control truth is durable-card-derived only (T03-AC2–AC5): the whole-card
+  // presentation decides visibility; local pending state may only disable an
+  // already-allowed action, never create or hide a control.
+  const cancelVisible = presentation.showCancel;
+  const cancelling = presentation.cancelDisabled;
+  const resumeVisible = presentation.showResume && onResume !== undefined;
 
   return (
     <div className="flex flex-col gap-1" data-pi-subagent-execution-id={card.executionId}>
@@ -96,7 +104,7 @@ function ExecutionRow({
         <span className={cn("text-xs font-medium", presentation.textToneClassName)}>
           {presentation.label}
         </span>
-        {presentation.live ? (
+        {presentation.spinner ? (
           <LoaderIcon className={cn("size-3 animate-spin", presentation.textToneClassName)} />
         ) : null}
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
@@ -126,10 +134,11 @@ function ExecutionRow({
             )}
           </Button>
         ) : null}
-        {/* Ticket 14 (T14-AC6): explicit resume affordance — ONLY an orphaned
-            execution offers it. The dispatch is the explicit user action; no
-            automatic path produces the resume command. */}
-        {card.observedState === "orphaned" && onResume ? (
+        {/* Ticket 14 (T14-AC6) / Ticket 03 (T03-AC4): explicit resume
+            affordance — ONLY an orphaned execution offers it. The dispatch is
+            the explicit user action; no automatic path produces the resume
+            command. */}
+        {resumeVisible ? (
           <Button
             type="button"
             variant="ghost"
@@ -183,11 +192,8 @@ function ExecutionRow({
             {card.terminalSummary ? (
               <span className="line-clamp-3 whitespace-pre-wrap">{card.terminalSummary}</span>
             ) : null}
-            {card.observedState === "orphaned" ? (
-              <span className="text-amber-300/80">
-                Owner lost after restart; partial side effects may already exist. Inspect the
-                workspace before resuming.
-              </span>
+            {presentation.detailMessage !== null ? (
+              <span className="text-amber-300/80">{presentation.detailMessage}</span>
             ) : null}
             {diagnostic !== null ? (
               <span className="text-muted-foreground/60">{diagnostic}</span>
@@ -241,13 +247,15 @@ export function PiSubagentExecutionCardStrip({
 
   // Live (non-terminal) rows start expanded so diagnostics are visible on
   // arrival; terminal rows start collapsed. Only applied once per card.
+  // Ticket 03: "live" is the whole-card presentation truth (an unverified or
+  // orphaned card starts collapsed — it is not live work).
   useEffect(() => {
     setExpandedByExecutionId((previous) => {
       let changed = false;
       const next = { ...previous };
       for (const card of cards) {
         if (!(card.executionId in next)) {
-          next[card.executionId] = piSubagentExecutionStatePresentation(card.observedState).live;
+          next[card.executionId] = piSubagentExecutionCardPresentation(card).live;
           changed = true;
         }
       }

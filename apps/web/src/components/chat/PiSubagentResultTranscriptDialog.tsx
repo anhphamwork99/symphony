@@ -4,7 +4,9 @@
 // fetches the bounded result read and cursor-paged transcript entries through
 // the authorized server boundary, and renders stable truncation/availability
 // diagnostics. Transcript availability is never presented as liveness
-// (T12-AC6): the header renders the durable observed state verbatim.
+// (T12-AC6): the header renders the Ticket 03 WHOLE-CARD presentation
+// (T03-AC5) — the same pure derivation the card strip consumes — plus the
+// bounded uncertainty/orphan explanation when the durable card carries it.
 // Layer: Chat presentation component
 // Exports: PiSubagentResultTranscriptDialog
 
@@ -16,7 +18,7 @@ import type {
 import { useCallback, useEffect, useState } from "react";
 
 import { LoaderIcon } from "~/lib/icons";
-import { piSubagentExecutionStatePresentation } from "~/lib/piSubagentExecutionCardPresentation";
+import { piSubagentExecutionCardPresentation } from "~/lib/piSubagentExecutionCardPresentation";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -145,7 +147,7 @@ export function PiSubagentResultTranscriptDialog({
     return null;
   }
 
-  const presentation = piSubagentExecutionStatePresentation(card.observedState);
+  const presentation = piSubagentExecutionCardPresentation(card);
   const loading = loadState.kind === "loading";
 
   return (
@@ -163,6 +165,14 @@ export function PiSubagentResultTranscriptDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="flex max-h-[min(60vh,32rem)] flex-col gap-3 overflow-y-auto px-4 pb-4">
+          {presentation.detailMessage !== null ? (
+            <p
+              className="rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-[11px] leading-relaxed text-amber-300/80"
+              data-testid="pi-subagent-card-presentation-detail"
+            >
+              {presentation.detailMessage}
+            </p>
+          ) : null}
           {error !== null ? (
             <div className="rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs text-foreground/85">
               {error}

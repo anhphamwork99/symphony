@@ -485,11 +485,46 @@ export type PiSubagentCompletionOutboxEntry = typeof PiSubagentCompletionOutboxE
  * only bounded summaries and opaque references. Terminal evidence
  * (`terminalSummary`, `transcriptRef`) inherits the Ticket 07/08 bounds and
  * `deliveryState` exposes the completion-outbox delivery state without ever
- * conflating delivery failure with execution failure (T08-AC2).
+ * conflating delivery failure with execution failure (T08-AC2). Ticket 03
+ * adds bounded current-generation attachment/teardown-evidence fields
+ * (T03-AC1) with null decoding defaults so pre-Ticket-03 persisted card
+ * events replay unchanged.
  */
 export const PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS = 512;
 export const PI_SUBAGENT_EXECUTION_CARD_DIAGNOSTIC_MAX_CHARS = 512;
 export const PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD = 64;
+
+/**
+ * Ticket 03 current-generation attachment truth (T03-AC1). Derived
+ * server-side from exact current execution/attempt/generation durable
+ * evidence only: `detached` for a durable background admission or an exact
+ * seq-3 `phase=detached` journal row; `attached` for any other current live
+ * execution; `null` for terminal/orphaned/non-live aggregates and for cards
+ * replayed from pre-Ticket-03 persisted events (decoding default).
+ */
+export const PiSubagentExecutionCardAttachment = Schema.Literals([
+  "attached",
+  "detached",
+]);
+export type PiSubagentExecutionCardAttachment =
+  typeof PiSubagentExecutionCardAttachment.Type;
+
+/**
+ * Ticket 03 current-generation teardown evidence (T03-AC1). Derived only
+ * from journal bands of the exact current execution/attempt/generation:
+ * `survivors` (77, wins over `owner_unproven` when both exist),
+ * `owner_unproven` (78), `requested` (75). Band 76 `proven` is excluded —
+ * proven teardown settles cancellation and advances the generation, so it
+ * can never describe the current generation. `none` is the fresh default;
+ * `null` decodes from pre-Ticket-03 persisted card events.
+ */
+export const PiSubagentTeardownEvidence = Schema.Literals([
+  "none",
+  "requested",
+  "survivors",
+  "owner_unproven",
+]);
+export type PiSubagentTeardownEvidence = typeof PiSubagentTeardownEvidence.Type;
 
 export const PiSubagentExecutionCard = Schema.Struct({
   executionId: PiSubagentExecutionId,
@@ -519,6 +554,23 @@ export const PiSubagentExecutionCard = Schema.Struct({
   transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Completion-outbox delivery state, when a delivery entry exists. */
   deliveryState: Schema.optional(PiSubagentCompletionDeliveryState),
+  /**
+   * Ticket 03 bounded current-generation attachment truth (T03-AC1).
+   * Optional with decoding default `null` so old persisted card events
+   * replay: the web treats `null` conservatively (ordinary observed-state
+   * presentation). Fresh server cards always emit an explicit value.
+   */
+  currentAttachment: Schema.optional(Schema.NullOr(PiSubagentExecutionCardAttachment)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  /**
+   * Ticket 03 bounded current-generation teardown evidence (T03-AC1).
+   * Same old-shape decoding default `null`; fresh server cards always emit
+   * an explicit value (`none` when no teardown band exists).
+   */
+  currentTeardownEvidence: Schema.optional(Schema.NullOr(PiSubagentTeardownEvidence)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: TrimmedNonEmptyString,
   updatedAt: TrimmedNonEmptyString,
 });

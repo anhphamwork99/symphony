@@ -1,8 +1,10 @@
 // FILE: PiSubagentExecutionCardStrip.test.tsx
-// Purpose: Ticket 11 (T11-AC4/AC8) web execution-card component boundary over
-// complete lifecycle and legacy fixtures: every managed lifecycle state
-// renders its label and applicable diagnostics, cancel visibility follows the
-// live/cancelling rules, delivery badges and terminal summaries appear, and
+// Purpose: Ticket 11 (T11-AC4/AC8) + Ticket 03 (T03-AC2–AC5) web
+// execution-card component boundary: every managed lifecycle state renders
+// its whole-card label, cancel/resume visibility follows the durable
+// whole-card truth, detached current running renders Running in background,
+// desired cancellation overrides an observed running label, teardown
+// uncertainty renders Cancellation unverified without lifecycle controls, and
 // the legacy unmanaged label renders only for legacy sessions.
 // Layer: Web chat component tests
 // Depends on: renderToStaticMarkup (SSR-safe presentation contracts).
@@ -15,7 +17,11 @@ import { PiSubagentExecutionCardStrip } from "./PiSubagentExecutionCardStrip";
 
 vi.mock("~/lib/icons", () => ({
   FileIcon: () => null,
-  LoaderIcon: () => null,
+  // Spinner affordances render a marker span carrying the animate-spin
+  // class so static markup can prove whole-card spinner eligibility.
+  LoaderIcon: ({ className }: { className?: string }) => (
+    <span data-testid="card-loader" className={className} />
+  ),
   RotateCcwIcon: () => null,
   StopIcon: () => null,
 }));
@@ -76,7 +82,7 @@ describe("PiSubagentExecutionCardStrip (Ticket 11 component boundary)", () => {
       ["cancelled", "Cancelled"],
       ["succeeded", "Succeeded"],
       ["failed", "Failed"],
-      ["orphaned", "Orphaned"],
+      ["orphaned", "Outcome unknown (orphaned)"],
     ];
     for (const [observedState, label] of cases) {
       const markup = render({
@@ -117,7 +123,6 @@ describe("PiSubagentExecutionCardStrip (Ticket 11 component boundary)", () => {
     expect(markup).toContain("exec-ui-1");
     expect(markup).toContain("exec-ui-2");
   });
-
   it("T11-AC6: cancel affordance renders for live states and disabling text appears while cancelling", () => {
     const liveMarkup = render({
       cards: [makeCard({ observedState: "running" })],
@@ -223,5 +228,274 @@ describe("PiSubagentExecutionCardStrip (Ticket 11 component boundary)", () => {
         cancelPendingExecutionId: null,
       }),
     ).toBe("");
+  });
+});
+
+describe("PiSubagentExecutionCardStrip (Ticket 03 whole-card truth)", () => {
+  it("T03-AC2: current detached running renders Running in background with spinner evidence and Cancel", () => {
+    const markup = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "running",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "none",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(markup).toContain("Running in background");
+    // Spinner eligibility (the mock renders LoaderIcon as null, but the
+    // whole-card spinner flag still gates the animate-spin class).
+    expect(markup).toContain("animate-spin");
+    expect(markup).toContain("title=\"Cancel execution\"");
+  });
+
+  it("T03-AC2: attached and old-null running render the ordinary Running label", () => {
+    for (const currentAttachment of ["attached", null] as const) {
+      const markup = render({
+        cards: [
+          makeCard({
+            observedState: "running",
+            desiredState: "running",
+            currentAttachment,
+            currentTeardownEvidence: "none",
+          }),
+        ],
+        legacyAgentToolActive: false,
+        onCancelExecution: () => {},
+        cancelPendingExecutionId: null,
+      });
+      expect(markup).toContain(">Running<");
+      expect(markup).not.toContain("Running in background");
+    }
+  });
+
+  it("T03-AC3: desired cancelling overrides an observed running label even while detached", () => {
+    const markup = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "none",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(markup).toContain(">Cancelling<");
+    expect(markup).not.toContain("Running in background");
+    // Cancel stays visible but disabled while the durable intent is recorded.
+    expect(markup).toContain("waiting for server acknowledgement");
+  });
+
+  it("T03-AC3: a requested teardown band alone follows cancellation intent and never claims uncertainty", () => {
+    const withIntent = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "requested",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(withIntent).toContain(">Cancelling<");
+    expect(withIntent).not.toContain("Cancellation unverified");
+
+    const withoutIntent = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "running",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "requested",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(withoutIntent).toContain("Running in background");
+    expect(withoutIntent).not.toContain("Cancellation unverified");
+  });
+
+  it("T03-AC3: survivors and owner_unproven render Cancellation unverified with no spinner or lifecycle controls", () => {
+    for (const currentTeardownEvidence of ["survivors", "owner_unproven"] as const) {
+      const markup = render({
+        cards: [
+          makeCard({
+            observedState: "running",
+            desiredState: "cancelling",
+            currentAttachment: "detached",
+            currentTeardownEvidence,
+          }),
+        ],
+        legacyAgentToolActive: false,
+        onCancelExecution: () => {},
+        cancelPendingExecutionId: null,
+        onResumeExecution: () => {},
+        resumePendingExecutionId: null,
+      });
+      expect(markup).toContain(">Cancellation unverified<");
+      // No spinner: the row is not live work.
+      expect(markup).not.toContain("animate-spin");
+      // No Cancel and no Resume: no honest lifecycle action remains.
+      expect(markup).not.toContain("Cancel execution");
+      expect(markup).not.toContain("Resume execution with a new attempt");
+      // Bounded static uncertainty copy renders and never claims stopped.
+      expect(markup).toContain("cannot claim the execution was cancelled");
+    }
+    // The two bands carry distinct explanatory copy.
+    const survivors = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentTeardownEvidence: "survivors",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    const unproven = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentTeardownEvidence: "owner_unproven",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(survivors).toContain("could not be proven stopped");
+    expect(unproven).toContain("owner could not prove teardown");
+  });
+
+  it("T03-AC4: orphaned renders the exact label with no spinner, no Cancel, and Resume only", () => {
+    const markup = render({
+      cards: [
+        makeCard({
+          observedState: "orphaned",
+          desiredState: "running",
+          currentAttachment: null,
+          currentTeardownEvidence: null,
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+      onResumeExecution: () => {},
+      resumePendingExecutionId: null,
+    });
+    expect(markup).toContain(">Outcome unknown (orphaned)<");
+    expect(markup).not.toContain("animate-spin");
+    expect(markup).not.toContain("Cancel execution");
+    expect(markup).toContain("title=\"Resume execution with a new attempt\"");
+  });
+
+  it("T03-AC5: committed terminal labels ignore stale attachment and teardown fields", () => {
+    for (const [observedState, label] of [
+      ["succeeded", "Succeeded"],
+      ["failed", "Failed"],
+    ] as const) {
+      const markup = render({
+        cards: [
+          makeCard({
+            observedState,
+            desiredState: "cancelling",
+            // Stale live-work truth must not mutate the settled card.
+            currentAttachment: "detached",
+            currentTeardownEvidence: "survivors",
+          }),
+        ],
+        legacyAgentToolActive: false,
+        onCancelExecution: () => {},
+        cancelPendingExecutionId: null,
+        onResumeExecution: () => {},
+        resumePendingExecutionId: null,
+      });
+      expect(markup).toContain(`>${label}<`);
+      expect(markup).not.toContain("Cancellation unverified");
+      expect(markup).not.toContain("Running in background");
+      expect(markup).not.toContain("animate-spin");
+      expect(markup).not.toContain("Cancel execution");
+      expect(markup).not.toContain("Resume execution with a new attempt");
+    }
+  });
+
+  it("T03: local cancel/resume pending only disables an allowed action and never changes the label", () => {
+    const base = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "none",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    expect(base).toContain("Running in background");
+    expect(base).not.toContain('disabled=""');
+
+    const pending = render({
+      cards: [
+        makeCard({
+          observedState: "running",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "none",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: "exec-ui-1",
+    });
+    // The durable label is unchanged; only the cancel button is disabled.
+    expect(pending).toContain("Running in background");
+    expect(pending).toContain("Cancel execution");
+    expect(pending).toContain('disabled=""');
+  });
+
+  it("T03-AC5: ordering places live whole-card work before non-live unverified/orphaned rows", () => {
+    const markup = render({
+      cards: [
+        makeCard({
+          executionId: "exec-order-unverified",
+          createdAt: "2026-08-19T00:00:00.000Z",
+          observedState: "running",
+          desiredState: "cancelling",
+          currentTeardownEvidence: "owner_unproven",
+        }),
+        makeCard({
+          executionId: "exec-order-live",
+          createdAt: "2026-08-19T00:00:05.000Z",
+          observedState: "running",
+          desiredState: "running",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "none",
+        }),
+      ],
+      legacyAgentToolActive: false,
+      onCancelExecution: () => {},
+      cancelPendingExecutionId: null,
+    });
+    const liveIndex = markup.indexOf("exec-order-live");
+    const unverifiedIndex = markup.indexOf("exec-order-unverified");
+    expect(liveIndex).toBeGreaterThan(-1);
+    expect(unverifiedIndex).toBeGreaterThan(-1);
+    // The NEWER live card still sorts before the OLDER unverified card.
+    expect(liveIndex).toBeLessThan(unverifiedIndex);
   });
 });

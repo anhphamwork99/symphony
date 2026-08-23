@@ -159,7 +159,12 @@ describe("Pi subagent result/transcript dialog", () => {
 
     const mounted = await render(
       <PiSubagentResultTranscriptDialog
-        card={makeCard({ observedState: "orphaned", desiredState: "running" })}
+        card={makeCard({
+          observedState: "orphaned",
+          desiredState: "running",
+          currentAttachment: null,
+          currentTeardownEvidence: null,
+        })}
         open
         onOpenChange={() => undefined}
         readResult={readResult}
@@ -169,9 +174,59 @@ describe("Pi subagent result/transcript dialog", () => {
 
     await expect.element(page.getByText(/no longer available on the server/i)).toBeInTheDocument();
     await expect.element(page.getByTestId("pi-subagent-transcript-empty")).toBeInTheDocument();
-    // The header echoes the durable observed state verbatim — "Orphaned",
-    // never "Running": an available transcript is not liveness evidence.
-    await expect.element(page.getByText("Orphaned")).toBeInTheDocument();
+    // The header echoes the Ticket 03 whole-card truth — the exact orphaned
+    // label, never "Running": an available transcript is not liveness
+    // evidence. The bounded orphan explanation renders alongside it.
+    await expect.element(page.getByText("Outcome unknown (orphaned)")).toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("pi-subagent-card-presentation-detail"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(/inspect the workspace before resuming/i))
+      .toBeInTheDocument();
+    await mounted.unmount();
+  });
+
+  it("renders the shared whole-card Cancellation unverified truth with its bounded uncertainty copy (T03-AC3/AC5)", async () => {
+    const readResult = vi.fn().mockResolvedValue({
+      executionId: "exec-t12-ui",
+      observedState: "running",
+      summary: null,
+      summaryTruncated: false,
+      transcriptRef: null,
+    } satisfies PiSubagentResultReadResult);
+    const readTranscriptPage = vi.fn().mockResolvedValue({
+      entries: [],
+      nextCursor: null,
+      hasMore: false,
+      skippedCorruptEntries: 0,
+      observedState: "running",
+    });
+
+    const mounted = await render(
+      <PiSubagentResultTranscriptDialog
+        card={makeCard({
+          observedState: "running",
+          desiredState: "cancelling",
+          currentAttachment: "detached",
+          currentTeardownEvidence: "survivors",
+        })}
+        open
+        onOpenChange={() => undefined}
+        readResult={readResult}
+        readTranscriptPage={readTranscriptPage}
+      />,
+    );
+
+    // Same whole-card derivation the strip consumes: uncertainty overrides
+    // the observed running label and NEVER claims the child stopped.
+    await expect.element(page.getByText("Cancellation unverified")).toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("pi-subagent-card-presentation-detail"))
+      .toHaveTextContent(/could not be proven stopped/i);
+    await expect
+      .element(page.getByTestId("pi-subagent-card-presentation-detail"))
+      .toHaveTextContent(/cannot claim the execution was cancelled/i);
     await mounted.unmount();
   });
 
