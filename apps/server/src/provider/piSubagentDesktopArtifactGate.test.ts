@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -313,6 +313,14 @@ const CLOSURE_VALID_FILES = [
     path: "node_modules/zod/index.js",
     content: "module.exports = require('./lib/index.js');\n",
   },
+  {
+    path: "agent/system/subagent-system.md",
+    content: "# Subagent System\n\nYou are a delegated subagent.\n",
+  },
+  {
+    path: "agent/system/working-style.md",
+    content: "# Working Style\n\nBe precise and evidence-driven.\n",
+  },
 ] as const;
 
 const stageClosureArtifact = async (root: string): Promise<void> => {
@@ -356,6 +364,55 @@ afterAll(async () => {
 
 const REAL_VERIFIER: PiSubagentArtifactVerifier = (root) => verifyPiSubagentArtifact(root);
 
+/**
+ * Ticket 01c (Decision 0010 AC6) — the desktop gate fed by the production
+ * verifier over the expanded prompt-system closure. The valid fixture carries
+ * `agent/system` entries; corrupt/missing system entries deny with the real
+ * verifier's bounded category BEFORE any managed runtime use — the same
+ * fail-close ordering as every other closure subtree.
+ */
+describe("evaluatePiSubagentDesktopArtifactGate with agent/system prompt closure entries (Ticket 01c)", () => {
+  it("a symlinked agent/system prompt entry denies with symlink_escape before load", async () => {
+    const artifactRoot = await mkdtemp(join(closureFixtureRoot, "t01c-symlink-"));
+    await stageClosureArtifact(artifactRoot);
+    const outside = join(closureFixtureRoot, "t01c-outside-prompt.md");
+    await writeFile(outside, "# Subagent System\n\nDecoy prompt bytes.\n");
+    await rm(join(artifactRoot, "agent/system/subagent-system.md"));
+    await symlink(outside, join(artifactRoot, "agent/system/subagent-system.md"));
+
+    const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+      env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: artifactRoot },
+      verify: REAL_VERIFIER,
+    });
+
+    expect(result).toEqual({
+      kind: "unavailable",
+      reason: "symlink_escape",
+      detail: "managed pi artifact verification failed: symlink_escape (entry: agent/system/subagent-system.md)",
+    });
+    // The decoy bytes never entered any gate surface.
+    expect(JSON.stringify(result)).not.toContain("Decoy prompt bytes");
+  });
+
+  it("an unlisted extra file under agent/system denies with unlisted_entry", async () => {
+    const artifactRoot = await mkdtemp(join(closureFixtureRoot, "t01c-unlisted-"));
+    await stageClosureArtifact(artifactRoot);
+    await writeFile(join(artifactRoot, "agent/system/orchestration-rules.md"), "unlisted bytes");
+
+    const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+      env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: artifactRoot },
+      verify: REAL_VERIFIER,
+    });
+
+    expect(result).toEqual({
+      kind: "unavailable",
+      reason: "unlisted_entry",
+      detail:
+        "managed pi artifact verification failed: unlisted_entry (entry: agent/system/orchestration-rules.md)",
+    });
+  });
+});
+
 describe("evaluatePiSubagentDesktopArtifactGate with the production verifier over real expanded-closure artifacts (Ticket 01b)", () => {
   it.for([
     [
@@ -375,6 +432,26 @@ describe("evaluatePiSubagentDesktopArtifactGate with the production verifier ove
         entry: "node_modules/zod/index.js",
         corrupt: async (root: string) => {
           await writeFile(join(root, "node_modules/zod/index.js"), "module.exports = require('./lib/index.jS');\n");
+        },
+      },
+    ],
+    [
+      "system-missing",
+      {
+        category: "entry_missing",
+        entry: "agent/system/subagent-system.md",
+        corrupt: async (root: string) => {
+          await rm(join(root, "agent/system/subagent-system.md"));
+        },
+      },
+    ],
+    [
+      "system-tampered",
+      {
+        category: "digest_mismatch",
+        entry: "agent/system/working-style.md",
+        corrupt: async (root: string) => {
+          await writeFile(join(root, "agent/system/working-style.md"), "# Working Style\n\nBe precise and evidence-driven.\X");
         },
       },
     ],

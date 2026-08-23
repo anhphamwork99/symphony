@@ -92,6 +92,38 @@ interface SyntheticAlfieRepo {
 /** Shared runtime modules the real pinned extension imports (stager contract). */
 const SYNTHETIC_SHARED_MODULES = ["durable-preferences", "execution-identity", "model-catalog-reconciler"];
 
+/** The current pin's exact derived child-prompt closure (stager contract). */
+const SYNTHETIC_PROMPT_FILES = [
+  "agent/system/skill-rules.md",
+  "agent/system/subagent-system.md",
+  "agent/system/tool-guidelines.md",
+  "agent/system/working-style.md",
+];
+
+/**
+ * The minimal pinned-shape prompt modules the mechanical derivation walks
+ * (entry `src/agent-runner.ts` importing `buildAgentPrompt` from
+ * `src/prompts.ts`, whose required reads resolve `../../../system`).
+ * Parameterizable for Ticket 01c staging fixtures (fifth read, dynamic read…).
+ */
+function syntheticPromptModules(options: {
+  readonly extraLiteralRead?: string;
+  readonly dynamicRead?: boolean;
+  readonly emptyPromptFile?: string;
+}): { readonly agentRunner: string; readonly prompts: string } {
+  const extraConst = options.extraLiteralRead
+    ? `const EXTRA_PATH = join(SYSTEM_DIR, "${options.extraLiteralRead}");\n`
+    : "";
+  const extraRead = options.extraLiteralRead ? "    readRequiredPrompt(EXTRA_PATH),\n" : "";
+  const dynamicRead = options.dynamicRead
+    ? "    readRequiredPrompt(join(SYSTEM_DIR, `dyn-${Date.now()}.md`)),\n"
+    : "";
+  return {
+    agentRunner: `import { buildAgentPrompt } from "./prompts.js";\nexport function runAgent(): string {\n  return buildAgentPrompt();\n}\n`,
+    prompts: `import { existsSync, readFileSync } from "node:fs";\nimport { dirname, join } from "node:path";\nimport { fileURLToPath } from "node:url";\n\nconst __dirname = dirname(fileURLToPath(import.meta.url));\nconst SYSTEM_DIR = join(__dirname, "../../../system");\nconst SUBAGENT_SYSTEM_TEMPLATE_PATH = join(SYSTEM_DIR, "subagent-system.md");\nconst TOOL_GUIDELINES_PATH = join(SYSTEM_DIR, "tool-guidelines.md");\nconst SKILL_RULES_PATH = join(SYSTEM_DIR, "skill-rules.md");\nconst WORKING_STYLE_PATH = join(SYSTEM_DIR, "working-style.md");\n${extraConst}function clean(value: unknown): string {\n  return String(value ?? "").trim();\n}\n\nfunction readRequiredPrompt(path: string): string {\n  if (!existsSync(path)) {\n    throw new Error(\`Required subagent prompt file missing: \${path}\`);\n  }\n  const body = clean(readFileSync(path, "utf-8"));\n  if (!body) {\n    throw new Error(\`Required subagent prompt file is empty: \${path}\`);\n  }\n  return body;\n}\n\nexport function buildAgentPrompt(): string {\n  return [\n    readRequiredPrompt(SUBAGENT_SYSTEM_TEMPLATE_PATH),\n    readRequiredPrompt(TOOL_GUIDELINES_PATH),\n    readRequiredPrompt(SKILL_RULES_PATH),\n    readRequiredPrompt(WORKING_STYLE_PATH),\n${extraRead}${dynamicRead}  ].join("\\n");\n}\n`,
+  };
+}
+
 /**
  * Minimal npm lockfile v3 for the synthetic fixture. The default synthetic
  * extension declares zero runtime dependencies (root dependency maps both
@@ -126,6 +158,14 @@ function createSyntheticAlfieRepo(options: {
   readonly untrackedFile?: string;
   readonly packageJson?: string;
   readonly dependencies?: Record<string, string>;
+  readonly promptShape?: {
+    readonly extraLiteralRead?: string;
+    readonly dynamicRead?: boolean;
+  };
+  readonly emptyPromptFile?: string;
+  readonly missingPromptFile?: string;
+  readonly trackedPromptSymlink?: { readonly relative: string; readonly target: string };
+  readonly dirtyPromptFile?: string;
 }): SyntheticAlfieRepo {
   const repoDir = join(makeTempRoot("synthetic-alfie-"), "alfie");
   mkdirSync(repoDir, { recursive: true });
@@ -175,6 +215,25 @@ function createSyntheticAlfieRepo(options: {
     writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.js`), `export const x = "${basename}";\n`);
     writeFileSync(join(repoDir, "agent/extensions/shared", `${basename}.d.ts`), `export declare const x: string;\n`);
   }
+  // Ticket 01c: the derivation-walked prompt modules + the agent/system
+  // content, exactly the pinned shape the mechanical closure resolves.
+  const promptModules = syntheticPromptModules({
+    extraLiteralRead: options.promptShape?.extraLiteralRead,
+    dynamicRead: options.promptShape?.dynamicRead,
+  });
+  writeFileSync(join(repoDir, extensionRoot, "src/agent-runner.ts"), promptModules.agentRunner);
+  writeFileSync(join(repoDir, extensionRoot, "src/prompts.ts"), promptModules.prompts);
+  mkdirSync(join(repoDir, "agent/system"), { recursive: true });
+  const promptFiles = options.promptShape?.extraLiteralRead
+    ? [...SYNTHETIC_PROMPT_FILES, `agent/system/${options.promptShape.extraLiteralRead}`]
+    : SYNTHETIC_PROMPT_FILES;
+  for (const relative of promptFiles) {
+    if (options.missingPromptFile === relative) continue;
+    if (options.trackedPromptSymlink?.relative === relative) continue;
+    const target = join(repoDir, relative);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, options.emptyPromptFile === relative ? "" : `content-of:${relative}\n`);
+  }
   for (const extra of options.extraFiles ?? []) {
     const fullPath = join(repoDir, extra);
     mkdirSync(dirname(fullPath), { recursive: true });
@@ -185,6 +244,11 @@ function createSyntheticAlfieRepo(options: {
     mkdirSync(dirname(linkPath), { recursive: true });
     symlinkSync(options.trackedSymlink.target, linkPath);
   }
+  if (options.trackedPromptSymlink) {
+    const linkPath = join(repoDir, options.trackedPromptSymlink.relative);
+    mkdirSync(dirname(linkPath), { recursive: true });
+    symlinkSync(options.trackedPromptSymlink.target, linkPath);
+  }
 
   run(["add", "."]);
   run(["commit", "-m", "synthetic pinned extension"]);
@@ -193,6 +257,9 @@ function createSyntheticAlfieRepo(options: {
     const fullPath = join(repoDir, options.untrackedFile);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, "uncommitted bytes\n");
+  }
+  if (options.dirtyPromptFile) {
+    writeFileSync(join(repoDir, options.dirtyPromptFile), "tampered prompt bytes\n");
   }
 
   return { repoDir, provenance: syntheticProvenanceFor(repoDir, extensionRoot) };
@@ -471,7 +538,10 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
         "agent/extensions/pi-subagents/dist/index.js",
         "agent/extensions/pi-subagents/package-lock.json",
         "agent/extensions/pi-subagents/package.json",
+        "agent/extensions/pi-subagents/src/agent-runner.ts",
         "agent/extensions/pi-subagents/src/index.ts",
+        "agent/extensions/pi-subagents/src/prompts.ts",
+        ...SYNTHETIC_PROMPT_FILES,
         ...SYNTHETIC_SHARED_MODULES.flatMap((basename) => [
           `agent/extensions/shared/${basename}.js`,
           `agent/extensions/shared/${basename}.d.ts`,
@@ -524,6 +594,156 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       expect(existsSync(join(artifactDir, PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME))).toBe(true);
       const siblings = readdirSync(parentDir).filter((entry) => entry.startsWith("pi-subagents-artifact"));
       expect(siblings).toEqual([PI_SUBAGENT_ARTIFACT_DIR_NAME]);
+    });
+  });
+
+  describe("prompt-closure staging (Ticket 01c, Decision 0010)", () => {
+    it(
+      "real pin: stages exactly the four mechanically derived agent/system entries with manifest-exact size and digest (AC1/AC3)",
+      { timeout: 120_000 },
+      () => {
+        const provenance = loadRealProvenance();
+        const artifactDir = join(makeTempRoot("pi-t01c-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+        const staged = buildPiSubagentArtifact({
+          repoDir: REAL_ALFIE_REPO_DIR,
+          artifactDir,
+          provenance,
+        });
+        const manifest = JSON.parse(readFileSync(staged.manifestPath, "utf8")) as {
+          readonly files: ReadonlyArray<{
+            readonly path: string;
+            readonly sizeBytes: number;
+            readonly sha256: string;
+          }>;
+        };
+        const systemEntries = manifest.files
+          .map((record) => record.path)
+          .filter((path) => path.startsWith("agent/system/"))
+          .sort();
+        expect(systemEntries).toEqual(SYNTHETIC_PROMPT_FILES);
+        for (const record of manifest.files.filter((r) => r.path.startsWith("agent/system/"))) {
+          const stagedBytes = readFileSync(join(artifactDir, record.path));
+          expect(stagedBytes.length).toBe(record.sizeBytes);
+          expect(sha256(stagedBytes)).toBe(record.sha256);
+          // The bytes are the exact clean pinned checkout's bytes.
+          expect(sha256(readFileSync(join(REAL_ALFIE_REPO_DIR, record.path)))).toBe(record.sha256);
+          expect(stagedBytes.length).toBeGreaterThan(0);
+          expect(lstatSync(join(artifactDir, record.path)).isSymbolicLink()).toBe(false);
+        }
+
+        // Repeat staging is deterministic including the derived prompt entries.
+        const secondDir = join(makeTempRoot("pi-t01c-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+        const second = buildPiSubagentArtifact({
+          repoDir: REAL_ALFIE_REPO_DIR,
+          artifactDir: secondDir,
+          provenance,
+        });
+        expect(readFileSync(second.manifestPath, "utf8")).toBe(
+          readFileSync(staged.manifestPath, "utf8"),
+        );
+      },
+    );
+
+    it("synthetic: a FIFTH static literal required read is staged automatically (AC1 negative fixture)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        promptShape: { extraLiteralRead: "orchestration-rules.md" },
+      });
+      const artifactDir = join(makeTempRoot("t01c-fifth-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+      const staged = buildPiSubagentArtifact({ repoDir, artifactDir, provenance });
+      const manifest = JSON.parse(readFileSync(staged.manifestPath, "utf8")) as {
+        readonly files: ReadonlyArray<{ readonly path: string }>;
+      };
+      const systemEntries = manifest.files
+        .map((record) => record.path)
+        .filter((path) => path.startsWith("agent/system/"))
+        .sort();
+      expect(systemEntries).toEqual(
+        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].sort(),
+      );
+    });
+
+    it("synthetic: a dynamic required prompt read fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        promptShape: { dynamicRead: true },
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-dyn-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/prompt-closure derivation failed \(prompt_closure_unsupported\)/);
+    });
+
+    it("synthetic: an untracked derived prompt input fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        untrackedFile: "agent/system/subagent-system.md",
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-untracked-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/uncommitted changes|not tracked/i);
+    });
+
+    it("synthetic: dirty derived prompt input fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        dirtyPromptFile: "agent/system/working-style.md",
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-dirty-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/uncommitted changes/i);
+    });
+
+    it("synthetic: a derived prompt input absent from the pinned tree fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        missingPromptFile: "agent/system/skill-rules.md",
+      });
+      // A required prompt file the pinned commit never carries is refused
+      // before staging (the untracked/missing bounded categories overlap —
+      // either way the build fails closed, never silently omitting content).
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-missing-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/not tracked by the pinned commit|missing from the managed pi-subagents (source )?tree|is missing/i);
+    });
+
+    it("synthetic: an empty derived prompt input fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        emptyPromptFile: "agent/system/tool-guidelines.md",
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-empty-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/empty; required prompt content must be non-empty/i);
+    });
+
+    it("synthetic: a symlinked derived prompt input fails staging (AC2)", () => {
+      const { repoDir, provenance } = createSyntheticAlfieRepo({
+        trackedPromptSymlink: {
+          relative: "agent/system/subagent-system.md",
+          target: "../../elsewhere/subagent-system.md",
+        },
+      });
+      expect(() =>
+        buildPiSubagentArtifact({
+          repoDir,
+          artifactDir: join(makeTempRoot("t01c-symlink-"), "artifact"),
+          provenance,
+        }),
+      ).toThrow(/symbolic link/i);
     });
   });
 });

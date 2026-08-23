@@ -87,6 +87,31 @@ const SHARED_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   },
 ];
 
+/**
+ * Ticket 01c (Decision 0010 AC4) — the derived child-prompt closure subtree
+ * `agent/system`. Staged manifest-exactly like every other release content;
+ * the generic security matrix below proves it fails closed under the same
+ * bounded categories with no partial trust.
+ */
+const PROMPT_SYSTEM_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
+  {
+    path: "agent/system/subagent-system.md",
+    content: "# Subagent System\n\nYou are a delegated subagent.\n",
+  },
+  {
+    path: "agent/system/tool-guidelines.md",
+    content: "# Tool Guidelines\n\nUse tools deliberately.\n",
+  },
+  {
+    path: "agent/system/skill-rules.md",
+    content: "# Skill Rules\n\nLoad skills before use.\n",
+  },
+  {
+    path: "agent/system/working-style.md",
+    content: "# Working Style\n\nBe precise and evidence-driven.\n",
+  },
+];
+
 const DEPENDENCY_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   {
     path: "node_modules/zod/package.json",
@@ -107,11 +132,12 @@ const DEPENDENCY_SUBTREE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   },
 ];
 
-/** Extension + shared + dependency subtrees — the full 01b closure. */
+/** Extension + shared + dependency + prompt-system subtrees — the full 01c closure. */
 const CLOSURE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   ...BASE_FILES,
   ...SHARED_SUBTREE_FILES,
   ...DEPENDENCY_SUBTREE_FILES,
+  ...PROMPT_SYSTEM_SUBTREE_FILES,
 ];
 
 /** The two expanded-closure subtrees proven per failure category (AC3). */
@@ -132,6 +158,18 @@ const EXPANDED_SUBTREES = [
       unsafeNameTarget: "agent/extensions/shared/bad\nname.js",
       /** Symlinked-directory name inside the subtree. */
       symlinkDirTarget: "agent/extensions/shared/node_modules",
+    },
+  ],
+  [
+    "agent/system",
+    {
+      files: PROMPT_SYSTEM_SUBTREE_FILES,
+      listedEntry: "agent/system/subagent-system.md",
+      tamperedContent: "# Subagent System\n\nYou are a delegated subagent.\X",
+      unlistedFileTarget: "agent/system/orchestration-rules.md",
+      unlistedNonRegularTarget: "agent/system/extra.fifo",
+      unsafeNameTarget: "agent/system/bad\nname.md",
+      symlinkDirTarget: "agent/system/extra",
     },
   ],
   [
@@ -719,7 +757,7 @@ describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b
     async ([label, subtree]) => {
       const root = await freshRoot(`closure-${label}-file-symlink`);
       await stageClosureArtifact(root);
-      const target = join(fixtureRoot, `outside-${label}-file.js`);
+      const target = join(fixtureRoot, `outside-${label.replaceAll("/", "_")}-file.js`);
       await rm(target, { force: true });
       await writeFile(target, "outside content");
       await rm(join(root, subtree.listedEntry));
@@ -739,7 +777,7 @@ describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b
     async ([label, subtree]) => {
       const root = await freshRoot(`closure-${label}-dir-symlink`);
       await stageClosureArtifact(root);
-      const outsideDir = join(fixtureRoot, `outside-${label}-dir`);
+      const outsideDir = join(fixtureRoot, `outside-${label.replaceAll("/", "_")}-dir`);
       await rm(outsideDir, { recursive: true, force: true });
       await mkdir(join(outsideDir, "inner"), { recursive: true });
       await writeFile(join(outsideDir, "inner", "payload.js"), "sneaky");

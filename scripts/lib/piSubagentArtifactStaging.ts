@@ -43,6 +43,10 @@ import {
   selectNpmRuntimeClosure,
   type NpmRuntimeClosureSelection,
 } from "./piSubagentNpmRuntimeClosure.ts";
+import {
+  PiSubagentPromptClosureError,
+  derivePromptClosureFromRepo,
+} from "./piSubagentPromptClosureDerivation.ts";
 
 /** Staged artifact directory name inside desktop resources. */
 export const PI_SUBAGENT_ARTIFACT_DIR_NAME = "pi-subagents-artifact";
@@ -74,6 +78,16 @@ const EXTENSION_SHARED_MODULE_BASENAMES = [
 
 /** Shared subtree root inside the Alfie repository. */
 const SHARED_RELATIVE_ROOT = "agent/extensions/shared";
+
+/**
+ * Ticket 01c (Decision 0010): the `agent/system` subtree inside the Alfie
+ * repository whose prompt files are mechanically derived per pin. The
+ * subtree root bounds the cleanliness/status Git checks; the exact staged
+ * file set is ALWAYS the derivation result — there is deliberately no
+ * hand-maintained per-file list (a changed dependency graph must update the
+ * closure or fail the build, never silently omit content).
+ */
+const PROMPT_SYSTEM_RELATIVE_ROOT = "agent/system";
 
 /**
  * The extension's own development-test subtree is not release runtime
@@ -480,6 +494,107 @@ function listSharedRuntimeFiles(repoDir: string): ReadonlyArray<string> {
   return relativePaths.sort();
 }
 
+/**
+ * Ticket 01c (Decision 0010 Binding decision 3) — mechanically derives the
+ * pinned extension's child-prompt runtime dependency closure from the clean
+ * pinned source and proves every derived input is a tracked, clean,
+ * non-empty, non-symlinked regular file strictly inside the repository
+ * before its bytes may enter the artifact. No hand-maintained allowlist: a
+ * future pin with a changed prompt-read graph rederives here and either
+ * stages the new set or fails the build.
+ *
+ * Fail-close mapping (bounded, repository-relative diagnostics only):
+ * - derivation analysis failure (dynamic/unresolved/unrecognized shape,
+ *   escape, empty closure) → `dependency_closure_invalid`;
+ * - derived input untracked or the `agent/system` tree dirty →
+ *   `extension_tree_unclean`;
+ * - derived input missing → `extension_tree_missing`;
+ * - derived input empty → `staging_output_invalid`;
+ * - derived input a symlink → `symlink_in_source`;
+ * - derived input any other non-regular node → `staging_output_invalid`.
+ */
+function derivePromptClosureInputs(repoDir: string): ReadonlyArray<string> {
+  let closure: { readonly promptPaths: ReadonlyArray<string> };
+  try {
+    closure = derivePromptClosureFromRepo({ repoDir });
+  } catch (cause) {
+    if (cause instanceof PiSubagentPromptClosureError) {
+      throw new PiSubagentArtifactStagingError(
+        "dependency_closure_invalid",
+        `Managed pi-subagents prompt-closure derivation failed (${cause.code}): ${cause.message}`,
+      );
+    }
+    throw cause;
+  }
+
+  // The whole agent/system subtree must be clean so derived bytes provably
+  // come from the pinned commit (an untracked or modified prompt input is
+  // ambient checkout state, never release content).
+  const systemStatusRaw = git(repoDir, ["status", "--porcelain", PROMPT_SYSTEM_RELATIVE_ROOT]).trim();
+  const systemStatusLines = systemStatusRaw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (systemStatusLines.length > 0) {
+    throw new PiSubagentArtifactStagingError(
+      "extension_tree_unclean",
+      `Managed pi-subagents prompt tree '${PROMPT_SYSTEM_RELATIVE_ROOT}' has uncommitted changes; refusing to stage unclean prompt bytes.`,
+    );
+  }
+
+  const trackedOutput = git(repoDir, [
+    "ls-files",
+    "-z",
+    "--",
+    PROMPT_SYSTEM_RELATIVE_ROOT,
+  ]);
+  const trackedSet = new Set(
+    trackedOutput
+      .split("\0")
+      .map((entry) => entry.replace(/^\"|\"$/g, ""))
+      .filter((entry) => entry.length > 0),
+  );
+
+  for (const relativePath of closure.promptPaths) {
+    if (!trackedSet.has(relativePath)) {
+      throw new PiSubagentArtifactStagingError(
+        "extension_tree_unclean",
+        `Derived prompt dependency '${relativePath}' is not tracked by the pinned commit; refusing to stage untracked prompt bytes.`,
+      );
+    }
+    const sourcePath = join(repoDir, relativePath);
+    let stats: ReturnType<typeof lstatSync>;
+    try {
+      stats = lstatSync(sourcePath);
+    } catch {
+      throw new PiSubagentArtifactStagingError(
+        "extension_tree_missing",
+        `Derived prompt dependency '${relativePath}' is missing from the managed pi-subagents source tree.`,
+      );
+    }
+    if (stats.isSymbolicLink()) {
+      throw new PiSubagentArtifactStagingError(
+        "symlink_in_source",
+        `Derived prompt dependency '${relativePath}' is a symbolic link; staged prompt records must be exact regular files.`,
+      );
+    }
+    if (!stats.isFile()) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Derived prompt dependency '${relativePath}' is not a regular file.`,
+      );
+    }
+    if (stats.size === 0) {
+      throw new PiSubagentArtifactStagingError(
+        "staging_output_invalid",
+        `Derived prompt dependency '${relativePath}' is empty; required prompt content must be non-empty.`,
+      );
+    }
+  }
+
+  return closure.promptPaths;
+}
+
 /** Lists the exact Git-tracked release-runtime files of the extension. */
 function listTrackedExtensionFiles(repoDir: string): ReadonlyArray<string> {
   const output = git(repoDir, ["ls-files", "-z", "--", EXTENSION_RELATIVE_ROOT]);
@@ -605,6 +720,10 @@ function assembleArtifactInto(input: {
 
   const trackedFiles = listTrackedExtensionFiles(verified.repoDir);
   const sharedFiles = listSharedRuntimeFiles(verified.repoDir);
+  // Ticket 01c: the prompt-closure inputs are derived AFTER provenance is
+  // proven and BEFORE any staging output — mechanically from the pinned
+  // source, never from a hand-maintained list (Decision 0010 Binding 3).
+  const promptClosureFiles = derivePromptClosureInputs(verified.repoDir);
   const entrySourcePath = join(verified.repoDir, input.provenance.extensionEntryRelativePath);
   if (!existsSync(entrySourcePath)) {
     throw new PiSubagentArtifactStagingError(
@@ -700,7 +819,7 @@ function assembleArtifactInto(input: {
     });
   };
 
-  for (const relativePath of [...trackedFiles, ...sharedFiles].sort()) {
+  for (const relativePath of [...trackedFiles, ...sharedFiles, ...promptClosureFiles].sort()) {
     stageFile(relativePath);
   }
 

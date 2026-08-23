@@ -251,8 +251,11 @@ export function buildAgentPrompt()`,
         [`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()],
       ]),
     );
+    // The pure seam resolves './prompts.js' but readSource then fails on the
+    // absent module; the filesystem seam surfaces the dedicated unresolved-import
+    // diagnostic ('./prompts.js') covered in the filesystem-seam test below.
     expect(() => derivePromptClosure(seam)).toThrow(
-      /Could not resolve prompt-closure import/,
+      /is missing from the synthetic fixture/,
     );
   });
 
@@ -345,7 +348,11 @@ export function buildAgentPrompt()`,
     } catch (error) {
       const closureError = error as PiSubagentPromptClosureError;
       expect(closureError.code).toBe("prompt_closure_unsupported");
-      expect(closureError.message).toContain("prompts.ts");
+      // The filesystem seam reports the unresolved import specifier
+      // repo-relatively (bounded diagnostic: no host path leaks).
+      expect(closureError.message).toContain(
+        "Could not resolve prompt-closure import './prompts.js'",
+      );
       expect(closureError.message).not.toContain(root);
     }
   });
