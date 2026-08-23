@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked as Local Markdown under `.planning/`. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the repository's standard ticket lifecycle labels. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository with a root glossary and shared ADR
+directory. See `docs/agents/domain.md`.
+
 ## Task Completion Requirements
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
