@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 // ── WebSocket surface ────────────────────────────────────────────────
 
@@ -679,3 +679,45 @@ export const DeviceFrameDecodeErrorReason = Schema.Literals([
   "invalid-device-id",
 ]);
 export type DeviceFrameDecodeErrorReason = typeof DeviceFrameDecodeErrorReason.Type;
+
+// ── Project-owned device workspace contracts ─────────────────────
+//
+// The Right-sidebar device pane belongs to a Project (Decision 0002): the
+// attachment survives Main-conversation switches and Project navigation, and
+// reconnects to the owning Project. These schemas carry the owning `ProjectId`
+// directly rather than inferring the Project from whichever Thread happens to
+// be active. The Thread-keyed state above remains the legacy v1 surface.
+
+export const ProjectDeviceState = Schema.Struct({
+  projectId: ProjectId,
+  /** Monotonic per project; lets the pane drop out-of-order pushes. */
+  version: NonNegativeInt,
+  attachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  attachPhase: Schema.optional(Schema.NullOr(DeviceAttachPhase)),
+  devices: Schema.Array(DeviceDescriptor).check(Schema.isMaxLength(64)),
+  agentActive: Schema.Boolean,
+  availability: DeviceAvailability,
+  lastError: Schema.NullOr(Schema.String.check(Schema.isMaxLength(DEVICE_MESSAGE_MAX_LENGTH))),
+});
+export type ProjectDeviceState = typeof ProjectDeviceState.Type;
+
+export const DeviceProjectInput = Schema.Struct({ projectId: ProjectId });
+export type DeviceProjectInput = typeof DeviceProjectInput.Type;
+
+export const DeviceProjectAttachInput = Schema.Struct({
+  projectId: ProjectId,
+  udid: DeviceUdid,
+});
+export type DeviceProjectAttachInput = typeof DeviceProjectAttachInput.Type;
+
+export const DeviceProjectGetStateInput = Schema.Struct({ projectId: ProjectId });
+export type DeviceProjectGetStateInput = typeof DeviceProjectGetStateInput.Type;
+
+export const DeviceProjectStateEvent = Schema.Struct({
+  type: Schema.Literal("device.project-state"),
+  state: ProjectDeviceState,
+});
+export type DeviceProjectStateEvent = typeof DeviceProjectStateEvent.Type;
+
+export const DeviceProjectEvent = Schema.Union([DeviceProjectStateEvent]);
+export type DeviceProjectEvent = typeof DeviceProjectEvent.Type;

@@ -16,6 +16,7 @@ import {
   BrowserHostConnectionId,
   BrowserIdempotencyKey,
   BrowserOperationId,
+  BrowserProjectId,
   BrowserProviderRuntimeGeneration,
   BrowserProviderSessionId,
   BrowserRoutingInventoryVersion,
@@ -102,14 +103,29 @@ describe("browser automation identities", () => {
     expect(Schema.is(BrowserIdempotencyKey)("é".repeat(65))).toBe(false);
   });
 
-  it("bounds browser environment, thread, and command ids to 128 UTF-8 bytes", () => {
-    for (const schema of [BrowserEnvironmentId, BrowserThreadId, BrowserCommandId]) {
+  it("bounds browser environment, thread, project, and command ids to 128 UTF-8 bytes", () => {
+    for (const schema of [
+      BrowserEnvironmentId,
+      BrowserThreadId,
+      BrowserProjectId,
+      BrowserCommandId,
+    ]) {
       expect(Schema.is(schema)("a".repeat(128))).toBe(true);
       expect(Schema.is(schema)("a".repeat(129))).toBe(false);
       expect(Schema.is(schema)("é".repeat(64))).toBe(true);
       expect(Schema.is(schema)("é".repeat(65))).toBe(false);
       expect(Schema.is(schema)("   ")).toBe(false);
     }
+  });
+
+  it("keeps the Project-owned browser id a real ProjectId, not a synthetic alias", () => {
+    // Ownership is explicit, not string-shape based: a ProjectId is a plain
+    // non-empty trimmed string bounded to 128 bytes, branded as a ProjectId.
+    // No cast, prefix, or pseudo-Thread encoding is involved.
+    expect(Schema.is(BrowserProjectId)("project-1")).toBe(true);
+    expect(Schema.is(BrowserProjectId)("")).toBe(false);
+    expect(Schema.is(BrowserProjectId)("   ")).toBe(false);
+    expect(Schema.is(BrowserProjectId)("a".repeat(129))).toBe(false);
   });
 
   it("uses positive integers for authorization and runtime generations", () => {

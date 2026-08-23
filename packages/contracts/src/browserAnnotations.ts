@@ -1,4 +1,4 @@
-import type { ThreadId } from "./baseSchemas";
+import type { ProjectId, ThreadId } from "./baseSchemas";
 
 export const BROWSER_ANNOTATION_MAX_ID_LENGTH = 128;
 export const BROWSER_ANNOTATION_MAX_DOCUMENT_KEY_LENGTH = 128;
@@ -141,4 +141,79 @@ export interface BrowserAnnotationMethods {
   cancel: (input: BrowserAnnotationCancelInput) => Promise<void>;
   syncMarkers: (input: BrowserAnnotationSyncMarkersInput) => Promise<void>;
   onEvent: (listener: (event: BrowserAnnotationEvent) => void) => () => void;
+}
+
+// ── Project-owned annotation contracts ─────────────────────────
+//
+// The Right-sidebar browser/annotation workspace belongs to a Project
+// (Decision 0002): annotation sessions, marker projection, and their events
+// carry the owning `ProjectId` directly rather than inferring ownership from
+// whichever Thread happens to be active. The Thread-keyed interfaces above
+// remain the legacy v1 surface until every consumer migrates.
+
+export interface BrowserAnnotationProjectStartInput {
+  projectId: ProjectId;
+  tabId: string;
+  theme: BrowserAnnotationTheme;
+}
+
+export interface BrowserAnnotationProjectCancelInput {
+  projectId: ProjectId;
+  tabId: string;
+}
+
+export interface BrowserAnnotationProjectSyncMarkersInput {
+  projectId: ProjectId;
+  tabId: string;
+  /** Monotonic renderer-owned full-projection version. Stale projections are ignored. */
+  version: number;
+  markers: readonly BrowserAnnotationMarker[];
+}
+
+export interface BrowserAnnotationProjectSession {
+  sessionId: string;
+  projectId: ProjectId;
+  tabId: string;
+  document: BrowserAnnotationDocument;
+  source: BrowserAnnotationSource;
+}
+
+interface BrowserAnnotationProjectEventBase {
+  projectId: ProjectId;
+  tabId: string;
+  document: BrowserAnnotationDocument;
+  source: BrowserAnnotationSource;
+}
+
+export type BrowserAnnotationProjectEvent =
+  | (BrowserAnnotationProjectEventBase & {
+      kind: "started";
+      sessionId: string;
+    })
+  | (BrowserAnnotationProjectEventBase & {
+      kind: "cancelled";
+      sessionId: string | null;
+      reason: BrowserAnnotationCancelReason;
+    })
+  | (BrowserAnnotationProjectEventBase & {
+      kind: "document-changed";
+      sessionId: null;
+    })
+  | (BrowserAnnotationProjectEventBase & {
+      kind: "markers-synced";
+      sessionId: null;
+      version: number;
+      projectedMarkerIds: readonly string[];
+    })
+  | (BrowserAnnotationProjectEventBase & {
+      kind: "committed";
+      sessionId: string;
+      annotation: BrowserAnnotation;
+    });
+
+export interface BrowserAnnotationProjectMethods {
+  start: (input: BrowserAnnotationProjectStartInput) => Promise<BrowserAnnotationProjectSession>;
+  cancel: (input: BrowserAnnotationProjectCancelInput) => Promise<void>;
+  syncMarkers: (input: BrowserAnnotationProjectSyncMarkersInput) => Promise<void>;
+  onEvent: (listener: (event: BrowserAnnotationProjectEvent) => void) => () => void;
 }

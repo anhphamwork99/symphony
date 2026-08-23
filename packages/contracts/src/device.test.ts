@@ -4,8 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   DeviceDescriptor,
   DeviceListResult,
+  DeviceProjectAttachInput,
+  DeviceProjectEvent,
+  DeviceProjectGetStateInput,
+  DeviceProjectStateEvent,
   DeviceScrollToElementInput,
   DeviceSwipeInput,
+  ProjectDeviceState,
   ThreadDeviceState,
 } from "./device";
 
@@ -123,5 +128,75 @@ describe("device control limits", () => {
     expect(decodes(DeviceScrollToElementInput, { ...scroll, maxSwipes: 32 })).toBe(true);
     expect(decodes(DeviceScrollToElementInput, { ...scroll, maxSwipes: 33 })).toBe(false);
     expect(decodes(DeviceScrollToElementInput, { ...scroll, maxSwipes: 1.5 })).toBe(false);
+  });
+});
+
+describe("ProjectDeviceState", () => {
+  it("round-trips a valid Project-owned device state", () => {
+    const decoded = decodeSync(ProjectDeviceState, {
+      projectId: "project-1",
+      version: 2,
+      attachedDeviceUdid: BASE_DEVICE.udid,
+      devices: [{ ...BASE_DEVICE, geometry: GEOMETRY }],
+      agentActive: false,
+      availability: { kind: "available" },
+      lastError: null,
+    });
+    expect(decoded.projectId).toBe("project-1");
+    expect(decoded.attachedDeviceUdid).toBe(BASE_DEVICE.udid);
+  });
+
+  it("rejects a missing or malformed ProjectId", () => {
+    const base = {
+      version: 0,
+      attachedDeviceUdid: null,
+      devices: [],
+      agentActive: false,
+      availability: { kind: "available" },
+      lastError: null,
+    };
+    expect(decodes(ProjectDeviceState, base)).toBe(false);
+    expect(decodes(ProjectDeviceState, { ...base, projectId: " " })).toBe(false);
+    expect(decodes(ProjectDeviceState, { ...base, projectId: "project-1" })).toBe(true);
+  });
+});
+
+describe("Project device inputs", () => {
+  it("carries the owning ProjectId on attach and state reads", () => {
+    expect(
+      decodeSync(DeviceProjectAttachInput, {
+        projectId: "project-1",
+        udid: BASE_DEVICE.udid,
+      }).projectId,
+    ).toBe("project-1");
+    expect(decodeSync(DeviceProjectGetStateInput, { projectId: "project-1" }).projectId).toBe(
+      "project-1",
+    );
+    expect(decodes(DeviceProjectAttachInput, { udid: BASE_DEVICE.udid })).toBe(false);
+    expect(decodes(DeviceProjectGetStateInput, {})).toBe(false);
+  });
+});
+
+describe("DeviceProjectEvent", () => {
+  it("round-trips a project-state push and rejects a missing ProjectId", () => {
+    const state = {
+      projectId: "project-1",
+      version: 1,
+      attachedDeviceUdid: null,
+      devices: [],
+      agentActive: false,
+      availability: { kind: "available" },
+      lastError: null,
+    };
+    expect(
+      decodeSync(DeviceProjectStateEvent, { type: "device.project-state", state }).state
+        .projectId,
+    ).toBe("project-1");
+    expect(
+      decodes(DeviceProjectEvent, {
+        type: "device.project-state",
+        state: { ...state, projectId: "  " },
+      }),
+    ).toBe(false);
   });
 });

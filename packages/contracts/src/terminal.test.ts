@@ -8,6 +8,11 @@ import {
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
+  TerminalProjectCloseInput,
+  TerminalProjectEvent,
+  TerminalProjectOpenInput,
+  TerminalProjectSessionSnapshot,
+  TerminalProjectWriteInput,
   TerminalResizeInput,
   TerminalSessionSnapshot,
   TerminalThreadInput,
@@ -265,5 +270,91 @@ describe("TerminalEvent", () => {
         agentState: "running",
       }),
     ).toBe(true);
+  });
+});
+
+describe("TerminalProjectOpenInput", () => {
+  it("accepts a valid Project-owned open input and defaults the terminal id", () => {
+    const parsed = decodeSync(TerminalProjectOpenInput, {
+      projectId: "project-1",
+      cwd: "/tmp/project",
+      cols: 120,
+      rows: 40,
+    });
+    expect(parsed.projectId).toBe("project-1");
+    expect(parsed.terminalId).toBe(DEFAULT_TERMINAL_ID);
+  });
+
+  it("rejects a missing ProjectId", () => {
+    expect(
+      decodes(TerminalProjectOpenInput, {
+        cwd: "/tmp/project",
+        cols: 120,
+        rows: 40,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a malformed ProjectId", () => {
+    expect(
+      decodes(TerminalProjectOpenInput, {
+        projectId: "   ",
+        cwd: "/tmp/project",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("TerminalProjectWriteInput", () => {
+  it("accepts a Project-owned write and rejects a missing ProjectId", () => {
+    expect(
+      decodes(TerminalProjectWriteInput, {
+        projectId: "project-1",
+        data: "echo hello\n",
+      }),
+    ).toBe(true);
+    expect(decodes(TerminalProjectWriteInput, { data: "echo hello\n" })).toBe(false);
+  });
+});
+
+describe("TerminalProjectCloseInput", () => {
+  it("carries the owning ProjectId", () => {
+    const parsed = decodeSync(TerminalProjectCloseInput, {
+      projectId: "project-1",
+      deleteHistory: true,
+    });
+    expect(parsed.projectId).toBe("project-1");
+    expect(decodes(TerminalProjectCloseInput, { deleteHistory: true })).toBe(false);
+  });
+});
+
+describe("TerminalProjectSessionSnapshot", () => {
+  it("round-trips a Project-owned snapshot", () => {
+    const decoded = decodeSync(TerminalProjectSessionSnapshot, {
+      projectId: "project-1",
+      terminalId: DEFAULT_TERMINAL_ID,
+      cwd: "/tmp/project",
+      status: "running",
+      pid: 1234,
+      history: "hello\n",
+      exitCode: null,
+      exitSignal: null,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(decoded.projectId).toBe("project-1");
+  });
+});
+
+describe("TerminalProjectEvent", () => {
+  it("accepts Project-owned output events and rejects a missing ProjectId", () => {
+    const base = {
+      type: "output",
+      terminalId: DEFAULT_TERMINAL_ID,
+      createdAt: new Date().toISOString(),
+      data: "line\n",
+    };
+    expect(decodes(TerminalProjectEvent, { ...base, projectId: "project-1" })).toBe(true);
+    expect(decodes(TerminalProjectEvent, base)).toBe(false);
+    expect(decodes(TerminalProjectEvent, { ...base, projectId: "  " })).toBe(false);
   });
 });
