@@ -393,51 +393,79 @@ const CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES = [
  * (75) alone reports intent, otherwise `none`. Band 76 (`proven`) is
  * intentionally excluded: proven teardown settles cancellation and ADVANCES
  * the generation, so it can never describe the current generation.
+ *
+ * The derivation itself lives in `makePiSubagentCardCurrentTruthColumns`; the
+ * exported wrappers below select only the outer-row alias (`base` vs
+ * `ranked`), so every card SQL path shares one identical derivation.
  */
-export const piSubagentCardCurrentTruthColumns = (sql: SqlClient.SqlClient) => sql`
+/**
+ * Closed set of outer-row aliases used by card SQL paths. The alias is a
+ * compile-time literal chosen by the caller — never untrusted input — and is
+ * embedded through `sql(alias)`, which compiles to an escaped SQL identifier
+ * (never a bound parameter and never raw text interpolation).
+ */
+export type PiSubagentCardCurrentTruthAlias = "base" | "ranked";
+
+const makePiSubagentCardCurrentTruthColumns =
+  (sql: SqlClient.SqlClient, alias: PiSubagentCardCurrentTruthAlias) => sql`
             CASE
-              WHEN base.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
-              WHEN base.mode = 'background' THEN 'detached'
+              WHEN ${sql(alias)}.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
+              WHEN ${sql(alias)}.mode = 'background' THEN 'detached'
               WHEN EXISTS (
                 SELECT 1
                 FROM pi_subagent_lifecycle_journal AS detach
-                WHERE detach.execution_id = base.execution_id
-                  AND detach.attempt_id = base.attempt_id
-                  AND detach.generation = base.generation
+                WHERE detach.execution_id = ${sql(alias)}.execution_id
+                  AND detach.attempt_id = ${sql(alias)}.attempt_id
+                  AND detach.generation = ${sql(alias)}.generation
                   AND detach.sequence = 3
                   AND json_extract(detach.metadata_json, '$.phase') = 'detached'
               ) THEN 'detached'
               ELSE 'attached'
             END AS "currentAttachment",
             CASE
-              WHEN base.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
+              WHEN ${sql(alias)}.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
               WHEN EXISTS (
                 SELECT 1
                 FROM pi_subagent_lifecycle_journal AS survivors
-                WHERE survivors.execution_id = base.execution_id
-                  AND survivors.attempt_id = base.attempt_id
-                  AND survivors.generation = base.generation
+                WHERE survivors.execution_id = ${sql(alias)}.execution_id
+                  AND survivors.attempt_id = ${sql(alias)}.attempt_id
+                  AND survivors.generation = ${sql(alias)}.generation
                   AND survivors.sequence = 77
               ) THEN 'survivors'
               WHEN EXISTS (
                 SELECT 1
                 FROM pi_subagent_lifecycle_journal AS unproven
-                WHERE unproven.execution_id = base.execution_id
-                  AND unproven.attempt_id = base.attempt_id
-                  AND unproven.generation = base.generation
+                WHERE unproven.execution_id = ${sql(alias)}.execution_id
+                  AND unproven.attempt_id = ${sql(alias)}.attempt_id
+                  AND unproven.generation = ${sql(alias)}.generation
                   AND unproven.sequence = 78
               ) THEN 'owner_unproven'
               WHEN EXISTS (
                 SELECT 1
                 FROM pi_subagent_lifecycle_journal AS requested
-                WHERE requested.execution_id = base.execution_id
-                  AND requested.attempt_id = base.attempt_id
-                  AND requested.generation = base.generation
+                WHERE requested.execution_id = ${sql(alias)}.execution_id
+                  AND requested.attempt_id = ${sql(alias)}.attempt_id
+                  AND requested.generation = ${sql(alias)}.generation
                   AND requested.sequence = 75
               ) THEN 'requested'
               ELSE 'none'
             END AS "currentTeardownEvidence"
 `;
+
+/**
+ * Current-truth columns for card SQL whose outer rows are aliased `base`
+ * (identity read, per-thread reads, thread-scoped snapshot reads).
+ */
+export const piSubagentCardCurrentTruthColumns = (sql: SqlClient.SqlClient) =>
+  makePiSubagentCardCurrentTruthColumns(sql, "base");
+
+/**
+ * Current-truth columns for card SQL whose ranked outer rows are aliased
+ * `ranked` (global snapshot reads). Same derivation as the `base` variant —
+ * only the outer-row alias differs.
+ */
+export const piSubagentCardCurrentTruthColumnsRanked = (sql: SqlClient.SqlClient) =>
+  makePiSubagentCardCurrentTruthColumns(sql, "ranked");
 
 /**
  * Ticket 11 joined card row (T11-AC1): execution aggregate + observation
