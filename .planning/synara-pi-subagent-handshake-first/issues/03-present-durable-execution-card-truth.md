@@ -7,7 +7,11 @@ and offers only the actions that remain honest.
 
 **Blocked by:** None — Ticket 01 was accepted by Decision 0005.
 
-**Status:** implemented — awaiting independent review (2026-08-23)
+**Status:** implemented; final acceptance withheld by
+[Decision 0013](../decisions/0013-t03-final-acceptance-non-acceptance.md)
+(2026-08-23) solely pending owner-authorized `bun fmt`, `bun lint`, and
+`bun typecheck` evidence. The independent review passes AC1–AC5; Ticket 04
+remains blocked.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
@@ -50,8 +54,9 @@ and offers only the actions that remain honest.
 
 ## Implementation Report
 
-**Implementation state:** implemented at candidate `236d4119b` — awaiting the
-one independent Ticket-03 review.
+**Implementation state:** implemented at candidate `236d4119b`; the one
+independent Ticket-03 review passes AC1–AC5. Decision 0013 withholds final
+acceptance solely for missing mandatory workspace-check evidence.
 
 ### Delivered behavior
 

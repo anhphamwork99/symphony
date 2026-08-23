@@ -5,10 +5,12 @@
 - **Owner:** anhpham99
 - **Lifecycle:** Implementation in progress — Ticket 01, its runtime-closure
   remediation Ticket 01b, its prompt-closure remediation Ticket 01c, and
-  Ticket 02 are accepted. Decision 0012 accepts Ticket 02 after its complete
-  real controlled-artifact AC1–AC5 rerun and independent PASS review.
-- **Triage status:** 02 accepted; 03 ready-for-agent; 04 remains blocked by
-  03.
+  Ticket 02 are accepted. Ticket 03 is implemented and behaviorally passes
+  AC1–AC5, but Decision 0013 withholds final acceptance pending the
+  owner-authorized mandatory `bun fmt` / `bun lint` / `bun typecheck`
+  evidence.
+- **Triage status:** 02 accepted; 03 needs verification remediation; 04
+  remains blocked by 03.
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -67,6 +69,13 @@
   — **Authoritative** binding final acceptance: Ticket 02 at candidate
   `c9c8278eb` (independent PASS review persisted at `2c7979cba`) is accepted
   on AC1–AC5. Ticket 04 remains blocked by Ticket 03.
+- [decisions/0013-t03-final-acceptance-non-acceptance.md](decisions/0013-t03-final-acceptance-non-acceptance.md)
+  — **Authoritative** binding final-acceptance non-acceptance: Ticket 03
+  candidate `236d4119b` and its independent PASS review support AC1–AC5, but
+  final acceptance is withheld solely because the mandatory workspace
+  formatting, lint, and typecheck pass was not authorized or run. The one
+  Ticket-03 final consultation is exhausted; fresh authorized check evidence
+  must route as a reassessment.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -98,8 +107,10 @@
   AC1–AC5 evidence proves artifact-only loading, handshake-before-admission,
   one normal durable admission, post-detach liveness through one fenced
   terminal commit, and redacted zero-effect bootstrap/runtime failures.
-- **03 — Present durable execution-card truth** is unblocked and
-  ready-for-agent.
+- **03 — Present durable execution-card truth** is implemented at
+  `236d4119b`; its independent review passes AC1–AC5. Decision 0013 withholds
+  final acceptance pending owner-authorized `bun fmt`, `bun lint`, and
+  `bun typecheck` evidence.
 - **04 — Prove desktop production composition and complete acceptance** is
-  blocked by tickets 02 and 03; it remains packaged desktop/server
-  final composition only and does not absorb the remediation.
+  blocked by Ticket 03; it remains packaged desktop/server final composition
+  only and does not absorb the verification remediation.
