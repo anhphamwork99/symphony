@@ -306,12 +306,20 @@ function legacyCapabilityDescriptors(
       id: reasoningDescriptorId(provider),
       label: provider === "kilo" || provider === "opencode" ? "Variant" : "Reasoning",
       type: "select",
-      options: primaryOptions.map((option) => ({
-        id: option.value,
-        label: option.label,
-        ...(option.description ? { description: option.description } : {}),
-        ...(option.isDefault ? { isDefault: true as const } : {}),
-      })),
+      options: primaryOptions.map((option) =>
+        option.description
+          ? option.isDefault
+            ? {
+                id: option.value,
+                label: option.label,
+                description: option.description,
+                isDefault: true as const,
+              }
+            : { id: option.value, label: option.label, description: option.description }
+          : option.isDefault
+            ? { id: option.value, label: option.label, isDefault: true as const }
+            : { id: option.value, label: option.label },
+      ),
       ...(defaultPrimaryOption ? { currentValue: defaultPrimaryOption.value } : {}),
       ...(caps.promptInjectedEffortLevels.length > 0
         ? { promptInjectedValues: [...caps.promptInjectedEffortLevels] }

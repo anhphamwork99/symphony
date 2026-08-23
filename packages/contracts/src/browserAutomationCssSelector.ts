@@ -275,6 +275,7 @@ class CssSelectorParser {
     if (quote === "'" || quote === '"') {
       this.index += 1;
       while (this.index < this.source.length && this.source[this.index] !== quote) {
+        // oxlint-disable-next-line no-control-regex -- deliberately rejects control characters inside quoted CSS strings
         if (/[\u0000-\u001f\u007f]/u.test(this.source[this.index]!)) return false;
         this.index += 1;
       }
@@ -350,10 +351,12 @@ class CssSelectorParser {
 }
 
 export const isBrowserCssSelector = (value: string): boolean => {
+  // oxlint-disable-next-line no-control-regex -- deliberately rejects control characters and CSS comments in selectors
   if (/\/\*|\*\/|[\u0000-\u001f\u007f]/u.test(value)) return false;
   const decoded = decodeCssEscapes(value);
   if (
     decoded === undefined ||
+    // oxlint-disable-next-line no-control-regex -- re-checks the decoded form for control characters and CSS comments
     /\/\*|\*\/|[\u0000-\u001f\u007f]/u.test(decoded) ||
     /^(?:css|text|xpath)\s*=/iu.test(decoded.trim()) ||
     decoded.includes(">>") ||

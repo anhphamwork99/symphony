@@ -152,6 +152,17 @@ function normalizeDependencyMap(value: unknown): Record<string, string> | undefi
   return value as Record<string, string>;
 }
 
+const sameDependencyMap = (
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined,
+): boolean => {
+  const aKeys = Object.keys(a ?? {}).toSorted();
+  const bKeys = Object.keys(b ?? {}).toSorted();
+  if (aKeys.length !== bKeys.length || aKeys.some((key, index) => key !== bKeys[index]))
+    return false;
+  return aKeys.every((key) => (a ?? {})[key] === (b ?? {})[key]);
+};
+
 /**
  * Proves the lock root dependency/peer maps still describe exactly the same
  * dependency graph the extension package manifest declares. The lock ROOT
@@ -169,18 +180,7 @@ export function assertLockRootMatchesPackageManifest(input: {
   const pkgDeps = normalizeDependencyMap(input.packageManifest.dependencies);
   const pkgPeers = normalizeDependencyMap(input.packageManifest.peerDependencies) ?? {};
 
-  const sameMap = (
-    a: Record<string, string> | undefined,
-    b: Record<string, string> | undefined,
-  ): boolean => {
-    const aKeys = Object.keys(a ?? {}).sort();
-    const bKeys = Object.keys(b ?? {}).sort();
-    if (aKeys.length !== bKeys.length || aKeys.some((key, index) => key !== bKeys[index]))
-      return false;
-    return aKeys.every((key) => (a ?? {})[key] === (b ?? {})[key]);
-  };
-
-  if (!sameMap(lockDeps, pkgDeps) || !sameMap(lockPeers, pkgPeers)) {
+  if (!sameDependencyMap(lockDeps, pkgDeps) || !sameDependencyMap(lockPeers, pkgPeers)) {
     throw new PiSubagentNpmRuntimeClosureError(
       "lock_root_map_mismatch",
       "The extension lockfile root dependency/peer maps do not match package.json; the lock no longer proves the manifest dependency graph.",
@@ -244,7 +244,7 @@ export function selectNpmRuntimeClosure(input: {
 
   assertLockRootMatchesPackageManifest({ lockRootPackagesEntry: lockRoot, packageManifest });
 
-  const seedNames = Object.keys(normalizeDependencyMap(packageManifest.dependencies) ?? {}).sort();
+  const seedNames = Object.keys(normalizeDependencyMap(packageManifest.dependencies) ?? {}).toSorted();
   const selected = new Map<string, NpmRuntimeClosurePackage>();
   const queue = [...seedNames];
   const visited = new Set<string>();
@@ -289,7 +289,7 @@ export function selectNpmRuntimeClosure(input: {
         `Lockfile entry '${name}@${version}' has no sha512 integrity digest; refusing range-floating or integrity-unproven selection.`,
       );
     }
-    if (typeof resolved !== "string" || !/^https:\/\/registry\./.test(resolved)) {
+    if (typeof resolved !== "string" || !resolved.startsWith("https://registry.")) {
       throw new PiSubagentNpmRuntimeClosureError(
         "lock_package_ineligible",
         `Lockfile entry '${name}@${version}' is not resolved from a registry tarball URL; git/file/link sources are ineligible.`,
@@ -300,13 +300,13 @@ export function selectNpmRuntimeClosure(input: {
 
     for (const transitiveName of Object.keys(
       normalizeDependencyMap(entry.dependencies) ?? {},
-    ).sort()) {
+    ).toSorted()) {
       if (!visited.has(transitiveName)) queue.push(transitiveName);
     }
   }
 
   return {
-    packages: [...selected.values()].sort((a, b) =>
+    packages: [...selected.values()].toSorted((a, b) =>
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
     ),
     lockRootVersion: typeof lockRoot.version === "string" ? lockRoot.version : "",
@@ -514,7 +514,7 @@ function listRegularFilesRecursive(
 ): ReadonlyArray<string> {
   const collected: string[] = [];
   const walk = (dir: string, prefix: string): void => {
-    for (const entry of readdirSync(dir).sort()) {
+    for (const entry of readdirSync(dir).toSorted()) {
       if (entry === ".bin") {
         // `.bin` content is categorically never staged.
         continue;
@@ -543,5 +543,5 @@ function listRegularFilesRecursive(
     }
   };
   walk(rootDir, "");
-  return collected.sort();
+  return collected.toSorted();
 }

@@ -7,6 +7,8 @@ import {
   parseMigrationRecoveryResumeState,
 } from "./migrationRecovery";
 
+const encodeMarker = (value: Record<string, unknown>) => JSON.stringify(value);
+
 describe("migration recovery paths", () => {
   it("derives the marker and backup directory from the database path", () => {
     expect(migrationRecoveryMarkerPath("/data/state.sqlite")).toBe(
@@ -17,7 +19,7 @@ describe("migration recovery paths", () => {
 });
 
 describe("parseMigrationRecoveryResumeState", () => {
-  const marker = (value: Record<string, unknown>) => JSON.stringify(value);
+  const marker = encodeMarker;
 
   it("gives markers written before the resume path existed a full budget", () => {
     // Every install wedged by 0.6.0 carries a counter-less marker. Treating it

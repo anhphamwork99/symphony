@@ -545,7 +545,7 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
   it("exposes teardownOwnedProcesses as the opaque bridge operation spelling (D0033)", () => {
     // The operation stays opaque at the contract layer: the schema names carry
     // the binding spelling and no generic PID/kill surface is introduced.
-    expect(Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields).sort()).toEqual([
+    expect(Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields).toSorted()).toEqual([
       "commandId",
       "executionId",
       "expectedAttemptId",

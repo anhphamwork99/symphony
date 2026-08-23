@@ -84,6 +84,7 @@ export const BrowserWorkspaceRelativePath = described(
   BoundedUtf8String(4_096, 1).check(
     Schema.makeFilter((value: string) => {
       if (/^[a-zA-Z]:[\\/]/u.test(value) || /^[\\/]/u.test(value)) return false;
+      // oxlint-disable-next-line no-control-regex -- deliberately rejects NUL in workspace paths
       if (/\u0000/u.test(value)) return false;
       const segments = value.split(/[\\/]/u);
       return (
@@ -98,6 +99,7 @@ const BrowserKeyChord = described(
   BoundedUtf8String(128, 1).check(
     Schema.makeFilter(
       (value: string) =>
+        // oxlint-disable-next-line no-control-regex -- key chords must not contain control characters
         !/[\u0000-\u001f\u007f]/u.test(value) &&
         /^(?:(?:Alt|Control|Meta|Shift)\+)*(?:[A-Za-z0-9]|Arrow(?:Down|Left|Right|Up)|Backspace|Delete|End|Enter|Escape|Home|PageDown|PageUp|Space|Tab|F(?:[1-9]|1[0-2]))$/u.test(
           value,

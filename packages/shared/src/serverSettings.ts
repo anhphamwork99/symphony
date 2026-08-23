@@ -52,37 +52,37 @@ export function providerStartOptionsFromServerSettings(
   const { providers } = settings;
   return {
     codex: {
-      ...(providers.codex.binaryPath ? { binaryPath: providers.codex.binaryPath } : {}),
-      ...(providers.codex.homePath ? { homePath: providers.codex.homePath } : {}),
+      binaryPath: providers.codex.binaryPath || undefined,
+      homePath: providers.codex.homePath || undefined,
     },
     claudeAgent: {
-      ...(providers.claudeAgent.binaryPath ? { binaryPath: providers.claudeAgent.binaryPath } : {}),
+      binaryPath: providers.claudeAgent.binaryPath || undefined,
     },
     cursor: {
-      ...(providers.cursor.binaryPath ? { binaryPath: providers.cursor.binaryPath } : {}),
-      ...(providers.cursor.apiEndpoint ? { apiEndpoint: providers.cursor.apiEndpoint } : {}),
+      binaryPath: providers.cursor.binaryPath || undefined,
+      apiEndpoint: providers.cursor.apiEndpoint || undefined,
     },
     antigravity: {
-      ...(providers.antigravity.binaryPath ? { binaryPath: providers.antigravity.binaryPath } : {}),
+      binaryPath: providers.antigravity.binaryPath || undefined,
     },
     grok: {
-      ...(providers.grok.binaryPath ? { binaryPath: providers.grok.binaryPath } : {}),
+      binaryPath: providers.grok.binaryPath || undefined,
     },
     droid: {
-      ...(providers.droid.binaryPath ? { binaryPath: providers.droid.binaryPath } : {}),
+      binaryPath: providers.droid.binaryPath || undefined,
     },
     kilo: {
-      ...(providers.kilo.binaryPath ? { binaryPath: providers.kilo.binaryPath } : {}),
-      ...(providers.kilo.serverUrl ? { serverUrl: providers.kilo.serverUrl } : {}),
+      binaryPath: providers.kilo.binaryPath || undefined,
+      serverUrl: providers.kilo.serverUrl || undefined,
     },
     opencode: {
-      ...(providers.opencode.binaryPath ? { binaryPath: providers.opencode.binaryPath } : {}),
-      ...(providers.opencode.serverUrl ? { serverUrl: providers.opencode.serverUrl } : {}),
+      binaryPath: providers.opencode.binaryPath || undefined,
+      serverUrl: providers.opencode.serverUrl || undefined,
       experimentalWebSockets: providers.opencode.experimentalWebSockets,
     },
     pi: {
-      ...(providers.pi.binaryPath ? { binaryPath: providers.pi.binaryPath } : {}),
-      ...(providers.pi.agentDir ? { agentDir: providers.pi.agentDir } : {}),
+      binaryPath: providers.pi.binaryPath || undefined,
+      agentDir: providers.pi.agentDir || undefined,
     },
   };
 }

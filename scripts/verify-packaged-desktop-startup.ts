@@ -99,7 +99,7 @@ function findFiles(root: string, predicate: (path: string) => boolean): string[]
       }
     }
   }
-  return matches.sort((left, right) => left.localeCompare(right));
+  return matches.toSorted((left, right) => left.localeCompare(right));
 }
 
 function requireSingleAsset(directory: string, suffix: string): string {
@@ -306,6 +306,7 @@ export async function verifyPackagedDesktopStartup(
   mkdirSync(extractionRoot, { recursive: true });
 
   let child: ChildProcess | null = null;
+  let primaryError: unknown = null;
   try {
     const launch = prepareLaunch(options, extractionRoot);
     const env = createPackagedDesktopSmokeEnvironment(join(temporaryRoot, "state"), options);
@@ -350,9 +351,23 @@ export async function verifyPackagedDesktopStartup(
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
     }
     throw new Error(`Packaged startup proof timed out after ${options.timeoutMs}ms.`);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
     if (child) {
-      await terminateProcessTree(child);
+      try {
+        await terminateProcessTree(child);
+      } catch (error) {
+        if (primaryError === null) {
+          primaryError = error;
+          throw error;
+        }
+        console.warn(
+          `Could not terminate packaged app process tree during cleanup (primary error preserved): ${temporaryRoot}`,
+          error,
+        );
+      }
     }
     try {
       rmSync(temporaryRoot, {
@@ -362,15 +377,24 @@ export async function verifyPackagedDesktopStartup(
         retryDelay: process.platform === "win32" ? 250 : 100,
       });
     } catch (error) {
-      if (
-        process.platform !== "win32" ||
-        !(error instanceof Error && "code" in error && error.code === "EPERM")
-      ) {
+      const isWindowsTempDirectoryLock =
+        process.platform === "win32" &&
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "EPERM";
+      if (isWindowsTempDirectoryLock) {
+        console.warn(
+          `Could not remove Windows smoke temp directory; leaving it for runner cleanup: ${temporaryRoot}`,
+        );
+      } else if (primaryError === null) {
+        primaryError = error;
         throw error;
+      } else {
+        console.warn(
+          `Could not remove smoke temp directory (primary error preserved): ${temporaryRoot}`,
+          error,
+        );
       }
-      console.warn(
-        `Could not remove Windows smoke temp directory; leaving it for runner cleanup: ${temporaryRoot}`,
-      );
     }
   }
 }
