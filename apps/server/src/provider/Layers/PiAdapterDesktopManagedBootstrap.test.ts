@@ -1245,11 +1245,11 @@ describe("PiAdapter desktop managed bootstrap — in-memory settings isolation (
       }
     };
     await walk(expectedControlledAgentDir());
-    expect(controlledFiles.sort()).toEqual(
+    expect(controlledFiles.toSorted()).toEqual(
       [
         path.join(expectedControlledAgentDir(), "extensions", "pi-subagents", "package.json"),
         path.join(expectedControlledAgentDir(), "extensions", "pi-subagents", "src", "index.ts"),
-      ].sort(),
+      ].toSorted(),
     );
   });
 
