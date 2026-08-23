@@ -67,9 +67,7 @@ const realReconnectRunningCard = {
 
 /** Contract validation gate: the fixture is schema-valid server output. */
 function decodeReconnectCard(): PiSubagentExecutionCardType {
-  const decoded = Schema.decodeUnknownOption(PiSubagentExecutionCard)(
-    realReconnectRunningCard,
-  );
+  const decoded = Schema.decodeUnknownOption(PiSubagentExecutionCard)(realReconnectRunningCard);
   if (decoded._tag === "None") {
     throw new Error("Reconnect card fixture is not a valid PiSubagentExecutionCard.");
   }
@@ -109,10 +107,7 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
 
     // Snapshot normalization path (the reconnecting tab's thread-detail
     // hydration): the card survives with identity and durable state intact.
-    const normalized = normalizeThreadFromReadModel(
-      makeReconnectThreadDetail(card),
-      undefined,
-    );
+    const normalized = normalizeThreadFromReadModel(makeReconnectThreadDetail(card), undefined);
     expect(normalized.piSubagentExecutions).toHaveLength(1);
     const restored = normalized.piSubagentExecutions![0]!;
     expect(restored.executionId).toBe(card.executionId);
@@ -165,23 +160,20 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
     const card = decodeReconnectCard();
     const base = makeState(makeThread({ id: reconnectThreadId }));
     // Reconnect hydration first…
-    let state = syncServerReadModel(
-      base,
-      {
-        snapshotSequence: 7,
-        spaces: [],
-        projects: [],
-        updatedAt: "2026-08-19T18:10:56.000Z",
-        threads: [
-          {
-            ...makeThread({ id: reconnectThreadId }),
-            deletedAt: null,
-            checkpoints: [],
-            piSubagentExecutions: [card],
-          } as never,
-        ],
-      } as never,
-    );
+    let state = syncServerReadModel(base, {
+      snapshotSequence: 7,
+      spaces: [],
+      projects: [],
+      updatedAt: "2026-08-19T18:10:56.000Z",
+      threads: [
+        {
+          ...makeThread({ id: reconnectThreadId }),
+          deletedAt: null,
+          checkpoints: [],
+          piSubagentExecutions: [card],
+        } as never,
+      ],
+    } as never);
     // …then the durable terminal truth arrives through the event stream.
     const terminalCard: PiSubagentExecutionCardType = {
       ...card,
@@ -201,23 +193,20 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
     // explicitly carries NO executions for the thread drops the card (server
     // truth wins over stale local state; an absent field would instead
     // preserve it — that distinction is itself production semantics).
-    state = syncServerReadModel(
-      state,
-      {
-        snapshotSequence: 20,
-        spaces: [],
-        projects: [],
-        updatedAt: "2026-08-19T18:11:10.000Z",
-        threads: [
-          {
-            ...makeThread({ id: reconnectThreadId }),
-            deletedAt: null,
-            checkpoints: [],
-            piSubagentExecutions: [],
-          } as never,
-        ],
-      } as never,
-    );
+    state = syncServerReadModel(state, {
+      snapshotSequence: 20,
+      spaces: [],
+      projects: [],
+      updatedAt: "2026-08-19T18:11:10.000Z",
+      threads: [
+        {
+          ...makeThread({ id: reconnectThreadId }),
+          deletedAt: null,
+          checkpoints: [],
+          piSubagentExecutions: [],
+        } as never,
+      ],
+    } as never);
     const evicted = getThreadFromState(state, reconnectThreadId);
     expect(evicted?.piSubagentExecutions ?? []).toHaveLength(0);
   });
@@ -244,23 +233,20 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
     expect(again).toBe(first);
 
     // Full read-model sync writes the same truth into the store slice.
-    let state = syncServerReadModel(
-      makeState(makeThread({ id: reconnectThreadId })),
-      {
-        snapshotSequence: 7,
-        spaces: [],
-        projects: [],
-        updatedAt: "2026-08-19T18:10:56.000Z",
-        threads: [
-          {
-            ...makeThread({ id: reconnectThreadId }),
-            deletedAt: null,
-            checkpoints: [],
-            piSubagentExecutions: [detachedCard],
-          } as never,
-        ],
-      } as never,
-    );
+    let state = syncServerReadModel(makeState(makeThread({ id: reconnectThreadId })), {
+      snapshotSequence: 7,
+      spaces: [],
+      projects: [],
+      updatedAt: "2026-08-19T18:10:56.000Z",
+      threads: [
+        {
+          ...makeThread({ id: reconnectThreadId }),
+          deletedAt: null,
+          checkpoints: [],
+          piSubagentExecutions: [detachedCard],
+        } as never,
+      ],
+    } as never);
     expect(
       getThreadFromState(state, reconnectThreadId)?.piSubagentExecutions![0]!.currentAttachment,
     ).toBe("detached");
@@ -305,10 +291,9 @@ describe("Ticket 17 execution-card reconnect hydration (web store seam)", () => 
 
     // Replaying the old-shape card through the event reducer hydrates the
     // same conservative null truth (no derived relabel, no churn).
-    const state = applyOrchestrationEvents(
-      makeState(makeThread({ id: reconnectThreadId })),
-      [executionUpdatedEvent(card, 3)],
-    );
+    const state = applyOrchestrationEvents(makeState(makeThread({ id: reconnectThreadId })), [
+      executionUpdatedEvent(card, 3),
+    ]);
     const projected = getThreadFromState(state, reconnectThreadId)?.piSubagentExecutions![0]!;
     expect(projected.observedState).toBe("running");
     expect(projected.currentAttachment ?? null).toBeNull();

@@ -332,9 +332,9 @@ export type PiSubagentTeardownOwnedProcessesCommand =
 export const MAX_PI_SUBAGENT_TEARDOWN_RESULT_SURVIVOR_PIDS = 16;
 
 /** Positive safe-integer PID — the only individual PID shape the contract admits. */
-const PositiveSafeIntPid = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(1),
-).check(Schema.isLessThanOrEqualTo(9007199254740991));
+const PositiveSafeIntPid = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
+  Schema.isLessThanOrEqualTo(9007199254740991),
+);
 
 /**
  * Owner-reported survivor evidence is immutable diagnostic data, never host
@@ -344,9 +344,7 @@ const PositiveSafeIntPid = Schema.Int.check(
 const OrderedUniqueSurvivorPids = Schema.Array(PositiveSafeIntPid)
   .check(Schema.isMinLength(1), Schema.isMaxLength(MAX_PI_SUBAGENT_TEARDOWN_RESULT_SURVIVOR_PIDS))
   .check(
-    Schema.makeFilter((pids) =>
-      pids.every((pid, index) => index === 0 || pids[index - 1]! < pid),
-    ),
+    Schema.makeFilter((pids) => pids.every((pid, index) => index === 0 || pids[index - 1]! < pid)),
   );
 
 /**
@@ -356,9 +354,9 @@ const OrderedUniqueSurvivorPids = Schema.Array(PositiveSafeIntPid)
  * - `proven` — the identity-matched owner proved every owned child process
  *   exited (liveness-verified, never a bare kill API return).
  * - `survivors` — the owner ran teardown but at least one owned child
-   *   remained live past its escalation bounds; the ONLY status that may
-   *   carry non-empty, ascending, deduplicated, bounded positive-safe-integer
-   *   survivor PID evidence.
+ *   remained live past its escalation bounds; the ONLY status that may
+ *   carry non-empty, ascending, deduplicated, bounded positive-safe-integer
+ *   survivor PID evidence.
  * - `stale` — the live owner's identity does not match the command fencing;
  *   nothing was signaled.
  * - `missing` — no such execution under this owner.
@@ -373,7 +371,7 @@ export const PiSubagentTeardownOwnedProcessesResult = Schema.Union([
     executionId: PiSubagentExecutionId,
     attemptId: PiSubagentAttemptId,
     generation: PositiveInt,
-      survivorPids: OrderedUniqueSurvivorPids,
+    survivorPids: OrderedUniqueSurvivorPids,
   }),
   Schema.Struct({
     status: Schema.Literals(["proven", "stale", "missing", "owner_unavailable", "dispatch_failed"]),
@@ -502,12 +500,8 @@ export const PI_SUBAGENT_EXECUTION_CARD_MAX_PER_THREAD = 64;
  * execution; `null` for terminal/orphaned/non-live aggregates and for cards
  * replayed from pre-Ticket-03 persisted events (decoding default).
  */
-export const PiSubagentExecutionCardAttachment = Schema.Literals([
-  "attached",
-  "detached",
-]);
-export type PiSubagentExecutionCardAttachment =
-  typeof PiSubagentExecutionCardAttachment.Type;
+export const PiSubagentExecutionCardAttachment = Schema.Literals(["attached", "detached"]);
+export type PiSubagentExecutionCardAttachment = typeof PiSubagentExecutionCardAttachment.Type;
 
 /**
  * Ticket 03 current-generation teardown evidence (T03-AC1). Derived only

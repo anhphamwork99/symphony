@@ -17,6 +17,7 @@ import {
   PI_SUBAGENT_RUNNING_IN_BACKGROUND_LABEL,
   piSubagentExecutionCardPresentation,
 } from "./piSubagentExecutionCardPresentation";
+import type { PiSubagentExecutionCardPresentationKind } from "./piSubagentExecutionCardPresentation";
 
 function makeCard(overrides: Partial<PiSubagentExecutionCard> = {}): PiSubagentExecutionCard {
   return {
@@ -211,9 +212,7 @@ describe("Ticket 03 whole-card presentation precedence (T03-AC2–AC5)", () => {
   });
 
   it("T03: ordinary observed states fall through to the per-state presentation", () => {
-    const cases: ReadonlyArray<
-      [PiSubagentExecutionCard["observedState"], string, boolean],
-    > = [
+    const cases: ReadonlyArray<[PiSubagentExecutionCard["observedState"], string, boolean]> = [
       ["requested", "Requested", true],
       ["accepted", "Accepted", true],
       ["queued", "Queued", true],
@@ -238,7 +237,7 @@ describe("Ticket 03 whole-card presentation precedence (T03-AC2–AC5)", () => {
     // Each row's card carries ALL lower-precedence truth; only the top band
     // may decide the presentation.
     const table: ReadonlyArray<
-      [string, PiSubagentExecutionCard, string, PiSubagentExecutionCardPresentationKind],
+      [string, PiSubagentExecutionCard, string, PiSubagentExecutionCardPresentationKind]
     > = [
       [
         "terminal over everything",

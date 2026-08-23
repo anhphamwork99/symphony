@@ -427,9 +427,7 @@ describe("Ticket 03 durable card truth (current-generation attachment + teardown
       );
 
       // Rung 0: no teardown band → `none`.
-      expect((await currentCard(system, "exec-t03-ladder")).currentTeardownEvidence).toBe(
-        "none",
-      );
+      expect((await currentCard(system, "exec-t03-ladder")).currentTeardownEvidence).toBe("none");
 
       // Rung 1: band 75 request only → `requested` (intent, not outcome).
       await system.run(

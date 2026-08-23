@@ -314,10 +314,16 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
 
     // Generation: positive integer (the existing cancel-command convention).
     expect(() =>
-      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, expectedGeneration: 0 }),
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+        ...base,
+        expectedGeneration: 0,
+      }),
     ).toThrow();
     expect(() =>
-      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({ ...base, expectedGeneration: -1 }),
+      Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
+        ...base,
+        expectedGeneration: -1,
+      }),
     ).toThrow();
     expect(() =>
       Schema.decodeSync(PiSubagentTeardownOwnedProcessesCommand)({
@@ -342,13 +348,13 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
       generation: 1,
     };
 
-      // `survivors` is the only status that carries non-empty owner evidence.
-      const decodedSurvivors = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
-        status: "survivors",
-        ...correlation,
-        survivorPids: [901, 4242],
-      });
-      expect(decodedSurvivors.status).toBe("survivors");
+    // `survivors` is the only status that carries non-empty owner evidence.
+    const decodedSurvivors = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+      status: "survivors",
+      ...correlation,
+      survivorPids: [901, 4242],
+    });
+    expect(decodedSurvivors.status).toBe("survivors");
 
     for (const status of [
       "proven",
@@ -416,7 +422,7 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
     ).toThrow();
   });
 
-    it("carries canonical survivor evidence and rejects malformed PID data (D0033)", () => {
+  it("carries canonical survivor evidence and rejects malformed PID data (D0033)", () => {
     const base = {
       executionId: "exec_123456",
       attemptId: "att_001",
@@ -426,30 +432,30 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
     const decoded = Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
       status: "survivors" as const,
       ...base,
-        survivorPids: [901, 4242],
-      });
-      expect(decoded.status).toBe("survivors");
-      expect(decoded.survivorPids).toEqual([901, 4242]);
+      survivorPids: [901, 4242],
+    });
+    expect(decoded.status).toBe("survivors");
+    expect(decoded.survivorPids).toEqual([901, 4242]);
 
-      // Owner evidence is non-empty, positive-safe-integer, strictly ascending,
-      // deduplicated, and capped; the host must reject rather than normalize it.
-      for (const survivorPids of [
-        [],
-        [2, 1],
-        [1, 1],
-        [1, 2, 1],
-        Array.from({ length: 17 }, (_, index) => index + 1),
-      ]) {
-        expect(() =>
-          Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
-            status: "survivors" as const,
-            ...base,
-            survivorPids,
-          }),
-        ).toThrow();
-      }
+    // Owner evidence is non-empty, positive-safe-integer, strictly ascending,
+    // deduplicated, and capped; the host must reject rather than normalize it.
+    for (const survivorPids of [
+      [],
+      [2, 1],
+      [1, 1],
+      [1, 2, 1],
+      Array.from({ length: 17 }, (_, index) => index + 1),
+    ]) {
+      expect(() =>
+        Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
+          status: "survivors" as const,
+          ...base,
+          survivorPids,
+        }),
+      ).toThrow();
+    }
 
-      // Only positive safe integers are individual survivor evidence.
+    // Only positive safe integers are individual survivor evidence.
     expect(() =>
       Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
         status: "survivors" as const,
@@ -494,7 +500,13 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
       generation: 1,
     };
 
-    for (const status of ["proven", "stale", "missing", "owner_unavailable", "dispatch_failed"] as const) {
+    for (const status of [
+      "proven",
+      "stale",
+      "missing",
+      "owner_unavailable",
+      "dispatch_failed",
+    ] as const) {
       expect(() =>
         Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
           status,
@@ -503,9 +515,9 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
         } as never),
       ).toThrow();
       // ...and the same status decodes cleanly WITHOUT survivor data.
-      expect(Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ status, ...base }).status).toBe(
-        status,
-      );
+      expect(
+        Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({ status, ...base }).status,
+      ).toBe(status);
     }
   });
 
@@ -517,7 +529,15 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
     expect(fields).toContain("executionId");
     expect(fields).toContain("expectedAttemptId");
     expect(fields).toContain("expectedGeneration");
-    for (const forbidden of ["pids", "ownerPid", "pid", "sessionKey", "sessionId", "signal", "kill"]) {
+    for (const forbidden of [
+      "pids",
+      "ownerPid",
+      "pid",
+      "sessionKey",
+      "sessionId",
+      "signal",
+      "kill",
+    ]) {
       expect(fields).not.toContain(forbidden);
     }
   });
@@ -525,9 +545,12 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
   it("exposes teardownOwnedProcesses as the opaque bridge operation spelling (D0033)", () => {
     // The operation stays opaque at the contract layer: the schema names carry
     // the binding spelling and no generic PID/kill surface is introduced.
-    expect(
-      Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields).sort(),
-    ).toEqual(["commandId", "executionId", "expectedAttemptId", "expectedGeneration"]);
+    expect(Object.keys(PiSubagentTeardownOwnedProcessesCommand.fields).sort()).toEqual([
+      "commandId",
+      "executionId",
+      "expectedAttemptId",
+      "expectedGeneration",
+    ]);
   });
 });
 
@@ -801,10 +824,10 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
       parentTurnId: null,
       parentToolCallId: null,
       agentType: "worker",
-      mode: "foreground",
-      cancellationScope: "parent_turn",
-      desiredState: "running",
-      observedState: "running",
+      mode: "foreground" as const,
+      cancellationScope: "parent_turn" as const,
+      desiredState: "running" as const,
+      observedState: "running" as const,
       createdAt: "2026-08-19T00:00:00.000Z",
       updatedAt: "2026-08-19T00:00:01.000Z",
     };
@@ -832,10 +855,10 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
       parentTurnId: null,
       parentToolCallId: null,
       agentType: "worker",
-      mode: "foreground",
-      cancellationScope: "parent_turn",
-      desiredState: "running",
-      observedState: "running",
+      mode: "foreground" as const,
+      cancellationScope: "parent_turn" as const,
+      desiredState: "running" as const,
+      observedState: "running" as const,
       createdAt: "2026-08-19T00:00:00.000Z",
       updatedAt: "2026-08-19T00:00:01.000Z",
     };
@@ -860,19 +883,19 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
     expect(() =>
       Schema.decodeSync(PiSubagentExecutionCard)({
         ...baseCard,
-        currentAttachment: "running_in_background",
+        currentAttachment: "running_in_background" as never,
       }),
     ).toThrow();
     expect(() =>
       Schema.decodeSync(PiSubagentExecutionCard)({
         ...baseCard,
-        currentTeardownEvidence: "proven",
+        currentTeardownEvidence: "proven" as never,
       }),
     ).toThrow();
     expect(() =>
       Schema.decodeSync(PiSubagentExecutionCard)({
         ...baseCard,
-        currentTeardownEvidence: 76,
+        currentTeardownEvidence: 76 as never,
       }),
     ).toThrow();
   });
@@ -892,7 +915,9 @@ describe("Pi subagent cancel command conventions (Issue 06, D0033 reference)", (
     const decoded = Schema.decodeSync(PiSubagentCancelCommand)(base);
     expect(decoded.cancelCommandId).toBe("cancel_exec_1_att_1_gen1");
 
-    expect(() => Schema.decodeSync(PiSubagentCancelCommand)({ ...base, cancelCommandId: "" })).toThrow();
+    expect(() =>
+      Schema.decodeSync(PiSubagentCancelCommand)({ ...base, cancelCommandId: "" }),
+    ).toThrow();
     expect(() =>
       Schema.decodeSync(PiSubagentCancelCommand)({ ...base, expectedGeneration: 0 }),
     ).toThrow();

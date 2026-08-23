@@ -380,12 +380,7 @@ export interface PiSubagentExecutionCardRow {
    * 78 owner_unproven; 76 proven is excluded — it settles and advances the
    * generation). Null for terminal/orphaned aggregates.
    */
-  readonly currentTeardownEvidence:
-    | "none"
-    | "requested"
-    | "survivors"
-    | "owner_unproven"
-    | null;
+  readonly currentTeardownEvidence: "none" | "requested" | "survivors" | "owner_unproven" | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -4108,7 +4103,10 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         if (result.kind === "recorded" && input.outcome === "proven") {
           return notifyIfLifecycleTruthChanged(result, 76);
         }
-        if (result.kind === "recorded" && (input.outcome === "survivors" || input.outcome === "owner_unproven")) {
+        if (
+          result.kind === "recorded" &&
+          (input.outcome === "survivors" || input.outcome === "owner_unproven")
+        ) {
           return notifyIfLifecycleTruthChanged(result, input.outcome === "survivors" ? 77 : 78);
         }
         return Effect.void;

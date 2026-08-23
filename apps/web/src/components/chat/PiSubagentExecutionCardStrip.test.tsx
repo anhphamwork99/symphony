@@ -250,7 +250,7 @@ describe("PiSubagentExecutionCardStrip (Ticket 03 whole-card truth)", () => {
     // Spinner eligibility (the mock renders LoaderIcon as null, but the
     // whole-card spinner flag still gates the animate-spin class).
     expect(markup).toContain("animate-spin");
-    expect(markup).toContain("title=\"Cancel execution\"");
+    expect(markup).toContain('title="Cancel execution"');
   });
 
   it("T03-AC2: attached and old-null running render the ordinary Running label", () => {
@@ -401,7 +401,7 @@ describe("PiSubagentExecutionCardStrip (Ticket 03 whole-card truth)", () => {
     expect(markup).toContain(">Outcome unknown (orphaned)<");
     expect(markup).not.toContain("animate-spin");
     expect(markup).not.toContain("Cancel execution");
-    expect(markup).toContain("title=\"Resume execution with a new attempt\"");
+    expect(markup).toContain('title="Resume execution with a new attempt"');
   });
 
   it("T03-AC5: committed terminal labels ignore stale attachment and teardown fields", () => {
