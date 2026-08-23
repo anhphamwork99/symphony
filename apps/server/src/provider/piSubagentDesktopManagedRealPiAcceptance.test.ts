@@ -683,7 +683,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
   );
 
   it(
-    "AC4: a slow real child detaches within the bounded foreground window, emits post-detach progress/heartbeat, commits exactly one terminal seq-40, and clears the active registry only after handoff",
+    "AC4: a slow real child detaches within the bounded foreground window, emits strictly-new progress/heartbeat liveness after the detach journal event, commits exactly one terminal seq-40, and clears the active registry only after handoff",
     async () => {
       const harness = await makeDesktopHarness(copyArtifactForRun("ac4"));
       try {
@@ -718,6 +718,29 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
           45_000,
           "slow child model request",
         );
+
+        // Finding B (independent review), part 1 — pre-detach liveness
+        // baseline: capture the observation state as of the started (seq-2)
+        // journal event, before the detach event can be observed. With this
+        // harness's deterministic loopback the slow child model answers
+        // only after DETERMINISTIC_SLOW_DELAY_MS = 4_000 ms, while the
+        // foreground budget is 300 ms — so the producer's progress funnel
+        // (`onStreamUpdate`) cannot have fired yet and NO progress
+        // observation may predate detach. (The heartbeat interval is 1_000
+        // ms and starts only after the seq-2 commit, so a pre-detach tick is
+        // equally impossible; it is recorded, not asserted, to avoid a
+        // poll-latency race with the 300 ms window.)
+        await waitFor(
+          () => harness.durable.listJournalEvents(executionId),
+          (events) => events.some((event) => event.sequence === 2),
+          30_000,
+          "started journal event",
+        );
+        const preDetachObservation = await harness.durable.getObservation(executionId);
+        process.stdout.write(
+          `T02-AC4 pre-detach baseline: progress=${preDetachObservation?.lastProgressAt ?? null} heartbeat=${preDetachObservation?.lastHeartbeatAt ?? null}\n`,
+        );
+        expect(preDetachObservation?.lastProgressAt ?? null).toBeNull();
 
         const journal = await waitFor(
           () => harness.durable.listJournalEvents(executionId),
@@ -756,13 +779,37 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         );
         expect(activeBeforeTerminal.some((candidate) => candidate.executionId === executionId)).toBe(true);
 
+        // Finding B, part 2 — post-detach liveness proof. Deterministic
+        // loopback chronology pins the ordering: the slow child's first
+        // response chunk lands ~3.7 s AFTER the 300 ms detach, and the
+        // heartbeat interval (1_000 ms) first ticks ~0.7 s after detach, so
+        // both required observations can only be produced by a reporter
+        // still alive after the detach journal commit. Every timestamp
+        // compared is producer-minted `new Date().toISOString()` from the
+        // SAME extension process clock — the journal `occurredAt` is the
+        // producer-supplied string of the detached observation — so strict
+        // `>` is well defined, and same-ms collisions are excluded by the
+        // deterministic separations above, not by luck. (Waiting for a
+        // NEWER-than-baseline pair would be wrong here: observations stop
+        // exactly-once when the detached child settles, so the first
+        // post-detach pair is frequently also the final one.)
+        const detachedOccurredAtMs = Date.parse(detached!.occurredAt);
         const observation = await waitFor(
           () => harness.durable.getObservation(executionId),
           (value) =>
-            value !== undefined && value.lastProgressAt !== null && value.lastHeartbeatAt !== null,
-          45_000,
-          "post-detach progress and heartbeat",
+            value !== undefined &&
+            value.lastProgressAt !== null &&
+            value.lastHeartbeatAt !== null &&
+            Date.parse(value.lastProgressAt) > detachedOccurredAtMs &&
+            Date.parse(value.lastHeartbeatAt) > detachedOccurredAtMs,
+          60_000,
+          "progress and heartbeat observation strictly after the detach journal event",
         );
+        process.stdout.write(
+          `T02-AC4 post-detach observation: detached=${detached!.occurredAt} progress=${observation.lastProgressAt} heartbeat=${observation.lastHeartbeatAt}\n`,
+        );
+        expect(Date.parse(observation.lastProgressAt!)).toBeGreaterThan(detachedOccurredAtMs);
+        expect(Date.parse(observation.lastHeartbeatAt!)).toBeGreaterThan(detachedOccurredAtMs);
         expect(observation.lastProgressJson).not.toBeNull();
         expect(Date.parse(observation.leaseExpiresAt!)).toBeGreaterThan(
           Date.parse(observation.lastHeartbeatAt!),
@@ -823,8 +870,24 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
           "Attempt to start with a hostile unavailable selected model id.",
         );
 
+        // Finding A (independent review): AC5 selected invalid runtime
+        // config must surface EXACTLY the exported runtime-config failure
+        // constant — the closed-vocabulary contract — not a superset detail
+        // that merely contains it. The public activity detail is the reactor's
+        // `Cause.pretty` envelope around the ProviderAdapterRequestError:
+        // line 1 is the error message `Error: Provider adapter request
+        // failed (pi) for session/start: <detail>` followed by its stack, so
+        // the closed-vocabulary rule is asserted on the exact extracted
+        // `<detail>` segment. Only the malformed/unsupported bridge legs keep
+        // their own distinct exact bounded bootstrap details.
         const detail = await waitForTurnStartFailureDetail(harness, threadId);
-        expect(detail).toContain(PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL);
+        const RUNTIME_CONFIG_ENVELOPE_PREFIX =
+          "Error: Provider adapter request failed (pi) for session/start: ";
+        const detailFirstLine = detail.split("\n", 1)[0]!;
+        expect(detailFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
+        expect(detailFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
+          PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
+        );
         for (const forbidden of [
           HOSTILE_SELECTED_MODEL_ID,
           stagedFixture.sourceArtifactDir,
@@ -848,7 +911,12 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
           status: "error",
           activeTurnId: null,
         });
-        expect(threadDetail.thread.session?.lastError).toContain(
+        const sessionErrorFirstLine = (threadDetail.thread.session?.lastError ?? "").split(
+          "\n",
+          1,
+        )[0]!;
+        expect(sessionErrorFirstLine.startsWith(RUNTIME_CONFIG_ENVELOPE_PREFIX)).toBe(true);
+        expect(sessionErrorFirstLine.slice(RUNTIME_CONFIG_ENVELOPE_PREFIX.length)).toBe(
           PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
         );
         expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
