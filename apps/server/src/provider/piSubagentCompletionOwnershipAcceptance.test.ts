@@ -308,17 +308,37 @@ function materializeLegacyExtensionWorktree(): string {
     "dir",
   );
   const rootModules = join(repoDir, "node_modules");
-  if (existsSync(rootModules)) {
-    symlinkSync(rootModules, join(worktreeDir, "node_modules"), "dir");
-  }
-  // The runtime loads the BUILT entry (index.js → dist/), which is
-  // gitignored — compile the legacy checkout in the worktree. The legacy
-  // source type-checks against ITS pinned peers; the linked workspace
-  // node_modules is newer and reports peer-type drift — tsc still EMITS the
-  // JavaScript (no noEmitOnError), which is what the runtime loads. Verify
-  // the emitted entry exists and is the LEGACY build (advertises
-  // journal-terminal-lifecycle, does NOT advertise
-  // completion-delivery-ownership).
+    if (existsSync(rootModules)) {
+      symlinkSync(rootModules, join(worktreeDir, "node_modules"), "dir");
+    }
+    // Pi 0.83 loads the declared source entry through jiti. Because the
+    // extension itself is later mounted into an isolated agent directory by
+    // symlink, jiti resolves bare imports from that mounted extension path
+    // instead of from `agent/extensions/node_modules` in this worktree.
+    // Materialize the one normal dependency used by the legacy source at the
+    // extension-local Node resolution seam. The worktree is test-owned and
+    // removed after the leg, so neither the live Alfie checkout nor user Pi
+    // state is mutated.
+    const typeboxDir = join(
+      worktreeDir,
+      "agent",
+      "extensions",
+      "pi-subagents",
+      "node_modules",
+      "@sinclair",
+    );
+    mkdirSync(typeboxDir, { recursive: true });
+    symlinkSync(
+      join(repoDir, "agent", "extensions", "node_modules", "@sinclair", "typebox"),
+      join(typeboxDir, "typebox"),
+      "dir",
+    );
+    // The Pi 0.83 loader executes the package's declared source entry through
+    // jiti. Compile as an additional fixture-integrity check: the legacy source
+    // type-checks against its pinned peers, while the linked newer workspace
+    // peers may report drift but still emit JavaScript. The emitted artifact is
+    // not the runtime entry; it gives us a deterministic capability fingerprint
+    // proving this checkout is the intended pre-09 family.
   try {
     execSync("bun x tsc", {
       cwd: join(worktreeDir, "agent", "extensions", "pi-subagents"),
@@ -328,9 +348,8 @@ function materializeLegacyExtensionWorktree(): string {
     });
   } catch {
     // The legacy source type-checks against ITS pinned peers; the linked
-    // workspace node_modules is newer and reports peer-type drift. tsc
-    // still EMITS the JavaScript (what the runtime loads); the artifact
-    // checks below are the load-bearing verification.
+      // workspace node_modules is newer and reports peer-type drift. tsc still
+      // emits the capability fingerprint checked below.
   }
   const legacyEntry = readFileSync(
     join(worktreeDir, "agent", "extensions", "pi-subagents", "dist", "index.js"),
