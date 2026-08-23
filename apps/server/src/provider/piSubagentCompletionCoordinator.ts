@@ -4,7 +4,6 @@ import { Effect, Option } from "effect";
 import type {
   PiSubagentCompletionDispatchBatch,
   PiSubagentCompletionDispatchBatchContent,
-  PiSubagentCompletionDispatchCreateResult,
   PiSubagentCompletionOutboxEntry,
   PiSubagentExecutionRepositoryShape,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
@@ -203,7 +202,7 @@ export const makePiSubagentCompletionCoordinator = (
       ? input.maxBatchEntries
       : DEFAULT_PI_SUBAGENT_COMPLETION_MAX_BATCH_ENTRIES;
   const now = input.scheduler?.now ?? input.now ?? (() => Date.now());
-  const schedule = input.scheduler?.schedule ?? input.schedule ?? makeDefaultScheduler();
+  const schedule = input.scheduler?.schedule ?? input.schedule ?? defaultSchedule;
   const dispatcher = input.parentEffectDispatcher;
   const parentSessionAvailable = input.parentSessionAvailable ?? (() => true);
 
@@ -757,16 +756,16 @@ export const makePiSubagentCompletionCoordinator = (
 };
 
 /** Production scheduler (real timers); tests inject a virtual clock. */
-const makeDefaultScheduler = (): CompletionCoordinatorScheduler["schedule"] => {
-  const schedule: CompletionCoordinatorScheduler["schedule"] = (delayMs, callback) => {
-    const timer = setTimeout(callback, Math.max(0, delayMs));
-    return {
-      cancel: () => {
-        clearTimeout(timer);
-      },
-    };
+const defaultSchedule: CompletionCoordinatorScheduler["schedule"] = (
+  delayMs,
+  callback,
+) => {
+  const timer = setTimeout(callback, Math.max(0, delayMs));
+  return {
+    cancel: () => {
+      clearTimeout(timer);
+    },
   };
-  return schedule;
 };
 
 // Re-exported for adapter wiring: the entry projection used in follow-ups.

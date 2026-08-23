@@ -469,22 +469,6 @@ export const cancelParentTurnScope = (
   input: CancelParentTurnScopeInput,
 ): Effect.Effect<CancelParentTurnScopeResult, unknown> =>
   Effect.gen(function* () {
-    const now = input.now ?? (() => Date.now());
-    const sleep =
-      input.sleep ?? ((ms: number) => Effect.sleep(`${Math.max(0, ms)} millis` as const));
-    const ackTimeoutMs =
-      input.cancelAckTimeoutMs !== undefined && input.cancelAckTimeoutMs > 0
-        ? input.cancelAckTimeoutMs
-        : DEFAULT_PI_SUBAGENT_CANCEL_ACK_TIMEOUT_MS;
-    const retryLimit =
-      input.cancelRetryLimit !== undefined && input.cancelRetryLimit >= 0
-        ? input.cancelRetryLimit
-        : DEFAULT_PI_SUBAGENT_CANCEL_RETRY_LIMIT;
-    const leaseDurationMs =
-      input.leaseDurationMs !== undefined && input.leaseDurationMs > 0
-        ? input.leaseDurationMs
-        : 30000;
-
     // T06-AC2: every managed child declaring the parent-turn scope, both
     // transport modes.
     const cancellable = yield* input.repository.listCancellableByParentTurn(input.threadId);

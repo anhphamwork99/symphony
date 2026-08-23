@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PI_SUBAGENT_CAPABILITIES,
   PI_SUBAGENTS_PROTOCOL_VERSION,
-  type PiSubagentHandshakeRequest,
   type PiSubagentTeardownOwnedProcessesCommand,
   type PiSubagentTeardownOwnedProcessesResult,
 } from "@synara/contracts";
@@ -31,7 +30,7 @@ import {
 
 describe("Pi subagent extension bridge & versioned handshake (Issue 19)", () => {
   it("successfully negotiates capability with compatible bridge fixture", async () => {
-    const { extension, bridge } = makeCompatiblePiSubagentExtension({
+    const { bridge } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
       capabilities: [...PI_SUBAGENT_CAPABILITIES],
       extensionVersion: "0.1.0",
@@ -686,7 +685,7 @@ describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () =
           // Malformed PID evidence.
           { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [] },
           { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [0] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [9007199254740993] },
+          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [Number.MAX_SAFE_INTEGER + 1] },
           { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: ["4242"] },
           { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [2, 1] },
           { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [1, 1] },

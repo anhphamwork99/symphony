@@ -3,16 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { Cause, Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { ThreadId } from "@synara/contracts";
 
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import {
-  makePiSubagentExecutionRepository,
-  PiSubagentExecutionRepositoryLive,
-} from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 
 describe("PiSubagentForegroundReopen (T22-AC4)", () => {
