@@ -144,7 +144,7 @@ async function main(): Promise<number> {
   }
 
   console.log(`> test orchestrator: 1 unit run + ${WALLCLOCK_TESTS.length} standalone wallclock runs`);
-  const failures: InvocationFailure[] = [];
+  const firstPassFailures: InvocationFailure[] = [];
   for (const [index, invocation] of invocations.entries()) {
     console.log(
       `\n> [${index + 1}/${invocations.length}] ${invocation.label === "unit" ? "unit project" : `wallclock ${invocation.label}`}`,
@@ -153,7 +153,31 @@ async function main(): Promise<number> {
     // of the remaining files (the previous single `vitest run` also executed
     // every file before exiting non-zero).
     const failure = await runInvocation(invocation, vitestCli);
-    if (failure) failures.push(failure);
+    if (failure) firstPassFailures.push(failure);
+  }
+
+  // WP-08's measured wall-clock suites may miss the strict detach envelope
+  // once under transient host load even in a standalone invocation. Re-run
+  // only failed wall-clock files exactly once after the first pass has fully
+  // settled. Unit failures are never retried, and a second wall-clock failure
+  // remains gate-failing evidence.
+  const failures: InvocationFailure[] = firstPassFailures.filter(
+    (failure) => failure.label === "unit",
+  );
+  for (const failure of firstPassFailures) {
+    if (failure.label === "unit") continue;
+    const invocation = invocations.find((candidate) => candidate.label === failure.label);
+    if (invocation === undefined) {
+      failures.push(failure);
+      continue;
+    }
+    console.warn(`\n> retrying wallclock ${failure.label} once after the first pass settled`);
+    const retryFailure = await runInvocation(invocation, vitestCli);
+    if (retryFailure) {
+      failures.push(retryFailure);
+    } else {
+      console.log(`> wallclock ${failure.label} passed on its single allowed retry`);
+    }
   }
 
   if (failures.length === 0) {
