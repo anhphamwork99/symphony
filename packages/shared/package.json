@@ -136,6 +136,10 @@
       "types": "./src/projectContainers.ts",
       "import": "./src/projectContainers.ts"
     },
+    "./projectWorkspaceMigration": {
+      "types": "./src/projectWorkspaceMigration.ts",
+      "import": "./src/projectWorkspaceMigration.ts"
+    },
     "./projectDirectoryName": {
       "types": "./src/projectDirectoryName.ts",
       "import": "./src/projectDirectoryName.ts"
