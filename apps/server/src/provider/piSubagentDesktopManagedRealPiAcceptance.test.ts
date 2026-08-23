@@ -52,6 +52,34 @@ const CANARY_MARKER = "wp-c-ticket-02-desktop-managed-canary";
 const HOSTILE_SELECTED_MODEL_ID = "wp-c-hostile-unavailable-selected-model";
 const createdRoots: string[] = [];
 
+/**
+ * Ticket 02 AC5 safe-diagnostics hardening: a bare `99` substring is NOT the
+ * redaction contract — two-digit substrings collide with benign material
+ * (e.g. an OS username embedded in a tmpdir path). The contract is that the
+ * hostile negotiated protocol VERSION must not reach the operator surface in
+ * any contextual form: prose ("protocol 99"), JSON field values, or
+ * offered/supported version enumerations. These patterns pin that intent.
+ */
+const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
+  /protocol\s*version\s*[:=#]?\s*99\b/i,
+  /protocolVersion["'\s:=]+99\b/i,
+  /supportedProtocolVersions[^0-9]{0,64}\b99\b/i,
+  /\bversion["'\s:=]+99\b/i,
+  /\boffered\b[^0-9]{0,64}\b99\b/i,
+  /\bsupported\b[^0-9]{0,64}\b99\b/i,
+  /\b99\s*\/\s*[0-9]+\b/,
+  /\b[0-9]+\s*\/\s*99\b/,
+];
+
+function assertNoHostileProtocolVersion(detail: string): void {
+  for (const pattern of HOSTILE_PROTOCOL_VERSION_PATTERNS) {
+    expect(
+      detail,
+      `detail must not match hostile protocol-version pattern ${String(pattern)}`,
+    ).not.toMatch(pattern);
+  }
+}
+
 interface TreeSnapshot {
   readonly bytes: number;
   readonly digest: string;
@@ -1181,12 +1209,12 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         "Managed Pi subagent harness bootstrap failed (unsupported_version:pi_subagent_unsupported_version)",
       );
       expect(detail.length).toBeLessThanOrEqual(512);
+      assertNoHostileProtocolVersion(detail);
       for (const forbidden of [
         PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
         "Hostile extension demands",
         "sk-hostile-99",
         "/private/hostile",
-        "99",
         unsupportedArtifactDir,
         stagedFixture.sourceArtifactDir,
         harness.desktop?.userAgentDir ?? "",
@@ -1212,6 +1240,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
       expect(threadDetail.thread.session?.lastError).toContain(
         "(unsupported_version:pi_subagent_unsupported_version)",
       );
+      assertNoHostileProtocolVersion(threadDetail.thread.session?.lastError ?? "");
       expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
       expect(harness.observedSessions().size).toBe(0);
       expect(harness.observedCapabilities().size).toBe(0);

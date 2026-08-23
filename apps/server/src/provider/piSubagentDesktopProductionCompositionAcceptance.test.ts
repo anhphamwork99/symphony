@@ -485,6 +485,34 @@ function assertNoSensitiveTokens(
   }
 }
 
+/**
+ * Ticket 04 AC3 safe-diagnostics hardening: a bare `99` substring is NOT the
+ * redaction contract — two-digit substrings collide with benign material
+ * (e.g. an OS username embedded in a tmpdir path). The contract is that the
+ * hostile negotiated protocol VERSION must not reach the operator surface in
+ * any contextual form: prose ("protocol 99"), JSON field values, or
+ * offered/supported version enumerations. These patterns pin that intent.
+ */
+const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
+  /protocol\s*version\s*[:=#]?\s*99\b/i,
+  /protocolVersion["'\s:=]+99\b/i,
+  /supportedProtocolVersions[^0-9]{0,64}\b99\b/i,
+  /\bversion["'\s:=]+99\b/i,
+  /\boffered\b[^0-9]{0,64}\b99\b/i,
+  /\bsupported\b[^0-9]{0,64}\b99\b/i,
+  /\b99\s*\/\s*[0-9]+\b/,
+  /\b[0-9]+\s*\/\s*99\b/,
+];
+
+function assertNoHostileProtocolVersion(detail: string): void {
+  for (const pattern of HOSTILE_PROTOCOL_VERSION_PATTERNS) {
+    expect(
+      detail,
+      `detail must not match hostile protocol-version pattern ${String(pattern)}`,
+    ).not.toMatch(pattern);
+  }
+}
+
 async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
   const layout = makeFailureRelease(expectation);
   const userAgentDir = join(layout.rootDir, "isolated-user-agent");
@@ -532,6 +560,7 @@ async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
       ...(fixtureBaseUrl === undefined ? [] : [fixtureBaseUrl]),
     ];
     assertRedactedDetail(detail, layout, userAgentDir, extraForbidden);
+    assertNoHostileProtocolVersion(detail);
 
     const threadDetail = await harness.waitForThreadDetail(String(threadId));
     expect(threadDetail.thread.session).toMatchObject({
@@ -552,6 +581,7 @@ async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
       expect(sessionLastError).toContain(expectation.category);
     }
     assertNoSensitiveTokens(sessionLastError, layout, userAgentDir, extraForbidden);
+    assertNoHostileProtocolVersion(sessionLastError);
     expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
     expect(harness.observedSessions().size).toBe(0);
     expect(harness.observedCapabilities().size).toBe(0);
@@ -915,7 +945,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
       {
         label: "unsupported-protocol",
         category: "unsupported_version:pi_subagent_unsupported_version",
-        forbidden: ["99", "Hostile extension demands"],
+        forbidden: ["Hostile extension demands", "sk-hostile"],
         mutate: (artifactDir) =>
           patchHandshakeArtifact(
             artifactDir,
