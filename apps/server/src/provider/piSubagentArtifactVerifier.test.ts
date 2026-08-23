@@ -165,7 +165,7 @@ const EXPANDED_SUBTREES = [
     {
       files: PROMPT_SYSTEM_SUBTREE_FILES,
       listedEntry: "agent/system/subagent-system.md",
-      tamperedContent: "# Subagent System\n\nYou are a delegated subagent.\X",
+      tamperedContent: "# Subagent System\n\nYou are a delegated subagent.X",
       unlistedFileTarget: "agent/system/orchestration-rules.md",
       unlistedNonRegularTarget: "agent/system/extra.fifo",
       unsafeNameTarget: "agent/system/bad\nname.md",
@@ -203,10 +203,7 @@ const manifestFor = (
 });
 
 /** Stages a complete artifact fixture: files + generated manifest. */
-const stageArtifact = async (
-  root: string,
-  spec: ArtifactSpec,
-): Promise<void> => {
+const stageArtifact = async (root: string, spec: ArtifactSpec): Promise<void> => {
   for (const file of spec.files) {
     await mkdir(join(root, file.path, ".."), { recursive: true });
     await writeFile(join(root, file.path), file.content as Uint8Array | string);
@@ -244,16 +241,15 @@ const freshRoot = async (label: string): Promise<string> => {
   return root;
 };
 
-const expectInvalid = (
-  result: PiSubagentArtifactVerification,
-  category: string,
-): void => {
+const expectInvalid = (result: PiSubagentArtifactVerification, category: string): void => {
   expect(result.valid).toBe(false);
   if (!result.valid) {
     expect(result.category).toBe(category);
-    expect(Object.keys(result).sort()).toEqual(["category", "entry", "valid"].filter((key) =>
-      key === "entry" ? result.entry !== undefined : true,
-    ));
+    expect(Object.keys(result).toSorted()).toEqual(
+      ["category", "entry", "valid"].filter((key) =>
+        key === "entry" ? result.entry !== undefined : true,
+      ),
+    );
   }
 };
 
@@ -576,7 +572,11 @@ describe("Pi subagent artifact production verifier (Ticket 01, handshake-first)"
         if (dir === root) {
           return [
             ...entries.filter((entry) => entry.name !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
-            { name: "../escaped.ts", isFile: () => true, isDirectory: () => false } as unknown as Dirent,
+            {
+              name: "../escaped.ts",
+              isFile: () => true,
+              isDirectory: () => false,
+            } as unknown as Dirent,
           ];
         }
         return entries;
@@ -687,9 +687,8 @@ describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b
     async ([label, subtree]) => {
       const root = await freshRoot(`closure-${label}-tampered`);
       await stageClosureArtifact(root);
-      const original = subtree.files.find(
-        (file) => file.path === subtree.listedEntry,
-      )?.content as string;
+      const original = subtree.files.find((file) => file.path === subtree.listedEntry)
+        ?.content as string;
       expect(Buffer.byteLength(subtree.tamperedContent)).toBe(Buffer.byteLength(original));
       await writeFile(join(root, subtree.listedEntry), subtree.tamperedContent);
 
@@ -794,7 +793,7 @@ describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b
 
   it.for(EXPANDED_SUBTREES)(
     "%s subtree: a manifest record resolving outside the root is path_escape (seam)",
-    async ([label, subtree]) => {
+    async ([label, _subtree]) => {
       const root = await freshRoot(`closure-${label}-record-escape`);
       await stageClosureArtifact(root);
       const base = await import("node:fs/promises");
@@ -809,7 +808,11 @@ describe("Pi subagent artifact verifier — expanded runtime closure (Ticket 01b
           if (dir === root) {
             return [
               ...entries.filter((entry) => entry.name !== PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME),
-              { name: escapedLabel, isFile: () => true, isDirectory: () => false } as unknown as Dirent,
+              {
+                name: escapedLabel,
+                isFile: () => true,
+                isDirectory: () => false,
+              } as unknown as Dirent,
             ];
           }
           return entries;

@@ -18,6 +18,17 @@ const execFileAsync = promisify(execFile);
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 const DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 15_000;
 
+const asOAuthToken = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const tryParseJson = (candidate: string): unknown | null => {
+  try {
+    return JSON.parse(candidate) as unknown;
+  } catch {
+    return null;
+  }
+};
+
 /** Build a short, non-secret identity for cache partitioning without retaining credentials. */
 export function credentialFingerprint(secret: string): string {
   return createHash("sha256").update(secret).digest("base64url").slice(0, 18);
@@ -146,15 +157,13 @@ export async function refreshOAuthAccessToken(input: {
   }
 
   const record = json as Record<string, unknown>;
-  const asToken = (value: unknown): string | undefined =>
-    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-  const accessToken = asToken(record.access_token);
+  const accessToken = asOAuthToken(record.access_token);
   if (!accessToken) {
     return { ok: false, status: response.status };
   }
 
-  const refreshToken = asToken(record.refresh_token);
-  const idToken = asToken(record.id_token);
+  const refreshToken = asOAuthToken(record.refresh_token);
+  const idToken = asOAuthToken(record.id_token);
   const expiresInSeconds =
     typeof record.expires_in === "number" && Number.isFinite(record.expires_in)
       ? record.expires_in
@@ -203,15 +212,8 @@ export async function readKeychainPassword(input: {
  */
 export function decodeKeychainJson(value: string): unknown | null {
   const trimmed = value.trim();
-  const tryParse = (candidate: string): unknown | null => {
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      return null;
-    }
-  };
 
-  const direct = tryParse(trimmed);
+  const direct = tryParseJson(trimmed);
   if (direct !== null) {
     return direct;
   }
@@ -219,7 +221,7 @@ export function decodeKeychainJson(value: string): unknown | null {
   const hex = trimmed.startsWith("0x") || trimmed.startsWith("0X") ? trimmed.slice(2) : trimmed;
   if (hex.length % 2 === 0 && /^[0-9a-fA-F]+$/u.test(hex)) {
     try {
-      return tryParse(Buffer.from(hex, "hex").toString("utf8"));
+      return tryParseJson(Buffer.from(hex, "hex").toString("utf8"));
     } catch {
       return null;
     }

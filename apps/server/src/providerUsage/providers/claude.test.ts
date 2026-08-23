@@ -132,9 +132,8 @@ describe("claudeUsageFetcher", () => {
       }),
     );
     stubOutboundFetch(async (_url, init) => {
-      expect((init?.headers as Record<string, string>).Authorization).toBe(
-        "Bearer keychain-access-token",
-      );
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.Authorization).toBe("Bearer keychain-access-token");
       return jsonResponse({ five_hour: { utilization: 7 } });
     });
 

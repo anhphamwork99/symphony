@@ -13,10 +13,7 @@ import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
 } from "../persistence/Services/PiSubagentExecutionRepository.ts";
-import {
-  ingestPiSubagentTerminal,
-  PI_SUBAGENT_TERMINAL_SEQUENCE,
-} from "./piSubagentTerminalCoordinator.ts";
+import { ingestPiSubagentTerminal } from "./piSubagentTerminalCoordinator.ts";
 import { PI_SUBAGENT_WATCHDOG_BAND } from "./piSubagentWatchdogEscalation.ts";
 import {
   MAX_PI_SUBAGENT_TEARDOWN_SURVIVOR_PIDS,
@@ -854,7 +851,10 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
         };
         const diagnostics: DiagnosticEvent[] = [];
         const result = yield* Effect.promise(() =>
-          runPiSubagentProcessTeardown({ ...input, onDiagnostic: (event) => diagnostics.push(event as DiagnosticEvent) }),
+          runPiSubagentProcessTeardown({
+            ...input,
+            onDiagnostic: (event) => diagnostics.push(event as DiagnosticEvent),
+          }),
         );
 
         // §6: a FAILED endpoint is owner_unproven — the dispatch crash never
@@ -876,10 +876,11 @@ describe("runPiSubagentProcessTeardown (Issue 16)", () => {
         const journal = yield* repository.listJournalEvents("exec_td_1");
         // Band 75 request first (preserved ordering), then exactly the
         // band-78 owner_unproven outcome; no band 76 and no band 77.
-        const outcomeRows = journal.filter((event) =>
-          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven ||
-          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors ||
-          event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
+        const outcomeRows = journal.filter(
+          (event) =>
+            event.sequence === PI_SUBAGENT_TEARDOWN_BAND.proven ||
+            event.sequence === PI_SUBAGENT_TEARDOWN_BAND.survivors ||
+            event.sequence === PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
         );
         expect(outcomeRows).toHaveLength(1);
         const outcomeRow = outcomeRows[0]!;

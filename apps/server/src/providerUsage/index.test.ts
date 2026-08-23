@@ -79,7 +79,7 @@ describe("collectProviderUsageSnapshots caching", () => {
   });
 
   it("coalesces concurrent requests into a single fetch", async () => {
-    let release: (snapshot: ServerProviderUsageSnapshot) => void = () => {};
+    let release!: (snapshot: ServerProviderUsageSnapshot) => void;
     fetchMock.mockImplementation(
       () => new Promise<ServerProviderUsageSnapshot>((resolve) => (release = resolve)),
     );
@@ -110,7 +110,7 @@ describe("collectProviderUsageSnapshots caching", () => {
     fetchMock.mockResolvedValueOnce(okSnapshot(NOW_MS, "cached"));
     await collectProviderUsageSnapshots(makeCtx(NOW_MS));
 
-    let release: (snapshot: ServerProviderUsageSnapshot) => void = () => {};
+    let release!: (snapshot: ServerProviderUsageSnapshot) => void;
     fetchMock.mockImplementationOnce(
       () => new Promise<ServerProviderUsageSnapshot>((resolve) => (release = resolve)),
     );
@@ -140,7 +140,7 @@ describe("collectProviderUsageSnapshots caching", () => {
 
   it("does not cache a snapshot when credentials change during the fetch", async () => {
     let account = "account-a";
-    let release: (snapshot: ServerProviderUsageSnapshot) => void = () => {};
+    let release!: (snapshot: ServerProviderUsageSnapshot) => void;
     cacheKeyMock.mockImplementation(async () => account);
     fetchMock.mockImplementationOnce(
       () => new Promise<ServerProviderUsageSnapshot>((resolve) => (release = resolve)),

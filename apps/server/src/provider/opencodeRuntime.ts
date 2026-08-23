@@ -644,7 +644,7 @@ function parseOpenCodeCliModelJson(
     variants,
     supportedReasoningEfforts,
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
-    ...(contextWindowOptions ?? {}),
+    ...contextWindowOptions,
     ...(typeof isFree === "boolean" ? { isFree } : {}),
   };
 }
@@ -899,9 +899,9 @@ const makeOpenCodeRuntime = (options?: OpenCodeRuntimeLiveOptions) =>
 
     const runOpenCodeCommand: OpenCodeRuntimeShape["runOpenCodeCommand"] = (input) =>
       Effect.gen(function* () {
-        const childEnv = buildOpenCodeServerProcessEnv({
-          ...(input.cliSpec ? { cliSpec: input.cliSpec } : {}),
-        });
+        const childEnv = buildOpenCodeServerProcessEnv(
+          input.cliSpec ? { cliSpec: input.cliSpec } : {},
+        );
         const prepared = prepareWindowsSafeProcess(input.binaryPath, input.args, {
           cwd: input.cwd,
           env: childEnv,

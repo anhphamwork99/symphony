@@ -98,6 +98,22 @@ interface StageControls {
   readonly isSessionAlive: (threadId: string) => boolean;
 }
 
+const defaultCancel = (): PiSubagentCancelResult => ({
+  // Never resolves to an acknowledgement by default: the dispatch races
+  // the stage timeout and times out (the honest no-evidence case).
+  status: "missing",
+  executionId: "exec_wd_1",
+  attemptId: "att_wd_1",
+  generation: 1,
+});
+
+const ackedCancel = (): PiSubagentCancelResult => ({
+  status: "cancelled",
+  executionId: "exec_wd_1",
+  attemptId: "att_wd_1",
+  generation: 1,
+});
+
 /**
  * Controllable child/provider-turn/provider-session fixture (approved seam):
  * every stage action is recorded and its evidence is toggleable.
@@ -117,14 +133,6 @@ function makeStageControls(
   };
   const interrupts: Array<{ readonly threadId: string }> = [];
   const sessionStops: Array<{ readonly threadId: string }> = [];
-  const defaultCancel = (): PiSubagentCancelResult => ({
-    // Never resolves to an acknowledgement by default: the dispatch races
-    // the stage timeout and times out (the honest no-evidence case).
-    status: "missing",
-    executionId: "exec_wd_1",
-    attemptId: "att_wd_1",
-    generation: 1,
-  });
   const bridge: PiSubagentExtensionBridge = {
     handshake: () => ({
       ok: true,
@@ -372,12 +380,6 @@ describe("runPiSubagentWatchdogEscalation (Issue 15)", () => {
           }),
         );
 
-        const ackedCancel = (): PiSubagentCancelResult => ({
-          status: "cancelled",
-          executionId: "exec_wd_1",
-          attemptId: "att_wd_1",
-          generation: 1,
-        });
         const controls = makeStageControls({ cancelResult: ackedCancel });
 
         yield* Effect.promise(() =>

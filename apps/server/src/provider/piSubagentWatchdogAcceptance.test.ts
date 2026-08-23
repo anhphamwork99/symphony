@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { execSync } from "node:child_process";
-import crypto from "node:crypto";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, Option, Stream } from "effect";
@@ -62,10 +61,6 @@ interface ProvenanceManifest {
 function loadProvenanceManifest(): ProvenanceManifest {
   const manifestPath = resolve(__dirname, "./test-fixtures/piSubagentExtensionProvenance.json");
   return JSON.parse(readFileSync(manifestPath, "utf8"));
-}
-
-function computeSha256(filePath: string): string {
-  return crypto.createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
 function normalizeGitUrl(url: string): string {
@@ -164,7 +159,7 @@ function startDeterministicModelServer(): Promise<{
     req.on("end", () => {
       const parsed = JSON.parse(body || "{}") as { messages?: Array<{ role: string }> };
       const userText =
-        parsed.messages?.filter((message) => message.role === "user").at(-1)?.role === "user"
+        parsed.messages?.findLast((message) => message.role === "user")?.role === "user"
           ? "watchdog acceptance task"
           : "watchdog acceptance task";
       const respond = () => {

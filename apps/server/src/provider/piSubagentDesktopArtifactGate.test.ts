@@ -324,7 +324,7 @@ const CLOSURE_VALID_FILES = [
 ] as const;
 
 const stageClosureArtifact = async (root: string): Promise<void> => {
-  const files = CLOSURE_VALID_FILES.map((file) => ({ ...file }));
+  const files = CLOSURE_VALID_FILES.map((file) => Object.assign({}, file));
   for (const file of files) {
     await mkdir(join(root, file.path, ".."), { recursive: true });
     await writeFile(join(root, file.path), file.content);
@@ -388,7 +388,8 @@ describe("evaluatePiSubagentDesktopArtifactGate with agent/system prompt closure
     expect(result).toEqual({
       kind: "unavailable",
       reason: "symlink_escape",
-      detail: "managed pi artifact verification failed: symlink_escape (entry: agent/system/subagent-system.md)",
+      detail:
+        "managed pi artifact verification failed: symlink_escape (entry: agent/system/subagent-system.md)",
     });
     // The decoy bytes never entered any gate surface.
     expect(JSON.stringify(result)).not.toContain("Decoy prompt bytes");
@@ -431,7 +432,10 @@ describe("evaluatePiSubagentDesktopArtifactGate with the production verifier ove
         category: "digest_mismatch",
         entry: "node_modules/zod/index.js",
         corrupt: async (root: string) => {
-          await writeFile(join(root, "node_modules/zod/index.js"), "module.exports = require('./lib/index.jS');\n");
+          await writeFile(
+            join(root, "node_modules/zod/index.js"),
+            "module.exports = require('./lib/index.jS');\n",
+          );
         },
       },
     ],
@@ -451,7 +455,10 @@ describe("evaluatePiSubagentDesktopArtifactGate with the production verifier ove
         category: "digest_mismatch",
         entry: "agent/system/working-style.md",
         corrupt: async (root: string) => {
-          await writeFile(join(root, "agent/system/working-style.md"), "# Working Style\n\nBe precise and evidence-driven.\X");
+          await writeFile(
+            join(root, "agent/system/working-style.md"),
+            "# Working Style\n\nBe precise and evidence-driven.X",
+          );
         },
       },
     ],

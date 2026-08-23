@@ -102,7 +102,7 @@ function snapshotTree(rootDir: string): TreeSnapshot {
 function readdirStable(rootDir: string): string[] {
   const entries: string[] = [];
   const visit = (dir: string) => {
-    const names = readdirSync(dir).sort();
+    const names = readdirSync(dir).toSorted();
     for (const name of names) {
       const fullPath = join(dir, name);
       const stat = lstatSync(fullPath);

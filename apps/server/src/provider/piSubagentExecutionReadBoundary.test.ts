@@ -478,7 +478,7 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
         // parent thread is bound to the SAME authority).
         const owningAuthority = "auth-owner-1";
         const makeHook =
-          (connectionAuthorityId: string | null) => (input: { readonly parentThreadId: string }) =>
+          (connectionAuthorityId: string | null) => (_input: { readonly parentThreadId: string }) =>
             Effect.succeed(
               connectionAuthorityId !== null && connectionAuthorityId !== owningAuthority
                 ? ({ kind: "denied", diagnosticCode: "pi_subagent_read_denied" } as const)

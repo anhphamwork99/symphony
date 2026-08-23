@@ -11,7 +11,6 @@ import {
   makePiSynaraMcpDisabledError,
   makePiSynaraMcpToolExecutionRegistry,
   SYNARA_MCP_DISABLED_ERROR_CODE,
-  type PiSynaraMcpToolExecutionRegistry,
 } from "./piSynaraMcpToolExecution.ts";
 
 function deferred<T = void>() {

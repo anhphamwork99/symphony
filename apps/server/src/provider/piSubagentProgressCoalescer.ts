@@ -108,7 +108,18 @@ interface CoalescerEntry {
   disposed: boolean;
 }
 
-const noopCancel = (): void => {};
+const makeCoalescerEntry = (): CoalescerEntry => ({
+  pendingJson: undefined,
+  pendingMeta: undefined,
+  pendingSince: 0,
+  coalescedSinceFlush: 0,
+  totalEmitted: 0,
+  totalCoalesced: 0,
+  flushTimer: undefined,
+  flushInFlight: undefined,
+  idleTimer: undefined,
+  disposed: false,
+});
 
 const makeRealSchedule =
   () =>
@@ -132,19 +143,6 @@ export function makePiSubagentProgressCoalescer(
   const entries = new Map<string, CoalescerEntry>();
   let totalEmitted = 0;
   let totalCoalesced = 0;
-
-  const makeEntry = (): CoalescerEntry => ({
-    pendingJson: undefined,
-    pendingMeta: undefined,
-    pendingSince: 0,
-    coalescedSinceFlush: 0,
-    totalEmitted: 0,
-    totalCoalesced: 0,
-    flushTimer: undefined,
-    flushInFlight: undefined,
-    idleTimer: undefined,
-    disposed: false,
-  });
 
   const runFlush = (executionId: string, entry: CoalescerEntry): Promise<void> => {
     const payload = entry.pendingJson;
@@ -200,7 +198,7 @@ export function makePiSubagentProgressCoalescer(
       }
       let entry = entries.get(executionId);
       if (entry === undefined) {
-        entry = makeEntry();
+        entry = makeCoalescerEntry();
         entries.set(executionId, entry);
       } else {
         entry.idleTimer?.cancel();
@@ -281,7 +279,7 @@ export function makePiSubagentProgressCoalescer(
 
     disposeAll: async () => {
       const pending: Array<Promise<void>> = [];
-      for (const [executionId, entry] of [...entries]) {
+      for (const [executionId, entry] of entries) {
         entry.idleTimer?.cancel();
         entry.idleTimer = undefined;
         const flushTimer = entry.flushTimer;

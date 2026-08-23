@@ -9,14 +9,10 @@
 // Depends on: the lifecycle coordinator and dormant adapter public seams.
 
 import type { McpAuthorityBinding, ProviderKind, ThreadId } from "@synara/contracts";
-import type { AgentGatewaySessionIdentity } from "../agentGateway/Services/AgentGatewaySessionRegistry";
 import { describe, expect, it, vi } from "vitest";
 
 import { makePiSynaraMcpDormantExtension } from "./piSynaraMcpExtension.ts";
-import {
-  PI_SYNARA_MCP_LIFECYCLE_DISPOSED_REFUSAL,
-  type PiSynaraMcpLifecycleCoordinator,
-} from "./piSynaraMcpLifecycle.ts";
+import { type PiSynaraMcpLifecycleCoordinator } from "./piSynaraMcpLifecycle.ts";
 import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL,

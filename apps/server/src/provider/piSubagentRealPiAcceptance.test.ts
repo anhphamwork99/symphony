@@ -126,6 +126,34 @@ function activityPayloadDetail(payload: unknown): string | undefined {
   return (payload as { detail: string }).detail;
 }
 
+const metadataPhase = (metadata: unknown): string | undefined => {
+  if (typeof metadata !== "object" || metadata === null || !("phase" in metadata)) {
+    return undefined;
+  }
+  return typeof metadata.phase === "string" ? metadata.phase : undefined;
+};
+
+const metadataDispatched = (metadata: unknown): boolean | undefined => {
+  if (typeof metadata !== "object" || metadata === null || !("dispatched" in metadata)) {
+    return undefined;
+  }
+  return typeof metadata.dispatched === "boolean" ? metadata.dispatched : undefined;
+};
+
+const metadataResult = (metadata: unknown): string | undefined => {
+  if (typeof metadata !== "object" || metadata === null || !("result" in metadata)) {
+    return undefined;
+  }
+  return typeof metadata.result === "string" ? metadata.result : undefined;
+};
+
+const metadataReason = (metadata: unknown): string | undefined => {
+  if (typeof metadata !== "object" || metadata === null || !("reason" in metadata)) {
+    return undefined;
+  }
+  return typeof metadata.reason === "string" ? metadata.reason : undefined;
+};
+
 describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", () => {
   // -------------------------------------------------------------------------
   // STAGE 0 — T17-AC8/AC9: provenance + owned isolation + diagnostics
@@ -156,32 +184,32 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
     // isolation postconditions (idempotent dispose, removed temp root,
     // restored env, unchanged user Pi home).
     // Owned isolation: every path the server may write lives under one
-      // fresh temp root; the loopback listener bound an ephemeral port.
-      expect(harness.port).toBeGreaterThan(0);
-      expect(harness.port).not.toBe(3000);
-      expect(harness.port).not.toBe(8080);
-      expect(harness.origin).toBe(`http://127.0.0.1:${harness.port}`);
-      for (const ownedPath of [
-        harness.rootDir,
-        harness.homeDir,
-        harness.workspaceDir,
-        harness.dbPath,
-        harness.parentAgentDir,
-        harness.childAgentDir,
-      ]) {
-        expect(ownedPath.startsWith(harness.rootDir)).toBe(true);
-        expect(ownedPath.startsWith(await harness.userHome())).toBe(false);
-      }
-      expect(harness.dbPath.endsWith(".sqlite")).toBe(true);
-      // The parent agent dir is wired through the PUBLIC settings seam.
-      const settings = await harness.client.getServerSettings();
-      expect(settings.providers.pi?.agentDir).toBe(harness.parentAgentDir);
-      // Stable stage diagnostics: every operation failure carries the
-      // harness operation name.
-      expect(harness.lastOperationDiagnostics()).toEqual([]);
-      // The deterministic loopback model endpoint is owned by the harness
-      // and has served nothing yet.
-      expect(harness.modelServer.requestCount()).toBe(0);
+    // fresh temp root; the loopback listener bound an ephemeral port.
+    expect(harness.port).toBeGreaterThan(0);
+    expect(harness.port).not.toBe(3000);
+    expect(harness.port).not.toBe(8080);
+    expect(harness.origin).toBe(`http://127.0.0.1:${harness.port}`);
+    for (const ownedPath of [
+      harness.rootDir,
+      harness.homeDir,
+      harness.workspaceDir,
+      harness.dbPath,
+      harness.parentAgentDir,
+      harness.childAgentDir,
+    ]) {
+      expect(ownedPath.startsWith(harness.rootDir)).toBe(true);
+      expect(ownedPath.startsWith(await harness.userHome())).toBe(false);
+    }
+    expect(harness.dbPath.endsWith(".sqlite")).toBe(true);
+    // The parent agent dir is wired through the PUBLIC settings seam.
+    const settings = await harness.client.getServerSettings();
+    expect(settings.providers.pi?.agentDir).toBe(harness.parentAgentDir);
+    // Stable stage diagnostics: every operation failure carries the
+    // harness operation name.
+    expect(harness.lastOperationDiagnostics()).toEqual([]);
+    // The deterministic loopback model endpoint is owned by the harness
+    // and has served nothing yet.
+    expect(harness.modelServer.requestCount()).toBe(0);
   }, 120_000);
   // -----------------------------------------------------------------------
   // STAGE 1 — T17-AC1: managed execution started through the production
@@ -255,9 +283,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
     // live parent session).
     const admission = await waitFor(
       () =>
-        harness
-          .observedAdmissions()
-          .find((event) => String(event.threadId) === String(threadId)),
+        harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
       (value) => value !== undefined && value.result.status !== "rejected",
       90_000,
       "managed admission",
@@ -361,9 +387,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
 
     const admission = await waitFor(
       () =>
-        harness
-          .observedAdmissions()
-          .find((event) => String(event.threadId) === String(threadId)),
+        harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
       (value) => value !== undefined && value.result.status !== "rejected",
       90_000,
       "slow managed admission",
@@ -388,8 +412,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       attachmentMode: "foreground",
       foregroundWaitMs: waitMs,
     });
-    const attachmentMs =
-      Date.parse(detached.occurredAt) - Date.parse(started.occurredAt);
+    const attachmentMs = Date.parse(detached.occurredAt) - Date.parse(started.occurredAt);
     process.stdout.write(
       `T17-AC2 detach envelope: attachment=${attachmentMs}ms budget=${waitMs}ms envelope=${waitMs + 500}ms\n`,
     );
@@ -429,9 +452,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       expect(freshCardRunning.cancellationScope).toBe("parent_turn");
       // The fresh snapshot is contract-valid and carries the hydration
       // payload the web store normalizes (captured for the web seam test).
-      process.stdout.write(
-        `T17-AC2 reconnect running card: ${JSON.stringify(freshCardRunning)}\n`,
-      );
+      process.stdout.write(`T17-AC2 reconnect running card: ${JSON.stringify(freshCardRunning)}\n`);
 
       // Bounded/latest progress and heartbeat land as the slow child's first
       // turn streams; the reconnected client observes the coalesced card
@@ -495,7 +516,6 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
     for (const sequence of sequences.slice(3)) {
       expect(sequence).toBe(40);
     }
-
   }, 180_000);
 
   // -----------------------------------------------------------------------
@@ -574,11 +594,10 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       expect(strippedCapability.missingCapabilities).toContain("bounded-foreground-attachment");
       await waitFor(
         () =>
-          harness
-            .modelServer.requests()
+          harness.modelServer
+            .requests()
             .filter(
-              (request) =>
-                request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
+              (request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
             ).length,
         (count) => count !== undefined && count >= 1,
         30_000,
@@ -651,6 +670,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         `${stage} failed: ${error instanceof Error ? error.message : String(error)}; ` +
           `diagnostics=${JSON.stringify(harness.lastOperationDiagnostics())}; ` +
           `modelRequests=${JSON.stringify(harness.modelServer.requests())}`,
+        { cause: error },
       );
     } finally {
       await client.close();
@@ -710,9 +730,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
 
       const admission = await waitFor(
         () =>
-          harness
-            .observedAdmissions()
-            .find((event) => String(event.threadId) === String(threadId)),
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
         (value) => value !== undefined && value.result.status !== "rejected",
         90_000,
         `${stage} managed admission`,
@@ -1022,8 +1040,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
             .observedAdmissions()
             .find(
               (event) =>
-                String(event.threadId) === String(threadId) &&
-                event.result.status !== "rejected",
+                String(event.threadId) === String(threadId) && event.result.status !== "rejected",
             ),
         (event) => event !== undefined,
         90_000,
@@ -1057,7 +1074,10 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         120_000,
         `${stage} two managed admissions`,
       );
-      const executionIds = [firstAdmission, ...admissions.filter((event) => event !== firstAdmission)]
+      const executionIds = [
+        firstAdmission,
+        ...admissions.filter((event) => event !== firstAdmission),
+      ]
         .slice(0, 2)
         .map((event) => event.result.executionId);
       expect(new Set(executionIds).size).toBe(2);
@@ -1111,7 +1131,9 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         `${stage} acknowledged completion batch`,
       );
       expect(batch.membership).toHaveLength(2);
-      expect(new Set(batch.membership)).toEqual(new Set(outboxEntries.map((entry) => entry.outboxId)));
+      expect(new Set(batch.membership)).toEqual(
+        new Set(outboxEntries.map((entry) => entry.outboxId)),
+      );
       expect(batch.acceptedReceiptSequence).toBeGreaterThan(0);
 
       const replayed = await waitFor(
@@ -1171,6 +1193,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       throw new Error(
         `${stage} failed: ${error instanceof Error ? error.message : String(error)}; ` +
           `modelRequests=${JSON.stringify(harness.modelServer.requests())}`,
+        { cause: error },
       );
     } finally {
       await stageClient.close();
@@ -1235,9 +1258,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
 
       const admission = await waitFor(
         () =>
-          harness
-            .observedAdmissions()
-            .find((event) => String(event.threadId) === String(threadId)),
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
         (value) => value !== undefined && value.result.status !== "rejected",
         90_000,
         `${stage} managed admission`,
@@ -1248,12 +1269,11 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       // baseline, but the child itself remains alive on the slow model.
       await waitFor(
         () =>
-          harness
-            .modelServer.requests()
+          harness.modelServer
+            .requests()
             .filter(
               (request) =>
-                request.model === DETERMINISTIC_RESTART_DRIVER_MODEL_ID &&
-                request.hasAgentTool,
+                request.model === DETERMINISTIC_RESTART_DRIVER_MODEL_ID && request.hasAgentTool,
             ),
         (requests) =>
           requests.length >= 2 &&
@@ -1266,10 +1286,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       const activeBeforeRestart = await waitFor(
         () => harness.bridgeActiveExecutions(String(threadId)),
         (active) =>
-          active.some(
-            (candidate) =>
-              candidate.executionId === executionId && candidate.isRunning,
-          ),
+          active.some((candidate) => candidate.executionId === executionId && candidate.isRunning),
         30_000,
         `${stage} real bridge active child before restart`,
       );
@@ -1294,7 +1311,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
                 attemptId: event.attemptId,
                 generation: event.generation,
               })),
-          )}`,
+            )}`,
         );
       }
       const nonterminalRow = admittedRow;
@@ -1315,49 +1332,47 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       expect(runningJournal.some((event) => event.sequence === 40)).toBe(false);
 
       const modelRequestCountBeforeRestart = harness.modelServer.requestCount();
-      const delegationCountBeforeRestart = harness
-        .modelServer.requests()
+      const delegationCountBeforeRestart = harness.modelServer
+        .requests()
         .filter((request) => request.delegated).length;
-      const admissionCountBeforeRestart = harness.observedAdmissions().filter(
-        (event) => String(event.threadId) === String(threadId),
-      ).length;
-        const completionOutboxBeforeRestart = await harness.durable.getCompletionOutboxEntry(
-          executionId,
-        );
-        const stableReplayBeforeRestart = await waitFor(
-          async () => {
-            // A background Agent return can publish its parent assistant
-            // finalize/completion events just after the Agent execution has
-            // returned. Three back-to-back reads only prove RPC consistency,
-            // not that the event pump is quiet; checkpoint only after two
-            // real quiet-window samples so a pre-restart native message is
-            // never misclassified as a post-restart parent effect.
-            const snapshots = [
-              await harness.client.replayEvents({
-                threadId,
-                fromSequenceExclusive: 0,
-              }),
-            ];
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            snapshots.push(
-              await harness.client.replayEvents({
-                threadId,
-                fromSequenceExclusive: 0,
-              }),
-            );
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            snapshots.push(
-              await harness.client.replayEvents({
-                threadId,
-                fromSequenceExclusive: 0,
-              }),
-            );
-            return snapshots.map((events) => ({
-              events,
-              headSequence: events.reduce((max, event) => Math.max(max, event.sequence), 0),
-            parentMessageSentCount: events.filter(
-              (event) => event.type === "thread.message-sent",
-            ).length,
+      const admissionCountBeforeRestart = harness
+        .observedAdmissions()
+        .filter((event) => String(event.threadId) === String(threadId)).length;
+      const completionOutboxBeforeRestart =
+        await harness.durable.getCompletionOutboxEntry(executionId);
+      const stableReplayBeforeRestart = await waitFor(
+        async () => {
+          // A background Agent return can publish its parent assistant
+          // finalize/completion events just after the Agent execution has
+          // returned. Three back-to-back reads only prove RPC consistency,
+          // not that the event pump is quiet; checkpoint only after two
+          // real quiet-window samples so a pre-restart native message is
+          // never misclassified as a post-restart parent effect.
+          const snapshots = [
+            await harness.client.replayEvents({
+              threadId,
+              fromSequenceExclusive: 0,
+            }),
+          ];
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          snapshots.push(
+            await harness.client.replayEvents({
+              threadId,
+              fromSequenceExclusive: 0,
+            }),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          snapshots.push(
+            await harness.client.replayEvents({
+              threadId,
+              fromSequenceExclusive: 0,
+            }),
+          );
+          return snapshots.map((events) => ({
+            events,
+            headSequence: events.reduce((max, event) => Math.max(max, event.sequence), 0),
+            parentMessageSentCount: events.filter((event) => event.type === "thread.message-sent")
+              .length,
           }));
         },
         (snapshots) =>
@@ -1369,37 +1384,38 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           snapshots[2]?.parentMessageSentCount === snapshots[1]?.parentMessageSentCount,
         30_000,
         `${stage} replayEvents quiescence before restart`,
-        );
-        const replayedBeforeRestart = stableReplayBeforeRestart[stableReplayBeforeRestart.length - 1]!;
-        const followUpsBeforeRestart = replayedBeforeRestart.parentMessageSentCount;
+      );
+      const replayedBeforeRestart =
+        stableReplayBeforeRestart[stableReplayBeforeRestart.length - 1]!;
+      const followUpsBeforeRestart = replayedBeforeRestart.parentMessageSentCount;
 
-        process.stdout.write(
+      process.stdout.write(
         `${stage} pre-restart counters: executionId=${executionId} attemptId=${nonterminalRow.attemptId} generation=${nonterminalRow.generation} modelRequests=${modelRequestCountBeforeRestart} delegations=${delegationCountBeforeRestart} admissions=${admissionCountBeforeRestart} outbox=${completionOutboxBeforeRestart ? 1 : 0} followUps=${followUpsBeforeRestart}\n`,
       );
 
       const restartRootDir = harness.rootDir;
       const restartDbPath = harness.dbPath;
       const sharedModelServer = harness.modelServer;
-        await harness.dispose({
-          preserveRootDir: true,
-          preserveModelServer: true,
-        });
-        // The old server is now fully stopped. Read the durable global event
-        // head only after shutdown so an old-instance event committed during
-        // disposal belongs to the pre-fresh-boot baseline, never to the fresh
-        // server's restart effect assertion below.
-        const closedDatabase = new DatabaseSync(restartDbPath, { readOnly: true });
-        let replayHeadAfterOldServerShutdown: number;
-        try {
-          const row = closedDatabase
-            .prepare("SELECT MAX(sequence) AS headSequence FROM orchestration_events")
-            .get() as { readonly headSequence: number | null } | null;
-          replayHeadAfterOldServerShutdown = row?.headSequence ?? 0;
-        } finally {
-          closedDatabase.close();
-        }
+      await harness.dispose({
+        preserveRootDir: true,
+        preserveModelServer: true,
+      });
+      // The old server is now fully stopped. Read the durable global event
+      // head only after shutdown so an old-instance event committed during
+      // disposal belongs to the pre-fresh-boot baseline, never to the fresh
+      // server's restart effect assertion below.
+      const closedDatabase = new DatabaseSync(restartDbPath, { readOnly: true });
+      let replayHeadAfterOldServerShutdown: number;
+      try {
+        const row = closedDatabase
+          .prepare("SELECT MAX(sequence) AS headSequence FROM orchestration_events")
+          .get() as { readonly headSequence: number | null } | null;
+        replayHeadAfterOldServerShutdown = row?.headSequence ?? 0;
+      } finally {
+        closedDatabase.close();
+      }
 
-        const freshHarness = await makeRealPiWsHarness({
+      const freshHarness = await makeRealPiWsHarness({
         foregroundWaitMs: 300,
         progressRateHz: 10,
         heartbeatIntervalMs: 1_000,
@@ -1439,18 +1455,17 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           const followUpsAfterRestart = replayedAfterRestart.filter(
             (event) => event.type === "thread.message-sent",
           ).length;
-            const newEventsAfterRestart = await freshClient.replayEvents({
-              threadId,
-              fromSequenceExclusive: replayHeadAfterOldServerShutdown,
-            });
+          const newEventsAfterRestart = await freshClient.replayEvents({
+            threadId,
+            fromSequenceExclusive: replayHeadAfterOldServerShutdown,
+          });
           const newParentEffectsAfterRestart = newEventsAfterRestart.filter(
             (event) => event.type === "thread.message-sent",
           );
-          const completionOutboxAfterRestart = await freshHarness.durable.getCompletionOutboxEntry(
-            executionId,
-          );
-          const delegationCountAfterRestart = freshHarness
-            .modelServer.requests()
+          const completionOutboxAfterRestart =
+            await freshHarness.durable.getCompletionOutboxEntry(executionId);
+          const delegationCountAfterRestart = freshHarness.modelServer
+            .requests()
             .filter((request) => request.delegated).length;
 
           process.stdout.write(
@@ -1471,9 +1486,9 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           expect(reconciledCard.generation).toBe(nonterminalCard.generation + 1);
           expect(delegationCountAfterRestart).toBe(delegationCountBeforeRestart);
           expect(
-            freshHarness.observedAdmissions().filter(
-              (event) => String(event.threadId) === String(threadId),
-            ).length,
+            freshHarness
+              .observedAdmissions()
+              .filter((event) => String(event.threadId) === String(threadId)).length,
           ).toBe(0);
           expect(
             newEventsAfterRestart.filter(
@@ -1512,6 +1527,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         `${stage} failed: ${error instanceof Error ? error.message : String(error)}; ` +
           `diagnostics=${JSON.stringify(harness.lastOperationDiagnostics())}; ` +
           `modelRequests=${JSON.stringify(harness.modelServer.requests())}`,
+        { cause: error },
       );
     }
   }, 240_000);
@@ -1578,16 +1594,16 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
 
       const admission = await waitFor(
         () =>
-          harness
-            .observedAdmissions()
-            .find((event) => String(event.threadId) === String(threadId)),
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
         (value) => value !== undefined && value.result.status !== "rejected",
         90_000,
         `${stage} managed admission`,
       );
       const executionId = admission.result.executionId;
       if (!executionId) {
-        throw new Error(`${stage} guard (${guardDiagnostic}): admission completed without an executionId`);
+        throw new Error(
+          `${stage} guard (${guardDiagnostic}): admission completed without an executionId`,
+        );
       }
 
       const durableBefore = await waitFor(
@@ -1689,30 +1705,6 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
             event.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC,
         ),
       ).toBe(true);
-      const metadataPhase = (metadata: unknown): string | undefined => {
-        if (typeof metadata !== "object" || metadata === null || !("phase" in metadata)) {
-          return undefined;
-        }
-        return typeof metadata.phase === "string" ? metadata.phase : undefined;
-      };
-      const metadataDispatched = (metadata: unknown): boolean | undefined => {
-        if (typeof metadata !== "object" || metadata === null || !("dispatched" in metadata)) {
-          return undefined;
-        }
-        return typeof metadata.dispatched === "boolean" ? metadata.dispatched : undefined;
-      };
-      const metadataResult = (metadata: unknown): string | undefined => {
-        if (typeof metadata !== "object" || metadata === null || !("result" in metadata)) {
-          return undefined;
-        }
-        return typeof metadata.result === "string" ? metadata.result : undefined;
-      };
-      const metadataReason = (metadata: unknown): string | undefined => {
-        if (typeof metadata !== "object" || metadata === null || !("reason" in metadata)) {
-          return undefined;
-        }
-        return typeof metadata.reason === "string" ? metadata.reason : undefined;
-      };
       const providerSessionStopDiagnostics = diagnostics.filter(
         (event) => event.stage === "provider_session_stop",
       );
@@ -1809,7 +1801,8 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         (providerSessionStopRow?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STOPPED_DIAGNOSTIC &&
           metadataResult(providerSessionStopRow?.metadata) === "stopped" &&
           metadataReason(teardownHandoffRow?.metadata) === "session_stopped") ||
-          (providerSessionStopRow?.diagnosticCode === PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC &&
+          (providerSessionStopRow?.diagnosticCode ===
+            PI_SUBAGENT_WATCHDOG_STAGE_TIMEOUT_DIAGNOSTIC &&
             (metadataResult(providerSessionStopRow?.metadata) === "timeout" ||
               metadataResult(providerSessionStopRow?.metadata) === "failed") &&
             metadataReason(teardownHandoffRow?.metadata) === "session_stop_timeout"),
@@ -1855,13 +1848,12 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       );
     } catch (error) {
       const failure =
-        error instanceof Error
-          ? `${error.message}\n${error.stack ?? ""}`
-          : String(error);
+        error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
       throw new Error(
         `${stage} failed (${guardDiagnostic}): ${failure}; ` +
           `diagnostics=${JSON.stringify(harness.lastOperationDiagnostics())}; ` +
           `modelRequests=${JSON.stringify(harness.modelServer.requests())}`,
+        { cause: error },
       );
     } finally {
       await stageClient.close();
@@ -1891,7 +1883,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
   // in, capture the resulting record, and never report it as CI evidence.
   // -----------------------------------------------------------------------
   it.skipIf(process.env.SYNARA_T17_MANUAL_TEARDOWN !== "1")(
-      "MANUAL T17-AC6: a child-owned Pi Bash root and descendant ignore TERM, the production owner registry/sweep proves both exit, and band 76 fences the generation",
+    "MANUAL T17-AC6: a child-owned Pi Bash root and descendant ignore TERM, the production owner registry/sweep proves both exit, and band 76 fences the generation",
     async () => {
       const stage = "T17-AC6 manual teardown";
       const harness = await makeRealPiWsHarness({
@@ -1903,24 +1895,24 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       const client = await harness.connectNewClient();
 
       try {
-          const projectId = ProjectId.makeUnsafe("t17-manual-proj");
-          const threadId = ThreadId.makeUnsafe("t17-manual-thread");
-          const pidFile = path.join(harness.workspaceDir, "t17-owned-bash.pid");
-          const descendantPidFile = path.join(harness.workspaceDir, "t17-owned-bash-descendant.pid");
-          const termEvidenceFile = path.join(harness.workspaceDir, "t17-owned-bash-term.log");
-          const escapedPidFile = JSON.stringify(pidFile);
-          const escapedDescendantPidFile = JSON.stringify(descendantPidFile);
-          const escapedTermEvidenceFile = JSON.stringify(termEvidenceFile);
-          harness.modelServer.setManualTeardownCommand(
-            // `BASHPID` is absent on the macOS Bash 3 runtime. The root's
-            // `$$` and the parent shell's `$!` for the backgrounded
-            // descendant Bash are stable concrete PIDs on every supported
-            // Bash version.
-            `bash -c 'trap "echo root-term >> \\"$3\\"" TERM; ` +
-              `(trap "echo descendant-term >> \\"$3\\"" TERM; ` +
-              `while :; do sleep 300 & wait "$!"; done) & child=$!; ` +
-              `echo "$$" > "$1"; echo "$child" > "$2"; wait "$child"' bash ` +
-              `${escapedPidFile} ${escapedDescendantPidFile} ${escapedTermEvidenceFile}`,
+        const projectId = ProjectId.makeUnsafe("t17-manual-proj");
+        const threadId = ThreadId.makeUnsafe("t17-manual-thread");
+        const pidFile = path.join(harness.workspaceDir, "t17-owned-bash.pid");
+        const descendantPidFile = path.join(harness.workspaceDir, "t17-owned-bash-descendant.pid");
+        const termEvidenceFile = path.join(harness.workspaceDir, "t17-owned-bash-term.log");
+        const escapedPidFile = JSON.stringify(pidFile);
+        const escapedDescendantPidFile = JSON.stringify(descendantPidFile);
+        const escapedTermEvidenceFile = JSON.stringify(termEvidenceFile);
+        harness.modelServer.setManualTeardownCommand(
+          // `BASHPID` is absent on the macOS Bash 3 runtime. The root's
+          // `$$` and the parent shell's `$!` for the backgrounded
+          // descendant Bash are stable concrete PIDs on every supported
+          // Bash version.
+          `bash -c 'trap "echo root-term >> \\"$3\\"" TERM; ` +
+            `(trap "echo descendant-term >> \\"$3\\"" TERM; ` +
+            `while :; do sleep 300 & wait "$!"; done) & child=$!; ` +
+            `echo "$$" > "$1"; echo "$child" > "$2"; wait "$child"' bash ` +
+            `${escapedPidFile} ${escapedDescendantPidFile} ${escapedTermEvidenceFile}`,
         );
         harness.writeSubagentModelPreference(
           `synara-local-echo/${DETERMINISTIC_MANUAL_TEARDOWN_CHILD_MODEL}`,
@@ -1975,37 +1967,39 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         const activeBefore = await waitFor(
           () => harness.bridgeActiveExecutions(String(threadId)),
           (active) =>
-            active.some((candidate) => candidate.executionId === executionId && candidate.isRunning),
+            active.some(
+              (candidate) => candidate.executionId === executionId && candidate.isRunning,
+            ),
           30_000,
           `${stage} real active child`,
         );
         expect(activeBefore.some((candidate) => candidate.executionId === executionId)).toBe(true);
-          await waitFor(
-            () => existsSync(pidFile),
-            (present) => present === true,
-            30_000,
-            `${stage} owned bash PID file`,
-          );
-          await waitFor(
-            () => existsSync(descendantPidFile),
-            (present) => present === true,
-            30_000,
-            `${stage} owned Bash descendant PID file`,
-          );
-          const rootPid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
-          const descendantPid = Number.parseInt(readFileSync(descendantPidFile, "utf8").trim(), 10);
-          expect(Number.isSafeInteger(rootPid) && rootPid > 0).toBe(true);
-          expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true);
-          expect(() => process.kill(rootPid, 0)).not.toThrow();
-          expect(() => process.kill(descendantPid, 0)).not.toThrow();
-          expect(
-            harness.observedSupervisorSpawnPids().includes(rootPid),
-            `${stage} requires the real child Bash root PID to be absent from parent-supervisor spawn observations before teardown`,
-          ).toBe(false);
-          expect(
-            harness.observedSupervisorSpawnPids().includes(descendantPid),
-            `${stage} requires the real child Bash descendant PID to be absent from parent-supervisor spawn observations before teardown`,
-          ).toBe(false);
+        await waitFor(
+          () => existsSync(pidFile),
+          (present) => present === true,
+          30_000,
+          `${stage} owned bash PID file`,
+        );
+        await waitFor(
+          () => existsSync(descendantPidFile),
+          (present) => present === true,
+          30_000,
+          `${stage} owned Bash descendant PID file`,
+        );
+        const rootPid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+        const descendantPid = Number.parseInt(readFileSync(descendantPidFile, "utf8").trim(), 10);
+        expect(Number.isSafeInteger(rootPid) && rootPid > 0).toBe(true);
+        expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true);
+        expect(() => process.kill(rootPid, 0)).not.toThrow();
+        expect(() => process.kill(descendantPid, 0)).not.toThrow();
+        expect(
+          harness.observedSupervisorSpawnPids().includes(rootPid),
+          `${stage} requires the real child Bash root PID to be absent from parent-supervisor spawn observations before teardown`,
+        ).toBe(false);
+        expect(
+          harness.observedSupervisorSpawnPids().includes(descendantPid),
+          `${stage} requires the real child Bash descendant PID to be absent from parent-supervisor spawn observations before teardown`,
+        ).toBe(false);
 
         const before = await waitFor(
           () => harness.durable.getById(executionId),
@@ -2024,84 +2018,85 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
           30_000,
           `${stage} watchdog handoff`,
         );
-        expect(handoff.some((event) => event.sequence === 75 || event.sequence === 76)).toBe(
-          false,
-        );
+        expect(handoff.some((event) => event.sequence === 75 || event.sequence === 76)).toBe(false);
         expect(handoff.find((event) => event.sequence === 74)?.metadata).toMatchObject({
           phase: "manual_owned_teardown_setup",
         });
 
-          const processState = (pid: number) => {
-            try {
-              return execFileSync("ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,stat=,command="], {
+        const processState = (pid: number) => {
+          try {
+            return execFileSync(
+              "ps",
+              ["-p", String(pid), "-o", "pid=,ppid=,pgid=,stat=,command="],
+              {
                 encoding: "utf8",
                 stdio: ["ignore", "pipe", "ignore"],
-              }).trim();
-            } catch {
-              return "absent";
+              },
+            ).trim();
+          } catch {
+            return "absent";
+          }
+        };
+        const isCurrentProvenRow = (
+          events: Awaited<ReturnType<typeof harness.durable.listJournalEvents>>,
+        ) =>
+          events.some(
+            (event) =>
+              event.sequence === 76 &&
+              event.attemptId === before.attemptId &&
+              event.generation === before.generation,
+          );
+        const monitorRootAndDescendantUntilAbsence = async () => {
+          const deadline = Date.now() + 75_000;
+          let rootState = processState(rootPid);
+          let descendantState = processState(descendantPid);
+          for (;;) {
+            const events = await harness.durable.listJournalEvents(executionId);
+            const hasProvenRow = isCurrentProvenRow(events);
+            rootState = processState(rootPid);
+            descendantState = processState(descendantPid);
+            if (hasProvenRow && (rootState !== "absent" || descendantState !== "absent")) {
+              throw new Error(
+                `${stage} band 76 appeared while an exact owned identity was still live; ` +
+                  `root=${JSON.stringify(rootState)} descendant=${JSON.stringify(descendantState)}`,
+              );
             }
-          };
-          const isCurrentProvenRow = (events: Awaited<ReturnType<typeof harness.durable.listJournalEvents>>) =>
-            events.some(
-              (event) =>
-                event.sequence === 76 &&
-                event.attemptId === before.attemptId &&
-                event.generation === before.generation,
-            );
-          const monitorRootAndDescendantUntilAbsence = async () => {
-            const deadline = Date.now() + 75_000;
-            let rootState = processState(rootPid);
-            let descendantState = processState(descendantPid);
-            for (;;) {
-              const events = await harness.durable.listJournalEvents(executionId);
-              const hasProvenRow = isCurrentProvenRow(events);
-              rootState = processState(rootPid);
-              descendantState = processState(descendantPid);
-              if (
-                hasProvenRow &&
-                (rootState !== "absent" || descendantState !== "absent")
-              ) {
-                throw new Error(
-                  `${stage} band 76 appeared while an exact owned identity was still live; ` +
-                    `root=${JSON.stringify(rootState)} descendant=${JSON.stringify(descendantState)}`,
-                );
-              }
-              if (rootState === "absent" && descendantState === "absent") {
-                return { rootState, descendantState };
-              }
-              if (Date.now() >= deadline) {
-                throw new Error(
-                  `${stage} did not observe root-and-descendant absence during production teardown; ` +
-                    `root=${JSON.stringify(rootState)} descendant=${JSON.stringify(descendantState)}`,
-                );
-              }
-              await new Promise((resolve) => setTimeout(resolve, 5));
+            if (rootState === "absent" && descendantState === "absent") {
+              return { rootState, descendantState };
             }
-          };
+            if (Date.now() >= deadline) {
+              throw new Error(
+                `${stage} did not observe root-and-descendant absence during production teardown; ` +
+                  `root=${JSON.stringify(rootState)} descendant=${JSON.stringify(descendantState)}`,
+              );
+            }
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+        };
 
-          // No direct coordinator/bridge seam is invoked here. The production
-          // PiAdapter's retained owner registry and periodic teardown sweep
-          // must discover this durable band-74 handoff and resolve the exact
-          // opaque child owner itself. The concurrent monitor rejects any
-          // band-76/fence observable while either exact owned identity remains
-          // live; Alfie's supervisor tests separately prove the internal
-          // root-and-captured-descendant liveness check before it returns
-          // `proven`.
-          const [settled, absence] = await Promise.all([
-            waitFor(
-              () => harness.durable.listJournalEvents(executionId),
-              isCurrentProvenRow,
-              75_000,
-              `${stage} production registry/sweep proven teardown row`,
-            ),
-            monitorRootAndDescendantUntilAbsence(),
-          ]);
-          expect(absence).toEqual({ rootState: "absent", descendantState: "absent" });
-          expect(settled.some((event) => event.sequence === 75)).toBe(true);
-          expect(settled.some((event) => event.sequence === 76)).toBe(true);
-          const termEvidence = readFileSync(termEvidenceFile, "utf8");
-          expect(termEvidence).toContain("root-term");
-          expect(termEvidence).toContain("descendant-term");
+        // No direct coordinator/bridge seam is invoked here. The production
+        // PiAdapter's retained owner registry and periodic teardown sweep
+        // must discover this durable band-74 handoff and resolve the exact
+        // opaque child owner itself. The concurrent monitor rejects any
+        // band-76/fence observable while either exact owned identity remains
+        // live; Alfie's supervisor tests separately prove the internal
+        // root-and-captured-descendant liveness check before it returns
+        // `proven`.
+        const [settled, absence] = await Promise.all([
+          waitFor(
+            () => harness.durable.listJournalEvents(executionId),
+            isCurrentProvenRow,
+            75_000,
+            `${stage} production registry/sweep proven teardown row`,
+          ),
+          monitorRootAndDescendantUntilAbsence(),
+        ]);
+        expect(absence).toEqual({ rootState: "absent", descendantState: "absent" });
+        expect(settled.some((event) => event.sequence === 75)).toBe(true);
+        expect(settled.some((event) => event.sequence === 76)).toBe(true);
+        const termEvidence = readFileSync(termEvidenceFile, "utf8");
+        expect(termEvidence).toContain("root-term");
+        expect(termEvidence).toContain("descendant-term");
 
         const after = await harness.durable.getById(executionId);
         expect(after?.observedState).toBe("cancelled");
@@ -2113,12 +2108,12 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         expect(card?.observedState).toBe("cancelled");
         expect(card?.generation).toBe(before.generation + 1);
 
-          process.stdout.write(
-            `${stage} RUN_RECORD executionId=${executionId} attemptId=${before.attemptId} ` +
-              `rootPid=${rootPid} descendantPid=${descendantPid} termEvidence=root,descendant ` +
-              `noBand76WhileLive=true harnessRoot=${harness.rootDir} bands=75,76 ` +
-              `generation=${before.generation}->${after?.generation}\n`,
-          );
+        process.stdout.write(
+          `${stage} RUN_RECORD executionId=${executionId} attemptId=${before.attemptId} ` +
+            `rootPid=${rootPid} descendantPid=${descendantPid} termEvidence=root,descendant ` +
+            `noBand76WhileLive=true harnessRoot=${harness.rootDir} bands=75,76 ` +
+            `generation=${before.generation}->${after?.generation}\n`,
+        );
       } finally {
         await client.close();
         await harness.dispose();

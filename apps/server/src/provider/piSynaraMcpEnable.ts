@@ -123,12 +123,12 @@ export async function enablePiSynaraMcpSession(
   // or a turn starts (the natural boundary then resolves it). The activation
   // starts in a microtask, so the pump must not gate on the coordinator state
   // it will observe at startup.
-  let settled = false;
+  const pumpState = { settled: false };
   const boundaryPump =
     input.activeTurnId !== undefined
       ? Promise.resolve()
       : (async () => {
-          while (!settled) {
+          while (!pumpState.settled) {
             try {
               if (input.isStillIdle?.() ?? true) {
                 await input.adapter.notifySafeBoundary();
@@ -158,7 +158,7 @@ export async function enablePiSynaraMcpSession(
     }
     throw cause;
   } finally {
-    settled = true;
+    pumpState.settled = true;
     await boundaryPump;
   }
 }

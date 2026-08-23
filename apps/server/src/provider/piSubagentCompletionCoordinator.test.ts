@@ -139,7 +139,7 @@ const makeVirtualClock = () => {
     },
     advance: (ms: number) => {
       current += ms;
-      for (const timer of [...timers]) {
+      for (const timer of timers.slice()) {
         if (!timer.cancelled && timer.at <= current) {
           timer.cancelled = true;
           timer.callback();

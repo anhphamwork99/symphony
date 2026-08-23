@@ -28,7 +28,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   symlinkSync,
@@ -68,6 +67,7 @@ import {
   WsDeviceRpcGroup,
   WsFeatureRpcGroup,
 } from "@synara/contracts";
+
 import { Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
@@ -104,12 +104,8 @@ import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/Prov
 import { ProviderUnsupportedError } from "../provider/Errors.ts";
 import { ProviderDiscoveryServiceLive } from "../provider/Layers/ProviderDiscoveryService.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
-import {
-  makePiAdapterLive,
-} from "../provider/Layers/PiAdapter.ts";
-import {
-  PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
-} from "../provider/piSubagentDesktopArtifactGate.ts";
+import { makePiAdapterLive } from "../provider/Layers/PiAdapter.ts";
+import { PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT } from "../provider/piSubagentDesktopArtifactGate.ts";
 import { piSubagentDesktopManagedExtensionDir } from "../provider/piSubagentManagedRuntimeBinding.ts";
 import { makeDurableProviderServiceLive } from "../provider/Layers/ProviderService.ts";
 import { PiAdapter } from "../provider/Services/PiAdapter.ts";
@@ -131,6 +127,10 @@ import { websocketRpcRouteLayer } from "../wsRpc.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 
+type ModelTool = { name?: string; function?: { name?: string } };
+
+const modelToolName = (tool: ModelTool): string | undefined => tool.name ?? tool.function?.name;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Provenance (local copy of the pinned-suite pattern; no test imports) ────
@@ -144,10 +144,7 @@ interface LocalProvenanceManifest {
 }
 
 function loadLocalProvenanceManifest(): LocalProvenanceManifest {
-  const manifestPath = path.join(
-    __dirname,
-    "./test-fixtures/piSubagentExtensionProvenance.json",
-  );
+  const manifestPath = path.join(__dirname, "./test-fixtures/piSubagentExtensionProvenance.json");
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
 
@@ -212,7 +209,7 @@ function snapshotUserPiHomeState(): UserPiHomeSnapshot {
     }
     let names: string[];
     try {
-      names = readdirSync(dir).sort();
+      names = readdirSync(dir).toSorted();
     } catch {
       hash.update(`missing:${path.relative(piHome, dir)}`);
       return;
@@ -360,13 +357,12 @@ export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
         body = null;
       }
       const requestedModel = typeof body?.model === "string" ? body.model : "";
-      const tools: ReadonlyArray<{ name?: string; function?: { name?: string } }> =
-        Array.isArray(body?.tools) ? body.tools : [];
-      const toolName = (tool: { name?: string; function?: { name?: string } }) =>
-        tool?.name ?? tool?.function?.name;
-      const hasAgentTool = tools.some((tool) => toolName(tool) === "Agent");
-      const hasBashTool = tools.some((tool) => toolName(tool) === "bash");
-      const messages: ReadonlyArray<{ role?: string; content?: unknown }> = Array.isArray(body?.messages)
+      const tools: ReadonlyArray<ModelTool> = Array.isArray(body?.tools) ? body.tools : [];
+      const hasAgentTool = tools.some((tool) => modelToolName(tool) === "Agent");
+      const hasBashTool = tools.some((tool) => modelToolName(tool) === "bash");
+      const messages: ReadonlyArray<{ role?: string; content?: unknown }> = Array.isArray(
+        body?.messages,
+      )
         ? body.messages
         : [];
       // Delegate exactly once per conversation: only the request that has
@@ -485,8 +481,7 @@ export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
           delegatedToolCallCount += 1;
           const toolArgs = JSON.stringify({
             task: "Run the integrated real-Pi acceptance delegation",
-            context:
-              "Deterministic loopback acceptance harness; the child must simply complete.",
+            context: "Deterministic loopback acceptance harness; the child must simply complete.",
             link_references: "None",
             expected_outcome: "A completed child run with a text result.",
             subagent_type: "researcher",
@@ -668,7 +663,12 @@ export function writeStrippedCapabilityAgentDir(tempAgentDir: string, baseUrl: s
   const targetExtensionDir = path.join(tempAgentDir, "extensions", "pi-subagents");
   mkdirSync(targetExtensionDir, { recursive: true });
   for (const entry of readdirSync(versionedDir)) {
-    if (entry === "node_modules" || entry === "dist" || entry === "test" || entry === ".gitignore") {
+    if (
+      entry === "node_modules" ||
+      entry === "dist" ||
+      entry === "test" ||
+      entry === ".gitignore"
+    ) {
       continue;
     }
     const from = path.join(versionedDir, entry);
@@ -681,7 +681,11 @@ export function writeStrippedCapabilityAgentDir(tempAgentDir: string, baseUrl: s
       fs.copyFileSync(from, to);
     }
   }
-  symlinkSync(path.join(versionedDir, "node_modules"), path.join(targetExtensionDir, "node_modules"), "dir");
+  symlinkSync(
+    path.join(versionedDir, "node_modules"),
+    path.join(targetExtensionDir, "node_modules"),
+    "dir",
+  );
 
   const indexPath = path.join(targetExtensionDir, "src", "index.ts");
   const source = readFileSync(indexPath, "utf8");
@@ -943,11 +947,9 @@ export interface RealPiWsHarness {
   readonly abortPiTurn: (threadId: string) => Promise<void>;
   /** Actual provider-session stop for the owned Pi session. */
   readonly stopPiSession: (threadId: string) => Promise<"stopped">;
-    /** Durable-truth reads through the LIVE repository the server writes. */
+  /** Durable-truth reads through the LIVE repository the server writes. */
   readonly durable: {
-    readonly getById: (
-      executionId: string,
-    ) => Promise<
+    readonly getById: (executionId: string) => Promise<
       | {
           readonly executionId: string;
           readonly attemptId: string;
@@ -959,9 +961,7 @@ export interface RealPiWsHarness {
         }
       | undefined
     >;
-    readonly listJournalEvents: (
-      executionId: string,
-    ) => Promise<
+    readonly listJournalEvents: (executionId: string) => Promise<
       ReadonlyArray<{
         readonly sequence: number;
         readonly state: string;
@@ -972,9 +972,7 @@ export interface RealPiWsHarness {
         readonly metadata: Record<string, unknown> | null;
       }>
     >;
-    readonly getObservation: (
-      executionId: string,
-    ) => Promise<
+    readonly getObservation: (executionId: string) => Promise<
       | {
           readonly lastProgressJson: string | null;
           readonly lastProgressAt: string | null;
@@ -992,9 +990,7 @@ export interface RealPiWsHarness {
      * against an actual owned bash process. It is not watchdog evidence.
      */
     readonly recordManualTeardownHandoff: (executionId: string) => Promise<void>;
-    readonly getCompletionOutboxEntry: (
-      executionId: string,
-    ) => Promise<
+    readonly getCompletionOutboxEntry: (executionId: string) => Promise<
       | {
           readonly outboxId: string;
           readonly executionId: string;
@@ -1003,9 +999,7 @@ export interface RealPiWsHarness {
         }
       | undefined
     >;
-    readonly getCompletionDispatchBatch: (
-      batchId: string,
-    ) => Promise<
+    readonly getCompletionDispatchBatch: (batchId: string) => Promise<
       | {
           readonly batchId: string;
           readonly parentCommandId: string;
@@ -1217,20 +1211,19 @@ export async function makeRealPiWsHarness(
   // the runtime builds below), so validation semantics are unchanged — no
   // second registry, no bypassed revocation/expiry checks.
   let liveAuthority: McpSessionAuthorityShape | undefined;
-  const authorityForwarder: McpSessionAuthorityShape = new Proxy(
-    {} as McpSessionAuthorityShape,
-    {
-      get(_target, property) {
-        if (liveAuthority === undefined) {
-          throw new Error(
-            "RealPiWsHarness MCP session authority forwarder used before the runtime bound the live registry.",
-          );
-        }
-        const value = (liveAuthority as unknown as Record<string | symbol, unknown>)[property];
-        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(liveAuthority) : value;
-      },
+  const authorityForwarder: McpSessionAuthorityShape = new Proxy({} as McpSessionAuthorityShape, {
+    get(_target, property) {
+      if (liveAuthority === undefined) {
+        throw new Error(
+          "RealPiWsHarness MCP session authority forwarder used before the runtime bound the live registry.",
+        );
+      }
+      const value = (liveAuthority as unknown as Record<string | symbol, unknown>)[property];
+      return typeof value === "function"
+        ? (value as (...args: unknown[]) => unknown).bind(liveAuthority)
+        : value;
     },
-  );
+  });
 
   const piAdapterLayer = makePiAdapterLive({
     completionDispatchBridge,
@@ -1551,7 +1544,9 @@ export async function makeRealPiWsHarness(
           const repo = yield* PiSubagentExecutionRepository;
           const aggregate = yield* repo.getById(executionId);
           if (Option.isNone(aggregate)) {
-            throw new Error(`Execution '${executionId}' is unavailable for manual teardown handoff.`);
+            throw new Error(
+              `Execution '${executionId}' is unavailable for manual teardown handoff.`,
+            );
           }
           const value = aggregate.value;
           yield* repo.recordWatchdogStageEvent({
@@ -1562,7 +1557,8 @@ export async function makeRealPiWsHarness(
             state: value.observedState,
             occurredAt: new Date().toISOString(),
             diagnosticCode: "pi_subagent_watchdog_cleanup_uncertain",
-            diagnosticMessage: "Manual owned-teardown setup after separately proven watchdog handoff.",
+            diagnosticMessage:
+              "Manual owned-teardown setup after separately proven watchdog handoff.",
             metadata: { phase: "manual_owned_teardown_setup" },
           });
         }),
@@ -1708,7 +1704,9 @@ export async function makeRealPiWsHarness(
     },
     bridgeForThread: (threadId) => extractPiSubagentBridge(observedSessionObjects.get(threadId)),
     abortPiTurn: async (threadId) => {
-      const session = observedSessionObjects.get(threadId) as { abort?: () => Promise<void> } | undefined;
+      const session = observedSessionObjects.get(threadId) as
+        | { abort?: () => Promise<void> }
+        | undefined;
       if (typeof session?.abort !== "function") {
         throw new RealPiHarnessError(
           `No live Pi session with abort() is bound to thread '${threadId}'.`,
@@ -1745,7 +1743,7 @@ export async function makeRealPiWsHarness(
       await runtime.runPromise(adapter.stopSession(ThreadId.makeUnsafe(threadId)));
       return "stopped" as const;
     },
-      durable,
+    durable,
     dispose,
   } satisfies RealPiWsHarness;
 }

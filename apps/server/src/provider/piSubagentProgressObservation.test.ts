@@ -87,7 +87,7 @@ class VirtualClock {
     for (;;) {
       const due = this.tasks
         .filter((t) => !t.cancelled && t.at <= this.nowMs)
-        .sort((a, b) => a.at - b.at || a.id - b.id);
+        .toSorted((a, b) => a.at - b.at || a.id - b.id);
       if (due.length === 0) break;
       for (const task of due) {
         task.cancelled = true; // fire exactly once
@@ -99,15 +99,6 @@ class VirtualClock {
     }
   }
 }
-
-const settle = async (): Promise<void> => {
-  // One macrotask turn: lets fire-and-forget Effect.runPromise writes and
-  // collector fibers progress between assertions.
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  for (let i = 0; i < 10; i += 1) {
-    await Promise.resolve();
-  }
-};
 
 function makeTestSetup(options?: {
   readonly foregroundWaitMs?: number;
