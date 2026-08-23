@@ -35,6 +35,7 @@ import { verifyPiSubagentArtifact } from "./piSubagentArtifactVerifier.ts";
 import {
   DETERMINISTIC_SLOW_MODEL_ID,
   DETERMINISTIC_DRIVER_MODEL_ID,
+  DETERMINISTIC_FAST_MODEL_ID,
   makeRealPiWsHarness,
   verifyRealPiExtensionProvenance,
   type RealPiWsHarness,
@@ -306,6 +307,7 @@ async function startTurn(
   threadId: ThreadId,
   suffix: string,
   text: string,
+  modelSelection?: { readonly provider: "pi"; readonly model: string },
 ): Promise<void> {
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
@@ -317,6 +319,7 @@ async function startTurn(
       text,
       attachments: [],
     },
+    ...(modelSelection === undefined ? {} : { modelSelection }),
     runtimeMode: "full-access",
     interactionMode: "default",
     createdAt: new Date().toISOString(),
@@ -603,6 +606,95 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
 
       const artifactStillValid = await verifyPiSubagentArtifact(stagedFixture.sourceArtifactDir);
       expect(artifactStillValid.valid).toBe(true);
+    } finally {
+      await harness.dispose();
+      expect(harness.envWasRestored()).toBe(true);
+    }
+  }, 180_000);
+
+  // Runtime-repro regression (2026-08-23): Pi SDK 0.83's session.setModel
+  // persists defaultProvider/defaultModel through the session services'
+  // SettingsManager to `<agentDir>/settings.json`. On the desktop managed
+  // path that agentDir is the VERIFIED artifact's controlled `agent` subtree,
+  // so switching models in an existing chat wrote an unlisted file and the
+  // next artifact gate failed closed with `unlisted_entry`, quarantining
+  // the thread. Production now passes one session-scoped
+  // `SettingsManager.inMemory()` per createSdkRuntime invocation for
+  // desktop-managed sessions only. This leg proves the fix against the REAL
+  // SDK + REAL verified artifact: a mid-chat model switch actually reaches
+  // the real AgentSession.setModel (observed as model traffic on the new
+  // model id), and the artifact tree remains byte-identical and
+  // re-verifiable afterwards.
+  it("settings isolation: a mid-chat model switch through the real SDK setModel writes no artifact settings.json and leaves the verified artifact re-verifiable", async () => {
+    const runArtifactDir = copyArtifactForRun("settings-isolation");
+    const harness = await makeDesktopHarness(runArtifactDir);
+    try {
+      if (harness.desktop === undefined) {
+        throw new Error("Desktop harness did not expose controlled desktop paths.");
+      }
+      const managedAgentDir = harness.desktop.managedAgentDir;
+
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "settings-isolation",
+        DETERMINISTIC_DRIVER_MODEL_ID,
+      );
+      await startTurn(
+        harness,
+        threadId,
+        "settings-isolation-1",
+        "Reply with a short acknowledgment only. Do not delegate.",
+      );
+
+        // The session is live and the initial model selection is in effect.
+        await waitFor(
+          () => harness.modelServer.requests(),
+          (requests) => requests.some((request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID),
+        45_000,
+        "initial driver model traffic",
+      );
+      await waitFor(
+        () => harness.observedSessions().get(String(threadId)),
+        (value) => value !== undefined,
+        45_000,
+        "live desktop session",
+      );
+
+      const artifactBefore = snapshotTree(runArtifactDir);
+      expect(existsSync(join(managedAgentDir, "settings.json"))).toBe(false);
+
+      // The runtime-repro vector: switch models in the EXISTING chat. The
+      // production sendTurn path resolves the model from the session's
+      // registry and calls the real AgentSession.setModel BEFORE the prompt.
+      await startTurn(
+        harness,
+        threadId,
+        "settings-isolation-2",
+        "Reply with a short acknowledgment only. Do not delegate.",
+        { provider: "pi", model: DETERMINISTIC_FAST_MODEL_ID },
+      );
+
+      // setModel genuinely ran: the turn's model traffic is on the NEW id
+      // (a model request that could only follow a successful setModel +
+      // prompt on the switched session).
+      await waitFor(
+        () => harness.modelServer.requests(),
+        (requests) => requests.some((request) => request.model === DETERMINISTIC_FAST_MODEL_ID),
+        45_000,
+        "switched model traffic",
+      );
+
+      // No settings.json materialized anywhere in the verified artifact —
+      // the `unlisted_entry` repro file — and the whole tree is
+      // byte-identical to before the switch.
+      expect(existsSync(join(managedAgentDir, "settings.json"))).toBe(false);
+      expect(existsSync(join(runArtifactDir, "settings.json"))).toBe(false);
+      expect(snapshotTree(runArtifactDir)).toEqual(artifactBefore);
+
+      // The verifier itself still accepts the artifact: genuine fail-closed
+      // verification is untouched (no whitelist, no relaxed policy).
+      const stillVerified = await verifyPiSubagentArtifact(runArtifactDir);
+      expect(stillVerified.valid).toBe(true);
     } finally {
       await harness.dispose();
       expect(harness.envWasRestored()).toBe(true);

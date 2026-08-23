@@ -13,7 +13,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -90,6 +90,20 @@ const sdkHarness = vi.hoisted(() => ({
   /** Caller-supplied extension factories observed in the loader options. */
   observedExtensionFactories: [] as unknown[],
   /**
+   * SettingsManager override observed on createAgentSessionServices — the
+   * in-memory manager production must pass for desktop-managed sessions so
+   * setModel persistence cannot touch the verified artifact tree.
+   */
+  settingsManagerOverrides: [] as Array<{
+    readonly kind: "inMemory" | "none";
+    readonly defaultModelAndProviderWrites: Array<{
+      readonly provider: string;
+      readonly modelId: string;
+    }>;
+  }>,
+  /** SettingsManager constructors observed on the mock SDK surface. */
+  settingsManagerCreates: [] as Array<"inMemory" | "create">,
+  /**
    * Ticket 02 WP-B: the empirically real runtime-configuration failure
    * vector. An explicitly selected model id unavailable from the registry
    * throws from inside the runtime factory (`createSdkRuntime`'s
@@ -120,6 +134,25 @@ const bridgeState = vi.hoisted(() => ({
    * Pi SDK 0.83.0 failure vector the empirical probe identified.
    */
   unavailableModelIds: null as null | ReadonlyArray<string>,
+  /**
+   * The settings manager most recently observed by the mocked
+   * createAgentSessionServices — used to emulate Pi SDK 0.83's session
+   * setModel → settingsManager.setDefaultModelAndProvider persistence path.
+   */
+  settingsManager: null as null | { setDefaultModelAndProvider: (provider: string, modelId: string) => void },
+  /**
+   * Every emulated FILE-BACKED SettingsManager the SDK default would have
+   * constructed (bound to the passed agentDir). Any entry or any write in it
+   * is the runtime repro surface (setModel → <agentDir>/settings.json).
+   */
+  fileSettingsWrites: [] as Array<{
+    readonly settingsPath: string;
+    readonly writes: Array<{
+      readonly provider: string;
+      readonly modelId: string;
+      readonly settingsPath: string;
+    }>;
+  }>,
 }));
 
 /** Hostile strings a bridge/extension could try to leak into diagnostics. */
@@ -159,6 +192,10 @@ const resetScenario = (input?: {
   bridgeState.handshake = input?.handshake ?? null;
   bridgeState.artifactExtensionLoaded = input?.artifactExtensionLoaded ?? true;
   bridgeState.unavailableModelIds = input?.unavailableModelIds ?? null;
+  sdkHarness.settingsManagerCreates.splice(0);
+  sdkHarness.settingsManagerOverrides.splice(0);
+  bridgeState.settingsManager = null;
+  bridgeState.fileSettingsWrites.splice(0);
 };
 
 /** A bridge object answering the desktop profile handshake successfully. */
@@ -236,6 +273,16 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       },
       abort: () => undefined,
       reload: async () => undefined,
+      prompt: async () => undefined,
+      // Pi SDK 0.83 AgentSession.setModel persists defaultProvider/
+      // defaultModel through the services' SettingsManager (agent-session.js
+      // setModel). The mock routes that through whatever settings manager
+      // createAgentSessionServices observed, so a file-backed manager is
+      // observable as a settings.json write attempt while an in-memory
+      // manager performs zero file I/O.
+      setModel: async (model: { provider: string; id: string }) => {
+        bridgeState.settingsManager?.setDefaultModelAndProvider(model.provider, model.id);
+      },
     };
   };
 
@@ -288,15 +335,79 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         throw new Error(`unexpected SessionManager.open(${file}) in bootstrap tests`);
       },
     },
+    SettingsManager: {
+      // Mocks the SDK-supported static constructors. Only `inMemory` is
+      // legal on the desktop-managed path; `create` presence lets tests
+      // prove production never falls back to constructing a file-backed
+      // manager itself for desktop sessions.
+      inMemory: () => {
+        sdkHarness.settingsManagerCreates.push("inMemory");
+                const writes: Array<{
+                  provider: string;
+                  modelId: string;
+                  settingsPath: string;
+                }> = [];
+        return {
+          kind: "inMemory" as const,
+          writes,
+          getShellPath: () => undefined,
+          getShellCommandPrefix: () => undefined,
+          setDefaultModelAndProvider: (provider: string, modelId: string) => {
+            writes.push({ provider, modelId });
+          },
+        };
+      },
+      create: () => {
+        sdkHarness.settingsManagerCreates.push("create");
+        throw new Error(
+          "mocked SettingsManager.create must not be used (file-backed settings are forbidden in these tests)",
+        );
+      },
+    },
     createAgentSessionServices: async (input: {
       cwd: string;
       agentDir: string;
       resourceLoaderOptions: Record<string, unknown>;
+      settingsManager?: unknown;
     }) => {
+      const settingsManagerOverride =
+        input.settingsManager === undefined
+          ? { kind: "none" as const, defaultModelAndProviderWrites: [] }
+          : {
+              kind: "inMemory" as const,
+              defaultModelAndProviderWrites: (
+                input.settingsManager as { writes: Array<{ provider: string; modelId: string }> }
+              ).writes,
+            };
+      sdkHarness.settingsManagerOverrides.push(settingsManagerOverride);
+      // The emulated SDK default: without a settingsManager override the
+      // services construct a file-backed SettingsManager bound to
+      // <agentDir> (the verified artifact tree in desktop mode) — exactly
+      // the runtime repro (setModel → <agentDir>/settings.json → verifier
+      // unlisted_entry). A file-backed manager records every attempted
+      // artifact path write so tests can prove it must stay at zero.
+      const settingsManager =
+        input.settingsManager === undefined
+          ? (() => {
+              const settingsPath = path.join(input.agentDir, "settings.json");
+              const writes: Array<{ provider: string; modelId: string }> = [];
+              bridgeState.fileSettingsWrites.push({ settingsPath, writes });
+              return {
+                kind: "file" as const,
+                getShellPath: () => undefined,
+                getShellCommandPrefix: () => undefined,
+                setDefaultModelAndProvider: (provider: string, modelId: string) => {
+                  writes.push({ provider, modelId, settingsPath });
+                },
+              };
+            })()
+          : (input.settingsManager as NonNullable<typeof input.settingsManager>);
+      bridgeState.settingsManager = settingsManager as typeof bridgeState.settingsManager;
       sdkHarness.serviceCreations.push({
         cwd: input.cwd,
         agentDir: input.agentDir,
         resourceLoaderOptions: input.resourceLoaderOptions,
+        ...(input.settingsManager === undefined ? {} : { settingsManager: settingsManager }),
       });
       if (Array.isArray(input.resourceLoaderOptions?.extensionFactories)) {
         sdkHarness.observedExtensionFactories.push(
@@ -306,10 +417,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       return {
         cwd: input.cwd,
         agentDir: input.agentDir,
-        settingsManager: {
-          getShellPath: () => undefined,
-          getShellCommandPrefix: () => undefined,
-        },
+        settingsManager,
         diagnostics: { log: () => undefined },
         modelRuntime: {},
         resourceLoader: makeResourceLoader(),
@@ -495,6 +603,58 @@ const runStartSession = (input: {
       hasSession,
       listSessionCount: sessions.length,
     } satisfies RunResult;
+  }).pipe(
+    Effect.provide(makeAdapterLayer(input)),
+    Effect.scoped,
+    Effect.runPromise,
+  );
+
+/**
+ * Runs the production startSession → sendTurn(with model selection) pair on
+ * one adapter instance so a model switch can be observed against the
+ * settings manager the bootstrap actually wired.
+ */
+const runStartSessionThenModelSwitch = async (input: {
+  readonly mode: ServerConfigShape["mode"];
+  readonly gateEnv: NodeJS.ProcessEnv;
+  readonly userAgentDir?: string;
+  readonly observers: HarnessObservers;
+  readonly switchModel: string;
+}): Promise<{
+  readonly start: RunResult;
+  readonly switchFailure: ProviderAdapterError | undefined;
+}> =>
+  Effect.gen(function* () {
+    const adapter = yield* PiAdapter;
+    const startOutcome = yield* Effect.exit(
+      adapter.startSession(startSessionInput as never),
+    );
+    const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
+    const sessions = yield* adapter.listSessions();
+    const switchOutcome = Exit.isSuccess(startOutcome)
+      ? yield* Effect.exit(
+          adapter.sendTurn(
+            {
+              threadId: startSessionInput.threadId,
+              input: "switch model please",
+              modelSelection: { provider: "pi", model: input.switchModel },
+            } as never,
+          ),
+        )
+      : undefined;
+    return {
+      start: {
+        success: Exit.isSuccess(startOutcome) ? startOutcome.value : undefined,
+        failure: Exit.isFailure(startOutcome)
+          ? (Cause.squash(startOutcome.cause) as ProviderAdapterError)
+          : undefined,
+        hasSession,
+        listSessionCount: sessions.length,
+      } satisfies RunResult,
+      switchFailure: switchOutcome && Exit.isFailure(switchOutcome)
+        ? (Cause.squash(switchOutcome.cause) as ProviderAdapterError)
+        : undefined,
+    };
   }).pipe(
     Effect.provide(makeAdapterLayer(input)),
     Effect.scoped,
@@ -1028,5 +1188,137 @@ describe("PiAdapter non-desktop regression — unavailable explicit model keeps 
     expect(result.hasSession).toBe(false);
     expect(result.listSessionCount).toBe(0);
     expect(observers.repository.writes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-memory SettingsManager regression — model switch must not mutate the
+// verified artifact (runtime-repro: setModel → <agentDir>/settings.json →
+// verifier `unlisted_entry` → thread quarantine)
+// ---------------------------------------------------------------------------
+
+describe("PiAdapter desktop managed bootstrap — in-memory settings isolation (model switch)", () => {
+  it("passes one session-scoped in-memory SettingsManager into createAgentSessionServices", async () => {
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "desktop",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result.hasSession).toBe(true);
+
+    // Exactly one in-memory manager was constructed and passed through the
+    // SDK seam — no second manager, no file-backed construction.
+    expect(sdkHarness.settingsManagerCreates).toEqual(["inMemory"]);
+    expect(sdkHarness.settingsManagerOverrides).toHaveLength(1);
+    expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("inMemory");
+
+    // Without the override the mocked SDK default would have bound a
+    // FILE-BACKED manager to the verified artifact agentDir — the runtime
+    // repro vector. It must never exist on the desktop path.
+    expect(bridgeState.fileSettingsWrites).toEqual([]);
+  });
+
+  it("applies a model switch through session.setModel without any artifact settings write", async () => {
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const { start, switchFailure } = await runStartSessionThenModelSwitch({
+      mode: "desktop",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+      switchModel: "openai/synara-switch-target-model",
+    });
+
+    // The start succeeded and the model switch went through the production
+    // setModel path (sendTurn modelSelection), not a validation rejection.
+    expect(start.failure).toBeUndefined();
+    expect(start.hasSession).toBe(true);
+    expect(switchFailure).toBeUndefined();
+
+    // The override wired for this session received the persistence call…
+    expect(sdkHarness.settingsManagerOverrides).toHaveLength(1);
+    expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("inMemory");
+    expect(sdkHarness.settingsManagerOverrides[0]!.defaultModelAndProviderWrites).toEqual([
+      { provider: "openai", modelId: "synara-switch-target-model" },
+    ]);
+
+    // …while the verified artifact tree stayed byte-identical: no file-backed
+    // settings manager was ever constructed against <artifact>/agent, so no
+    // settings.json write (the `unlisted_entry` repro) could occur.
+    expect(bridgeState.fileSettingsWrites).toEqual([]);
+
+    // The verified artifact remains re-verifiable: manifest + controlled
+    // files unchanged on disk (no settings.json appeared under
+    // <artifact>/agent).
+    const controlledFiles: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const entryPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(entryPath);
+        } else {
+          controlledFiles.push(entryPath);
+        }
+      }
+    };
+    await walk(expectedControlledAgentDir());
+    expect(controlledFiles.sort()).toEqual(
+      [
+        path.join(expectedControlledAgentDir(), "extensions", "pi-subagents", "package.json"),
+        path.join(expectedControlledAgentDir(), "extensions", "pi-subagents", "src", "index.ts"),
+      ].sort(),
+    );
+  });
+
+  it("still uses the settings manager for shell config resolution on the desktop path", async () => {
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "desktop",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+    });
+
+    // createRuntime consumed getShellPath/getShellCommandPrefix from the
+    // overridden manager (mock returns undefined) and the start still
+    // succeeded — the in-memory manager is a drop-in for the seams the
+    // adapter reads.
+    expect(result.failure).toBeUndefined();
+    expect(sdkHarness.settingsManagerOverrides).toHaveLength(1);
+    expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("inMemory");
+  });
+});
+
+describe("PiAdapter non-desktop regression — settings manager default preserved", () => {
+  it("keeps web mode on the SDK default file-backed settings manager", async () => {
+    resetScenario({ handshake: managedHandshake(LEGACY_THREE_CAPABILITIES) });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "web",
+      gateEnv: desktopGateEnv("/this/locator/is/ignored/in/web/mode"),
+      userAgentDir,
+      observers,
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result.hasSession).toBe(true);
+
+    // Non-desktop behavior is UNCHANGED: production passes no override, so
+    // the SDK default (file-backed SettingsManager.create) applies. The mock
+    // emulates that default against its own agentDir — the important
+    // assertion is that no override/in-memory construction happened here.
+    expect(sdkHarness.settingsManagerCreates).toEqual([]);
+    expect(sdkHarness.settingsManagerOverrides).toHaveLength(1);
+    expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("none");
   });
 });

@@ -3307,6 +3307,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         : {
             extensionFactories: [synaraMcp.extension, ...extraExtensionFactories],
           };
+      // Keep one settings owner for the lifetime of this runtime. The SDK
+      // currently invokes the runtime factory once, but the immutable
+      // artifact guarantee must not depend on that implementation detail.
+      const desktopManagedSettingsManager = input.desktopManaged
+        ? input.sdk.SettingsManager.inMemory()
+        : undefined;
       const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         cwd,
         agentDir,
@@ -3318,6 +3324,19 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           agentDir,
           modelRuntime,
           resourceLoaderOptions,
+          // Desktop-managed sessions must never persist writable settings
+          // into the verified artifact tree: Pi SDK 0.83's session.setModel
+          // persists defaultProvider/defaultModel through SettingsManager to
+          // `<agentDir>/settings.json`, which is not in manifest.json, so the
+          // next desktop artifact gate fails closed with `unlisted_entry` and
+          // quarantines the thread. One session-scoped in-memory
+          // SettingsManager per createSdkRuntime invocation keeps the SDK's
+          // supported `settingsManager` seam while guaranteeing zero file
+          // I/O against the immutable closure. Non-desktop sessions keep the
+          // SDK default file-backed SettingsManager exactly as before.
+          ...(desktopManagedSettingsManager
+            ? { settingsManager: desktopManagedSettingsManager }
+            : {}),
         });
         const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
         const model = findModelInRegistry(registry, input.modelId);
