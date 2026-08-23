@@ -9,7 +9,7 @@
 //          never pull a container up when a row shrinks.
 // Layer: Vitest browser tests
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { render } from "vitest-browser-react";
 

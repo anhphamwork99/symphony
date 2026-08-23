@@ -23,7 +23,6 @@
 // (`getThreadFromState`) — the same path a browser tab takes after
 // reconnecting.
 import {
-  OrchestrationThreadDetailSnapshot,
   PiSubagentExecutionCard,
   ThreadId,
   type OrchestrationEvent,

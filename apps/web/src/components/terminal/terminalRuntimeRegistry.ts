@@ -80,7 +80,7 @@ class TerminalRuntimeRegistry {
   }
 
   disposeThread(threadId: string): void {
-    for (const runtimeKey of [...this.entries.keys()]) {
+    for (const runtimeKey of Array.from(this.entries.keys())) {
       if (runtimeKey.startsWith(`${threadId}::`)) {
         this.dispose(runtimeKey);
       }

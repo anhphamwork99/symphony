@@ -361,6 +361,9 @@ function optimizeInWorker(
       },
       { once: true },
     );
+    // Worker.postMessage(message, transfer?) has no targetOrigin parameter; that
+    // argument only exists on Window.postMessage, so the rule is a false positive here.
+    // oxlint-disable-next-line require-post-message-target-origin
     worker.postMessage({
       file,
       width: initialSize.width,

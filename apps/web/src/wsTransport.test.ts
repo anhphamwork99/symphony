@@ -130,7 +130,7 @@ class MockWebSocket {
   private emit(type: WsEventType, event?: { data?: unknown }) {
     const listeners = this.listeners.get(type);
     if (!listeners) return;
-    for (const listener of [...listeners]) {
+    for (const listener of Array.from(listeners)) {
       listener(event);
     }
   }

@@ -59,7 +59,7 @@ describe("createProviderInstallResetPatch", () => {
       openCodeServerPassword: "",
     });
 
-    expect(Object.keys(patch).sort()).toEqual(
+    expect(Object.keys(patch).toSorted()).toEqual(
       [
         "antigravityBinaryPath",
         "claudeBinaryPath",
@@ -78,7 +78,7 @@ describe("createProviderInstallResetPatch", () => {
         "openCodeServerUrl",
         "piAgentDir",
         "piBinaryPath",
-      ].sort(),
+      ].toSorted(),
     );
     expect(patch.kiloServerPassword).toBe("");
     expect(patch.openCodeServerPassword).toBe("");

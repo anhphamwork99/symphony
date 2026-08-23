@@ -2129,7 +2129,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
   it("keeps near-cap composer work bounded while live activities arrive", async () => {
     const percentile = (samples: readonly number[], fraction: number): number => {
-      const ordered = [...samples].sort((left, right) => left - right);
+      const ordered = samples.toSorted((left, right) => left - right);
       return ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))] ?? 0;
     };
     const cases = [
