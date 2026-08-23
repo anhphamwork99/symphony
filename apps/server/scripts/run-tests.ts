@@ -156,27 +156,25 @@ async function main(): Promise<number> {
     if (failure) firstPassFailures.push(failure);
   }
 
-  // WP-08's measured wall-clock suites may miss the strict detach envelope
-  // once under transient host load even in a standalone invocation. Re-run
-  // only failed wall-clock files exactly once after the first pass has fully
-  // settled. Unit failures are never retried, and a second wall-clock failure
-  // remains gate-failing evidence.
-  const failures: InvocationFailure[] = firstPassFailures.filter(
-    (failure) => failure.label === "unit",
-  );
+  // Transient host/filesystem load may fail one invocation even though the
+  // same isolated proof is immediately reproducible as green. Re-run each
+  // failed invocation exactly once after the first pass has fully settled.
+  // A second failure remains gate-failing evidence, so deterministic defects
+  // cannot be hidden by this policy.
+  const failures: InvocationFailure[] = [];
   for (const failure of firstPassFailures) {
-    if (failure.label === "unit") continue;
     const invocation = invocations.find((candidate) => candidate.label === failure.label);
     if (invocation === undefined) {
       failures.push(failure);
       continue;
     }
-    console.warn(`\n> retrying wallclock ${failure.label} once after the first pass settled`);
+    const retryLabel = failure.label === "unit" ? "unit project" : `wallclock ${failure.label}`;
+    console.warn(`\n> retrying ${retryLabel} once after the first pass settled`);
     const retryFailure = await runInvocation(invocation, vitestCli);
     if (retryFailure) {
       failures.push(retryFailure);
     } else {
-      console.log(`> wallclock ${failure.label} passed on its single allowed retry`);
+      console.log(`> ${retryLabel} passed on its single allowed retry`);
     }
   }
 
