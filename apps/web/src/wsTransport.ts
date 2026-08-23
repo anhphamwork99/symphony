@@ -1630,7 +1630,7 @@ export class WsTransport {
     const streamSessionVersion = this.sessionVersion;
     const streamStartedAt = performance.now();
     const runnableStream = stream as Stream.Stream<T, WsTransportRpcError, never>;
-    let resolveSettled: () => void = () => undefined;
+    let resolveSettled: (() => void) | undefined;
     const settled = new Promise<void>((resolve) => {
       resolveSettled = resolve;
     });
@@ -1657,7 +1657,7 @@ export class WsTransport {
           if (this.streamSettled.get(key) === settled) {
             this.streamSettled.delete(key);
           }
-          resolveSettled();
+          resolveSettled?.();
           const wasReplacedOrStopped = this.streamCleanups.get(key) !== cancel;
           if (!wasReplacedOrStopped) {
             this.streamCleanups.delete(key);

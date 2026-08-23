@@ -34,6 +34,16 @@ import {
 } from "./storeTestFixtures";
 import { deriveWorkLogEntries } from "./workLog";
 
+function durableFacts(activity: OrchestrationThreadActivity) {
+  return {
+    id: activity.id,
+    kind: activity.kind,
+    turnId: activity.turnId,
+    createdAt: activity.createdAt,
+    payload: activity.payload,
+  };
+}
+
 describe("Synara MCP composite journey smoke test", () => {
   const threadId = ThreadId.makeUnsafe("thread-1");
   const turnId = TurnId.makeUnsafe("turn-1");
@@ -191,16 +201,6 @@ describe("Synara MCP composite journey smoke test", () => {
     createdAt: "2026-08-14T11:59:59.000Z",
     resolvedAt: null,
   };
-
-  function durableFacts(activity: OrchestrationThreadActivity) {
-    return {
-      id: activity.id,
-      kind: activity.kind,
-      turnId: activity.turnId,
-      createdAt: activity.createdAt,
-      payload: activity.payload,
-    };
-  }
 
   // Journey-level work-log facts: row identity in journey order plus the two
   // outcome signals the journey must surface (the cancelled call and the

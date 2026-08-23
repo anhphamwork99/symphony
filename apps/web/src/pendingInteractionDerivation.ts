@@ -269,13 +269,15 @@ function parseUserInputQuestions(
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      return {
+      const parsedQuestion = {
         id: question.id,
         header: question.header,
         question: question.question,
         options,
-        ...(question.multiSelect === true ? { multiSelect: true } : {}),
       };
+      return question.multiSelect === true
+        ? Object.assign(parsedQuestion, { multiSelect: true as const })
+        : parsedQuestion;
     })
     .filter((question): question is UserInputQuestion => question !== null);
   return parsed.length > 0 ? parsed : null;

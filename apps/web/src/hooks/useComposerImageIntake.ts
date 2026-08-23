@@ -112,6 +112,8 @@ export function useComposerImageIntake(input: {
   readonly commitImages: (images: ComposerImageAttachment[]) => number;
   readonly onError: (error: string | null) => void;
 }) {
+  // Queue ownership intentionally resets on thread changes so stale image work is disposed.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- The thread id is an intentional identity boundary.
   const queue = useMemo(() => new ComposerImageIntakeQueue(), [input.threadId]);
   useEffect(() => () => queue.dispose(), [queue]);
   const pendingCount = useSyncExternalStore(

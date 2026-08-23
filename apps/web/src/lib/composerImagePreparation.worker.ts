@@ -119,12 +119,9 @@ workerScope.addEventListener("message", (event) => {
     }
   })().catch((cause) => {
     // DedicatedWorkerGlobalScope.postMessage has no targetOrigin parameter.
-    // oxlint-disable-next-line require-post-message-target-origin
     workerScope.postMessage({
       ok: false,
       message: cause instanceof Error ? cause.message : "Image optimization failed.",
-    });
+    }); // oxlint-disable-line require-post-message-target-origin
   });
 });
-
-

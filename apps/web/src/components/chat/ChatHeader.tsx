@@ -492,6 +492,17 @@ export function resolveChatHeaderThreadIconKind(
   return entryPoint === "terminal" ? "terminal" : "provider";
 }
 
+function renderProviderIcon(provider: ProviderKind | null, className: string) {
+  return (
+    <ProviderIcon
+      provider={provider}
+      tone="header"
+      className={className}
+      fallback={<FiGitBranch className={className} />}
+    />
+  );
+}
+
 export function ChatHeader({
   activeThreadId,
   activeThreadTitle,
@@ -587,17 +598,6 @@ export function ChatHeader({
     observer.observe(el);
     return () => observer.disconnect();
   }, [isSplitPane]);
-
-  const renderProviderIcon = (provider: ProviderKind | null, className: string) => {
-    return (
-      <ProviderIcon
-        provider={provider}
-        tone="header"
-        className={className}
-        fallback={<FiGitBranch className={className} />}
-      />
-    );
-  };
 
   // Single-chat surfaces use this as a true right-dock visibility toggle. Hosts
   // without a multi-pane dock (split/editor surfaces) keep the legacy diff-only

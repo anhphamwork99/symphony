@@ -326,6 +326,7 @@ export function TaskCompletionNotifications() {
     }
   }, [
     navigate,
+    runtimeStartedAtMs,
     settings.enableSystemTaskCompletionNotifications,
     settings.enableTaskCompletionToasts,
     terminalStateByThreadId,

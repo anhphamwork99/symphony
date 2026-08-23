@@ -923,7 +923,7 @@ describe("WsTransport", () => {
     const { transport, internals } = makeBareTransport();
     const threadId = "thread-release-order";
     const key = `orchestration.thread:${threadId}`;
-    let settleStream: () => void = () => undefined;
+    let settleStream!: () => void;
     const settled = new Promise<void>((resolve) => {
       settleStream = resolve;
     });

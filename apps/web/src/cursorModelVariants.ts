@@ -181,39 +181,43 @@ export function collapseCursorModelVariants(
       ...variants.flatMap((variant) => variant.contextWindowOptions ?? []),
     ]);
 
-    return {
+    const collapsedModel: ProviderModelDescriptor = {
       slug: baseSlug,
       name: removeVariantNameSuffix(preferredName),
-      ...(variants[0]?.upstreamProviderId
-        ? { upstreamProviderId: variants[0].upstreamProviderId }
-        : {}),
-      ...(variants[0]?.upstreamProviderName
-        ? { upstreamProviderName: variants[0].upstreamProviderName }
-        : {}),
-      ...(efforts.length > 0
-        ? {
-            supportedReasoningEfforts: efforts.map((effort) => ({
-              value: effort.value,
-              label: effort.label,
-              ...(effort.value === defaultEffort ? { isDefault: true as const } : {}),
-            })),
-            ...(defaultEffort ? { defaultReasoningEffort: defaultEffort } : {}),
-          }
-        : {}),
-      ...(variants.some((variant) => variant.supportsFastMode === true)
-        ? { supportsFastMode: true as const }
-        : {}),
-      ...(variants.some((variant) => variant.supportsThinkingToggle === true)
-        ? { supportsThinkingToggle: true as const }
-        : {}),
-      ...(contextWindowOptions.length > 0
-        ? {
-            contextWindowOptions,
-            defaultContextWindow:
-              contextWindowOptions.find((option) => option.isDefault === true)?.value ??
-              contextWindowOptions[0]?.value,
-          }
-        : {}),
     };
+    const primaryVariant = variants[0];
+    if (primaryVariant?.upstreamProviderId) {
+      Object.assign(collapsedModel, { upstreamProviderId: primaryVariant.upstreamProviderId });
+    }
+    if (primaryVariant?.upstreamProviderName) {
+      Object.assign(collapsedModel, { upstreamProviderName: primaryVariant.upstreamProviderName });
+    }
+    if (efforts.length > 0) {
+      const supportedReasoningEfforts = efforts.map((effort) => {
+        const supportedEffort = { value: effort.value, label: effort.label };
+        return effort.value === defaultEffort
+          ? Object.assign(supportedEffort, { isDefault: true as const })
+          : supportedEffort;
+      });
+      Object.assign(collapsedModel, { supportedReasoningEfforts });
+      if (defaultEffort) {
+        Object.assign(collapsedModel, { defaultReasoningEffort: defaultEffort });
+      }
+    }
+    if (variants.some((variant) => variant.supportsFastMode === true)) {
+      Object.assign(collapsedModel, { supportsFastMode: true as const });
+    }
+    if (variants.some((variant) => variant.supportsThinkingToggle === true)) {
+      Object.assign(collapsedModel, { supportsThinkingToggle: true as const });
+    }
+    if (contextWindowOptions.length > 0) {
+      Object.assign(collapsedModel, {
+        contextWindowOptions,
+        defaultContextWindow:
+          contextWindowOptions.find((option) => option.isDefault === true)?.value ??
+          contextWindowOptions[0]?.value,
+      });
+    }
+    return collapsedModel;
   });
 }

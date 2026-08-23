@@ -22,6 +22,18 @@ import {
   type BrowserAnnotationDraft,
 } from "./browserAnnotations";
 
+const readyStatus = (
+  provider: ProviderKind,
+  overrides: Partial<ServerProviderStatus> = {},
+): ServerProviderStatus => ({
+  provider,
+  status: "ready",
+  available: true,
+  authStatus: "authenticated",
+  checkedAt: "2026-08-07T12:00:00.000Z",
+  ...overrides,
+});
+
 describe("threadHandoff", () => {
   it("strips source-thread browser annotations and selections from imported messages", () => {
     const sourceMessageId = MessageId.makeUnsafe("source-user-message");
@@ -92,17 +104,6 @@ describe("threadHandoff", () => {
   });
 
   it("excludes disabled, missing, unavailable, and unauthenticated handoff targets", () => {
-    const readyStatus = (
-      provider: ProviderKind,
-      overrides: Partial<ServerProviderStatus> = {},
-    ): ServerProviderStatus => ({
-      provider,
-      status: "ready",
-      available: true,
-      authStatus: "authenticated",
-      checkedAt: "2026-08-07T12:00:00.000Z",
-      ...overrides,
-    });
     const providerSettings = {
       ...DEFAULT_SERVER_SETTINGS_VIEW.providers,
       antigravity: {

@@ -15,7 +15,7 @@
 //      re-rendering the growing message) is the dominant CPU cost of a streaming turn,
 //      while a ~25/s multi-character reveal is visually equivalent.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMediaQuery } from "./useMediaQuery";
 
 // Drain the current backlog over this window. Kept above the ~100ms network flush so a
@@ -134,14 +134,14 @@ export function useSmoothStreamedText(text: string, isStreaming: boolean): strin
   const rafRef = useRef<number | null>(null);
   const tickRef = useRef<(now: number) => void>(() => undefined);
 
-  const cancelFrame = () => {
+  const cancelFrame = useCallback(() => {
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-  };
+  }, []);
 
-  const scheduleFrame = () => {
+  const scheduleFrame = useCallback(() => {
     if (rafRef.current != null) {
       return;
     }
@@ -149,7 +149,7 @@ export function useSmoothStreamedText(text: string, isStreaming: boolean): strin
       rafRef.current = null;
       tickRef.current(now);
     });
-  };
+  }, []);
 
   // Installed in an effect (not during render — that write would make the
   // whole hook ineligible for React Compiler). The tick reads everything

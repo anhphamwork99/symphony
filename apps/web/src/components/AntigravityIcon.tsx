@@ -4,12 +4,25 @@
 
 import { useId, type SVGProps } from "react";
 
+const ANTIGRAVITY_FILTER_SPECS = [
+  { key: "yellow-top", x: -2.13, y: -8.36, width: 12.84, height: 11.38, deviation: 0.72 },
+  { key: "red-wide", x: 2.75, y: -9.38, width: 25.18, height: 24.96, deviation: 3.5 },
+  { key: "blue-left", x: -14.17, y: -7.5, width: 26.51, height: 23.63, deviation: 2.97 },
+  { key: "yellow-left", x: -14.17, y: -7.5, width: 26.51, height: 23.63, deviation: 2.97 },
+  { key: "red-left", x: -12.36, y: -7.3, width: 23.71, height: 23.68, deviation: 2.97 },
+  { key: "blue-bottom", x: 0.63, y: 5.02, width: 21.7, height: 22.06, deviation: 2.82 },
+  { key: "yellow-wide", x: -3.98, y: -14.67, width: 23.29, height: 22.83, deviation: 2.56 },
+  { key: "red-bottom", x: -7.74, y: -0.95, width: 29.2, height: 30.11, deviation: 2.29 },
+  { key: "blue-right", x: 6.79, y: -0.27, width: 16.24, height: 15.57, deviation: 2.04 },
+  { key: "red-top", x: 3.78, y: -8.72, width: 21.69, height: 19.42, deviation: 1.73 },
+  { key: "yellow-small", x: -5.41, y: -6.39, width: 14.36, height: 16.93, deviation: 2.14 },
+] as const;
+
 export function AntigravityBrandIcon(props: SVGProps<SVGSVGElement>) {
   const prefix = useId();
   const maskId = `${prefix}-antigravity-mask`;
-  const filterIds = Array.from(
-    { length: 11 },
-    (_, index) => `${prefix}-antigravity-filter-${index}`,
+  const filterIds = ANTIGRAVITY_FILTER_SPECS.map(
+    (spec) => `${prefix}-antigravity-filter-${spec.key}`,
   );
 
   return (
@@ -104,21 +117,9 @@ export function AntigravityBrandIcon(props: SVGProps<SVGSVGElement>) {
         </g>
       </g>
       <defs>
-        {[
-          [-2.13, -8.36, 12.84, 11.38, 0.72],
-          [2.75, -9.38, 25.18, 24.96, 3.5],
-          [-14.17, -7.5, 26.51, 23.63, 2.97],
-          [-14.17, -7.5, 26.51, 23.63, 2.97],
-          [-12.36, -7.3, 23.71, 23.68, 2.97],
-          [0.63, 5.02, 21.7, 22.06, 2.82],
-          [-3.98, -14.67, 23.29, 22.83, 2.56],
-          [-7.74, -0.95, 29.2, 30.11, 2.29],
-          [6.79, -0.27, 16.24, 15.57, 2.04],
-          [3.78, -8.72, 21.69, 19.42, 1.73],
-          [-5.41, -6.39, 14.36, 16.93, 2.14],
-        ].map(([x, y, width, height, deviation], index) => (
+        {ANTIGRAVITY_FILTER_SPECS.map(({ key, x, y, width, height, deviation }, index) => (
           <filter
-            key={filterIds[index]}
+            key={key}
             id={filterIds[index]}
             x={x}
             y={y}

@@ -40,6 +40,16 @@ import {
 } from "./storeTestFixtures";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "./types";
 
+function durableFacts(activity: OrchestrationThreadActivity) {
+  return {
+    id: activity.id,
+    kind: activity.kind,
+    turnId: activity.turnId,
+    createdAt: activity.createdAt,
+    payload: activity.payload,
+  };
+}
+
 describe("store event reducer", () => {
   it("hydrates and removes Spaces while clearing matching project assignments", () => {
     const spaceId = SpaceId.makeUnsafe("space-work");
@@ -2226,16 +2236,6 @@ describe("store event reducer Synara MCP command acknowledgements", () => {
     makeDomainEvent("thread.activity-appended", { threadId, activity: succeeded }, { sequence: 2 }),
     makeDomainEvent("thread.activity-appended", { threadId, activity: failed }, { sequence: 3 }),
   ];
-
-  function durableFacts(activity: OrchestrationThreadActivity) {
-    return {
-      id: activity.id,
-      kind: activity.kind,
-      turnId: activity.turnId,
-      createdAt: activity.createdAt,
-      payload: activity.payload,
-    };
-  }
 
   it("reduces live MCP acknowledgement events equivalently to replayed snapshots", () => {
     const live = applyOrchestrationEvents(makeState(makeThread()), acknowledgementEvents);

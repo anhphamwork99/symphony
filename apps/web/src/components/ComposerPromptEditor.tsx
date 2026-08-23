@@ -72,6 +72,7 @@ import {
   COMPOSER_PLACEHOLDER_TEXT_CLASS_NAME,
   COMPOSER_EDITOR_TYPOGRAPHY_CLASS_NAME,
 } from "./chat/composerPickerStyles";
+
 import {
   ComposerMentionNode,
   ComposerSkillNode,
@@ -90,6 +91,7 @@ import {
   type ComposerInlineTokenNode,
 } from "./composer-nodes";
 
+const EMPTY_MENTION_REFERENCES: ReadonlyArray<ProviderMentionReference> = [];
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
 
 const ComposerRemoveTerminalContextContext = createContext<(contextId: string) => void>(() => {});
@@ -947,7 +949,7 @@ function ComposerPromptEditorInner({
   onPaste,
   editorRef,
 }: ComposerPromptEditorInnerProps) {
-  const mentionReferences = mentionReferencesProp ?? [];
+  const mentionReferences = mentionReferencesProp ?? EMPTY_MENTION_REFERENCES;
   const [editor] = useLexicalComposerContext();
   const onChangeRef = useRef(onChange);
   const initialCursor = clampCollapsedComposerCursor(value, cursor);
@@ -1269,7 +1271,7 @@ export const ComposerPromptEditor = forwardRef<
   const initialValueRef = useRef(value);
   const initialTerminalContextsRef = useRef(terminalContexts);
   // Normalize once at the wrapper boundary so the inner editor can treat mention refs as concrete.
-  const normalizedMentionReferences = mentionReferences ?? [];
+  const normalizedMentionReferences = mentionReferences ?? EMPTY_MENTION_REFERENCES;
   const initialMentionReferencesRef = useRef(normalizedMentionReferences);
   const initialConfig: InitialConfigType = {
     namespace: "synara-composer-editor",

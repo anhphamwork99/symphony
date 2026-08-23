@@ -273,14 +273,17 @@ function PullRequestsRouteView() {
     search.projectId === undefined ||
     search.selectedProjectId === undefined ||
     search.selectedProjectId === search.projectId;
-  const selectedInput =
-    selectionMatchesScope && search.selectedProjectId && search.selectedRepo && search.number
-      ? {
-          projectId: search.selectedProjectId,
-          repository: search.selectedRepo,
-          number: search.number,
-        }
-      : null;
+  const selectedInput = useMemo(
+    () =>
+      selectionMatchesScope && search.selectedProjectId && search.selectedRepo && search.number
+        ? {
+            projectId: search.selectedProjectId,
+            repository: search.selectedRepo,
+            number: search.number,
+          }
+        : null,
+    [selectionMatchesScope, search.number, search.selectedProjectId, search.selectedRepo],
+  );
   const detailOpen = selectedInput !== null;
   const [renderedInput, setRenderedInput] = useState(selectedInput);
   useEffect(() => {
@@ -289,10 +292,7 @@ function PullRequestsRouteView() {
     // detail panel animates in over 300ms, so one macrotask is invisible.
     const timeout = window.setTimeout(() => setRenderedInput(selectedInput), 0);
     return () => window.clearTimeout(timeout);
-    // selectedInput is a fresh object literal every render; depend on its primitive
-    // fields instead so this only re-fires when the actual selection changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.selectedProjectId, search.selectedRepo, search.number]);
+  }, [selectedInput]);
   useEffect(() => {
     if (detailOpen) return;
     const timeout = window.setTimeout(() => setRenderedInput(null), 300);

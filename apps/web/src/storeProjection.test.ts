@@ -46,6 +46,16 @@ import {
 } from "./storeTestFixtures";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
+function makeEmptyShellSnapshot(snapshotSequence: number) {
+  return {
+    snapshotSequence,
+    updatedAt: "2026-02-27T00:10:00.000Z",
+    spaces: [],
+    projects: [],
+    threads: [],
+  };
+}
+
 describe("store projection", () => {
   it("preserves a semantic branch when a temp worktree branch arrives from the read model", () => {
     const initialThread = makeThread({
@@ -1677,16 +1687,6 @@ describe("thread detail sync state", () => {
 describe("deletion tombstone retirement", () => {
   const projectId = ProjectId.makeUnsafe("project-1");
   const deletedThreadId = ThreadId.makeUnsafe("thread-1");
-
-  function makeEmptyShellSnapshot(snapshotSequence: number) {
-    return {
-      snapshotSequence,
-      updatedAt: "2026-02-27T00:10:00.000Z",
-      spaces: [],
-      projects: [],
-      threads: [],
-    };
-  }
 
   function makeShellSnapshotListingDeletedThread(snapshotSequence: number, title: string) {
     return {
