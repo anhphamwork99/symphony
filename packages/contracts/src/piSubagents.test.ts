@@ -481,7 +481,7 @@ describe("Pi subagent child-owned teardown bridge contract schemas (Decision 003
       Schema.decodeSync(PiSubagentTeardownOwnedProcessesResult)({
         status: "survivors" as const,
         ...base,
-        survivorPids: [9007199254740993], // > Number.MAX_SAFE_INTEGER
+        survivorPids: [9007199254740992], // > Number.MAX_SAFE_INTEGER (9007199254740993 loses precision to the same value)
       }),
     ).toThrow();
     expect(() =>

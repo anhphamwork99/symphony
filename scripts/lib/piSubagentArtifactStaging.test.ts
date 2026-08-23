@@ -748,7 +748,7 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       const systemEntries = manifest.files
         .map((record) => record.path)
         .filter((path) => path.startsWith("agent/system/"))
-        .sort();
+        .toSorted();
       expect(systemEntries).toEqual(
         [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].toSorted(),
       );
@@ -766,7 +766,7 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       const systemEntries = manifest.files
         .map((record) => record.path)
         .filter((path) => path.startsWith("agent/system/"))
-        .sort();
+        .toSorted();
       expect(systemEntries).toEqual(
         [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].toSorted(),
       );

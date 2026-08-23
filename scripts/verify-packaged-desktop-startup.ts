@@ -353,20 +353,24 @@ export async function verifyPackagedDesktopStartup(
     throw new Error(`Packaged startup proof timed out after ${options.timeoutMs}ms.`);
   } catch (error) {
     primaryError = error;
-    throw error;
   } finally {
+    // Cleanup must always run, but never `throw` from inside `finally`: that would
+    // swallow the primary error. Cleanup failures are recorded in `primaryError`
+    // when there is no primary error yet (first failure wins) and thrown after
+    // this block, otherwise the primary error is preserved and cleanup failures
+    // are only warned about.
     if (child) {
       try {
         await terminateProcessTree(child);
       } catch (error) {
         if (primaryError === null) {
           primaryError = error;
-          throw error;
+        } else {
+          console.warn(
+            `Could not terminate packaged app process tree during cleanup (primary error preserved): ${temporaryRoot}`,
+            error,
+          );
         }
-        console.warn(
-          `Could not terminate packaged app process tree during cleanup (primary error preserved): ${temporaryRoot}`,
-          error,
-        );
       }
     }
     try {
@@ -388,7 +392,6 @@ export async function verifyPackagedDesktopStartup(
         );
       } else if (primaryError === null) {
         primaryError = error;
-        throw error;
       } else {
         console.warn(
           `Could not remove smoke temp directory (primary error preserved): ${temporaryRoot}`,
@@ -396,6 +399,9 @@ export async function verifyPackagedDesktopStartup(
         );
       }
     }
+  }
+  if (primaryError !== null) {
+    throw primaryError;
   }
 }
 
