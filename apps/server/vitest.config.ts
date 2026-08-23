@@ -38,6 +38,7 @@ const WALLCLOCK_TESTS = [
   // its stage-2 `budget + 500 ms` detach envelope requires the same
   // standalone per-file wall-clock method as the suites above.
   "src/provider/piSubagentRealPiAcceptance.test.ts",
+  "src/provider/piSubagentDesktopManagedRealPiAcceptance.test.ts",
 ];
 
 const wallclockProject = defineConfig({
