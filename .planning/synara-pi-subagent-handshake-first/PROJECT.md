@@ -4,13 +4,11 @@
 
 - **Owner:** anhpham99
 - **Lifecycle:** Implementation in progress — Ticket 01, its runtime-closure
-  remediation Ticket 01b, and its prompt-closure remediation Ticket 01c are
-  accepted; Decision 0011 closes Decision 0010's suspension of Decision
-  0009's complete-executable-closure/unblock conclusions.
-- **Triage status:** 02 unblocked (in progress, not accepted — full real
-  controlled-artifact AC1–AC5 rerun required after its pending test-only
-  SQLite observation repair); 03 ready-for-agent; 04 remains blocked by
-  02 + 03
+  remediation Ticket 01b, its prompt-closure remediation Ticket 01c, and
+  Ticket 02 are accepted. Decision 0012 accepts Ticket 02 after its complete
+  real controlled-artifact AC1–AC5 rerun and independent PASS review.
+- **Triage status:** 02 accepted; 03 ready-for-agent; 04 remains blocked by
+  03.
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -61,12 +59,14 @@
 - [decisions/0011-t01c-final-acceptance.md](decisions/0011-t01c-final-acceptance.md)
   — **Authoritative** binding final acceptance: Ticket 01c at candidate
   `6ccc674b9` (independent PASS review persisted at `c470acffd`; 143 tests
-  / 6 files) is accepted on AC1–AC7. Discharges exactly Decision 0010's
+  / 6 files) is accepted on AC1–AC7. It discharged Decision 0010's
   suspension of Decision 0009's complete-executable-closure,
   real-child-execution, Decision-0006 discharge, and Ticket-02-block
-  conclusions. Ticket 02 is unblocked but **not accepted** — its full real
-  controlled-artifact AC1–AC5 suite must rerun after its pending test-only
-  SQLite observation repair. Ticket 04 remains blocked by 02 + 03.
+  conclusions.
+- [decisions/0012-t02-final-acceptance.md](decisions/0012-t02-final-acceptance.md)
+  — **Authoritative** binding final acceptance: Ticket 02 at candidate
+  `c9c8278eb` (independent PASS review persisted at `2c7979cba`) is accepted
+  on AC1–AC5. Ticket 04 remains blocked by Ticket 03.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -93,14 +93,11 @@
   security boundaries, and a real delegated child spawn reaches at least
   its first real child model request from the release alone.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
-  lifecycle** is unblocked by Decision 0011 and in progress, but **not
-  accepted** — no acceptance criterion is complete. It retains exclusive
-  ownership of controlled-runtime construction, user authentication/model
-  configuration, mandatory lifecycle handshake, and managed Agent-wrapper
-  exposure. Its pending test-only AC2/AC5 SQLite live-WAL observation repair
-  is permitted within its approved write set, after which the full real
-  controlled-artifact AC1–AC5 suite must be rerun; evidence produced before
-  01c acceptance does not carry.
+  lifecycle** is accepted by Decision 0012 (candidate `c9c8278eb`; independent
+  PASS review persisted at `2c7979cba`). Its real controlled-artifact
+  AC1–AC5 evidence proves artifact-only loading, handshake-before-admission,
+  one normal durable admission, post-detach liveness through one fenced
+  terminal commit, and redacted zero-effect bootstrap/runtime failures.
 - **03 — Present durable execution-card truth** is unblocked and
   ready-for-agent.
 - **04 — Prove desktop production composition and complete acceptance** is

@@ -17,39 +17,29 @@ artifact now carries the pinned extension's mechanically derived
 delegated child spawn reaches at least its first real child model request
 from the release alone.
 
-**Status:** in progress — unblocked by
-[Decision 0011](../decisions/0011-t01c-final-acceptance.md), **not
-accepted**: no acceptance criterion is complete. Existing implementation
-code and tests remain as in-progress work toward this ticket. Every AC —
-the full real controlled-artifact AC1–AC5 suite — must be rerun against the
-Ticket 01c-extended artifact after the permitted test-only SQLite
-observation repair below; evidence produced before 01c acceptance does not
-carry.
-
-**Permitted while in progress (test-only):** repairing the AC2/AC5 SQLite
-live-WAL observation defect — read ledger counts through the live
-repository, or dispose the repository before opening an external read-only
-`DatabaseSync` — within Ticket 02's approved write set, without marking any
-AC done and without fabricating prompt content or claiming acceptance.
-[Decision 0011](../decisions/0011-t01c-final-acceptance.md) requires the
-complete real controlled-artifact Ticket 02 suite to be rerun after that
-repair; Ticket 02 remains subject to its own independent review and exactly
-one final-acceptance consultation.
+**Status:** accepted — [Decision 0012](../decisions/0012-t02-final-acceptance.md)
+(2026-08-23) accepts the complete real controlled-artifact AC1–AC5 candidate
+at `c9c8278eb`, after the persisted independent PASS review at `2c7979cba`.
+The accepted evidence reran the standalone desktop-managed/public-WebSocket
+suite against the Ticket-01c-extended artifact and repaired the prior
+live-WAL observation issue by reading external ledger counts only after
+harness disposal. Ticket 02's one final-acceptance consultation has been
+consumed.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
-- [ ] **AC1:** Desktop managed sessions load extensions only from the verified
+- [x] **AC1:** Desktop managed sessions load extensions only from the verified
   release artifact while using only the user authentication/model configuration
   needed to run Pi.
-- [ ] **AC2:** The managed handshake completes with the required lifecycle
+- [x] **AC2:** The managed handshake completes with the required lifecycle
   capability profile before managed Agent work is exposed; failure is early and
   never becomes a legacy fallback or a normal late Agent-call failure.
-- [ ] **AC3:** A normal supported managed Agent task is admitted once and runs
+- [x] **AC3:** A normal supported managed Agent task is admitted once and runs
   without a missing-handshake rejection.
-- [ ] **AC4:** A real child exceeding the foreground budget reports accepted,
+- [x] **AC4:** A real child exceeding the foreground budget reports accepted,
   started, detached, continuing liveness, and exactly one fenced committed
   terminal result.
-- [ ] **AC5:** Invalid user runtime configuration and malformed/unsupported
+- [x] **AC5:** Invalid user runtime configuration and malformed/unsupported
   bridge responses fail safely before durable managed side effects and do not
   disclose credentials, paths, prompts, or provider configuration.
 
