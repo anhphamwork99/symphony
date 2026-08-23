@@ -3,13 +3,14 @@
 ## Routing metadata
 
 - **Owner:** anhpham99
-- **Lifecycle:** Implementation in progress — Ticket 01 and its runtime-closure
-  remediation Ticket 01b are accepted; Decision 0010 suspends Decision 0009's
-  complete-executable-closure/unblock conclusion and opens the prompt-closure
-  remediation Ticket 01c as Ticket 02's predecessor.
-- **Triage status:** 01c and 03 ready-for-agent; 02 blocked by 01c
-  (real-runtime acceptance; test-only AC2/AC5 observation repair may
-  continue); 04 remains blocked by 02 + 03
+- **Lifecycle:** Implementation in progress — Ticket 01, its runtime-closure
+  remediation Ticket 01b, and its prompt-closure remediation Ticket 01c are
+  accepted; Decision 0011 closes Decision 0010's suspension of Decision
+  0009's complete-executable-closure/unblock conclusions.
+- **Triage status:** 02 unblocked (in progress, not accepted — full real
+  controlled-artifact AC1–AC5 rerun required after its pending test-only
+  SQLite observation repair); 03 ready-for-agent; 04 remains blocked by
+  02 + 03
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -46,17 +47,26 @@
   upstream-authoritatively compatible; prefer artifact-local resolution.
 - [decisions/0009-t01b-final-acceptance.md](decisions/0009-t01b-final-acceptance.md)
   — binding final acceptance: Ticket 01b AC1–AC6 are accepted; its
-  complete-executable-closure and Ticket-02-unblocking conclusions are
-  narrowly amended by Decision 0010, all other findings stand.
+  complete-executable-closure and Ticket-02-unblocking conclusions were
+  narrowly amended by Decision 0010 and are restored by Decision 0011, all
+  other findings stand.
 - [decisions/0010-t01c-prompt-closure-reassessment.md](decisions/0010-t01c-prompt-closure-reassessment.md)
-  — **Authoritative** binding Supervisor reassessment: the accepted Ticket 01b
-  artifact omits the pinned extension's required `agent/system` prompt-file
-  closure, so it is not yet a complete executable closure for real child
-  spawn; opened remediation Ticket 01c with mechanical prompt-dependency
-  derivation, returned Ticket 02 to blocked-by-01c for real-runtime
-  acceptance (test-only AC2/AC5 observation repair may continue), and
-  narrowly amended Decision 0009 while preserving all Decisions 0001–0008
-  security boundaries.
+  — binding Supervisor reassessment (historical finding unamended): the
+  accepted Ticket 01b artifact omitted the pinned extension's required
+  `agent/system` prompt-file closure; opened remediation Ticket 01c with
+  mechanical prompt-dependency derivation, returned Ticket 02 to
+  blocked-by-01c for real-runtime acceptance, and narrowly amended Decision
+  0009 while preserving all Decisions 0001–0008 security boundaries. Its
+  suspension clauses are discharged by Decision 0011.
+- [decisions/0011-t01c-final-acceptance.md](decisions/0011-t01c-final-acceptance.md)
+  — **Authoritative** binding final acceptance: Ticket 01c at candidate
+  `6ccc674b9` (independent PASS review persisted at `c470acffd`; 143 tests
+  / 6 files) is accepted on AC1–AC7. Discharges exactly Decision 0010's
+  suspension of Decision 0009's complete-executable-closure,
+  real-child-execution, Decision-0006 discharge, and Ticket-02-block
+  conclusions. Ticket 02 is unblocked but **not accepted** — its full real
+  controlled-artifact AC1–AC5 suite must rerun after its pending test-only
+  SQLite observation repair. Ticket 04 remains blocked by 02 + 03.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -71,22 +81,26 @@
   remediation is tracked as Ticket 01b.
 - **01b — Remediate the verified managed Pi runtime closure** is accepted by
   Decision 0009. Its proven extension/shared/npm closure, host alignment, and
-  artifact-local TypeBox resolution stand; per Decision 0010, its
-  complete-executable-closure characterization and Ticket-02 unblocking are
-  suspended pending Ticket 01c acceptance.
-- **01c — Remediate the verified managed Pi prompt closure** is open and
-  ready-for-agent, created by Decision 0010 as the direct predecessor of
-  Ticket 02 real-runtime acceptance. It extends the same release-owned,
-  manifest-exact artifact with the pinned extension's mechanically derived
-  `agent/system` prompt-file runtime closure under all existing security
-  boundaries.
+  artifact-local TypeBox resolution stand; per Decision 0011, its
+  complete-executable-closure characterization and Ticket-02 unblocking
+  (suspended by Decision 0010) are restored through the Ticket 01c-extended
+  artifact.
+- **01c — Remediate the verified managed Pi prompt closure** is accepted by
+  Decision 0011 (candidate `6ccc674b9`; independent PASS review persisted at
+  `c470acffd`; 143 focused tests / 6 files). The same release-owned,
+  manifest-exact artifact now carries the pinned extension's mechanically
+  derived `agent/system` prompt-file runtime closure under all existing
+  security boundaries, and a real delegated child spawn reaches at least
+  its first real child model request from the release alone.
 - **02 — Bootstrap the verified managed harness and prove detached terminal
-  lifecycle** is blocked by 01c for real-runtime acceptance. It retains
-  exclusive ownership of controlled-runtime construction, user
-  authentication/model configuration, mandatory lifecycle handshake, and
-  managed Agent-wrapper exposure; only explicitly identified test-only
-  AC2/AC5 observation repair may continue, and no acceptance criterion is
-  complete until 01c is accepted.
+  lifecycle** is unblocked by Decision 0011 and in progress, but **not
+  accepted** — no acceptance criterion is complete. It retains exclusive
+  ownership of controlled-runtime construction, user authentication/model
+  configuration, mandatory lifecycle handshake, and managed Agent-wrapper
+  exposure. Its pending test-only AC2/AC5 SQLite live-WAL observation repair
+  is permitted within its approved write set, after which the full real
+  controlled-artifact AC1–AC5 suite must be rerun; evidence produced before
+  01c acceptance does not carry.
 - **03 — Present durable execution-card truth** is unblocked and
   ready-for-agent.
 - **04 — Prove desktop production composition and complete acceptance** is

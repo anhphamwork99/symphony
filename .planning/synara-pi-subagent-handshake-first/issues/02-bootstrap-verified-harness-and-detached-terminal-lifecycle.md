@@ -5,27 +5,36 @@ only after the official extension, user runtime configuration, and mandatory
 handshake are ready. The same detached child remains observable in the
 background and settles through exactly one fenced committed terminal outcome.
 
-**Blocked by:** 01c — Remediate the verified managed Pi prompt closure.
-Decision 0010 found the Decision-0009 accepted Ticket 01b artifact not a
-complete executable closure for real child spawn: the pinned Alfie
-extension's `prompts.ts` resolves `<artifact>/agent/system/*` prompt
-templates (`subagent-system.md`, `tool-guidelines.md`, `skill-rules.md`,
-`working-style.md`) that current manifest-exact staging omits, and the
-verifier correctly forbids adding files after verification. Ticket 02 may
-not claim real-runtime acceptance until remediation 01c is accepted.
+**Blocked by:** None for real-runtime acceptance — the Ticket 01c block was
+removed by [Decision 0011](../decisions/0011-t01c-final-acceptance.md)
+(2026-08-23), which accepted the prompt-closure remediation at candidate
+`6ccc674b9` after the persisted independent PASS review at `c470acffd` and
+discharged Decision 0010's suspension of Decision 0009's
+complete-executable-closure/Ticket-02-unblocking conclusions. The staged
+artifact now carries the pinned extension's mechanically derived
+`agent/system` prompt-file closure (`subagent-system.md`,
+`tool-guidelines.md`, `skill-rules.md`, `working-style.md`), and a real
+delegated child spawn reaches at least its first real child model request
+from the release alone.
 
-**Status:** blocked — real-runtime acceptance stopped by
-[Decision 0010](../decisions/0010-t01c-prompt-closure-reassessment.md).
-Existing implementation code and tests remain as in-progress work toward
-this ticket; no acceptance criterion is complete until 01c is accepted.
+**Status:** in progress — unblocked by
+[Decision 0011](../decisions/0011-t01c-final-acceptance.md), **not
+accepted**: no acceptance criterion is complete. Existing implementation
+code and tests remain as in-progress work toward this ticket. Every AC —
+the full real controlled-artifact AC1–AC5 suite — must be rerun against the
+Ticket 01c-extended artifact after the permitted test-only SQLite
+observation repair below; evidence produced before 01c acceptance does not
+carry.
 
-**Explicitly permitted while blocked (test-only):** repairing the AC2/AC5
-SQLite live-WAL observation defect — read ledger counts through the live
+**Permitted while in progress (test-only):** repairing the AC2/AC5 SQLite
+live-WAL observation defect — read ledger counts through the live
 repository, or dispose the repository before opening an external read-only
 `DatabaseSync` — within Ticket 02's approved write set, without marking any
-AC done and without fabricating prompt content or claiming acceptance. After
-Ticket 01c acceptance, the complete real controlled-artifact Ticket 02 suite
-must be rerun.
+AC done and without fabricating prompt content or claiming acceptance.
+[Decision 0011](../decisions/0011-t01c-final-acceptance.md) requires the
+complete real controlled-artifact Ticket 02 suite to be rerun after that
+repair; Ticket 02 remains subject to its own independent review and exactly
+one final-acceptance consultation.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
