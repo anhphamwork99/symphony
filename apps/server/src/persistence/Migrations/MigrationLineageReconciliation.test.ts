@@ -146,7 +146,7 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104],
+        [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105],
       );
 
       // Verify tracker
@@ -288,7 +288,7 @@ describe("Migration Lineage Reconciliation (T18-AC3, T18-AC5, T18-AC7)", () => {
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [97, 98, 99, 100, 101, 102, 103, 104],
+        [97, 98, 99, 100, 101, 102, 103, 104, 105],
       );
 
       // Verify tracker
