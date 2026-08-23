@@ -14,9 +14,9 @@ import {
 } from "./AcpSessionRuntime.ts";
 import * as AcpErrors from "./AcpErrors.ts";
 
-describe("makeAcpIncomingFrameGuard", () => {
-  const encode = (value: string) => new TextEncoder().encode(value);
+const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
+describe("makeAcpIncomingFrameGuard", () => {
   it("enforces the frame budget across split chunks and resets it at newline boundaries", () => {
     const guard = makeAcpIncomingFrameGuard(5);
 

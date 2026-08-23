@@ -212,6 +212,10 @@ interface OpenCodeSessionContext {
   readonly sessionScope: Scope.Closeable;
 }
 
+function collectKnownMessageIds(context: OpenCodeSessionContext): Set<string> {
+  return new Set(context.messageRoleById.keys());
+}
+
 function releaseOpenCodeGatewayLease(context: OpenCodeSessionContext): void {
   context.gatewaySessionLease?.release();
   delete context.gatewaySessionLease;
@@ -3251,9 +3255,6 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         },
       );
 
-      const collectKnownMessageIds = (context: OpenCodeSessionContext): Set<string> =>
-        new Set(context.messageRoleById.keys());
-
       const captureTurnSnapshotWatchdogBaseline = Effect.fn("captureTurnSnapshotWatchdogBaseline")(
         function* (context: OpenCodeSessionContext) {
           const knownMessageIds = collectKnownMessageIds(context);
@@ -3879,9 +3880,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           });
         }
         const harnessPolicy = takeSynaraHarnessPolicyForProviderSession(
-          {
-            ...(context.harnessPolicyDelivered ? { harnessPolicyDelivered: true } : {}),
-          },
+          context.harnessPolicyDelivered ? { harnessPolicyDelivered: true } : {},
           {
             provider,
             scopedGatewayConnectionAvailable: context.gatewayControlAvailable,

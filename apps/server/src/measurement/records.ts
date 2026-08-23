@@ -124,9 +124,9 @@ export function computePairedDeltas(repetitions: readonly RepetitionRecord[]): P
     // invalidating accounting or repeatability, so this never gates run-set
     // sufficiency — the claimed comparative direction is checked across valid
     // pairs at the recommendation level (Decision 34 §1).
-    const consistentDirection =
-      nonZeroDirections.length === 0 ||
-      nonZeroDirections.every((direction) => direction === nonZeroDirections[0]);
+    const consistentDirection = nonZeroDirections.every(
+      (direction) => direction === nonZeroDirections[0],
+    );
     deltas.push({
       mode: repetition.mode,
       repetitionIndex: repetition.repetitionIndex,

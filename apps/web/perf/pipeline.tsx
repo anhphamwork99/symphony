@@ -117,6 +117,8 @@ declare global {
 const NOOP = () => {};
 const EMPTY_TURN_DIFFS = new Map();
 const EMPTY_REVERT_COUNTS = new Map();
+const EMPTY_MESSAGES: never[] = [];
+const EMPTY_ACTIVITIES: never[] = [];
 const EMPTY_PROPOSED_PLANS: never[] = [];
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-pipeline");
@@ -463,8 +465,8 @@ function PipelineHarness() {
   const thread = useStore(selectThread);
   const listRef = useRef<LegendListRef | null>(null);
 
-  const messages = thread?.messages ?? [];
-  const activities = thread?.activities ?? [];
+  const messages = thread?.messages ?? EMPTY_MESSAGES;
+  const activities = thread?.activities ?? EMPTY_ACTIVITIES;
   const proposedPlans = thread?.proposedPlans ?? EMPTY_PROPOSED_PLANS;
 
   // Same derivation chain ChatView runs per store flush (workLog entries from

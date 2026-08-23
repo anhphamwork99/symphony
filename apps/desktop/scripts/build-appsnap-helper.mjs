@@ -133,7 +133,7 @@ export function buildAppSnapHelper({
   const targets = swiftTargetsForArch(arch);
   const sources = readdirSync(sourceDirectory)
     .filter((name) => name.endsWith(".swift"))
-    .sort()
+    .toSorted()
     .map((name) => join(sourceDirectory, name));
   if (sources.length === 0) {
     throw new Error(`No Swift sources found in ${sourceDirectory}.`);

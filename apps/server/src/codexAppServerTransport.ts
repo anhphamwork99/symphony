@@ -22,9 +22,7 @@ export class CodexAppServerTransportError extends Error {
     readonly observedBytes: number;
     readonly cause?: unknown;
   }) {
-    super(transportErrorMessage(input), {
-      ...(input.cause !== undefined ? { cause: input.cause } : {}),
-    });
+    super(transportErrorMessage(input), input.cause !== undefined ? { cause: input.cause } : {});
     this.name = "CodexAppServerTransportError";
     this.reason = input.reason;
     this.maxBytes = input.maxBytes;

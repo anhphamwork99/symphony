@@ -1103,6 +1103,9 @@ export class DesktopBrowserManager {
   }
 
   private closePopupWindowsWhere(shouldClose: (runtime: OAuthPopupRuntime) => boolean): void {
+    // closePopupRuntime removes entries from popupRuntimes mid-iteration;
+    // the snapshot spread keeps the loop over the original set stable.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const runtime of [...this.popupRuntimes.values()]) {
       if (shouldClose(runtime)) {
         this.closePopupRuntime(runtime);
@@ -2156,7 +2159,7 @@ export class DesktopBrowserManager {
     const inactiveRuntimeTabIds = state.tabs
       .filter((tab) => tab.id !== activeTabId)
       .filter((tab) => this.runtimes.has(buildRuntimeKey(threadId, tab.id)))
-      .sort((left, right) => {
+      .toSorted((left, right) => {
         const leftKey = buildRuntimeKey(threadId, left.id);
         const rightKey = buildRuntimeKey(threadId, right.id);
         return (
@@ -2975,7 +2978,7 @@ export class DesktopBrowserManager {
         this.automationSideEffectProvenanceByRuntimeKey.delete(key);
       }
     }
-    for (const listener of [...(this.humanControlListenersByThreadId.get(threadId) ?? [])]) {
+    for (const listener of this.humanControlListenersByThreadId.get(threadId) ?? []) {
       try {
         listener();
       } catch {
@@ -3031,7 +3034,7 @@ export class DesktopBrowserManager {
 
   private emitAutomationWindowOpen(event: BrowserAutomationWindowOpenEvent): void {
     const key = buildRuntimeKey(event.threadId, event.sourceTabId);
-    for (const listener of [...(this.automationWindowOpenListenersByRuntimeKey.get(key) ?? [])]) {
+    for (const listener of this.automationWindowOpenListenersByRuntimeKey.get(key) ?? []) {
       try {
         listener(event);
       } catch {
@@ -3043,7 +3046,7 @@ export class DesktopBrowserManager {
   private emitAutomationDownload(event: BrowserAutomationDownloadEvent): void {
     const key = buildRuntimeKey(event.threadId, event.sourceTabId);
     const humanControlEpoch = this.getAutomationHumanControlEpoch(event.threadId);
-    for (const lease of [...(this.automationDownloadListenersByRuntimeKey.get(key) ?? [])]) {
+    for (const lease of this.automationDownloadListenersByRuntimeKey.get(key) ?? []) {
       if (lease.humanControlEpoch !== humanControlEpoch) continue;
       try {
         lease.listener(event);

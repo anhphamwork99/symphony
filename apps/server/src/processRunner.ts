@@ -24,6 +24,18 @@ export interface ProcessRunResult {
   stderrTruncated?: boolean | undefined;
 }
 
+function notifyOutputObserver(
+  observer: ((chunk: string) => void) | undefined,
+  chunk: Buffer | string,
+): void {
+  if (!observer) return;
+  try {
+    observer(chunk.toString());
+  } catch {
+    // Live-output observers are best effort and must never crash the child-process lifecycle.
+  }
+}
+
 function commandLabel(command: string, args: readonly string[]): string {
   return [command, ...args].join(" ");
 }
@@ -250,18 +262,6 @@ export async function runProcess(
         }
       }
       return null;
-    };
-
-    const notifyOutputObserver = (
-      observer: ((chunk: string) => void) | undefined,
-      chunk: Buffer | string,
-    ): void => {
-      if (!observer) return;
-      try {
-        observer(chunk.toString());
-      } catch {
-        // Live-output observers are best effort and must never crash the child-process lifecycle.
-      }
     };
 
     child.stdout.on("data", (chunk: Buffer | string) => {

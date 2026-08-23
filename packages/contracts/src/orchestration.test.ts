@@ -421,15 +421,17 @@ it.effect("decodes thread.turn.start defaults for provider, runtime mode, and di
   }),
 );
 
+const encodeTurnCommand = (text: string, attachments: ReadonlyArray<unknown> = []) => ({
+  type: "thread.turn.start" as const,
+  commandId: "cmd-turn-input-limit",
+  threadId: "thread-1",
+  message: { messageId: "msg-input-limit", role: "user", text, attachments },
+  createdAt: "2026-01-01T00:00:00.000Z",
+});
+
 it.effect("bounds initial turn text while preserving attachment-only turns", () =>
   Effect.gen(function* () {
-    const command = (text: string, attachments: ReadonlyArray<unknown> = []) => ({
-      type: "thread.turn.start",
-      commandId: "cmd-turn-input-limit",
-      threadId: "thread-1",
-      message: { messageId: "msg-input-limit", role: "user", text, attachments },
-      createdAt: "2026-01-01T00:00:00.000Z",
-    });
+    const command = encodeTurnCommand;
 
     const exact = yield* decodeThreadTurnStartCommand(
       command("x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),

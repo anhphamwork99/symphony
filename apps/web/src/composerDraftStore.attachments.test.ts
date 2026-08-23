@@ -26,6 +26,23 @@ import {
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import { insertInlineTerminalContextPlaceholder } from "./lib/terminalContext";
 
+const persistedAttachment = (image: ComposerImageAttachment) => ({
+  id: image.id,
+  name: image.name,
+  mimeType: image.mimeType,
+  sizeBytes: image.sizeBytes,
+  dataUrl: "data:image/png;base64,aGk=",
+  ...(image.source ? { source: image.source } : {}),
+});
+
+const attachmentFor = (image: ComposerImageAttachment) => ({
+  id: image.id,
+  name: image.name,
+  mimeType: image.mimeType,
+  sizeBytes: image.sizeBytes,
+  dataUrl: "data:image/png;base64,aGk=",
+});
+
 describe("composerDraftStore addImages", () => {
   const threadId = ThreadId.makeUnsafe("thread-dedupe");
   let originalRevokeObjectUrl: typeof URL.revokeObjectURL;
@@ -571,14 +588,6 @@ describe("composerDraftStore prompt history saved draft", () => {
       previewUrl: "blob:unrelated-saved",
       name: "unrelated-saved.png",
     });
-    const persistedAttachment = (image: ComposerImageAttachment) => ({
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      dataUrl: "data:image/png;base64,aGk=",
-      ...(image.source ? { source: image.source } : {}),
-    });
     const store = useComposerDraftStore.getState();
 
     store.setPrompt(liveThreadId, "live draft");
@@ -853,13 +862,6 @@ describe("composerDraftStore syncPersistedAttachments", () => {
       id: "appsnap-sync-second",
       previewUrl: "blob:appsnap-sync-second",
       name: "appsnap-sync-second.png",
-    });
-    const attachmentFor = (image: ComposerImageAttachment) => ({
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      dataUrl: "data:image/png;base64,aGk=",
     });
     const store = useComposerDraftStore.getState();
     store.addImages(threadId, [firstImage, secondImage]);

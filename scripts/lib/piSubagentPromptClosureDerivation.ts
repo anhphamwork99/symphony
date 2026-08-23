@@ -39,7 +39,6 @@
 
 import * as fsSync from "node:fs";
 import { join, posix, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 /** Extension subtree the artifact stages (mirrors the stager's constant). */
@@ -745,7 +744,7 @@ export function derivePromptClosure(seam: PromptClosureSourceSeam): DerivedPromp
     );
   }
 
-  return { promptPaths: [...context.collected].sort() };
+  return { promptPaths: [...context.collected].toSorted() };
 }
 
 /**
@@ -775,5 +774,5 @@ export function derivePromptClosureFromRepo(input: {
   if (validated.length === 0) {
     fail("prompt_closure_invalid", "Derived prompt dependency closure is empty.");
   }
-  return { promptPaths: validated.sort() };
+  return { promptPaths: validated.toSorted() };
 }

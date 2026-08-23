@@ -859,9 +859,59 @@ const runAntigravityCommand = (args: ReadonlyArray<string>, executable = "agy") 
 
 async function makeCodexProbeEnv(homePath?: string): Promise<NodeJS.ProcessEnv> {
   const normalizedHomePath = nonEmptyTrimmed(homePath);
-  return buildCodexProcessEnv({
-    ...(normalizedHomePath ? { homePath: normalizedHomePath } : {}),
-  });
+  return buildCodexProcessEnv(normalizedHomePath ? { homePath: normalizedHomePath } : {});
+}
+
+function getProviderBinaryPath(provider: ProviderKind, settings: ServerSettings) {
+  switch (provider) {
+    case "codex":
+      return settings.providers.codex.binaryPath;
+    case "claudeAgent":
+      return settings.providers.claudeAgent.binaryPath;
+    case "cursor":
+      return settings.providers.cursor.binaryPath;
+    case "antigravity":
+      return settings.providers.antigravity.binaryPath;
+    case "grok":
+      return settings.providers.grok.binaryPath;
+    case "droid":
+      return settings.providers.droid.binaryPath;
+    case "kilo":
+      return settings.providers.kilo.binaryPath;
+    case "opencode":
+      return settings.providers.opencode.binaryPath;
+    case "pi":
+      return settings.providers.pi.binaryPath;
+  }
+}
+
+function makeUpdateState(input: {
+  readonly status: ServerProviderUpdateState["status"];
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly message: string | null;
+  readonly output?: string | null;
+}): ServerProviderUpdateState {
+  return {
+    status: input.status,
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    message: input.message,
+    output: input.output ?? null,
+  };
+}
+
+function describeUpdateCommandError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    if (error.message.includes("initial is not a function")) {
+      return "Update command failed before producing output. Try running the provider update command from a terminal.";
+    }
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+  return "Update command could not be started.";
 }
 
 const readCodexConfigModelProviderForEnv = (env: NodeJS.ProcessEnv) =>
@@ -2185,29 +2235,6 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
         Effect.map((probe) => probe?.subscriptionType),
       );
 
-      const getProviderBinaryPath = (provider: ProviderKind, settings: ServerSettings) => {
-        switch (provider) {
-          case "codex":
-            return settings.providers.codex.binaryPath;
-          case "claudeAgent":
-            return settings.providers.claudeAgent.binaryPath;
-          case "cursor":
-            return settings.providers.cursor.binaryPath;
-          case "antigravity":
-            return settings.providers.antigravity.binaryPath;
-          case "grok":
-            return settings.providers.grok.binaryPath;
-          case "droid":
-            return settings.providers.droid.binaryPath;
-          case "kilo":
-            return settings.providers.kilo.binaryPath;
-          case "opencode":
-            return settings.providers.opencode.binaryPath;
-          case "pi":
-            return settings.providers.pi.binaryPath;
-        }
-      };
-
       const getProviderMaintenanceCapabilities = Effect.fn("getProviderMaintenanceCapabilities")(
         function* (provider: ProviderKind) {
           const settings = yield* serverSettings.getSettings;
@@ -2519,33 +2546,6 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
       );
 
       const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-
-      const makeUpdateState = (input: {
-        readonly status: ServerProviderUpdateState["status"];
-        readonly startedAt: string | null;
-        readonly finishedAt: string | null;
-        readonly message: string | null;
-        readonly output?: string | null;
-      }): ServerProviderUpdateState => ({
-        status: input.status,
-        startedAt: input.startedAt,
-        finishedAt: input.finishedAt,
-        message: input.message,
-        output: input.output ?? null,
-      });
-
-      const describeUpdateCommandError = (error: unknown): string => {
-        if (error instanceof Error && error.message.trim().length > 0) {
-          if (error.message.includes("initial is not a function")) {
-            return "Update command failed before producing output. Try running the provider update command from a terminal.";
-          }
-          return error.message;
-        }
-        if (typeof error === "string" && error.trim().length > 0) {
-          return error;
-        }
-        return "Update command could not be started.";
-      };
 
       const runUpdateCommand = Effect.fn("runProviderUpdateCommand")(function* (input: {
         readonly provider: ProviderKind;

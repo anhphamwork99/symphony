@@ -179,6 +179,14 @@ type TargetedChildInterruptTombstone = {
   readonly lifecycleGeneration: string | undefined;
   readonly state: "uncertain" | "confirmed";
 };
+
+function targetedChildInterruptKey(
+  threadId: ThreadId,
+  turnId: TurnId,
+  providerThreadId: string,
+): string {
+  return JSON.stringify([threadId, turnId, providerThreadId]);
+}
 type InteractionResponse =
   | { readonly kind: "approval"; readonly input: ProviderRespondToRequestInput }
   | { readonly kind: "userInput"; readonly input: ProviderRespondToUserInputInput };
@@ -521,12 +529,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const waitForRuntimeIdleStop = (threadId: ThreadId): Effect.Effect<void> =>
       Effect.promise(() => runtimeIdleStopsInFlight.get(threadId) ?? Promise.resolve());
-
-    const targetedChildInterruptKey = (
-      threadId: ThreadId,
-      turnId: TurnId,
-      providerThreadId: string,
-    ): string => JSON.stringify([threadId, turnId, providerThreadId]);
 
     const rememberTargetedChildInterrupt = (
       key: string,

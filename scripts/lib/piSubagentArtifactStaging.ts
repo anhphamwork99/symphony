@@ -97,9 +97,6 @@ const PROMPT_SYSTEM_RELATIVE_ROOT = "agent/system";
  */
 const EXTENSION_EXCLUDED_SUBTREES = [`${EXTENSION_RELATIVE_ROOT}/test/`];
 
-/** Extension entry whose literals declare the artifact capability profile. */
-const EXTENSION_ENTRY_RELATIVE_PATH = `${EXTENSION_RELATIVE_ROOT}/src/index.ts`;
-
 /** Contract caps mirrored for bounded enumeration before schema validation. */
 const MAX_FILE_ENTRIES = 8_192;
 const MAX_FILE_BYTES = 64 * 1_024 * 1_024;
@@ -492,7 +489,7 @@ function listSharedRuntimeFiles(repoDir: string): ReadonlyArray<string> {
   }
   // Shared runtime material is exactly the enumerated files — never a
   // directory walk, so unrelated shared-tree content can never enter.
-  return relativePaths.sort();
+  return relativePaths.toSorted();
 }
 
 /**
@@ -551,7 +548,7 @@ function derivePromptClosureInputs(repoDir: string): ReadonlyArray<string> {
   const trackedSet = new Set(
     trackedOutput
       .split("\0")
-      .map((entry) => entry.replace(/^\"|\"$/g, ""))
+      .map((entry) => entry.replace(/^"|"$/g, ""))
       .filter((entry) => entry.length > 0),
   );
 
@@ -603,7 +600,7 @@ function listTrackedExtensionFiles(repoDir: string): ReadonlyArray<string> {
     .map((entry) => entry.replace(/^"|"$/g, ""))
     .filter((entry) => entry.length > 0)
     .filter((entry) => !EXTENSION_EXCLUDED_SUBTREES.some((excluded) => entry.startsWith(excluded)))
-    .sort();
+    .toSorted();
   if (relativePaths.length === 0) {
     throw new PiSubagentArtifactStagingError(
       "extension_tree_missing",
@@ -621,7 +618,7 @@ function listTrackedExtensionFiles(repoDir: string): ReadonlyArray<string> {
 
 function walkRegularFiles(rootDir: string, currentRelative = ""): ReadonlyArray<string> {
   const collected: string[] = [];
-  for (const entry of readdirSync(rootDir).sort()) {
+  for (const entry of readdirSync(rootDir).toSorted()) {
     const absolute = join(rootDir, entry);
     const relative = currentRelative ? `${currentRelative}/${entry}` : entry;
     const stats = lstatSync(absolute);
@@ -823,7 +820,7 @@ function assembleArtifactInto(input: {
     });
   };
 
-  for (const relativePath of [...trackedFiles, ...sharedFiles, ...promptClosureFiles].sort()) {
+  for (const relativePath of [...trackedFiles, ...sharedFiles, ...promptClosureFiles].toSorted()) {
     stageFile(relativePath);
   }
 
@@ -832,7 +829,7 @@ function assembleArtifactInto(input: {
   const nodeModulesRoot = join(artifactDir, "node_modules");
   if (existsSync(nodeModulesRoot)) {
     const dependencyFiles = walkRegularFiles(nodeModulesRoot, "node_modules");
-    for (const relativePath of [...dependencyFiles].sort()) {
+    for (const relativePath of [...dependencyFiles].toSorted()) {
       assertNoProhibitedPayload(relativePath, allowedNodeModulesPackagePrefixes);
       const stagedPath = join(artifactDir, relativePath);
       const stagedStats = lstatSync(stagedPath);

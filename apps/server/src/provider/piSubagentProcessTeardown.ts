@@ -75,27 +75,6 @@ export const PI_SUBAGENT_TEARDOWN_BAND = {
 /** Sequence of the teardown request row (test/telemetry filter anchor). */
 export const PI_SUBAGENT_TEARDOWN_SEQUENCE = PI_SUBAGENT_TEARDOWN_BAND.request;
 
-/** Maps an outcome kind onto its journal band and diagnostic code. */
-const TEARDOWN_OUTCOME_RECORDS: Readonly<
-  Record<
-    "proven" | "survivors" | "owner_unproven",
-    { readonly sequence: number; readonly diagnosticCode: PiSubagentDiagnosticCode }
-  >
-> = {
-  proven: {
-    sequence: PI_SUBAGENT_TEARDOWN_BAND.proven,
-    diagnosticCode: "pi_subagent_teardown_proven",
-  },
-  survivors: {
-    sequence: PI_SUBAGENT_TEARDOWN_BAND.survivors,
-    diagnosticCode: "pi_subagent_teardown_survivors",
-  },
-  owner_unproven: {
-    sequence: PI_SUBAGENT_TEARDOWN_BAND.ownerUnproven,
-    diagnosticCode: "pi_subagent_teardown_owner_unproven",
-  },
-};
-
 export const PI_SUBAGENT_TEARDOWN_REQUESTED_DIAGNOSTIC: PiSubagentDiagnosticCode =
   "pi_subagent_teardown_requested";
 export const PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC: PiSubagentDiagnosticCode =

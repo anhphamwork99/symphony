@@ -38,6 +38,9 @@ export function FileCommentsSummaryChip(props: FileCommentsSummaryChipProps) {
       removeLabel="Remove comments"
       onRemove={props.onRemove}
       tooltip={props.comments.map((comment, index) => (
+        // Comment drafts have no id; duplicates (same file, same range, same text)
+        // are legal, so the positional index is the only unique identity.
+        // oxlint-disable-next-line no-array-index-key
         <div key={`${formatFileCommentLabel(comment)}:${index}`} className="space-y-0.5">
           <p className="text-[0.6875rem] font-medium text-muted-foreground">
             {formatFileCommentLabel(comment)}

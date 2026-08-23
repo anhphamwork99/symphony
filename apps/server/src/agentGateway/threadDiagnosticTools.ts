@@ -105,17 +105,21 @@ export function makeThreadDiagnosticTools(input: {
         return mcpToolResultJson({
           threadId,
           activities: page
-            .map((row) => ({
-              sequence: row.sequence,
-              activityId: row.activityId,
-              turnId: row.turnId,
-              tone: row.tone,
-              kind: row.kind,
-              summary: row.summary,
-              createdAt: row.createdAt,
-              ...(includeDetails ? { detail: sanitizeDiagnosticValue(row.payload) } : {}),
-            }))
-            .reverse(),
+            .map((row) =>
+              Object.assign(
+                {
+                  sequence: row.sequence,
+                  activityId: row.activityId,
+                  turnId: row.turnId,
+                  tone: row.tone,
+                  kind: row.kind,
+                  summary: row.summary,
+                  createdAt: row.createdAt,
+                },
+                includeDetails ? { detail: sanitizeDiagnosticValue(row.payload) } : {},
+              ),
+            )
+            .toReversed(),
           coverage: {
             source: "projection_thread_activities",
             highWaterSequence,
@@ -299,18 +303,22 @@ export function makeThreadDiagnosticTools(input: {
         return mcpToolResultJson({
           threadId,
           events: page
-            .map(({ sequence, event }) => ({
-              sequence,
-              eventId: event.eventId,
-              type: event.type,
-              provider: event.provider,
-              turnId: event.turnId ?? null,
-              itemId: event.itemId ?? null,
-              requestId: event.requestId ?? null,
-              createdAt: event.createdAt,
-              ...(includeDetails ? { detail: sanitizeDiagnosticValue(event) } : {}),
-            }))
-            .reverse(),
+            .map(({ sequence, event }) =>
+              Object.assign(
+                {
+                  sequence,
+                  eventId: event.eventId,
+                  type: event.type,
+                  provider: event.provider,
+                  turnId: event.turnId ?? null,
+                  itemId: event.itemId ?? null,
+                  requestId: event.requestId ?? null,
+                  createdAt: event.createdAt,
+                },
+                includeDetails ? { detail: sanitizeDiagnosticValue(event) } : {},
+              ),
+            )
+            .toReversed(),
           coverage: {
             source: "provider_runtime_events",
             highWaterSequence,
@@ -351,7 +359,7 @@ export function makeThreadDiagnosticTools(input: {
       },
       annotations: { title: "Diagnose a Synara thread", ...READ_ONLY_TOOL_ANNOTATIONS },
     },
-    handler: (args, context) =>
+    handler: (args) =>
       Effect.gen(function* () {
         const threadId = readStringArg(args, "threadId", { required: true })!;
         yield* input.requireThreadShell(threadId);
@@ -434,7 +442,7 @@ export function makeThreadDiagnosticTools(input: {
               summary: activity.summary,
               createdAt: activity.createdAt,
             }))
-            .reverse(),
+            .toReversed(),
           recentEvents: shapeDiagnosticEvents(events, "summary"),
           recentRuntimeEvents: runtimeEvents
             .map(({ sequence, event }) => ({
@@ -447,16 +455,18 @@ export function makeThreadDiagnosticTools(input: {
               requestId: event.requestId ?? null,
               createdAt: event.createdAt,
             }))
-            .reverse(),
-          providerDeliveryBlockers: blockers.map((blocker) => ({
-            ...blocker,
-            lastError: sanitizeDiagnosticValue(blocker.lastError),
-            lastReconciliationNote: sanitizeDiagnosticValue(blocker.lastReconciliationNote),
-          })),
-          operationalIncidents: incidents.map((incident) => ({
-            ...incident,
-            detail: sanitizeDiagnosticValue(incident.detail),
-          })),
+            .toReversed(),
+          providerDeliveryBlockers: blockers.map((blocker) =>
+            Object.assign({}, blocker, {
+              lastError: sanitizeDiagnosticValue(blocker.lastError),
+              lastReconciliationNote: sanitizeDiagnosticValue(blocker.lastReconciliationNote),
+            }),
+          ),
+          operationalIncidents: incidents.map((incident) =>
+            Object.assign({}, incident, {
+              detail: sanitizeDiagnosticValue(incident.detail),
+            }),
+          ),
           coverage: {
             messages: { source: "projection_thread_messages", boundedToNewest: 2_000 },
             activity: {

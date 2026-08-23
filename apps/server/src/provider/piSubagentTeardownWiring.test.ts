@@ -65,7 +65,7 @@ class TeardownClock {
     for (;;) {
       const due = this.tasks
         .filter((t) => !t.cancelled && t.at <= this.nowMs)
-        .sort((a, b) => a.at - b.at || a.id - b.id);
+        .toSorted((a, b) => a.at - b.at || a.id - b.id);
       if (due.length === 0) break;
       for (const task of due) {
         task.cancelled = true;

@@ -395,27 +395,28 @@ export function buildTurnDiffSummaryByAssistantMessageId(input: {
   return byMessageId;
 }
 
+function checkpointTurnCountsFor(summary: TurnDiffSummary): number[] {
+  if (
+    summary.files.length === 0 ||
+    summary.status === "missing" ||
+    summary.status === "error" ||
+    summary.checkpointRef === undefined ||
+    summary.checkpointRef.startsWith("provider-diff:")
+  ) {
+    return [];
+  }
+  return (
+    summary.checkpointTurnCounts ??
+    (summary.checkpointTurnCount === undefined ? [] : [summary.checkpointTurnCount])
+  );
+}
+
 // Keeps multi-turn provider responses from losing earlier "Files changed" rows
 // when several turn-diff summaries anchor to the same final assistant message.
 function mergeTurnDiffSummaries(
   existing: TurnDiffSummary | undefined,
   next: TurnDiffSummary,
 ): TurnDiffSummary {
-  const checkpointTurnCountsFor = (summary: TurnDiffSummary): number[] => {
-    if (
-      summary.files.length === 0 ||
-      summary.status === "missing" ||
-      summary.status === "error" ||
-      summary.checkpointRef === undefined ||
-      summary.checkpointRef.startsWith("provider-diff:")
-    ) {
-      return [];
-    }
-    return (
-      summary.checkpointTurnCounts ??
-      (summary.checkpointTurnCount === undefined ? [] : [summary.checkpointTurnCount])
-    );
-  };
   if (!existing) {
     const checkpointTurnCounts = checkpointTurnCountsFor(next);
     return { ...next, checkpointTurnCounts };
@@ -496,11 +497,6 @@ export function deriveMessagesTimelineRows(input: {
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
-
-  const groupedEntriesEqual = (
-    left: ReadonlyArray<WorkLogEntry>,
-    right: ReadonlyArray<WorkLogEntry>,
-  ) => left.length === right.length && left.every((entry, index) => entry === right[index]);
 
   const appendWorkEntriesToPreviousAssistant = (
     groupedEntries: WorkLogEntry[],
@@ -668,6 +664,27 @@ export function deriveMessagesTimelineRows(input: {
 // The live turn starts at the most recent user message, so its header slots in
 // right after it. Absent any user message (degenerate transcripts) the header
 // leads the transcript so the "Working for" copy is never lost.
+function groupedEntriesEqual(
+  left: ReadonlyArray<WorkLogEntry>,
+  right: ReadonlyArray<WorkLogEntry>,
+): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
+function collectWorkItems(entries: ReadonlyArray<WorkLogEntry>, into: CollapsedTurnItem[]): void {
+  for (const entry of entries) {
+    into.push({ kind: "work", id: entry.id, entry });
+  }
+}
+
+function earliestTimestamp(a: string, b: string): string {
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isNaN(aMs)) return b;
+  if (Number.isNaN(bMs)) return a;
+  return bMs < aMs ? b : a;
+}
+
 function findLiveTurnHeaderInsertIndex(rows: ReadonlyArray<MessagesTimelineRow>): number {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index]!;
@@ -714,20 +731,6 @@ function collapseSettledTurns(
   const lastTerminalAssistantMessageId = activeTurnInProgress
     ? findTailTerminalAssistantMessageId(rows, terminalAssistantMessageIds)
     : null;
-
-  const collectWorkItems = (entries: ReadonlyArray<WorkLogEntry>, into: CollapsedTurnItem[]) => {
-    for (const entry of entries) {
-      into.push({ kind: "work", id: entry.id, entry });
-    }
-  };
-
-  const earliestTimestamp = (a: string, b: string): string => {
-    const aMs = Date.parse(a);
-    const bMs = Date.parse(b);
-    if (Number.isNaN(aMs)) return b;
-    if (Number.isNaN(bMs)) return a;
-    return bMs < aMs ? b : a;
-  };
 
   for (let pass = rows.length - 1; pass >= 0; pass -= 1) {
     const row = rows[pass]!;

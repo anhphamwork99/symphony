@@ -165,13 +165,14 @@ async function idleSessionReadModel(): Promise<OrchestrationReadModel> {
   const active = await baseReadModel({ active: true });
   return {
     ...active,
-    threads: active.threads.map((thread) => ({
-      ...thread,
-      session: thread.session
-        ? { ...thread.session, status: "ready" as const, activeTurnId: null }
-        : null,
-      latestTurn: null,
-    })),
+    threads: active.threads.map((thread) =>
+      Object.assign({}, thread, {
+        session: thread.session
+          ? Object.assign({}, thread.session, { status: "ready" as const, activeTurnId: null })
+          : null,
+        latestTurn: null,
+      }),
+    ),
   };
 }
 
@@ -1474,7 +1475,9 @@ describe("Synara MCP command boundary and durable activity contract", () => {
     const sessionless = {
       ...readModel,
       threads: readModel.threads.map((thread) =>
-        thread.id === operation.waitSet[1]!.sessionId ? { ...thread, session: null } : thread,
+        thread.id === operation.waitSet[1]!.sessionId
+          ? Object.assign({}, thread, { session: null })
+          : thread,
       ),
     };
     expect(synaraMcpMemberStatus(sessionless, operation, operation.waitSet[1]!)).toBe("failed");
@@ -1507,12 +1510,11 @@ describe("Synara MCP command boundary and durable activity contract", () => {
         ...readModel,
         projects: readModel.projects.map((project) =>
           project.id === projectId
-            ? {
-                ...project,
+            ? Object.assign({}, project, {
                 synaraMcpActivationVersion: operation.version,
                 synaraMcpActivationOperation: operation,
                 synaraMcpDesiredState: "enabled",
-              }
+              })
             : project,
         ),
       },

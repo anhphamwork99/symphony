@@ -2,7 +2,7 @@ import type { PiSubagentDiagnosticCode } from "@synara/contracts";
 
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { runPiSubagentWatchdogEscalation } from "./piSubagentWatchdogEscalation.ts";
-import type { PiSubagentActiveChild, PiSubagentExtensionBridge } from "./piSubagentBridge.ts";
+import type { PiSubagentExtensionBridge } from "./piSubagentBridge.ts";
 
 /**
  * Ticket 15 — Watchdog escalation sweep driver (the production consumer of

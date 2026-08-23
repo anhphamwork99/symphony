@@ -9,6 +9,7 @@ export function normalizeProjectDirectoryName(value: string): string | null {
     normalized === ".." ||
     normalized.endsWith(".") ||
     normalized.endsWith(" ") ||
+    // oxlint-disable-next-line no-control-regex -- deliberately rejects path-hostile control characters (Windows filesystem rules)
     /[<>:"/\\|?*\u0000-\u001f]/.test(normalized) ||
     WINDOWS_RESERVED_DIRECTORY_NAME.test(normalized)
   ) {

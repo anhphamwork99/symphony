@@ -51,10 +51,12 @@ function stubOutboundFetch(
 }
 
 /** An unsigned JWT carrying only `exp`, enough for expiry-window checks. */
+function encodeJwtPart(value: unknown): string {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
 function makeJwt(expMs: number): string {
-  const encode = (value: unknown): string =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${encode({ alg: "none" })}.${encode({ exp: Math.floor(expMs / 1000) })}.sig`;
+  return `${encodeJwtPart({ alg: "none" })}.${encodeJwtPart({ exp: Math.floor(expMs / 1000) })}.sig`;
 }
 
 function makeCodexHome(auth: Record<string, unknown>) {
@@ -107,7 +109,8 @@ describe("codexUsageFetcher", () => {
     );
     const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).not.toContain("auth.openai.com/oauth/token");
-      expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${staleJwt}`);
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.Authorization).toBe(`Bearer ${staleJwt}`);
       return jsonResponse(USAGE_BODY);
     });
     stubOutboundFetch(fetchMock);

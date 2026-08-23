@@ -237,6 +237,66 @@ type AntigravitySessionContext = {
   terminalSettlement?: Promise<void>;
 };
 
+function makeRawAntigravityEvent(messageType: string, payload: unknown) {
+  return {
+    source: "antigravity.cli.event" as const,
+    messageType,
+    payload,
+  };
+}
+
+function clearRecoveryTimer(recovery: RecoveryState): void {
+  if (recovery.phase === "grace") clearTimeout(recovery.timer);
+}
+
+function captureOwnership(context: AntigravitySessionContext): RecoveryOwnership | undefined {
+  if (
+    context.activeTurnId === undefined ||
+    context.activeProcess === undefined ||
+    context.activeRunDir === undefined
+  ) {
+    return;
+  }
+  return {
+    threadId: context.session.threadId,
+    turnId: context.activeTurnId,
+    ...(context.lifecycleGeneration !== undefined
+      ? { lifecycleGeneration: context.lifecycleGeneration }
+      : {}),
+    child: context.activeProcess,
+    runDir: context.activeRunDir,
+    ...(context.gatewaySessionLease !== undefined
+      ? { gatewaySessionLease: context.gatewaySessionLease }
+      : {}),
+  };
+}
+
+function claimTerminal(context: AntigravitySessionContext, claimant: TerminalClaimant): boolean {
+  if (context.terminalClaimant === undefined) {
+    context.terminalClaimant = claimant;
+    return true;
+  }
+  return context.terminalClaimant === claimant;
+}
+
+function currentTurn(context: AntigravitySessionContext): StoredTurn | undefined {
+  return context.activeTurnId
+    ? context.turns.find((turn) => turn.id === context.activeTurnId)
+    : undefined;
+}
+
+function snapshot(context: AntigravitySessionContext): ProviderThreadSnapshot {
+  return {
+    threadId: context.session.threadId,
+    ...(context.session.cwd ? { cwd: context.session.cwd } : {}),
+    turns: context.turns.map((turn) => ({ id: turn.id, items: [...turn.items] })),
+  };
+}
+
+async function noopMaybeRecoverTerminalAnswer(_context: AntigravitySessionContext): Promise<void> {
+  return undefined;
+}
+
 function messageFromCause(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
@@ -604,7 +664,8 @@ function effortLabel(value: string): string {
 export function parseAntigravityCliModelLabel(
   value: string,
 ): { model: string; effort?: string } | null {
-  const stripped = value.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  // oxlint-disable-next-line no-control-regex -- ANSI color stripping intentionally matches ESC.
+  const stripped = value.replace(/\u001B\[[0-9;]*m/gu, "").trim();
   if (!stripped) return null;
 
   // Newer `agy models` rows are `slug<TAB>Display Name (Effort)`. Older builds
@@ -653,19 +714,21 @@ export function parseAntigravityModelLines(output: string): ProviderListModelsRe
       );
     });
     const defaultEffort = DEFAULT_EFFORT_BY_MODEL[model] ?? efforts[0];
-    return {
-      slug: model,
-      name: model,
-      ...(efforts.length > 0
-        ? {
-            supportedReasoningEfforts: efforts.map((effort) => ({
-              value: effort,
-              label: effortLabel(effort),
-            })),
-            ...(defaultEffort ? { defaultReasoningEffort: defaultEffort } : {}),
-          }
-        : {}),
-    };
+    if (efforts.length === 0) {
+      return { slug: model, name: model };
+    }
+    const supportedReasoningEfforts = efforts.map((effort) => ({
+      value: effort,
+      label: effortLabel(effort),
+    }));
+    return defaultEffort
+      ? {
+          slug: model,
+          name: model,
+          supportedReasoningEfforts,
+          defaultReasoningEffort: defaultEffort,
+        }
+      : { slug: model, name: model, supportedReasoningEfforts };
   });
 }
 
@@ -834,11 +897,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         : {}),
     });
 
-    const raw = (messageType: string, payload: unknown) => ({
-      source: "antigravity.cli.event" as const,
-      messageType,
-      payload,
-    });
+    const raw = makeRawAntigravityEvent;
 
     const recoveryFields = (
       context: AntigravitySessionContext,
@@ -855,13 +914,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       ...extra,
     });
 
-    let maybeRecoverTerminalAnswer: (
-      context: AntigravitySessionContext,
-    ) => Promise<void> = async () => undefined;
-
-    const clearRecoveryTimer = (recovery: RecoveryState): void => {
-      if (recovery.phase === "grace") clearTimeout(recovery.timer);
-    };
+    let maybeRecoverTerminalAnswer = noopMaybeRecoverTerminalAnswer;
 
     const clearTurnScheduling = (context: AntigravitySessionContext): void => {
       clearRecoveryTimer(context.recovery);
@@ -869,30 +922,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         clearInterval(context.pollTimer);
         delete context.pollTimer;
       }
-    };
-
-    const captureOwnership = (
-      context: AntigravitySessionContext,
-    ): RecoveryOwnership | undefined => {
-      if (
-        context.activeTurnId === undefined ||
-        context.activeProcess === undefined ||
-        context.activeRunDir === undefined
-      ) {
-        return;
-      }
-      return {
-        threadId: context.session.threadId,
-        turnId: context.activeTurnId,
-        ...(context.lifecycleGeneration !== undefined
-          ? { lifecycleGeneration: context.lifecycleGeneration }
-          : {}),
-        child: context.activeProcess,
-        runDir: context.activeRunDir,
-        ...(context.gatewaySessionLease !== undefined
-          ? { gatewaySessionLease: context.gatewaySessionLease }
-          : {}),
-      };
     };
 
     const ownsRecovery = (
@@ -1202,17 +1231,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       }).pipe(Effect.asVoid);
     };
 
-    const claimTerminal = (
-      context: AntigravitySessionContext,
-      claimant: TerminalClaimant,
-    ): boolean => {
-      if (context.terminalClaimant === undefined) {
-        context.terminalClaimant = claimant;
-        return true;
-      }
-      return context.terminalClaimant === claimant;
-    };
-
     /**
      * Emit a single terminal turn.completed for the active turn and mark the
      * session idle. Idempotent so process-close, interrupt, and stop-hook
@@ -1283,11 +1301,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       } satisfies ProviderRuntimeEvent);
       return true;
     };
-
-    const currentTurn = (context: AntigravitySessionContext): StoredTurn | undefined =>
-      context.activeTurnId
-        ? context.turns.find((turn) => turn.id === context.activeTurnId)
-        : undefined;
 
     const emitTextItem = (
       context: AntigravitySessionContext,
@@ -2353,7 +2366,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         offer({
           ...base(context, { includeTurn: false }),
           type: "thread.started",
-          payload: { ...(conversationId ? { providerThreadId: conversationId } : {}) },
+          payload: conversationId ? { providerThreadId: conversationId } : {},
         } satisfies ProviderRuntimeEvent);
         return session;
       });
@@ -3320,12 +3333,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           payload: { reason: "stopped", exitKind: "graceful" },
         } satisfies ProviderRuntimeEvent);
       });
-
-    const snapshot = (context: AntigravitySessionContext): ProviderThreadSnapshot => ({
-      threadId: context.session.threadId,
-      ...(context.session.cwd ? { cwd: context.session.cwd } : {}),
-      turns: context.turns.map((turn) => ({ id: turn.id, items: [...turn.items] })),
-    });
 
     const rollbackThread: AntigravityAdapterShape["rollbackThread"] = (threadId, numTurns) =>
       requireSession(threadId).pipe(

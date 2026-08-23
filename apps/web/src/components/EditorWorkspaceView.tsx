@@ -10,6 +10,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -411,7 +412,7 @@ export function EditorWorkspaceView(props: EditorWorkspaceViewProps) {
     });
   };
 
-  const stopChatPaneResize = () => {
+  const stopChatPaneResize = useCallback(() => {
     const resizeState = chatPaneResizeStateRef.current;
     if (!resizeState || typeof window === "undefined") {
       return;
@@ -430,7 +431,7 @@ export function EditorWorkspaceView(props: EditorWorkspaceViewProps) {
     setChatPaneWidth(resizeState.pendingWidth);
     storeEditorChatPaneWidth(resizeState.pendingWidth);
     chatPaneResizeStateRef.current = null;
-  };
+  }, []);
 
   useEffect(() => stopChatPaneResize, [stopChatPaneResize]);
 

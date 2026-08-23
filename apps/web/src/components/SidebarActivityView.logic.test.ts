@@ -87,6 +87,9 @@ function completedTurn(completedAt: string): SidebarThreadSummary["latestTurn"] 
   } as SidebarThreadSummary["latestTurn"];
 }
 
+const localIso = (year: number, month: number, day: number, hour: number) =>
+  new Date(year, month, day, hour).toISOString();
+
 describe("isActivityThread", () => {
   it("excludes archived, subagent, and never-run threads", () => {
     expect(isActivityThread(makeThread({ id: "a", archivedAt: "2026-08-01T00:00:00Z" }))).toBe(
@@ -377,8 +380,6 @@ describe("date buckets", () => {
   // Fixed "now": 2026-08-01T15:00 local time.
   const now = new Date(2026, 7, 1, 15, 0, 0);
   const nowMs = now.getTime();
-  const localIso = (year: number, month: number, day: number, hour: number) =>
-    new Date(year, month, day, hour).toISOString();
 
   const threadAt = (iso: string) =>
     makeThread({ id: `thread-${iso}`, createdAt: iso, latestTurn: completedTurn(iso) });
@@ -536,14 +537,13 @@ describe("project filter", () => {
     const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-2");
     // 01:30 local on Aug 2: the working day still started at 04:00 on Aug 1.
     const nowMs = new Date(2026, 7, 2, 1, 30, 0).getTime();
-    const localIso = (day: number, hour: number) => new Date(2026, 7, day, hour).toISOString();
 
     const touched = {
       ...makeThread({
         id: "touched",
         projectId: PROJECT_ID,
-        latestTurn: completedTurn(localIso(1, 22)),
-        lastVisitedAt: localIso(1, 22),
+        latestTurn: completedTurn(localIso(2026, 7, 1, 22)),
+        lastVisitedAt: localIso(2026, 7, 1, 22),
       }),
     };
     // Newer agent output, but the user has not opened it since before the turnover.
@@ -551,8 +551,8 @@ describe("project filter", () => {
       ...makeThread({
         id: "untouched",
         projectId: OTHER_PROJECT_ID,
-        latestTurn: completedTurn(localIso(2, 1)),
-        lastVisitedAt: localIso(1, 3),
+        latestTurn: completedTurn(localIso(2026, 7, 2, 1)),
+        lastVisitedAt: localIso(2026, 7, 1, 3),
       }),
     };
 
@@ -622,8 +622,6 @@ describe("splitRecentActivityThreads", () => {
 
   // Fixed "now": 2026-08-01T15:00 local time, so the working day started at 04:00.
   const recentNowMs = new Date(2026, 7, 1, 15, 0, 0).getTime();
-  const localIso = (year: number, month: number, day: number, hour: number) =>
-    new Date(year, month, day, hour).toISOString();
   const byInteraction = (id: string, lastVisitedAt: string, latestUserMessageAt?: string) => ({
     ...makeThread({
       id,

@@ -160,6 +160,7 @@ export function verifyExtensionGitProvenance(repoDir?: string): {
   } catch (err) {
     throw new Error(
       `Provenance assertion failed: '${dir}' is not a valid Git repository: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 
@@ -181,7 +182,9 @@ export function verifyExtensionGitProvenance(repoDir?: string): {
     if (err instanceof Error && err.message.startsWith("Provenance assertion failed:")) {
       throw err;
     }
-    throw new Error(`Provenance assertion failed: unable to verify origin URL: ${err}`);
+    throw new Error(`Provenance assertion failed: unable to verify origin URL: ${err}`, {
+      cause: err,
+    });
   }
 
   // 3. Verify HEAD equals pinned commit
@@ -345,7 +348,9 @@ export function assertProductionExtensionProvenance(
   try {
     pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
   } catch (err) {
-    throw new Error(`Provenance assertion failed: unable to parse '${packageJsonPath}': ${err}`);
+    throw new Error(`Provenance assertion failed: unable to parse '${packageJsonPath}': ${err}`, {
+      cause: err,
+    });
   }
 
   const manifest = loadProvenanceManifest();
@@ -452,6 +457,27 @@ export async function createRealPiSession(options?: { tempAgentDir?: string }): 
   await session.bindExtensions({});
   return { session, services, tempAgentDir };
 }
+
+const executeCtxFor = (session: any, cwd: string) => ({
+  ui: {
+    notify: () => {},
+    status: () => {},
+    setStatus: () => {},
+    setWidget: () => {},
+    select: async () => undefined,
+    confirm: async () => true,
+    input: async () => undefined,
+  },
+  cwd,
+  model: undefined,
+  modelRegistry: {
+    find: () => undefined,
+    getAll: () => [],
+    getAvailable: () => [],
+  },
+  sessionManager: session.sessionManager,
+  getSystemPrompt: () => "",
+});
 
 describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
   it("T19-AC1, T19-AC7: production Pi provider session with actual extension negotiates protocol and capability set", async () => {
@@ -1466,27 +1492,6 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
         `;
       }
 
-      const executeCtxFor = (session: any, cwd: string = tempAgentDir) => ({
-        ui: {
-          notify: () => {},
-          status: () => {},
-          setStatus: () => {},
-          setWidget: () => {},
-          select: async () => undefined,
-          confirm: async () => true,
-          input: async () => undefined,
-        },
-        cwd,
-        model: undefined,
-        modelRegistry: {
-          find: () => undefined,
-          getAll: () => [],
-          getAvailable: () => [],
-        },
-        sessionManager: session.sessionManager,
-        getSystemPrompt: () => "",
-      });
-
       const outputFilesFor = (threadId: string) => {
         const session = sessionsByThread.get(threadId);
         if (!session) return [];
@@ -1513,7 +1518,7 @@ describe("Real Pi Subagent Extension production control health (Issue 21)", () =
         const agentEntry = loadedExt.tools.get("Agent");
         return {
           execute: agentEntry.execute ?? agentEntry.definition?.execute,
-          ctx: executeCtxFor(session),
+          ctx: executeCtxFor(session, tempAgentDir),
         };
       };
 

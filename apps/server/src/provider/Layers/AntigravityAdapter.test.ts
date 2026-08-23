@@ -37,6 +37,14 @@ import {
   runAntigravityHelperProcess,
 } from "./AntigravityAdapter";
 
+const failTeardown = async () => {
+  throw new Error("process exit could not be proven");
+};
+
+const noopRequestStop = () => undefined;
+
+const makeLeakedWatcher = () => () => undefined;
+
 function runCaptureCommand(command: string, input: string, env: NodeJS.ProcessEnv) {
   const shell = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh";
   const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
@@ -845,10 +853,6 @@ describe("Antigravity turn settle on cancel (#465)", () => {
       children.push(child);
       return child;
     }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
-
-  const failTeardown = async () => {
-    throw new Error("process exit could not be proven");
-  };
 
   it("unlocks Cancel but fences a child whose exit cannot be proven", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-interrupt-hung-"));
@@ -2481,7 +2485,7 @@ describe("Antigravity terminal-answer recovery", () => {
     let attempts = 0;
     const teardown = vi.fn(async () => {
       attempts += 1;
-      const leakedWatcher = () => undefined;
+      const leakedWatcher = makeLeakedWatcher();
       child?.once("exit", leakedWatcher);
       throw new ProviderProcessExitUnprovenError({
         rootPid: 41001,
@@ -2765,7 +2769,7 @@ describe("Antigravity terminal-answer recovery", () => {
       remainingDescendantPids: [],
       captureComplete: true,
     });
-    let requestStop = () => undefined;
+    let requestStop = noopRequestStop;
     let stop: Promise<void> | undefined;
     const teardown = vi.fn(async () => {
       requestStop();

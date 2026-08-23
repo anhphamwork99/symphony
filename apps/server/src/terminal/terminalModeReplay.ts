@@ -31,6 +31,7 @@ interface KittyKeyboardReplayState {
   stack: number[];
 }
 
+// oxlint-disable-next-line no-control-regex -- Kitty keyboard CSI uses literal ESC/C1 controls.
 const KITTY_KEYBOARD_SEQUENCE_PATTERN = /(?:\u001b\[|\u009b)([<>=])([0-9;]*)u/g;
 
 function parseKittyFlags(rawParams: string): number {

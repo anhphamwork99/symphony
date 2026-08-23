@@ -131,14 +131,14 @@ export function createThreadDetailPrewarmController(
       for (const threadId of nextThreadIds) {
         prewarmThreadDetail(threadId);
       }
-      for (const threadId of [...retainedThreadById.keys()]) {
+      for (const threadId of Array.from(retainedThreadById.keys())) {
         if (!nextThreadIdSet.has(threadId)) {
           releaseThread(threadId);
         }
       }
     },
     dispose() {
-      for (const threadId of [...retainedThreadById.keys()]) {
+      for (const threadId of Array.from(retainedThreadById.keys())) {
         releaseThread(threadId);
       }
     },

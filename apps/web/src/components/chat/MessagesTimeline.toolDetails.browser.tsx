@@ -361,8 +361,14 @@ describe("MessagesTimeline tool details", () => {
   it("preserves the file-open action for activity-only read rows", async () => {
     const openFile = vi.fn(() => true);
     const host = createTimelineHost();
+    const openFileValue = { openFile };
     const screen = await render(
-      <WorkspaceFileOpenerContext.Provider value={{ openFile }}>
+      <WorkspaceFileOpenerContext.Provider
+        // One-shot test render: this value is render-local and never rerenders,
+        // so constructing it inline-hoisted is safe here.
+        // oxlint-disable-next-line jsx-no-constructed-context-values
+        value={openFileValue}
+      >
         <TimelineWorkEntryRow
           workEntry={{
             id: "read-live-activity",

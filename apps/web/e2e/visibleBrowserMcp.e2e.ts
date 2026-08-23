@@ -350,6 +350,7 @@ test("production MCP controls one persistent Electron page across visibility cha
       });
       throw new Error(
         `browser_drag failed with ${String(error)}; diagnostics=${JSON.stringify(dragDiagnostics.structuredContent.value)}`,
+        { cause: error },
       );
     }
     await mcp.call("browser_wait", {

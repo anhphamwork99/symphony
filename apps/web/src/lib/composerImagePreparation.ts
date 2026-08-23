@@ -361,6 +361,8 @@ function optimizeInWorker(
       },
       { once: true },
     );
+    // Worker.postMessage(message, transfer?) has no targetOrigin parameter; that
+    // argument only exists on Window.postMessage, so the rule is a false positive here.
     worker.postMessage({
       file,
       width: initialSize.width,
@@ -369,7 +371,7 @@ function optimizeInWorker(
       quality: COMPOSER_IMAGE_QUALITY,
       targetBytes: COMPOSER_IMAGE_OPTIMIZED_TARGET_BYTES,
       maxResizeAttempts: COMPOSER_IMAGE_MAX_RESIZE_ATTEMPTS,
-    });
+    }); // oxlint-disable-line require-post-message-target-origin
   });
 }
 

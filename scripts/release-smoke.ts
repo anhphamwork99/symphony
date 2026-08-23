@@ -376,6 +376,7 @@ function verifyDesktopStageLockAuthority(): void {
   if (packagesSectionOffset < 0) {
     throw new Error("Expected bun.lock to contain a packages section.");
   }
+  // oxlint-disable-next-line prefer-set-has -- importer header text, not an array; the loop below does substring containment checks on it
   const workspaceImporters = lockfile.slice(0, packagesSectionOffset);
   for (const manifestPath of RELEASE_WORKSPACE_MANIFEST_PATHS) {
     const workspacePath = manifestPath === "package.json" ? "" : dirname(manifestPath);

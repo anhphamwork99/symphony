@@ -16,6 +16,34 @@ import {
   insertInlineTerminalContextPlaceholder,
 } from "./lib/terminalContext";
 
+function makeFakeEnv() {
+  const windowListeners = new Map<string, () => void>();
+  const documentListeners = new Map<string, () => void>();
+  const visibility = { value: "visible" };
+  return {
+    env: {
+      window: {
+        addEventListener: (type: string, listener: () => void) => {
+          windowListeners.set(type, listener);
+        },
+      },
+      document: {
+        addEventListener: (type: string, listener: () => void) => {
+          documentListeners.set(type, listener);
+        },
+        get visibilityState() {
+          return visibility.value;
+        },
+      },
+    },
+    fireWindow: (type: string) => windowListeners.get(type)?.(),
+    fireDocument: (type: string) => documentListeners.get(type)?.(),
+    setVisibility: (value: string) => {
+      visibility.value = value;
+    },
+  };
+}
+
 describe("composerDraftStore persisted-state hydration", () => {
   it("normalizes null and empty persisted states", () => {
     const emptyState = {
@@ -775,34 +803,6 @@ describe("createDeferredPersistStorage", () => {
 });
 
 describe("flushStorageBeforePageHide", () => {
-  function makeFakeEnv() {
-    const windowListeners = new Map<string, () => void>();
-    const documentListeners = new Map<string, () => void>();
-    const visibility = { value: "visible" };
-    return {
-      env: {
-        window: {
-          addEventListener: (type: string, listener: () => void) => {
-            windowListeners.set(type, listener);
-          },
-        },
-        document: {
-          addEventListener: (type: string, listener: () => void) => {
-            documentListeners.set(type, listener);
-          },
-          get visibilityState() {
-            return visibility.value;
-          },
-        },
-      },
-      fireWindow: (type: string) => windowListeners.get(type)?.(),
-      fireDocument: (type: string) => documentListeners.get(type)?.(),
-      setVisibility: (value: string) => {
-        visibility.value = value;
-      },
-    };
-  }
-
   it("flushes on pagehide, beforeunload, and visibilitychange->hidden", () => {
     const flush = vi.fn();
     const harness = makeFakeEnv();

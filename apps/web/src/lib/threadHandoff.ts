@@ -139,10 +139,7 @@ export function buildThreadHandoffImportedActivities(
 ): ReadonlyArray<OrchestrationThreadActivity> {
   return thread.activities.filter(isImportableThreadActivity).map((activity) => {
     const { sequence: _sequence, ...rest } = activity;
-    return {
-      ...rest,
-      id: EventId.makeUnsafe(randomUUID()),
-    };
+    return Object.assign(rest, { id: EventId.makeUnsafe(randomUUID()) });
   });
 }
 

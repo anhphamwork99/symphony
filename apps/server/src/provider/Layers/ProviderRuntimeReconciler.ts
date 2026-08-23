@@ -57,6 +57,21 @@ function reconciliationKey(plan: ProviderRuntimeReconciliationPlan): string {
   ])}`;
 }
 
+/** Compares everything that constitutes a repair; `updatedAt` always moves. */
+function isSameProjectedSession(
+  current: OrchestrationSession | null,
+  next: OrchestrationSession,
+): boolean {
+  return (
+    current !== null &&
+    current.status === next.status &&
+    current.providerName === next.providerName &&
+    current.runtimeMode === next.runtimeMode &&
+    current.activeTurnId === next.activeTurnId &&
+    current.lastError === next.lastError
+  );
+}
+
 const make = (options?: ProviderRuntimeReconcilerLiveOptions) =>
   Effect.gen(function* () {
     const orchestrationEngine = yield* OrchestrationEngineService;
@@ -80,18 +95,6 @@ const make = (options?: ProviderRuntimeReconcilerLiveOptions) =>
         Math.floor(options?.candidateLimit ?? DEFAULT_RECONCILIATION_CANDIDATE_LIMIT),
       ),
     );
-
-    /** Compares everything that constitutes a repair; `updatedAt` always moves. */
-    const isSameProjectedSession = (
-      current: OrchestrationSession | null,
-      next: OrchestrationSession,
-    ): boolean =>
-      current !== null &&
-      current.status === next.status &&
-      current.providerName === next.providerName &&
-      current.runtimeMode === next.runtimeMode &&
-      current.activeTurnId === next.activeTurnId &&
-      current.lastError === next.lastError;
 
     const applyPlan = Effect.fnUntraced(function* (input: {
       readonly plan: ProviderRuntimeReconciliationPlan;

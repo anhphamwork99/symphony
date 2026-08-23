@@ -97,6 +97,7 @@ const STUDIO_DRAFT_THREAD_ID = "thread-studio-draft" as ThreadId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
+const noop = (): void => {};
 let attachmentResponseDelayMs = 0;
 let attachmentUploadSequence = 0;
 let attachmentUploadBarrier: Promise<void> | null = null;
@@ -172,6 +173,15 @@ interface ChatLayoutMeasurement {
 
 function isoAt(offsetSeconds: number): string {
   return new Date(BASE_TIME_MS + offsetSeconds * 1_000).toISOString();
+}
+
+function percentile(samples: readonly number[], fraction: number): number {
+  const ordered = samples.toSorted((left, right) => left - right);
+  return ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))] ?? 0;
+}
+
+function scheduleAt(ms: number, action: () => void): number {
+  return window.setTimeout(action, ms);
 }
 
 function createBaseServerConfig(): ServerConfig {
@@ -397,7 +407,7 @@ function createIssue550Snapshot(options: {
   return {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
-      thread.id === THREAD_ID ? { ...thread, messages, activities } : thread,
+      thread.id === THREAD_ID ? Object.assign({}, thread, { messages, activities }) : thread,
     ),
   };
 }
@@ -657,7 +667,7 @@ function withActiveHomeChatThread(snapshot: OrchestrationReadModel): Orchestrati
   return {
     ...snapshotWithHomeProject,
     threads: snapshotWithHomeProject.threads.map((thread) =>
-      thread.id === THREAD_ID ? { ...thread, projectId: HOME_PROJECT_ID } : thread,
+      thread.id === THREAD_ID ? Object.assign({}, thread, { projectId: HOME_PROJECT_ID }) : thread,
     ),
   };
 }
@@ -766,8 +776,7 @@ function createSnapshotWithActiveInlinePlan(): OrchestrationReadModel {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             latestTurn: {
               turnId: activeTurnId,
               state: "running",
@@ -823,7 +832,7 @@ function createSnapshotWithActiveInlinePlan(): OrchestrationReadModel {
                 }
               : null,
             updatedAt: isoAt(1_003),
-          }
+          })
         : thread,
     ),
   };
@@ -837,8 +846,7 @@ function createSnapshotWithTallComposerStack(): OrchestrationReadModel {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             checkpoints: [
               {
                 turnId: activeTurnId,
@@ -863,7 +871,7 @@ function createSnapshotWithTallComposerStack(): OrchestrationReadModel {
                 completedAt: isoAt(1_004),
               },
             ],
-          }
+          })
         : thread,
     ),
   };
@@ -877,8 +885,7 @@ function createSnapshotWithSettledInlinePlan(): OrchestrationReadModel {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             latestTurn: {
               turnId: activeTurnId,
               state: "completed",
@@ -910,7 +917,7 @@ function createSnapshotWithSettledInlinePlan(): OrchestrationReadModel {
                 }
               : null,
             updatedAt: isoAt(1_004),
-          }
+          })
         : thread,
     ),
   };
@@ -923,8 +930,7 @@ function createSnapshotWithSettledCompletedInlinePlan(): OrchestrationReadModel 
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             activities: thread.activities.map((activity) =>
               activity.kind === "turn.tasks.updated"
                 ? {
@@ -939,7 +945,7 @@ function createSnapshotWithSettledCompletedInlinePlan(): OrchestrationReadModel 
                   }
                 : activity,
             ),
-          }
+          })
         : thread,
     ),
   };
@@ -963,8 +969,7 @@ function createSnapshotWithSettledPlanAwaitingFollowUp(): OrchestrationReadModel
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             interactionMode: "plan",
             hasActionableProposedPlan: true,
             proposedPlans: [
@@ -979,7 +984,7 @@ function createSnapshotWithSettledPlanAwaitingFollowUp(): OrchestrationReadModel
               },
             ],
             updatedAt: isoAt(1_005),
-          }
+          })
         : thread,
     ),
   };
@@ -999,8 +1004,7 @@ function createSnapshotWithInlineToolOverflow(options: {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             latestTurn: {
               turnId: activeTurnId,
               state: options.active ? "running" : "completed",
@@ -1044,7 +1048,7 @@ function createSnapshotWithInlineToolOverflow(options: {
                 }
               : null,
             updatedAt: options.active ? isoAt(1_107) : isoAt(1_109),
-          }
+          })
         : thread,
     ),
   };
@@ -1060,8 +1064,7 @@ function createSnapshotWithHistoricalToolHydrationDuringLiveTurn(options: {
     ...snapshot,
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             latestTurn: {
               turnId: liveTurnId,
               state: "running",
@@ -1103,7 +1106,7 @@ function createSnapshotWithHistoricalToolHydrationDuringLiveTurn(options: {
                 }
               : null,
             updatedAt: isoAt(1_202),
-          }
+          })
         : thread,
     ),
   };
@@ -2128,10 +2131,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("keeps near-cap composer work bounded while live activities arrive", async () => {
-    const percentile = (samples: readonly number[], fraction: number): number => {
-      const ordered = [...samples].sort((left, right) => left - right);
-      return ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))] ?? 0;
-    };
     const cases = [
       { name: "short", messageCount: 10, activityCount: 20 },
       { name: "near-cap", messageCount: 81, activityCount: 1_609 },
@@ -2226,16 +2225,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     const snapshot: OrchestrationReadModel = {
       ...baseSnapshot,
-      threads: baseSnapshot.threads.map((thread) => ({
-        ...thread,
-        runtimeMode: "approval-required",
-        session: thread.session
-          ? {
-              ...thread.session,
-              runtimeMode: "approval-required",
-            }
-          : null,
-      })),
+      threads: baseSnapshot.threads.map((thread) =>
+        Object.assign({}, thread, {
+          runtimeMode: "approval-required",
+          session: thread.session
+            ? {
+                ...thread.session,
+                runtimeMode: "approval-required",
+              }
+            : null,
+        }),
+      ),
     };
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2611,7 +2611,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotWithBottomAttachments(),
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     try {
       const scrollContainer = await waitForElement(
@@ -2725,7 +2725,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotWithLongAssistantResponse(),
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     try {
       const scrollContainer = await waitForElement(
@@ -2779,7 +2779,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotWithLongAssistantResponse(),
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     try {
       const scrollContainer = await waitForElement(
@@ -2852,7 +2852,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         targetText: "bottom stick target",
       }),
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     try {
       const scrollContainer = await waitForElement(
@@ -3323,12 +3323,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
       };
       window.requestAnimationFrame(sample);
 
-      const at = (ms: number, action: () => void) => window.setTimeout(action, ms);
       const activeTurnId = TurnId.makeUnsafe("turn-jitter");
       const streamingId = MessageId.makeUnsafe("msg-assistant-jitter-stream");
 
       // Server ack: durable user row + running turn (Thinking appears).
-      at(140, () => {
+      scheduleAt(140, () => {
         const sentMessageId = findSentRow()?.dataset.messageId;
         if (!sentMessageId) return;
         syncActiveThread((thread) => ({
@@ -3366,7 +3365,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         }));
       });
       // Turn actually starts: the "Working for" header replaces Thinking.
-      at(420, () => {
+      scheduleAt(420, () => {
         syncActiveThread((thread) => ({
           ...thread,
           latestTurn: thread.latestTurn
@@ -3383,7 +3382,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         .find((thread) => thread.id === THREAD_ID)!
         .messages.at(-2)!.id;
       for (const [index, delayMs] of [260, 340, 430].entries()) {
-        at(delayMs, () => {
+        scheduleAt(delayMs, () => {
           syncActiveThread((thread) => ({
             ...thread,
             messages: thread.messages.map((message) =>
@@ -3401,7 +3400,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }
       // Assistant text streams in below the anchor, chunk by chunk.
       for (let chunk = 1; chunk <= 24; chunk += 1) {
-        at(560 + chunk * 33, () => {
+        scheduleAt(560 + chunk * 33, () => {
           syncActiveThread((thread) => ({
             ...thread,
             messages: [
@@ -3512,7 +3511,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: currentSnapshot,
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     const syncActiveThread = (
       update: (
@@ -3706,7 +3705,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       viewport: DEFAULT_VIEWPORT,
       snapshot: currentSnapshot,
     });
-    let restoreScrollTo = () => {};
+    let restoreScrollTo: () => void = noop;
 
     const syncActiveThread = (
       update: (
@@ -6441,10 +6440,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
             deletedAt: null,
           },
         ],
-        projects: baseSnapshot.projects.map((project) => ({
-          ...project,
-          spaceId: currentSpaceId,
-        })),
+        projects: baseSnapshot.projects.map((project) =>
+          Object.assign({}, project, {
+            spaceId: currentSpaceId,
+          }),
+        ),
       },
     });
     const previousNativeApi = window.nativeApi;
@@ -6714,7 +6714,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
   it("keeps worktree setup resolvable while attachments upload", async () => {
     const restoreNativeApi = installDeterministicSendNativeApi();
-    let releaseAttachmentUpload = () => {};
+    let releaseAttachmentUpload: () => void = noop;
     attachmentUploadBarrier = new Promise<void>((resolve) => {
       releaseAttachmentUpload = resolve;
     });
@@ -7862,8 +7862,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         ...settledSnapshot,
         threads: settledSnapshot.threads.map((thread) =>
           thread.id === THREAD_ID
-            ? {
-                ...thread,
+            ? Object.assign({}, thread, {
                 messages: thread.messages.map((message) =>
                   message.role === "assistant"
                     ? {
@@ -7872,7 +7871,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                       }
                     : message,
                 ),
-              }
+              })
             : thread,
         ),
       },

@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ThreadId } from "@synara/contracts";
 
-import type { McpAuthorityBinding } from "../mcpSessionAuthority.ts";
 import { makeMcpSessionAuthorityRegistry } from "../mcpSessionAuthority.ts";
 import { makeAgentGatewaySessionRegistry } from "./AgentGatewaySessionRegistry.ts";
 

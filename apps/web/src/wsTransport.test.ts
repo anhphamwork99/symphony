@@ -130,7 +130,7 @@ class MockWebSocket {
   private emit(type: WsEventType, event?: { data?: unknown }) {
     const listeners = this.listeners.get(type);
     if (!listeners) return;
-    for (const listener of [...listeners]) {
+    for (const listener of Array.from(listeners)) {
       listener(event);
     }
   }
@@ -923,7 +923,7 @@ describe("WsTransport", () => {
     const { transport, internals } = makeBareTransport();
     const threadId = "thread-release-order";
     const key = `orchestration.thread:${threadId}`;
-    let settleStream: () => void = () => undefined;
+    let settleStream!: () => void;
     const settled = new Promise<void>((resolve) => {
       settleStream = resolve;
     });

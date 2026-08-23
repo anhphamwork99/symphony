@@ -174,8 +174,6 @@ export function ComposerLocalDirectoryMenu(props: {
 
   const errorMessage =
     errorState !== null && errorState.dir === expandedDirectory ? errorState.message : null;
-  const setErrorMessage = (message: string | null) =>
-    setErrorState(message === null ? null : { dir: expandedDirectory, message });
 
   // Cache by the expanded absolute path so `~/Documents` and `/Users/me/Documents`
   // share one entry instead of double-listing.
@@ -191,7 +189,7 @@ export function ComposerLocalDirectoryMenu(props: {
       if (cancelled) return;
       const api = readNativeApi();
       if (!api) {
-        setErrorMessage("App is still connecting. Try again in a moment.");
+        setErrorState({ dir: expandedDirectory, message: "App is still connecting. Try again in a moment." });
         return;
       }
 
@@ -206,7 +204,7 @@ export function ComposerLocalDirectoryMenu(props: {
         })
         .catch((error) => {
           setEntriesByPath((current) => ({ ...current, [expandedDirectory]: [] }));
-          setErrorMessage(summarizeDirectoryLoadError(error));
+          setErrorState({ dir: expandedDirectory, message: summarizeDirectoryLoadError(error) });
         })
         .finally(() => {
           setLoadingPaths((current) => {

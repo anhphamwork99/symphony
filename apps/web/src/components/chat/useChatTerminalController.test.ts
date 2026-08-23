@@ -5,6 +5,14 @@
 import { ThreadId } from "@synara/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const depsEqual = (
+  left: readonly unknown[] | undefined,
+  right: readonly unknown[],
+): boolean =>
+  left !== undefined &&
+  left.length === right.length &&
+  left.every((value, index) => Object.is(value, right[index]));
+
 const reactHarness = vi.hoisted(() => {
   interface HookSlot {
     value?: unknown;
@@ -21,10 +29,7 @@ const reactHarness = vi.hoisted(() => {
     slots[index] ??= {};
     return slots[index]!;
   };
-  const depsEqual = (left: readonly unknown[] | undefined, right: readonly unknown[]) =>
-    left !== undefined &&
-    left.length === right.length &&
-    left.every((value, index) => Object.is(value, right[index]));
+
 
   return {
     beginRender() {
@@ -64,32 +69,10 @@ const reactHarness = vi.hoisted(() => {
   };
 });
 
-const terminalHarness = vi.hoisted(() => {
-  const actions = {
-    setTerminalOpen: vi.fn(),
-    setTerminalPresentationMode: vi.fn(),
-    setTerminalWorkspaceLayout: vi.fn(),
-    openChatThreadPage: vi.fn(),
-    openTerminalThreadPage: vi.fn(),
-    closeWorkspaceChat: vi.fn(),
-    setTerminalWorkspaceTab: vi.fn(),
-    setTerminalHeight: vi.fn(),
-    setTerminalMetadata: vi.fn(),
-    setTerminalActivity: vi.fn(),
-    splitTerminalLeft: vi.fn(),
-    splitTerminalRight: vi.fn(),
-    splitTerminalDown: vi.fn(),
-    splitTerminalUp: vi.fn(),
-    newTerminal: vi.fn(),
-    newTerminalTab: vi.fn(),
-    openNewFullWidthTerminal: vi.fn(),
-    setActiveTerminal: vi.fn(),
-    closeTerminal: vi.fn(),
-    closeTerminalGroup: vi.fn(),
-    resizeTerminalSplit: vi.fn(),
-  };
-
-  const makeTerminalState = (terminalIds: string[]) => ({
+// Declared as a hoisted `function` so `vi.hoisted` below can reference it at
+// module-evaluation time (arrow `const` would still be in its TDZ there).
+function makeTerminalState(terminalIds: string[]) {
+  return {
     entryPoint: "terminal" as const,
     terminalOpen: true,
     presentationMode: "drawer" as const,
@@ -116,7 +99,33 @@ const terminalHarness = vi.hoisted(() => {
       },
     ],
     activeTerminalGroupId: "group-1",
-  });
+  };
+}
+
+const terminalHarness = vi.hoisted(() => {
+  const actions = {
+    setTerminalOpen: vi.fn(),
+    setTerminalPresentationMode: vi.fn(),
+    setTerminalWorkspaceLayout: vi.fn(),
+    openChatThreadPage: vi.fn(),
+    openTerminalThreadPage: vi.fn(),
+    closeWorkspaceChat: vi.fn(),
+    setTerminalWorkspaceTab: vi.fn(),
+    setTerminalHeight: vi.fn(),
+    setTerminalMetadata: vi.fn(),
+    setTerminalActivity: vi.fn(),
+    splitTerminalLeft: vi.fn(),
+    splitTerminalRight: vi.fn(),
+    splitTerminalDown: vi.fn(),
+    splitTerminalUp: vi.fn(),
+    newTerminal: vi.fn(),
+    newTerminalTab: vi.fn(),
+    openNewFullWidthTerminal: vi.fn(),
+    setActiveTerminal: vi.fn(),
+    closeTerminal: vi.fn(),
+    closeTerminalGroup: vi.fn(),
+    resizeTerminalSplit: vi.fn(),
+  };
 
   return {
     actions,

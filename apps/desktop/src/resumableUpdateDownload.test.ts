@@ -388,6 +388,25 @@ describe("shouldGiveUp", () => {
 // and the real installResumableUpdateDownloader wiring. These prove the behaviour
 // the pure helpers can only imply: the downloader actually resumes from a byte
 // offset after a mid-stream drop and verifies the published checksum.
+// electron-updater-style cancellation token that never cancels; shared by the
+// integration cases below and capturing nothing, so it lives at module scope.
+function makeCancellationToken() {
+  return {
+    cancelled: false,
+    createPromise<T>(
+      executor: (
+        resolve: (value: T) => void,
+        reject: (error: Error) => void,
+        onCancel: (handler: () => void) => void,
+      ) => void,
+    ): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        executor(resolve, reject, () => {});
+      });
+    },
+  };
+}
+
 describe("installResumableUpdateDownloader (integration)", () => {
   // Deterministic 256 KiB payload so resume offsets are reproducible.
   const payload = Buffer.alloc(256 * 1024);
@@ -435,23 +454,6 @@ describe("installResumableUpdateDownloader (integration)", () => {
         ) as unknown as ReturnType<UpdaterHttpExecutorLike["createRequest"]>,
       download: () => {
         throw new Error("download must be replaced by installResumableUpdateDownloader");
-      },
-    };
-  }
-
-  function makeCancellationToken() {
-    return {
-      cancelled: false,
-      createPromise<T>(
-        executor: (
-          resolve: (value: T) => void,
-          reject: (error: Error) => void,
-          onCancel: (handler: () => void) => void,
-        ) => void,
-      ): Promise<T> {
-        return new Promise<T>((resolve, reject) => {
-          executor(resolve, reject, () => {});
-        });
       },
     };
   }

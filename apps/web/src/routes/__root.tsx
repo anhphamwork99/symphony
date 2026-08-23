@@ -583,15 +583,18 @@ function ProviderUpdateNotifications({
   );
   const notificationKey = providerUpdateNotificationKey(outdatedProviders);
 
-  const updateAll = (providers: ReadonlyArray<ServerProviderStatus>) =>
-    runProviderUpdateAll({
-      providers,
-      queryClient,
-      activeToastRef,
-      isUpdatingAllRef,
-      progressToastDismissedRef,
-      setIsUpdatingAll,
-    });
+  const updateAll = useCallback(
+    (providers: ReadonlyArray<ServerProviderStatus>) =>
+      runProviderUpdateAll({
+        providers,
+        queryClient,
+        activeToastRef,
+        isUpdatingAllRef,
+        progressToastDismissedRef,
+        setIsUpdatingAll,
+      }),
+    [queryClient],
+  );
 
   useEffect(() => {
     const activeToast = activeToastRef.current;

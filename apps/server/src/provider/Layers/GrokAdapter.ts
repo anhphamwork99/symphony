@@ -1886,7 +1886,7 @@ export function makeGrokAdapter(
           provider: PROVIDER,
           threadId: input.threadId,
           turnId,
-          payload: { ...(model ? { model } : {}) },
+          payload: model ? { model } : {},
         });
 
         const runPrompt = Effect.suspend(() =>

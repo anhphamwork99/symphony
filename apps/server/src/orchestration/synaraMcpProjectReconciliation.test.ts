@@ -35,7 +35,6 @@ import { PI_SYNARA_MCP_ENABLE_STALE_GENERATION_DETAIL } from "../provider/piSyna
 import {
   reconcileSynaraMcpProject,
   SYNARA_MCP_PROJECT_CLEANUP_GRACE_MS,
-  SYNARA_MCP_PROJECT_DISABLE_TIMEOUT_DETAIL,
   SYNARA_MCP_PROJECT_ENABLE_TIMEOUT_DETAIL,
   SYNARA_MCP_PROJECT_SESSION_DISAPPEARED_DETAIL,
   type SynaraMcpProjectReconciliationSeams,
@@ -324,13 +323,14 @@ describe("Synara MCP project reconciliation (impl-08 AC1/AC2)", () => {
       ...readModel,
       threads: readModel.threads.map((thread) =>
         thread.id === secondThreadId
-          ? {
-              ...thread,
+          ? Object.assign({}, thread, {
               session:
                 thread.session === null
                   ? null
-                  : { ...thread.session, updatedAt: "2026-08-12T12:10:00.000Z" as IsoDateTime },
-            }
+                  : Object.assign({}, thread.session, {
+                      updatedAt: "2026-08-12T12:10:00.000Z" as IsoDateTime,
+                    }),
+            })
           : thread,
       ),
     };

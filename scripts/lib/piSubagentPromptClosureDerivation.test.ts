@@ -250,7 +250,7 @@ describe("pi-subagents prompt closure derivation (Ticket 01c, AC1)", () => {
       syntheticSeam({ extraLiteralRead: "orchestration-rules.md" }),
     );
     expect(closure.promptPaths).toEqual(
-      [...CURRENT_FOUR, "agent/system/orchestration-rules.md"].sort(),
+      [...CURRENT_FOUR, "agent/system/orchestration-rules.md"].toSorted(),
     );
   });
 
@@ -295,7 +295,7 @@ describe("pi-subagents prompt closure derivation (Ticket 01c, AC1)", () => {
       ),
     );
     expect(closure.promptPaths).toEqual(
-      [...CURRENT_FOUR, "agent/system/orchestration-rules.md"].sort(),
+      [...CURRENT_FOUR, "agent/system/orchestration-rules.md"].toSorted(),
     );
   });
 
@@ -398,7 +398,7 @@ export function buildAgentPrompt()`,
   });
 
   it("AC2: a path escaping the repository root fails prompt_closure_invalid", () => {
-    const seam = seamFor(
+    const _seam = seamFor(
       new Map([
         [`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()],
         [

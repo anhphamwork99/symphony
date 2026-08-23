@@ -20,6 +20,27 @@ import {
 const EXTERNAL_TOKEN = "syn_mcp_v1_external-route-test";
 const OTHER_EXTERNAL_TOKEN = `${EXTERNAL_TOKEN}-other`;
 
+const verified = (integrationId: string) =>
+  ({
+    integration: {
+      integrationId,
+      name: "Route test",
+      audience: "synara.external-mcp",
+      credentialHash: "hash-only",
+      capabilities: ["projects:read"],
+      projectIds: ["project-route-test"],
+      createdAt: "2026-07-20T00:00:00.000Z",
+      expiresAt: "2026-08-20T00:00:00.000Z",
+      lastUsedAt: null,
+      pairedAt: "2026-07-20T00:00:00.000Z",
+      revokedAt: null,
+      rateLimitPerMinute: 60,
+      concurrencyLimit: 2,
+    },
+    capabilities: new Set(["projects:read"]),
+    allowedProjectIds: new Set(["project-route-test"]),
+  }) as never;
+
 async function withExternalMcpServer(
   input: {
     readonly host?: string;
@@ -42,26 +63,6 @@ async function withExternalMcpServer(
   const handledBodies: unknown[] = [];
   let nodeServer: http.Server | null = null;
   try {
-    const verified = (integrationId: string) =>
-      ({
-        integration: {
-          integrationId,
-          name: "Route test",
-          audience: "synara.external-mcp",
-          credentialHash: "hash-only",
-          capabilities: ["projects:read"],
-          projectIds: ["project-route-test"],
-          createdAt: "2026-07-20T00:00:00.000Z",
-          expiresAt: "2026-08-20T00:00:00.000Z",
-          lastUsedAt: null,
-          pairedAt: "2026-07-20T00:00:00.000Z",
-          revokedAt: null,
-          rateLimitPerMinute: 60,
-          concurrencyLimit: 2,
-        },
-        capabilities: new Set(["projects:read"]),
-        allowedProjectIds: new Set(["project-route-test"]),
-      }) as never;
     const service = {
       verifyCredential: (credential: string) =>
         input.verifyCredentialFailure
@@ -233,12 +234,17 @@ describe("externalMcpRouteLayer", () => {
 
   it("bounds time spent queued behind occupied body-buffer permits", async () => {
     let startedReads = 0;
+    let resolveReadsStarted!: () => void;
+    const readsStarted = new Promise<void>((resolve) => {
+      resolveReadsStarted = resolve;
+    });
     const holdingRequest = {
       headers: {},
       stream: Stream.concat(
         Stream.fromEffect(
           Effect.sync(() => {
             startedReads += 1;
+            if (startedReads === 4) resolveReadsStarted();
             return new Uint8Array();
           }),
         ),
@@ -248,10 +254,7 @@ describe("externalMcpRouteLayer", () => {
     const holders = Array.from({ length: 4 }, () =>
       Effect.runPromise(readExternalMcpBody(holdingRequest, 200)),
     );
-    const deadline = Date.now() + 1_000;
-    while (startedReads < 4 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
+    await Promise.race([readsStarted, new Promise((resolve) => setTimeout(resolve, 1_000))]);
     expect(startedReads).toBe(4);
 
     let queuedStarted = false;

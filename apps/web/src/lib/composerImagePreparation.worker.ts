@@ -12,13 +12,15 @@ interface OptimizeRequest {
   readonly maxResizeAttempts: number;
 }
 
-const workerScope = self as unknown as {
+export type ComposerImageWorkerScope = {
   addEventListener: (
     type: "message",
     listener: (event: MessageEvent<OptimizeRequest>) => void,
   ) => void;
   postMessage: (message: unknown) => void;
 };
+
+const workerScope = self as unknown as ComposerImageWorkerScope;
 
 function nextSize(width: number, height: number, targetBytes: number, encodedBytes: number) {
   const estimatedScale = Math.sqrt(targetBytes / encodedBytes) * 0.94;
@@ -109,16 +111,17 @@ workerScope.addEventListener("message", (event) => {
         render(bitmap, canvas, width, height, mimeType);
         blob = await encodeRendered(canvas, mimeType, request.quality);
       }
+      // DedicatedWorkerGlobalScope.postMessage has no targetOrigin parameter.
+      // oxlint-disable-next-line require-post-message-target-origin
       workerScope.postMessage({ ok: true, blob });
     } finally {
       bitmap.close();
     }
   })().catch((cause) => {
+    // DedicatedWorkerGlobalScope.postMessage has no targetOrigin parameter.
     workerScope.postMessage({
       ok: false,
       message: cause instanceof Error ? cause.message : "Image optimization failed.",
-    });
+    }); // oxlint-disable-line require-post-message-target-origin
   });
 });
-
-export {};

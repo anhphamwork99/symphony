@@ -27,6 +27,7 @@ import {
 import { errorText } from "./toolInput.ts";
 
 const MCP_MAX_BATCH_MESSAGES = 50;
+const noop = (): void => undefined;
 
 type McpJsonRpcResponse = Record<string, unknown>;
 
@@ -297,7 +298,7 @@ export function makeAgentGatewayMcpTransport(input: {
         switch (parsed.kind) {
           case "request": {
             const registered = yield* Deferred.make<void>();
-            let unregister: () => void = () => undefined;
+            let unregister: () => void = noop;
             let requestStarted = false;
             let cancellationRequested = false;
             const requestEffect = Deferred.await(registered).pipe(

@@ -117,6 +117,17 @@ interface OutstandingWebSocketTicket {
 
 type OutstandingWebSocketTickets = ReadonlyMap<string, OutstandingWebSocketTicket>;
 
+function pruneOutstandingWebSocketTickets(
+  current: OutstandingWebSocketTickets,
+  nowMillis: number,
+): Map<string, OutstandingWebSocketTicket> {
+  const next = new Map(current);
+  for (const [ticketId, ticket] of next) {
+    if (ticket.expiresAtMillis <= nowMillis) next.delete(ticketId);
+  }
+  return next;
+}
+
 export const makeSessionCredentialService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
@@ -287,17 +298,6 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         discard: true,
       });
     });
-
-  const pruneOutstandingWebSocketTickets = (
-    current: OutstandingWebSocketTickets,
-    nowMillis: number,
-  ) => {
-    const next = new Map(current);
-    for (const [ticketId, ticket] of next) {
-      if (ticket.expiresAtMillis <= nowMillis) next.delete(ticketId);
-    }
-    return next;
-  };
 
   const clearOutstandingWebSocketTickets = (sessionIds: ReadonlyArray<AuthSessionId>) =>
     Ref.update(outstandingWebSocketTicketsRef, (current) => {

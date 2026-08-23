@@ -12,6 +12,42 @@ import {
   scheduleDeferredDockPaneHydration,
 } from "./dockPaneActivation";
 
+function createScheduler() {
+  let nextId = 1;
+  const frames = new Map<number, () => void>();
+  const timers = new Map<number, () => void>();
+  return {
+    frames,
+    timers,
+    scheduler: {
+      requestFrame: (callback: () => void) => {
+        const id = nextId++;
+        frames.set(id, callback);
+        return id;
+      },
+      cancelFrame: (id: number) => frames.delete(id),
+      setTimer: (callback: () => void) => {
+        const id = nextId++;
+        timers.set(id, callback);
+        return id;
+      },
+      clearTimer: (id: number) => timers.delete(id),
+    },
+    runNextFrame: () => {
+      const entry = frames.entries().next().value as [number, () => void] | undefined;
+      if (!entry) return;
+      frames.delete(entry[0]);
+      entry[1]();
+    },
+    runTimer: () => {
+      const entry = timers.entries().next().value as [number, () => void] | undefined;
+      if (!entry) return;
+      timers.delete(entry[0]);
+      entry[1]();
+    },
+  };
+}
+
 describe("dockPaneActivation", () => {
   it("treats browser, sidechat, and terminal panes as deferred runtime panes", () => {
     expect(isDeferredRuntimePaneKind("browser")).toBe(true);
@@ -63,42 +99,6 @@ describe("dockPaneActivation", () => {
   });
 
   describe("scheduleDeferredDockPaneHydration", () => {
-    function createScheduler() {
-      let nextId = 1;
-      const frames = new Map<number, () => void>();
-      const timers = new Map<number, () => void>();
-      return {
-        frames,
-        timers,
-        scheduler: {
-          requestFrame: (callback: () => void) => {
-            const id = nextId++;
-            frames.set(id, callback);
-            return id;
-          },
-          cancelFrame: (id: number) => frames.delete(id),
-          setTimer: (callback: () => void) => {
-            const id = nextId++;
-            timers.set(id, callback);
-            return id;
-          },
-          clearTimer: (id: number) => timers.delete(id),
-        },
-        runNextFrame: () => {
-          const entry = frames.entries().next().value as [number, () => void] | undefined;
-          if (!entry) return;
-          frames.delete(entry[0]);
-          entry[1]();
-        },
-        runTimer: () => {
-          const entry = timers.entries().next().value as [number, () => void] | undefined;
-          if (!entry) return;
-          timers.delete(entry[0]);
-          entry[1]();
-        },
-      };
-    }
-
     it("hydrates after the normal two-frame paint path and clears its fallback", () => {
       const harness = createScheduler();
       let hydrations = 0;

@@ -15,7 +15,6 @@
 
 import {
   PI_SUBAGENT_CAPABILITIES,
-  PI_SUBAGENTS_PROTOCOL_VERSION,
   type PiSubagentHandshakeRequest,
   type PiSubagentNegotiatedCapability,
 } from "@synara/contracts";

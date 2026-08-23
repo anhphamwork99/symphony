@@ -1121,7 +1121,7 @@ export class WsTransport {
     try {
       return await this.clientPromise;
     } catch (error) {
-      if (this.disposed) throw new Error("Transport disposed");
+      if (this.disposed) throw new Error("Transport disposed", { cause: error });
       if (isTerminalCompatibilityFailure(error)) throw error;
       return this.reconnect();
     }
@@ -1340,7 +1340,7 @@ export class WsTransport {
       } catch (error) {
         const failedResources = this.takeCurrentRuntime();
         if (failedResources) await this.closeRuntime(failedResources);
-        if (this.disposed) throw new Error("Transport disposed");
+        if (this.disposed) throw new Error("Transport disposed", { cause: error });
         if (isTerminalCompatibilityFailure(error)) throw error;
         // The backend may still be starting. Continue with bounded backoff;
         // the transport lifetime aborts this loop immediately on disposal.
@@ -1630,7 +1630,7 @@ export class WsTransport {
     const streamSessionVersion = this.sessionVersion;
     const streamStartedAt = performance.now();
     const runnableStream = stream as Stream.Stream<T, WsTransportRpcError, never>;
-    let resolveSettled: () => void = () => undefined;
+    let resolveSettled: (() => void) | undefined;
     const settled = new Promise<void>((resolve) => {
       resolveSettled = resolve;
     });
@@ -1657,7 +1657,7 @@ export class WsTransport {
           if (this.streamSettled.get(key) === settled) {
             this.streamSettled.delete(key);
           }
-          resolveSettled();
+          resolveSettled?.();
           const wasReplacedOrStopped = this.streamCleanups.get(key) !== cancel;
           if (!wasReplacedOrStopped) {
             this.streamCleanups.delete(key);

@@ -394,6 +394,14 @@ async function readFirstPromptMessage(
   return next.value;
 }
 
+function promptTextFromIteratorResult(message: IteratorResult<SDKUserMessage>): string | undefined {
+  if (message.done) {
+    return undefined;
+  }
+  const content = message.value.message.content[0];
+  return typeof content === "string" || content?.type !== "text" ? undefined : content.text;
+}
+
 function autoCompactWindowFromOptions(options: ClaudeQueryOptions | undefined): number | undefined {
   const settings = options?.settings;
   return settings && typeof settings === "object" ? settings.autoCompactWindow : undefined;
@@ -1112,15 +1120,8 @@ describe("ClaudeAdapterLive", () => {
       const iterator = createInput?.prompt[Symbol.asyncIterator]();
       const firstPrompt = yield* Effect.promise(() => iterator!.next());
       const secondPrompt = yield* Effect.promise(() => iterator!.next());
-      const promptText = (message: IteratorResult<SDKUserMessage>): string | undefined => {
-        if (message.done) {
-          return undefined;
-        }
-        const content = message.value.message.content[0];
-        return typeof content === "string" || content?.type !== "text" ? undefined : content.text;
-      };
-      assert.equal(promptText(firstPrompt), "Start the work");
-      assert.equal(promptText(secondPrompt), "Actually, focus on the tests");
+      assert.equal(promptTextFromIteratorResult(firstPrompt), "Start the work");
+      assert.equal(promptTextFromIteratorResult(secondPrompt), "Actually, focus on the tests");
 
       const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
       assert.deepEqual(
@@ -1373,7 +1374,7 @@ describe("ClaudeAdapterLive", () => {
           text: [
             "<attached_files>",
             "The user attached the following file(s), saved on disk. Read/extract them with your tools as needed; do not assume their contents.",
-            `- \"diagram.svg\" - image/svg+xml - 11 B - ${attachmentPath}`,
+            `- "diagram.svg" - image/svg+xml - 11 B - ${attachmentPath}`,
             "</attached_files>",
           ].join("\n"),
         },

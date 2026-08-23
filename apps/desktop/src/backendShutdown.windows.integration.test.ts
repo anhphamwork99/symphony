@@ -214,6 +214,9 @@ class TestResources {
     for (const socket of this.#sockets) socket.destroy();
     this.#sockets.clear();
 
+    // closeServer deletes entries from #servers as each one is closed, so
+    // the snapshot spread keeps the iteration set stable.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const server of [...this.#servers]) {
       try {
         if ("closeAllConnections" in server) {

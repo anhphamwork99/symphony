@@ -1,4 +1,4 @@
-import { Cause, DateTime, Effect, Layer, Option } from "effect";
+import { DateTime, Effect, Layer, Option } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
@@ -22,10 +22,7 @@ import {
   PiSubagentExecutionRepositoryLive,
 } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import {
-  PiSubagentExecutionRepository,
-  type PiSubagentExecutionRepositoryShape,
-} from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { makePiAdapterLive } from "./Layers/PiAdapter.ts";
 import {
   getPiSubagentManagedForegroundBinding,
@@ -33,10 +30,7 @@ import {
   makeLegacyPiSubagentExtension,
   type PiSubagentManagedForegroundBinding,
 } from "./piSubagentBridge.ts";
-import {
-  makePiSubagentControlHealth,
-  type PiSubagentControlHealthShape,
-} from "./piSubagentControlHealth.ts";
+import { makePiSubagentControlHealth } from "./piSubagentControlHealth.ts";
 import { PiAdapter } from "./Services/PiAdapter.ts";
 
 describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 22 / WP-03)", () => {
@@ -908,10 +902,10 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
   });
 
   it("T22-WP03-5: unmanaged / legacy session does not receive managed binding and executes legacy behavior", async () => {
-    let receivedBinding: any = "unset";
+    const receivedBinding = { current: "unset" as any };
     let observedSession: any;
 
-    const { extension } = makeLegacyPiSubagentExtension();
+    makeLegacyPiSubagentExtension();
 
     const customExtension = {
       name: "pi-legacy-subagents",
@@ -929,7 +923,7 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
               _onUpdate: any,
               ctx: any,
             ) => {
-              receivedBinding = getPiSubagentManagedForegroundBinding(ctx);
+              receivedBinding.current = getPiSubagentManagedForegroundBinding(ctx);
               return { content: [{ type: "text", text: "legacy response" }] };
             },
           });
@@ -985,7 +979,7 @@ describe("Pi subagent foreground lifecycle reporter and managed binding (Issue 2
         }),
       );
 
-      expect(receivedBinding).toBeUndefined();
+      expect(receivedBinding.current).toBeUndefined();
       expect((result as any).content[0].text).toBe("legacy response");
       expect((result as any).executionId).toBeUndefined();
 

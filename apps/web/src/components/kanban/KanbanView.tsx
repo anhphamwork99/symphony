@@ -6,7 +6,7 @@
 
 import type { ProjectId } from "@synara/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SidebarHeaderNavigationControls } from "~/components/SidebarHeaderNavigationControls";
 import { Button } from "~/components/ui/button";
@@ -97,16 +97,16 @@ export default function KanbanView({ projectId }: { projectId: string | null }) 
     projectId: ProjectId | null;
     sendAsDraft: boolean;
   } | null>(null);
-  const handleNewTask = (
-    targetProjectId: ProjectId | null,
-    options?: { sendAsDraft?: boolean },
-  ) => {
-    setNewTaskDialog({
-      key: Date.now(),
-      projectId: targetProjectId,
-      sendAsDraft: options?.sendAsDraft ?? false,
-    });
-  };
+  const handleNewTask = useCallback(
+    (targetProjectId: ProjectId | null, options?: { sendAsDraft?: boolean }) => {
+      setNewTaskDialog({
+        key: Date.now(),
+        projectId: targetProjectId,
+        sendAsDraft: options?.sendAsDraft ?? false,
+      });
+    },
+    [],
+  );
   const projectBoardId = projectBoard?.projectId ?? null;
   const handleNewTaskInProjectBoard = () => {
     handleNewTask(projectBoardId);

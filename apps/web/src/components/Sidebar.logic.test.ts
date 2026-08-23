@@ -79,6 +79,24 @@ function makeLatestTurn(overrides?: {
   };
 }
 
+type TestPr = {
+  readonly number: number;
+  readonly headBranch: string;
+  readonly state: "open" | "closed" | "merged";
+};
+
+const openPr = (number: number, headBranch: string): TestPr => ({
+  number,
+  headBranch,
+  state: "open",
+});
+
+const mergedPr = (number: number, headBranch: string): TestPr => ({
+  number,
+  headBranch,
+  state: "merged",
+});
+
 describe("isProjectsSidebarSurface", () => {
   it("enables Space shortcuts only where the Space switcher is visible", () => {
     expect(isProjectsSidebarSurface({ isOnSettings: false, isOnStudio: false })).toBe(true);
@@ -165,22 +183,6 @@ describe("shouldUseLivePullRequestForSidebarThread", () => {
 });
 
 describe("resolveSidebarThreadPullRequest", () => {
-  type TestPr = {
-    readonly number: number;
-    readonly headBranch: string;
-    readonly state: "open" | "closed" | "merged";
-  };
-  const openPr = (number: number, headBranch: string): TestPr => ({
-    number,
-    headBranch,
-    state: "open",
-  });
-  const mergedPr = (number: number, headBranch: string): TestPr => ({
-    number,
-    headBranch,
-    state: "merged",
-  });
-
   it("keeps persisted PR metadata when the worktree is no longer available", () => {
     const persisted = openPr(574, "feat/provider-usage-snapshot-cache");
     expect(

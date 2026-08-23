@@ -1,3 +1,5 @@
+import { argv } from "node:process";
+
 interface EngineResult {
   readonly engine: string;
   readonly commit: string;
@@ -18,10 +20,8 @@ interface EngineResult {
   }>;
 }
 
-export {};
-
 function argument(name: string): string {
-  const value = process.argv
+  const value = argv
     .find((item) => item.startsWith(`--${name}=`))
     ?.split("=")
     .slice(1)

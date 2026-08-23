@@ -55,12 +55,13 @@ export const makeAuthControlPlane = Effect.gen(function* () {
   const listPairingLinks: AuthControlPlaneShape["listPairingLinks"] = (input) =>
     bootstrapCredentials.listActive().pipe(
       Effect.map((pairingLinks) =>
-        pairingLinks
-          .filter((pairingLink) => (input?.role ? pairingLink.role === input.role : true))
-          .filter((pairingLink) => !input?.excludeSubjects?.includes(pairingLink.subject))
-          .map((pairingLink) =>
+        Array.from(
+          pairingLinks
+            .filter((pairingLink) => (input?.role ? pairingLink.role === input.role : true))
+            .filter((pairingLink) => !input?.excludeSubjects?.includes(pairingLink.subject)),
+          (pairingLink) =>
             pairingLink.label
-              ? ({ ...pairingLink, label: pairingLink.label } satisfies AuthPairingLink)
+              ? (Object.assign({}, pairingLink) satisfies AuthPairingLink)
               : ({
                   id: pairingLink.id,
                   credential: pairingLink.credential,
@@ -69,11 +70,10 @@ export const makeAuthControlPlane = Effect.gen(function* () {
                   createdAt: pairingLink.createdAt,
                   expiresAt: pairingLink.expiresAt,
                 } satisfies AuthPairingLink),
-          )
-          .sort(
-            (left, right) =>
-              DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt),
-          ),
+        ).toSorted(
+          (left, right) =>
+            DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt),
+        ),
       ),
       Effect.mapError(toAuthControlPlaneError("Failed to list pairing links.")),
     );
@@ -118,7 +118,7 @@ export const makeAuthControlPlane = Effect.gen(function* () {
 
   const listSessions: AuthControlPlaneShape["listSessions"] = () =>
     sessions.listActive().pipe(
-      Effect.map((activeSessions) => [...activeSessions].sort(bySessionPriority)),
+      Effect.map((activeSessions) => activeSessions.toSorted(bySessionPriority)),
       Effect.mapError(toAuthControlPlaneError("Failed to list sessions.")),
     );
 

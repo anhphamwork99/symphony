@@ -103,19 +103,21 @@ export function coalescePullRequestListEntries(
     else entriesByIdentity.set(identity, [entry]);
   }
 
-  return [...entriesByIdentity.values()].map((group) => {
+  const mergedEntries: PullRequestListEntry[] = [];
+  for (const group of entriesByIdentity.values()) {
     const first = group[0]!;
     const contexts = mergeProjectContexts(group);
     const preferred = preferredProjectContext(first, contexts, options.preferredProjectId);
-    return {
+    mergedEntries.push({
       ...first,
       projectId: preferred.projectId,
       projectTitle: preferred.projectTitle,
       projectContexts: contexts,
       isPinned: contexts.some((context) => context.isPinned),
       viewerReviewRequested: group.some((entry) => entry.viewerReviewRequested),
-    };
-  });
+    });
+  }
+  return mergedEntries;
 }
 
 /** Update one project-owned pin inside an aggregate row without changing its selected context. */

@@ -24,9 +24,11 @@ function pipePathForTest(name: string): string {
 function encodeFrame(value: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(value), "utf8");
   const header = Buffer.allocUnsafe(HEADER_BYTES);
-  os.endianness() === "LE"
-    ? header.writeUInt32LE(body.byteLength, 0)
-    : header.writeUInt32BE(body.byteLength, 0);
+  if (os.endianness() === "LE") {
+    header.writeUInt32LE(body.byteLength, 0);
+  } else {
+    header.writeUInt32BE(body.byteLength, 0);
+  }
   return Buffer.concat([header, body]);
 }
 
@@ -103,7 +105,9 @@ describe("browser host RPC client", () => {
       workspace_root: "/workspace/project-one",
       arguments: { timeoutMs: expect.any(Number) },
     });
-    expect((requests[1]?.params as { arguments?: unknown }).arguments).not.toMatchObject({
+    const secondRequest = requests.at(1);
+    if (!secondRequest) throw new Error("Expected executeTool request");
+    expect((secondRequest.params as { arguments?: unknown }).arguments).not.toMatchObject({
       workspaceRoot: expect.anything(),
       workspace_root: expect.anything(),
     });

@@ -4,6 +4,15 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+// Callable stand-ins for electron-updater's BaseUpdater constructor: a
+// standalone function exposes the same `typeof === "function"` and
+// `.prototype` surfaces the hardening path inspects, without an empty class.
+function emptyBaseUpdater(): void {}
+
+// The spawnSyncLog suite patches this constructor's prototype directly, so it
+// needs its own named constructor rather than the shared one above.
+function fakeBaseUpdater(): void {}
+
 import {
   buildPowerShellExecArgs,
   buildPowerShellExecutablePath,
@@ -200,9 +209,10 @@ describe("electronUpdaterSecurity", () => {
   });
 
   it("patches electron-updater BaseUpdater spawnSyncLog only on Windows", () => {
-    class FakeBaseUpdater {}
-    const updaterModule = { BaseUpdater: FakeBaseUpdater };
-    const prototype = FakeBaseUpdater.prototype as {
+    // fakeBaseUpdater (module scope) provides the same callable value and
+    // .prototype surface an empty class would; only those are consumed.
+    const updaterModule = { BaseUpdater: fakeBaseUpdater };
+    const prototype = fakeBaseUpdater.prototype as {
       spawnSyncLog?: (cmd: string, args?: string[]) => string;
       __synaraSpawnSyncLogPatched?: boolean;
     };
@@ -226,7 +236,7 @@ describe("electronUpdaterSecurity", () => {
     };
     const oldVerifier = updater.verifyUpdateCodeSignature;
 
-    hardenElectronUpdater({ BaseUpdater: class {} }, updater, "win32");
+    hardenElectronUpdater({ BaseUpdater: emptyBaseUpdater }, updater, "win32");
 
     expect(updater.verifyUpdateCodeSignature).not.toBe(oldVerifier);
     expect(oldVerifier).not.toHaveBeenCalled();
@@ -239,7 +249,7 @@ describe("electronUpdaterSecurity", () => {
       ),
     };
 
-    hardenElectronUpdater({ BaseUpdater: class {} }, updater, "win32");
+    hardenElectronUpdater({ BaseUpdater: emptyBaseUpdater }, updater, "win32");
 
     const result = await updater.verifyUpdateCodeSignature(
       ["CN=Feed Publisher, O=Acme Tools"],
@@ -256,7 +266,7 @@ describe("electronUpdaterSecurity", () => {
       ),
     };
 
-    hardenElectronUpdater({ BaseUpdater: class {} }, updater, "win32", []);
+    hardenElectronUpdater({ BaseUpdater: emptyBaseUpdater }, updater, "win32", []);
 
     await expect(
       updater.verifyUpdateCodeSignature(

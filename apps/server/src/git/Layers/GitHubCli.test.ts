@@ -14,6 +14,42 @@ import { GitHubCliLive } from "./GitHubCli.ts";
 const mockedRunProcess = vi.mocked(runProcess);
 const layer = it.layer(GitHubCliLive);
 
+const makeEntry = (position: number) => ({
+  position,
+  pullRequest: {
+    number: 1_000 + position,
+    title: `Stack entry ${position}`,
+    url: `https://github.com/acme/app/pull/${1_000 + position}`,
+    headRefName: `feature/stack-${position}`,
+    baseRefName: position === 1 ? "main" : `feature/stack-${position - 1}`,
+    state: "OPEN",
+    isDraft: false,
+    mergedAt: null,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+  },
+});
+
+const makeResponse = (
+  nodes: ReadonlyArray<ReturnType<typeof makeEntry>>,
+  pageInfo: { readonly hasNextPage: boolean; readonly endCursor: string | null },
+) =>
+  JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: {
+          stackEntry: { position: 101 },
+          stack: {
+            number: 29,
+            size: 101,
+            baseRefName: "main",
+            entries: { totalCount: 101, nodes, pageInfo },
+          },
+        },
+      },
+    },
+  });
+
 afterEach(() => {
   mockedRunProcess.mockReset();
   vi.unstubAllEnvs();
@@ -1233,41 +1269,6 @@ layer("GitHubCliLive", (it) => {
 
   it.effect("paginates stacks larger than the GraphQL page size", () =>
     Effect.gen(function* () {
-      const makeEntry = (position: number) => ({
-        position,
-        pullRequest: {
-          number: 1_000 + position,
-          title: `Stack entry ${position}`,
-          url: `https://github.com/acme/app/pull/${1_000 + position}`,
-          headRefName: `feature/stack-${position}`,
-          baseRefName: position === 1 ? "main" : `feature/stack-${position - 1}`,
-          state: "OPEN",
-          isDraft: false,
-          mergedAt: null,
-          mergeable: "MERGEABLE",
-          mergeStateStatus: "CLEAN",
-        },
-      });
-      const makeResponse = (
-        nodes: ReadonlyArray<ReturnType<typeof makeEntry>>,
-        pageInfo: { readonly hasNextPage: boolean; readonly endCursor: string | null },
-      ) =>
-        JSON.stringify({
-          data: {
-            repository: {
-              pullRequest: {
-                stackEntry: { position: 101 },
-                stack: {
-                  number: 29,
-                  size: 101,
-                  baseRefName: "main",
-                  entries: { totalCount: 101, nodes, pageInfo },
-                },
-              },
-            },
-          },
-        });
-
       mockedRunProcess
         .mockResolvedValueOnce({
           stdout: makeResponse(

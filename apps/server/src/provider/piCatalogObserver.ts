@@ -157,8 +157,11 @@ function freshThreadState(): ObserverThreadState {
 
 /** Bounded observer error carrying a failure code (never a path or schema). */
 class CatalogObserverError extends Error {
-  constructor(readonly code: PiCatalogObserverFailureCode) {
+  readonly code: PiCatalogObserverFailureCode;
+
+  constructor(code: PiCatalogObserverFailureCode) {
     super(code);
+    this.code = code;
   }
 }
 

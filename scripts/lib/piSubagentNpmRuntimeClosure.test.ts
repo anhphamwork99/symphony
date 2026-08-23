@@ -18,7 +18,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -147,7 +146,7 @@ describe("selectNpmRuntimeClosure (lock-proven selection)", () => {
         "node_modules/yaml": lockEntry({ version: "2.9.0" }),
       }),
     });
-    expect(selection.packages.map((pkg) => pkg.name).sort()).toEqual(["croner", "yaml"]);
+    expect(selection.packages.map((pkg) => pkg.name).toSorted()).toEqual(["croner", "yaml"]);
   });
 
   it("rejects a root dependency-map mismatch between lock and package.json", () => {
@@ -549,7 +548,7 @@ describe("materializeNpmRuntimeClosure (fresh isolated install)", () => {
     expect(result.stagedFileCount).toBe(2);
     expect(existsSync(join(artifactDir, "node_modules/.bin"))).toBe(false);
     expect(existsSync(join(artifactDir, "node_modules/croner/.bin"))).toBe(false);
-    const staged = readdirSync(join(artifactDir, "node_modules/croner")).sort();
+    const staged = readdirSync(join(artifactDir, "node_modules/croner")).toSorted();
     expect(staged).toEqual(["index.js", "package.json"]);
   });
 

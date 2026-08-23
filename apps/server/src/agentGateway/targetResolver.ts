@@ -300,13 +300,12 @@ function providerTargetOptionRules(
 ): ReadonlyArray<AgentGatewayTargetOptionRule> {
   return Object.entries(PROVIDER_TARGET_OPTION_RULES[provider].options)
     .filter(([, option]) => option.advertised)
-    .map(([key, { valueType, allowedValues, allowedValuesSource, allowsCustomValue }]) => ({
-      key,
-      valueType,
-      allowedValues,
-      allowedValuesSource,
-      ...(allowsCustomValue ? { allowsCustomValue: true } : {}),
-    }));
+    .map(([key, { valueType, allowedValues, allowedValuesSource, allowsCustomValue }]) =>
+      Object.assign(
+        { key, valueType, allowedValues, allowedValuesSource },
+        allowsCustomValue ? { allowsCustomValue: true } : {},
+      ),
+    );
 }
 
 function providerPrimaryOptionKey(provider: ProviderKind): string {
@@ -332,13 +331,11 @@ function modelTargetOptionRules(
   model: ProviderModelDescriptor,
 ): ReadonlyArray<AgentGatewayTargetOptionRule> {
   const rules = providerTargetOptionRules(provider).map(
-    ({ key, valueType, allowedValues, allowedValuesSource, allowsCustomValue }) => ({
-      key,
-      valueType,
-      allowedValues,
-      allowedValuesSource,
-      ...(allowsCustomValue === undefined ? {} : { allowsCustomValue }),
-    }),
+    ({ key, valueType, allowedValues, allowedValuesSource, allowsCustomValue }) =>
+      Object.assign(
+        { key, valueType, allowedValues, allowedValuesSource },
+        allowsCustomValue === undefined ? {} : { allowsCustomValue },
+      ),
   );
   const replaceAllowedValues = (
     key: string,

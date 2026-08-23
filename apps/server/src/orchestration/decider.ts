@@ -1226,20 +1226,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) === null)
         .map((thread) => thread.id);
       return [...subagentThreadIds, command.threadId].map(
-        (threadId): Omit<OrchestrationEvent, "sequence"> => ({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: threadId,
-            occurredAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.archived",
-          payload: {
-            threadId,
-            archivedAt: occurredAt,
-            updatedAt: occurredAt,
-          },
-        }),
+        (threadId): Omit<OrchestrationEvent, "sequence"> =>
+          Object.assign(
+            {},
+            withEventBase({
+              aggregateKind: "thread",
+              aggregateId: threadId,
+              occurredAt,
+              commandId: command.commandId,
+            }),
+            {
+              type: "thread.archived" as const,
+              payload: {
+                threadId,
+                archivedAt: occurredAt,
+                updatedAt: occurredAt,
+              },
+            },
+          ),
       );
     }
 
@@ -1257,19 +1261,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         .filter((thread) => thread.deletedAt === null && (thread.archivedAt ?? null) !== null)
         .map((thread) => thread.id);
       return [...subagentThreadIds, command.threadId].map(
-        (threadId): Omit<OrchestrationEvent, "sequence"> => ({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: threadId,
-            occurredAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.unarchived",
-          payload: {
-            threadId,
-            updatedAt: occurredAt,
-          },
-        }),
+        (threadId): Omit<OrchestrationEvent, "sequence"> =>
+          Object.assign(
+            {},
+            withEventBase({
+              aggregateKind: "thread",
+              aggregateId: threadId,
+              occurredAt,
+              commandId: command.commandId,
+            }),
+            {
+              type: "thread.unarchived" as const,
+              payload: {
+                threadId,
+                updatedAt: occurredAt,
+              },
+            },
+          ),
       );
     }
 

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   type OrchestrationReadModel,
-  type PiSubagentExecutionRecord,
   type PiSubagentNegotiatedCapability,
   type PiSubagentSpawnCommand,
   type PiSubagentSpawnResult,

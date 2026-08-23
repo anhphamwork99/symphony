@@ -133,7 +133,7 @@ import { isScrollContainerNearBottom } from "../chat-scroll";
 import { stripDiffSearchParams } from "../diffRouteSearch";
 import { resolveSubagentPresentationForThread } from "../lib/subagentPresentation";
 import { ensureHomeChatProject, isHomeChatContainerProject } from "../lib/chatProjects";
-import { ensureStudioProject, isStudioContainerProject } from "../lib/studioProjects";
+import { isStudioContainerProject } from "../lib/studioProjects";
 import { resolveFirstSendTarget } from "../lib/chatFirstSend";
 import { readActiveSpaceId } from "../spacesUiStore";
 import {
@@ -8149,6 +8149,9 @@ export default function ChatView({
     const composerImagesSnapshot = [...composerImagesForSend];
     const composerFilesSnapshot = [...composerFilesForSend];
     const composerAssistantSelectionsSnapshot = [...composerAssistantSelectionsForSend];
+    // Copy-on-write deep clone: each annotation and its nested source get fresh
+    // objects so later in-place edits cannot leak into the composer draft.
+    // oxlint-disable-next-line no-map-spread
     const composerBrowserAnnotationsSnapshot = composerBrowserAnnotationsForSend.map(
       (annotation) => ({ ...annotation, source: { ...annotation.source } }),
     );
@@ -9935,7 +9938,6 @@ export default function ChatView({
     scheduleComposerFocus,
     setDraftThreadContext,
     setStoreThreadWorkspace,
-    studioWorkspaceRoot,
     syncServerShellSnapshot,
     threadId,
   ]);

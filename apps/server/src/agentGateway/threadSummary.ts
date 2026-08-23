@@ -177,14 +177,11 @@ export function paginateThreadMessages(input: {
   const startInclusive = Math.max(0, endExclusive - limit);
   const messages = input.messages.slice(startInclusive, endExclusive).map((message, offset) => {
     const { text, truncated } = truncateMessageText(message.text, maxChars);
-    return {
-      index: startInclusive + offset,
-      role: message.role,
-      text,
-      truncated,
-      ...(message.dispatchOrigin !== undefined ? { dispatchOrigin: message.dispatchOrigin } : {}),
-      createdAt: message.createdAt,
-    } satisfies AgentThreadMessageSummary;
+    return Object.assign(
+      { index: startInclusive + offset, role: message.role, text, truncated },
+      message.dispatchOrigin !== undefined ? { dispatchOrigin: message.dispatchOrigin } : {},
+      { createdAt: message.createdAt },
+    ) satisfies AgentThreadMessageSummary;
   });
   return {
     messages,

@@ -94,7 +94,8 @@ function PullRequestThreadDialogContent({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [open]);
+    // `open` is not read inside the effect; the rAF-based focus only needs to run on mount.
+  }, []);
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);

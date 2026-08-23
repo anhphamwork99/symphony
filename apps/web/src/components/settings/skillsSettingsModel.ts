@@ -173,7 +173,7 @@ export function buildSettingsSkillGroups(
       } satisfies SettingsSkillGroup;
     })
     .filter((group): group is SettingsSkillGroup => group !== null)
-    .sort((left, right) => left.displayName.localeCompare(right.displayName));
+    .toSorted((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
 export function buildSettingsSkillSections(
@@ -190,5 +190,5 @@ export function buildSettingsSkillSections(
       title: sectionTitle(key),
       groups,
     }))
-    .sort((left, right) => sectionRank(left.key) - sectionRank(right.key));
+    .toSorted((left, right) => sectionRank(left.key) - sectionRank(right.key));
 }

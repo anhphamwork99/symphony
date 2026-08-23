@@ -19,6 +19,9 @@ interface FoldStep {
   readonly changed: boolean;
 }
 
+const byIdOf = (activities: readonly ThreadActivity[]) =>
+  Object.fromEntries(activities.map((activity) => [activity.id, activity]));
+
 /**
  * The pre-optimisation batch fold: one full `normalizeActivities` call per appended activity.
  * Kept here (and only here) as the oracle the accumulator must reproduce exactly.
@@ -177,9 +180,6 @@ describe("createThreadActivityAccumulator", () => {
 });
 
 describe("dedupeActivitiesByIdAfterAppend", () => {
-  const byIdOf = (activities: readonly ThreadActivity[]) =>
-    Object.fromEntries(activities.map((activity) => [activity.id, activity]));
-
   it("returns the input by reference when unique activities are appended to a deduped prefix", () => {
     const previous = [
       makeActivity({ id: "activity-a", sequence: 0 }),

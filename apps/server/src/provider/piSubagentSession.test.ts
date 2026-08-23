@@ -119,7 +119,7 @@ describe("Pi provider session subagent capability negotiation (T01-AC2, T01-AC3,
 describe("Pi provider session subagent admission and legacy bypass (T02-AC2, T02-AC4, T02-AC6)", () => {
   it("T02-AC2, T02-AC4: managed session runs subagent with server-minted identities and fails when denied", async () => {
     let spawnCount = 0;
-    const { extension, bridge, emittedEvents } = makeCompatiblePiSubagentExtension({
+    const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
       capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async (cmd) => {
@@ -280,12 +280,10 @@ describe("Pi provider session admission fails closed (Ticket 03: T03-AC1, T03-AC
 
 describe("Pi subagent admission and legacy bypass (Issue 20: T20-AC6, T20-AC7)", () => {
   it("T20-AC6: managed tool execution returns server-minted executionId, attemptId, generation on success and stable error on denial", async () => {
-    let spawnCalled = false;
     const { extension, emittedEvents } = makeCompatiblePiSubagentExtension({
       protocolVersion: PI_SUBAGENTS_PROTOCOL_VERSION,
       capabilities: ["managed-spawn", "abort-propagation", "bounded-foreground-attachment"],
       onSpawn: async (cmd) => {
-        spawnCalled = true;
         if (cmd.agentType === "denied_type") {
           return {
             status: "rejected",

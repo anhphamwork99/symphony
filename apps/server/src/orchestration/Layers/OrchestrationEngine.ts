@@ -97,6 +97,24 @@ interface EngineAdmissionState {
   readonly idle: Deferred.Deferred<void>;
 }
 
+const overlayThread = (
+  model: OrchestrationReadModel,
+  thread: OrchestrationReadModel["threads"][number],
+): OrchestrationReadModel => {
+  const existingThread = model.threads.find((entry) => entry.id === thread.id);
+  const mergedThread =
+    existingThread && existingThread.messages.length > 0
+      ? { ...thread, messages: existingThread.messages }
+      : thread;
+  return {
+    ...model,
+    threads:
+      existingThread === undefined
+        ? [...model.threads, mergedThread]
+        : model.threads.map((entry) => (entry.id === thread.id ? mergedThread : entry)),
+  };
+};
+
 type CommittedCommandResult = {
   readonly committedEvents: OrchestrationEvent[];
   readonly lastSequence: number;
@@ -241,7 +259,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       const requestedIds = command.message.attachments
         .filter((attachment) => attachment.type === "image" || attachment.type === "file")
         .map((attachment) => attachment.id)
-        .sort();
+        .toSorted();
       const claimed = yield* Effect.forEach(
         requestedIds,
         (attachmentId) => managedAttachments.findClaimedById({ attachmentId }),
@@ -465,27 +483,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       ),
     ),
   );
-
-  const overlayThread = (
-    model: OrchestrationReadModel,
-    thread: OrchestrationReadModel["threads"][number],
-  ): OrchestrationReadModel => {
-    const existingThread = model.threads.find((entry) => entry.id === thread.id);
-    const mergedThread =
-      existingThread && existingThread.messages.length > 0
-        ? {
-            ...thread,
-            messages: existingThread.messages,
-          }
-        : thread;
-    const hasThread = existingThread !== undefined;
-    return {
-      ...model,
-      threads: hasThread
-        ? model.threads.map((entry) => (entry.id === thread.id ? mergedThread : entry))
-        : [...model.threads, mergedThread],
-    };
-  };
 
   const loadThreadDetailForDecider = (
     command: OrchestrationCommand,

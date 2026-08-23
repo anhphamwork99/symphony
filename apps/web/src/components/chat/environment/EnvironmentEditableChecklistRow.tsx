@@ -3,6 +3,7 @@
 // Layer: Environment panel UI primitive
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -64,12 +65,13 @@ export function EnvironmentEditableChecklistRow({
   const jumpClickTimeoutRef = useRef<number | null>(null);
   const suppressNextBlurCommitRef = useRef(false);
 
-  const clearScheduledJump = () => {
+  // Stable across renders: only touches a ref, so the unmount cleanup can safely depend on it.
+  const clearScheduledJump = useCallback(() => {
     if (jumpClickTimeoutRef.current !== null) {
       window.clearTimeout(jumpClickTimeoutRef.current);
       jumpClickTimeoutRef.current = null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (editing) {

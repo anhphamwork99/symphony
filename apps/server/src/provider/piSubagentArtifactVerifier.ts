@@ -102,9 +102,10 @@ export type PiSubagentArtifactVerification =
 export interface PiSubagentArtifactVerifierFs {
   readonly lstat: (path: string) => Promise<Stats>;
   readonly stat: (path: string) => Promise<Stats>;
-  readonly readdir: (path: string, options: { readonly withFileTypes: true }) => Promise<
-    Array<Dirent>
-  >;
+  readonly readdir: (
+    path: string,
+    options: { readonly withFileTypes: true },
+  ) => Promise<Array<Dirent>>;
   readonly readFile: (path: string) => Promise<Buffer>;
   readonly open: (path: string, flags: "r") => Promise<ArtifactFileHandle>;
 }
@@ -161,12 +162,7 @@ const unsafeTreeLabel = (label: string): string | undefined => {
   if (label.includes("\\")) return label;
   const segments = label.split("/");
   for (const segment of segments) {
-    if (
-      segment.length === 0 ||
-      segment === "." ||
-      segment === ".." ||
-      segment !== segment.trim()
-    ) {
+    if (segment.length === 0 || segment === "." || segment === ".." || segment !== segment.trim()) {
       return label;
     }
     for (const char of segment) {
@@ -207,9 +203,7 @@ const walkArtifactTree = async (
   const files = new Map<string, Stats>();
   // Depth-first with sorted entries at every level: the first failure is a
   // deterministic function of the tree alone, not of readdir order.
-  const stack: Array<{ readonly dir: string; readonly label: string }> = [
-    { dir: root, label: "" },
-  ];
+  const stack: Array<{ readonly dir: string; readonly label: string }> = [{ dir: root, label: "" }];
   while (stack.length > 0) {
     const { dir, label } = stack.pop() as { dir: string; label: string };
     let entries: Array<Dirent>;
@@ -297,9 +291,7 @@ const hashArtifactFile = async (
       openedAfter.size !== openedBefore.size ||
       openedAfter.mtimeMs !== openedBefore.mtimeMs ||
       openedAfter.dev !== openedBefore.dev ||
-      (openedAfter.ino !== 0 &&
-        openedBefore.ino !== 0 &&
-        openedAfter.ino !== openedBefore.ino)
+      (openedAfter.ino !== 0 && openedBefore.ino !== 0 && openedAfter.ino !== openedBefore.ino)
     ) {
       return null;
     }
@@ -414,7 +406,7 @@ export async function verifyPiSubagentArtifact(
   //    and backslash shapes; the runtime resolution check is the
   //    guarantee that a manifest record can never address content outside
   //    the artifact root).
-  const records = [...manifest.files].sort((left, right) =>
+  const records = manifest.files.toSorted((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );
   const rootResolved = nodePath.resolve(root);
@@ -437,7 +429,11 @@ export async function verifyPiSubagentArtifact(
       // Unreadable/replaced content cannot be proven — tampered bytes.
       return invalid("digest_mismatch", boundedEntryLabel(record.path));
     }
-    if (hashed === null || hashed.sizeBytes !== record.sizeBytes || hashed.sha256 !== record.sha256) {
+    if (
+      hashed === null ||
+      hashed.sizeBytes !== record.sizeBytes ||
+      hashed.sha256 !== record.sha256
+    ) {
       return invalid("digest_mismatch", boundedEntryLabel(record.path));
     }
   }
@@ -448,7 +444,7 @@ export async function verifyPiSubagentArtifact(
   //    digest), so only content the release pipeline should have declared
   //    is compared.
   const declaredPaths = new Set(manifest.files.map((record) => record.path));
-  const unlisted = [...actualFiles.keys()].sort().find((label) => !declaredPaths.has(label));
+  const unlisted = [...actualFiles.keys()].toSorted().find((label) => !declaredPaths.has(label));
   if (unlisted !== undefined) {
     return invalid("unlisted_entry", boundedEntryLabel(unlisted));
   }

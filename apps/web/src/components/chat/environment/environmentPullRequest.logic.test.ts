@@ -26,6 +26,24 @@ function makeComment(overrides: Partial<GitPullRequestComment> = {}): GitPullReq
   };
 }
 
+function makePullRequestComment(
+  id: string,
+  kind: PullRequestComment["kind"],
+  createdAt: string,
+): PullRequestComment {
+  return {
+    id,
+    kind,
+    author: { login: "reviewer", name: null, avatarUrl: null, url: null },
+    body: `${id} body`,
+    createdAt,
+    updatedAt: null,
+    url: null,
+    path: `src/${id}.ts`,
+    reviewState: null,
+  };
+}
+
 describe("summarizePullRequestChecks", () => {
   it("reports failing checks ahead of pending ones", () => {
     const summary = summarizePullRequestChecks([
@@ -359,21 +377,7 @@ describe("buildFixFindingsPrompt", () => {
   });
 
   it("prefers newest line comments and reports incomplete bounded review data", () => {
-    const comment = (
-      id: string,
-      kind: PullRequestComment["kind"],
-      createdAt: string,
-    ): PullRequestComment => ({
-      id,
-      kind,
-      author: { login: "reviewer", name: null, avatarUrl: null, url: null },
-      body: `${id} body`,
-      createdAt,
-      updatedAt: null,
-      url: null,
-      path: `src/${id}.ts`,
-      reviewState: null,
-    });
+    const comment = makePullRequestComment;
     const prompt = buildFixFindingsPrompt({
       prNumber: 1,
       prTitle: "Title",

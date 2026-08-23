@@ -28,19 +28,15 @@ import { dirname, join, resolve } from "node:path";
 import * as http from "node:http";
 import {
   type AgentSession,
-  createAgentSessionFromServices,
-  createAgentSessionServices,
   ModelRegistry,
   ModelRuntime,
-  SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, DateTime, Effect, Layer, Option } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  PI_SUBAGENTS_PROTOCOL_VERSION,
   type PiSubagentSpawnCommand,
   type PiSubagentSpawnResult,
   type ThreadId,
@@ -59,24 +55,11 @@ import {
   type McpSessionAuthorityShape,
 } from "../agentGateway/Services/McpSessionAuthority.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import {
-  makePiSubagentExecutionRepository,
-  PiSubagentExecutionRepositoryLive,
-} from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import {
-  PiSubagentExecutionRepository,
-  type PiSubagentExecutionRepositoryShape,
-} from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import { makePiAdapterLive } from "./Layers/PiAdapter.ts";
-import {
-  attachPiSubagentManagedForegroundBinding,
-  getPiSubagentManagedForegroundBinding,
-  isPiSubagentManagedForegroundBinding,
-  makeCompatiblePiSubagentExtension,
-  makeLegacyPiSubagentExtension,
-  probePiSubagentBridge,
-} from "./piSubagentBridge.ts";
+import { isPiSubagentManagedForegroundBinding } from "./piSubagentBridge.ts";
 import { PiAdapter } from "./Services/PiAdapter.ts";
 
 // ─── Provenance helpers (local copies) ─────────────────────────────────────────
@@ -1193,7 +1176,6 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
 
     const testProgram = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      const repo = yield* PiSubagentExecutionRepository;
       const adapter = yield* PiAdapter;
 
       yield* sql`
@@ -1418,13 +1400,6 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
       piSubagentForegroundWaitMs: managedForegroundWaitMs,
     });
     const { authorityService, binding: binding1 } = makeAuthorityFixture("th_t22_ac6_m1");
-    const binding2 = authorityService.bindingFor("user_th_t22_ac6_m1", {
-      threadId: "th_t22_ac6_m2" as ThreadId,
-      provider: "pi",
-      projectId: "proj_default",
-      lifecycleGeneration: null,
-      credentialTtlMs: 60 * 60 * 1_000,
-    })!;
     const legacyBinding = authorityService.bindingFor("user_th_t22_ac6_m1", {
       threadId: "th_t22_ac6_legacy" as ThreadId,
       provider: "pi",

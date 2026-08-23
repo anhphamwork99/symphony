@@ -175,10 +175,7 @@ import {
   cancelSinglePiSubagentExecution,
 } from "../piSubagentCancellationCoordinator.ts";
 import { resumePiSubagentExecution as resumePiSubagentExecutionCoordinator } from "../piSubagentResumeCoordinator.ts";
-import {
-  extractPiSubagentBridge,
-  type PiSubagentExtensionBridge,
-} from "../piSubagentBridge.ts";
+import { extractPiSubagentBridge, type PiSubagentExtensionBridge } from "../piSubagentBridge.ts";
 import {
   makePiSubagentControlHealth,
   type PiSubagentControlHealthShape,
@@ -549,6 +546,33 @@ const piSubagentOwnedTeardownExecutionKey = (input: {
 
 interface PiPendingUserInput {
   readonly resolve: (answers: ProviderUserInputAnswers) => void;
+}
+
+const safeObserve = (run: () => void): void => {
+  try {
+    run();
+  } catch {
+    // The observer must never alter any lifecycle outcome; a throwing
+    // observer (contract violation) is dropped entirely.
+  }
+};
+
+function resolvePiExtensionUserInput(
+  context: PiSessionContext,
+  requestId: ApprovalRequestId,
+  answers: ProviderUserInputAnswers,
+): boolean {
+  const pending = context.pendingUserInputs.get(requestId);
+  if (!pending) return false;
+  pending.resolve(answers);
+  return true;
+}
+
+function recordPiItem(context: PiSessionContext, item: unknown): void {
+  const turn = context.activeTurnId
+    ? context.turns.find((candidate) => candidate.id === context.activeTurnId)
+    : context.turns.at(-1);
+  turn?.items.push(item);
 }
 
 export interface PiUserInputOptionMapping {
@@ -1793,7 +1817,13 @@ function toolLifecycleData(input: {
         ...base,
         kind: "edit",
         ...(path ? { path, filePath: path, files: [{ path }], changes: [{ path }] } : {}),
-        ...(edits ? { edits: edits.map((edit) => ({ ...edit, ...(path ? { path } : {}) })) } : {}),
+        ...(edits
+          ? {
+              edits: edits.map((edit) =>
+                path === undefined ? Object.assign({}, edit) : Object.assign({}, edit, { path }),
+              ),
+            }
+          : {}),
         ...(unifiedDiff ? { unifiedDiff } : {}),
       };
     case "write":
@@ -2054,14 +2084,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const catalogObserver = makePiCatalogObserver(
       captureCatalogObserverEnv(options?.catalogObserverEnv ?? process.env),
     );
-    const safeObserve = (run: () => void): void => {
-      try {
-        run();
-      } catch {
-        // The observer must never alter any lifecycle outcome; a throwing
-        // observer (contract violation) is dropped entirely.
-      }
-    };
     // Optional so adapter tests can run without the gateway layer; when
     // present, activation mints per-attempt Synara MCP credentials through it.
     const agentGatewayCredentials = Option.getOrUndefined(
@@ -2099,10 +2121,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     );
     const sessions = new Map<ThreadId, PiSessionContext>();
     const piSubagentOwnedTeardownOwners = new Map<string, PiSubagentOwnedTeardownOwnerRecord>();
-    const piSubagentOwnedTeardownExecutions = new Map<
-      string,
-      { readonly ownerKey: string }
-    >();
+    const piSubagentOwnedTeardownExecutions = new Map<string, { readonly ownerKey: string }>();
 
     const releasePiSubagentOwnedTeardownExecution = (input: {
       readonly executionId: string;
@@ -2143,10 +2162,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       // owner record and the teardown sweep resolves `undefined` for it:
       // the honest non-terminal band-78 owner-unproven path with no band
       // 76, no cancelled settlement, and no generation fence.
-      if (
-        bridge === undefined ||
-        typeof bridge.teardownOwnedProcesses !== "function"
-      ) {
+      if (bridge === undefined || typeof bridge.teardownOwnedProcesses !== "function") {
         return;
       }
       const ownerKey = crypto.randomUUID();
@@ -2582,17 +2598,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       } satisfies ProviderRuntimeEvent);
     };
 
-    const resolvePiExtensionUserInput = (
-      context: PiSessionContext,
-      requestId: ApprovalRequestId,
-      answers: ProviderUserInputAnswers,
-    ) => {
-      const pending = context.pendingUserInputs.get(requestId);
-      if (!pending) return false;
-      pending.resolve(answers);
-      return true;
-    };
-
     const requestPiExtensionUserInput = (
       context: PiSessionContext,
       input: {
@@ -2612,7 +2617,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       return new Promise((resolve) => {
         let settled = false;
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        let abort: () => void = () => undefined;
+        let abort: () => void;
 
         const cleanup = () => {
           if (timeoutId !== undefined) {
@@ -2883,13 +2888,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       } satisfies ProviderRuntimeEvent);
     };
 
-    const recordItem = (context: PiSessionContext, item: unknown) => {
-      const turn = context.activeTurnId
-        ? context.turns.find((candidate) => candidate.id === context.activeTurnId)
-        : context.turns.at(-1);
-      turn?.items.push(item);
-    };
-
     const requireSession = Effect.fn("PiAdapter.requireSession")(function* (threadId: ThreadId) {
       const context = sessions.get(threadId);
       if (!context) {
@@ -2960,7 +2958,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
         }
-        recordItem(context, { type: "assistant_message", delta: update.delta });
+        recordPiItem(context, { type: "assistant_message", delta: update.delta });
         offerRuntimeEvent({
           ...makeEventBase(context),
           itemId: context.activeAssistantItemId,
@@ -2987,7 +2985,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
           } satisfies ProviderRuntimeEvent);
         }
-        recordItem(context, { type: "reasoning", delta: update.delta });
+        recordPiItem(context, { type: "reasoning", delta: update.delta });
         offerRuntimeEvent({
           ...makeEventBase(context),
           itemId: context.activeReasoningItemId,
@@ -3041,7 +3039,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           };
           context.activeToolItems.set(event.toolCallId, tracked);
           const title = toolTitle(event.toolName, event.args);
-          recordItem(context, {
+          recordPiItem(context, {
             type: "tool_call",
             status: "started",
             toolName: event.toolName,
@@ -3075,7 +3073,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             args: tracked.args,
             partialResult: event.partialResult,
           });
-          recordItem(context, {
+          recordPiItem(context, {
             type: "tool_call",
             status: "updated",
             toolName: event.toolName,
@@ -3112,7 +3110,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             result: event.result,
             isError: event.isError,
           });
-          recordItem(context, {
+          recordPiItem(context, {
             type: "tool_call",
             status: event.isError ? "failed" : "completed",
             toolName: event.toolName,
@@ -3392,8 +3390,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // 0004 §4-§6 / Decision 0003).
         const gateResult = yield* Effect.tryPromise({
           try: () => evaluateDesktopPiArtifactGate("session/start"),
-          catch: (cause) =>
-            toPiSdkRequestError("session/start", cause, "Failed to load Pi SDK."),
+          catch: (cause) => toPiSdkRequestError("session/start", cause, "Failed to load Pi SDK."),
         });
         const piSdk = yield* loadPiSdk("session/start", gateResult);
         // Ticket 02 desktop managed bootstrap inputs (Decision 0003): the
@@ -3407,11 +3404,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             ? {
                 agentDir: gateResult.managed.agentDir,
                 userAgentDir:
-                  trimToUndefined(options?.piSubagentDesktopUserAgentDir) ??
-                  piSdk.getAgentDir(),
-                extensionPath: piSubagentDesktopManagedExtensionDir(
-                  gateResult.managed.agentDir,
-                ),
+                  trimToUndefined(options?.piSubagentDesktopUserAgentDir) ?? piSdk.getAgentDir(),
+                extensionPath: piSubagentDesktopManagedExtensionDir(gateResult.managed.agentDir),
               }
             : undefined;
         const processSupervisor = makePiBashProcessSupervisor({
@@ -3597,9 +3591,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               await runtime.session.bindExtensions({
                 uiContext: makePiExtensionUIContext(context),
               });
-              const negotiated = await negotiatePiSubagentDesktopManagedBridge(
-                runtime.session,
-              );
+              const negotiated = await negotiatePiSubagentDesktopManagedBridge(runtime.session);
               if (!negotiated.isManaged) {
                 throw new ProviderAdapterRequestError({
                   provider: PROVIDER,
@@ -3664,7 +3656,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                       method: "session/start-cleanup",
                       detail: toMessage(cause, "Failed to prove Pi startup cleanup completed."),
                       cause,
-                  }),
+                    }),
                 });
                 if (sessions.get(input.threadId) === context) {
                   sessions.delete(input.threadId);
@@ -3686,13 +3678,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             // the session's capability truth — no second probe, no cached legacy
             // probe, no warning fallback, and no post-publication renegotiation
             // that could fail after the session is already live.
-            desktopManagedCapability ??
+            (desktopManagedCapability ??
             (yield* Effect.die(
               new Error(
                 "Pi desktop managed bootstrap invariant violated: missing handshake result.",
               ),
-            ))
-          : (yield* Effect.tryPromise({
+            )))
+          : yield* Effect.tryPromise({
               try: () => probePiSubagentBridge(runtime.session),
               catch: (cause): PiSubagentNegotiatedCapability => ({
                 status: "bridge_error",
@@ -3705,7 +3697,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               // failure: recover it into the success channel so the session still
               // starts and managed execution is disabled downstream.
               Effect.catch((error) => Effect.succeed(error)),
-            ));
+            );
         context.subagentCapability = subagentCapability;
         registerPiSubagentOwnedTeardownOwner(context);
         options?.onSubagentCapability?.({
@@ -3906,11 +3898,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
                   );
                 }
-                let durableOrdinaryTerminal: {
-                  readonly executionId: string;
-                  readonly attemptId: string;
-                  readonly generation: number;
-                } | undefined;
+                let durableOrdinaryTerminal:
+                  | {
+                      readonly executionId: string;
+                      readonly attemptId: string;
+                      readonly generation: number;
+                    }
+                  | undefined;
                 const ingest = await Effect.runPromise(
                   Effect.result(
                     ingestPiSubagentTerminal({
@@ -4134,13 +4128,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   // post-band-76 proven diagnostic clears them.
                   releasePiSubagentOwnedTeardownExecution(durableOrdinaryTerminal);
                 }
-                  // A child terminal observation is not child-process-tree
-                  // proof: a Bash root can settle while a captured descendant
-                  // remains alive. A cancelling/teardown-eligible execution
-                  // therefore retains the opaque owner endpoint until the
-                  // Ticket-16 coordinator durably commits band 76/fences the
-                  // exact generation; only that post-proof path releases it.
-                  return;
+                // A child terminal observation is not child-process-tree
+                // proof: a Bash root can settle while a captured descendant
+                // remains alive. A cancelling/teardown-eligible execution
+                // therefore retains the opaque owner endpoint until the
+                // Ticket-16 coordinator durably commits band 76/fences the
+                // exact generation; only that post-proof path releases it.
+                return;
               }
 
               // Ticket 23 observation kinds take the coalescing/UPDATE-only
@@ -5081,14 +5075,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                   cause,
                 }),
             ),
-            );
-            for (const outcome of cancelOutcome.outcomes) {
-              if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
-                // Cancellation acknowledgement/owner death settles this
-                // lifecycle attempt but is not root-and-descendant teardown
-                // proof. Keep the exact opaque child owner for a later
-                // Ticket-16 handoff; only durable band 76 may release it.
-                offerRuntimeEvent({
+          );
+          for (const outcome of cancelOutcome.outcomes) {
+            if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+              // Cancellation acknowledgement/owner death settles this
+              // lifecycle attempt but is not root-and-descendant teardown
+              // proof. Keep the exact opaque child owner for a later
+              // Ticket-16 handoff; only durable band 76 may release it.
+              offerRuntimeEvent({
                 ...makeEventBase(context),
                 type: "runtime.warning",
                 payload: {
@@ -5352,13 +5346,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 cause,
               }),
           ),
-          );
-          const outcome = result.outcome;
-          if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
-            // See parent-turn cancellation: acknowledgement is lifecycle
-            // evidence, not child process-tree proof, so it cannot release
-            // this exact owner mapping before a durable band-76 fence.
-            offerRuntimeEvent({
+        );
+        const outcome = result.outcome;
+        if (outcome.kind === "cancelled_ack" || outcome.kind === "cancelled_owner_death") {
+          // See parent-turn cancellation: acknowledgement is lifecycle
+          // evidence, not child process-tree proof, so it cannot release
+          // this exact owner mapping before a durable band-76 fence.
+          offerRuntimeEvent({
             ...makeEventBase(context),
             type: "runtime.warning",
             payload: {
@@ -5619,17 +5613,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 // sweep still completes and schedules its next pass.
                 { timeoutMs: serverConfig.piSubagentWatchdogStageTimeoutMs },
               );
-                if (dispatch.kind !== "validated") {
-                  return undefined;
-                }
-                if (dispatch.result.status === "proven") {
-                  // Keep the exact opaque owner mapping until the coordinator
-                  // commits band 76 plus its cancellation/fence transaction.
-                  // A valid endpoint reply alone is not durable proof; if that
-                  // write fails, the next pass must be able to ask this owner
-                  // again instead of degrading to a synthetic owner-unproven.
-                  return { kind: "proven" };
-                }
+              if (dispatch.kind !== "validated") {
+                return undefined;
+              }
+              if (dispatch.result.status === "proven") {
+                // Keep the exact opaque owner mapping until the coordinator
+                // commits band 76 plus its cancellation/fence transaction.
+                // A valid endpoint reply alone is not durable proof; if that
+                // write fails, the next pass must be able to ask this owner
+                // again instead of degrading to a synthetic owner-unproven.
+                return { kind: "proven" };
+              }
               if (dispatch.result.status === "survivors") {
                 return {
                   kind: "survivors",
@@ -5639,20 +5633,20 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                 };
               }
               return undefined;
-              },
-              onDiagnostic: (event) => {
-                if (event.diagnosticCode === PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC) {
-                  // teardownOne emits this diagnostic only after
-                  // recordTeardownOutcome durably committed the proven
-                  // settlement/fence. This is the first safe moment to
-                  // release the retained child-owner endpoint.
-                  releasePiSubagentOwnedTeardownExecution({
-                    executionId: event.executionId,
-                    attemptId: event.attemptId,
-                    generation: event.generation,
-                  });
-                }
-                const safeCorrelation = makePiSubagentSafeCorrelation({
+            },
+            onDiagnostic: (event) => {
+              if (event.diagnosticCode === PI_SUBAGENT_TEARDOWN_PROVEN_DIAGNOSTIC) {
+                // teardownOne emits this diagnostic only after
+                // recordTeardownOutcome durably committed the proven
+                // settlement/fence. This is the first safe moment to
+                // release the retained child-owner endpoint.
+                releasePiSubagentOwnedTeardownExecution({
+                  executionId: event.executionId,
+                  attemptId: event.attemptId,
+                  generation: event.generation,
+                });
+              }
+              const safeCorrelation = makePiSubagentSafeCorrelation({
                 executionId: event.executionId,
                 attemptId: event.attemptId,
                 threadId: event.parentThreadId,
@@ -5934,13 +5928,20 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             skills: result.skills.map((skill) => {
               const description = trimToUndefined(skill.description);
               const scope = trimToUndefined(skill.sourceInfo.source);
-              return {
+              const mappedSkill: {
+                name: string;
+                path: string;
+                enabled: boolean;
+                description?: string;
+                scope?: string;
+              } = {
                 name: skill.name,
-                ...(description ? { description } : {}),
                 path: skill.filePath,
                 enabled: !skill.disableModelInvocation,
-                ...(scope ? { scope } : {}),
               };
+              if (description !== undefined) mappedSkill.description = description;
+              if (scope !== undefined) mappedSkill.scope = scope;
+              return mappedSkill;
             }),
             source: "pi.sdk",
             cached: false,
@@ -6006,8 +6007,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             cached: false,
           } satisfies ProviderListCommandsResult;
         },
-        catch: (cause) =>
-          toPiSdkRequestError("command/list", cause, "Failed to list Pi commands."),
+        catch: (cause) => toPiSdkRequestError("command/list", cause, "Failed to list Pi commands."),
       });
 
     const getComposerCapabilities: NonNullable<PiAdapterShape["getComposerCapabilities"]> = () =>

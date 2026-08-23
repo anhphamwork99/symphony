@@ -2343,11 +2343,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   listSessions(): ProviderSession[] {
-    return Array.from(this.sessions.values())
-      .filter((context) => this.isContextRoutable(context))
-      .map(({ session }) => ({
-        ...session,
-      }));
+    return Array.from(
+      Array.from(this.sessions.values()).filter((context) => this.isContextRoutable(context)),
+      ({ session }) => ({ ...session }),
+    );
   }
 
   hasSession(threadId: ThreadId): boolean {
@@ -3089,7 +3088,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
     const eventPayload = gatewayTurnAuthorityRetired
       ? {
-          ...(this.readObject(notification.params) ?? {}),
+          ...this.readObject(notification.params),
           [AGENT_GATEWAY_TURN_AUTHORITY_RETIRED]: true,
         }
       : notification.params;
@@ -3997,8 +3996,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private findLatestReviewTurnId(snapshot: CodexThreadSnapshot): TurnId | undefined {
-    const latestReviewTurn = [...snapshot.turns]
-      .reverse()
+    const latestReviewTurn = snapshot.turns
+      .toReversed()
       .find((turn) => this.turnHasReviewItem(turn, "entered"));
     return latestReviewTurn?.id;
   }
@@ -4156,9 +4155,7 @@ async function runCodexCliVersionGate(input: {
   readonly homePath?: string;
   readonly minimumVersion?: string;
 }): Promise<CodexCliBinaryFingerprint | null> {
-  const env = await buildCodexProcessEnv({
-    ...(input.homePath ? { homePath: input.homePath } : {}),
-  });
+  const env = await buildCodexProcessEnv(input.homePath ? { homePath: input.homePath } : {});
   // Resolved against the env the spawn below uses, never `process.env`. On macOS and Linux
   // `buildCodexProcessEnv` can replace PATH with the login shell's, so resolving through the
   // process environment could fingerprint a different `codex` than the one being probed — or

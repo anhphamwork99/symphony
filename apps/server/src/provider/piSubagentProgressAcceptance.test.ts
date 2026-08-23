@@ -1,14 +1,4 @@
-import {
-  cpSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  symlinkSync,
-  writeFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";

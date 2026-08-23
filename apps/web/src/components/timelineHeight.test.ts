@@ -14,26 +14,27 @@ import {
   estimateTimelineWorkGroupHeight,
 } from "./timelineHeight";
 
+const makeAnnotation = (ordinal: number): BrowserAnnotationDraft => ({
+  id: `annotation-${ordinal}`,
+  ordinal,
+  tabId: "tab-1",
+  source: {
+    url: `https://example.test/page-${ordinal}`,
+    pageTitle: `Page ${ordinal}`,
+  },
+  selector: `#target-${ordinal}`,
+  tagName: "button",
+  role: "button",
+  name: `Target ${ordinal}`,
+  text: `Target ${ordinal}`,
+  fingerprint: `button|target-${ordinal}`,
+  comment: "",
+  capturedAt: "2026-07-23T10:00:00.000Z",
+});
+
 describe("estimateTimelineMessageHeight", () => {
   it("keeps browser annotations to one estimated row regardless of their count", () => {
     const messageId = MessageId.makeUnsafe("message-with-browser-annotations");
-    const makeAnnotation = (ordinal: number): BrowserAnnotationDraft => ({
-      id: `annotation-${ordinal}`,
-      ordinal,
-      tabId: "tab-1",
-      source: {
-        url: `https://example.test/page-${ordinal}`,
-        pageTitle: `Page ${ordinal}`,
-      },
-      selector: `#target-${ordinal}`,
-      tagName: "button",
-      role: "button",
-      name: `Target ${ordinal}`,
-      text: `Target ${ordinal}`,
-      fingerprint: `button|target-${ordinal}`,
-      comment: "",
-      capturedAt: "2026-07-23T10:00:00.000Z",
-    });
     const estimateWithAnnotations = (count: number) =>
       estimateTimelineMessageHeight({
         id: messageId,

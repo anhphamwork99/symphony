@@ -16,7 +16,6 @@ import {
 } from "./piSubagentCompletionDispatchIdentity.ts";
 import {
   makePiSubagentParentEffectDispatcher,
-  type PiSubagentParentEffectDispatcher,
   type PiSubagentParentEffectEnginePort,
 } from "./piSubagentParentEffectDispatcher.ts";
 
@@ -61,7 +60,6 @@ type DispatchResult = {
 
 const makeFakeEngine = (
   dispatchResult: DispatchResult,
-  messageSent = true,
 ): {
   readonly engine: PiSubagentParentEffectEnginePort;
   readonly dispatched: OrchestrationCommand[];

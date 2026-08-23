@@ -10,6 +10,9 @@ const store = async () => {
   return { dir, file: path.join(dir, "ownership.json") };
 };
 
+const dead = () => false;
+const alive = () => true;
+
 describe("the boot ownership record", () => {
   it("survives the process that wrote it", async () => {
     // The whole point: a crash runs no finalizer, so the only way the next run
@@ -51,9 +54,6 @@ describe("the boot ownership record", () => {
 });
 
 describe("deciding which boots to reclaim", () => {
-  const dead = () => false;
-  const alive = () => true;
-
   it("reclaims devices a dead process left booted", async () => {
     expect(orphanedBootUdids({ pid: 123, udids: ["A", "B"] }, ["A", "B"], dead)).toEqual([
       "A",

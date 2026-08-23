@@ -14,7 +14,6 @@ import {
 } from "../Services/McpSessionAuthority.ts";
 import { McpSessionAuthorityLive } from "./McpSessionAuthority.ts";
 
-const NOW = 1_780_000_000_000;
 const FAR_FUTURE = Date.now() + 3_600_000;
 
 function makeLayerFor(baseDir: string) {

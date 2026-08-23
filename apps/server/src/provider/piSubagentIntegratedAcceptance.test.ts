@@ -625,6 +625,11 @@ afterAll(() => {
 
 // ─── The integrated chain ─────────────────────────────────────────────────────
 
+const trackerRows = (sql: SqlClient.SqlClient) =>
+  sql<{ readonly migration_id: number; readonly name: string }>`
+    SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id ASC
+  `;
+
 describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
   // -------------------------------------------------------------------------
   // STAGE 1 — T24-AC1: three-history startup convergence + repository readiness
@@ -662,11 +667,6 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
       legacyAgentDir,
       floodAgentDir,
     };
-
-    const trackerRows = (sql: SqlClient.SqlClient) =>
-      sql<{ readonly migration_id: number; readonly name: string }>`
-        SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id ASC
-      `;
 
     const schemaHas = (sql: SqlClient.SqlClient) =>
       Effect.gen(function* () {
@@ -779,11 +779,11 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         expect(tracker.map((r) => [r.migration_id, r.name])).toEqual(
           migrationEntries.map(([id, name]) => [id, name]),
         );
-          // The tracker reaches the current declared migration frontier, and
-          // a second explicit run is a no-op (idempotent convergence).
-          expect(tracker[tracker.length - 1]!.migration_id).toBe(
-            migrationEntries[migrationEntries.length - 1]![0],
-          );
+        // The tracker reaches the current declared migration frontier, and
+        // a second explicit run is a no-op (idempotent convergence).
+        expect(tracker[tracker.length - 1]!.migration_id).toBe(
+          migrationEntries[migrationEntries.length - 1]![0],
+        );
         const secondPass = yield* runMigrations();
         expect(secondPass.length).toBe(0);
         yield* repositoryRoundTrip("fresh", 30_000);
@@ -810,9 +810,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         `;
         const executed = yield* runMigrations();
         expect(executed.map(([id]) => id)).toEqual(
-          migrationEntries
-            .map(([id]) => id)
-            .filter((id) => id >= 90),
+          migrationEntries.map(([id]) => id).filter((id) => id >= 90),
         );
         yield* schemaHas(sql);
         const tracker = yield* trackerRows(sql);
@@ -1738,7 +1736,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
   // -------------------------------------------------------------------------
   it("T24-AC6: real slow child produces durable progress and heartbeat lease observations; a 2000-observation flood is rate-capped with exact dropped accounting and idempotent lifecycle journal; cleanup releases attachments and timers", async () => {
     if (!fixture) throw new Error("stage 1 must run first");
-    const { dbPath, parentAgentDir, childAgentDir, modelServer } = fixture;
+    const { dbPath, parentAgentDir, childAgentDir } = fixture;
 
     const modelRuntime = await ModelRuntime.create({
       authPath: join(parentAgentDir, "auth.json"),

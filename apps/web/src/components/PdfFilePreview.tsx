@@ -45,14 +45,15 @@ export function PdfFilePreview(props: {
   });
   const fileName = basenameOfPath(props.filePath);
   const doc = usePdfDocument(previewUrl);
+  const { onPreviewError, onPreviewReady } = props;
 
   useEffect(() => {
     if (doc.status === "ready") {
-      props.onPreviewReady?.();
+      onPreviewReady?.();
     } else if (doc.status === "error") {
-      props.onPreviewError?.();
+      onPreviewError?.();
     }
-  }, [doc.status, props.onPreviewError, props.onPreviewReady]);
+  }, [doc.status, onPreviewError, onPreviewReady]);
 
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
   const containerSize = useContainerSize(scrollRoot);

@@ -58,6 +58,19 @@ function device(overrides: Partial<DeviceDescriptor> = {}): DeviceDescriptor {
   } as DeviceDescriptor;
 }
 
+function threadState(overrides: Record<string, unknown> = {}) {
+  return {
+    threadId: "t",
+    version: 1,
+    attachedDeviceUdid: null,
+    devices: [],
+    agentActive: false,
+    availability: { kind: "available" },
+    lastError: null,
+    ...overrides,
+  } as never;
+}
+
 describe("device frame gate", () => {
   it("ignores frames addressed to another device", () => {
     const state = createDeviceFrameGateState();
@@ -769,18 +782,6 @@ describe("thread state helpers", () => {
 });
 
 describe("optimistic device selection", () => {
-  const threadState = (overrides: Record<string, unknown> = {}) =>
-    ({
-      threadId: "t",
-      version: 1,
-      attachedDeviceUdid: null,
-      devices: [],
-      agentActive: false,
-      availability: { kind: "available" },
-      lastError: null,
-      ...overrides,
-    }) as never;
-
   it("shows the device the user just picked before the server confirms it", () => {
     const picked = device({ udid: OTHER_UDID, name: "iPad Pro 13-inch", state: "shutdown" });
 

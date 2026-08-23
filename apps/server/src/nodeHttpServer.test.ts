@@ -71,7 +71,7 @@ describe("bounded Node HTTP server socket lifecycle", () => {
     let nodeServer: http.Server | null = null;
     let serverForCleanup: http.Server | undefined;
     const activeSockets = new Set<Duplex>();
-    let releasePendingUpgrades = () => Promise.resolve(false);
+    let releasePendingUpgrades!: () => Promise<boolean>;
 
     try {
       const port = await Effect.runPromise(

@@ -31,22 +31,34 @@ vi.mock("electron", () => ({
     getPreferredSystemLanguages: () => ["en-US"],
     userAgentFallback: "Mozilla/5.0 Electron/40.0.0",
   },
-  BrowserWindow: class {},
+  // Standalone functions carry the same callable + .prototype surfaces as
+  // the empty classes they replace; the manager never constructs them.
+  BrowserWindow: emptyBrowserWindowConstructor,
   clipboard: { writeImage: vi.fn(), writeText: vi.fn() },
   nativeImage: { createFromBuffer: vi.fn() },
   session: {
     fromPartition: () => browserSession,
   },
   webContents: { fromId },
-  WebContentsView: class {
-    constructor() {
-      return webContentsViewConstructor();
-    }
+  // `new WebContentsView(...)` must surface the hoisted vi.fn()'s configured
+  // return value while staying a plain constructor (vitest rejects
+  // mockReturnValueOnce on a vi.fn invoked with `new`). A plain function that
+  // forwards the construction to the mock preserves both surfaces.
+  WebContentsView: function WebContentsViewConstructor(
+    this: unknown,
+    ...args: Parameters<typeof webContentsViewConstructor>
+  ) {
+    return (webContentsViewConstructor as (...forward: unknown[]) => unknown)(...args);
   },
 }));
 
 import { DesktopBrowserManager } from "../browserManager";
 import { dispatchTrustedClick } from "./trustedInput";
+
+// Callable stand-in for the Electron BrowserWindow constructor; this suite
+// never constructs it, and a standalone function exposes the same
+// typeof/function surface an empty class does.
+function emptyBrowserWindowConstructor(): void {}
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-visible-runtime");
 

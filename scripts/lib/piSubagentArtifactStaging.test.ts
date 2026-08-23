@@ -58,7 +58,7 @@ interface WalkedEntry {
 
 function walkEntries(rootDir: string, currentRelative = ""): ReadonlyArray<WalkedEntry> {
   const collected: WalkedEntry[] = [];
-  for (const entry of readdirSync(rootDir).sort()) {
+  for (const entry of readdirSync(rootDir).toSorted()) {
     const absolute = join(rootDir, entry);
     const relative = currentRelative ? `${currentRelative}/${entry}` : entry;
     const stats = lstatSync(absolute);
@@ -446,7 +446,7 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
             .filter((entry) => entry.isDirectory())
             .map((entry) => entry.name);
           expect(dependencyRoots).toContain("@sinclair");
-          expect(dependencyRoots.sort()).toEqual(["@sinclair", "croner", "nanoid", "yaml"]);
+          expect(dependencyRoots.toSorted()).toEqual(["@sinclair", "croner", "nanoid", "yaml"]);
           const expectedLockedVersions: Record<string, string> = {
             "@sinclair/typebox": "0.34.49",
             croner: "10.0.1",
@@ -634,7 +634,7 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
           `agent/extensions/shared/${basename}.js`,
           `agent/extensions/shared/${basename}.d.ts`,
         ]),
-      ].sort();
+      ].toSorted();
       expect(staged.fileCount).toBe(expectedFiles.length);
       const stagedFiles = walkEntries(artifactDir)
         .map((entry) => entry.relative)
@@ -711,7 +711,7 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
         const systemEntries = manifest.files
           .map((record) => record.path)
           .filter((path) => path.startsWith("agent/system/"))
-          .sort();
+          .toSorted();
         expect(systemEntries).toEqual(SYNTHETIC_PROMPT_FILES);
         for (const record of manifest.files.filter((r) => r.path.startsWith("agent/system/"))) {
           const stagedBytes = readFileSync(join(artifactDir, record.path));
@@ -748,9 +748,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       const systemEntries = manifest.files
         .map((record) => record.path)
         .filter((path) => path.startsWith("agent/system/"))
-        .sort();
+        .toSorted();
       expect(systemEntries).toEqual(
-        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].sort(),
+        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].toSorted(),
       );
     });
 
@@ -766,9 +766,9 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
       const systemEntries = manifest.files
         .map((record) => record.path)
         .filter((path) => path.startsWith("agent/system/"))
-        .sort();
+        .toSorted();
       expect(systemEntries).toEqual(
-        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].sort(),
+        [...SYNTHETIC_PROMPT_FILES, "agent/system/orchestration-rules.md"].toSorted(),
       );
       // The imported helper module itself is part of the tracked extension
       // tree and therefore staged with the artifact.

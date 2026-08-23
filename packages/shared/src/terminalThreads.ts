@@ -74,10 +74,15 @@ function truncateTerminalTitle(title: string): string {
 
 function normalizeTextForIdentityDetection(value: string): string {
   return value
+    // oxlint-disable-next-line no-control-regex -- stripping ANSI/VT escape sequences and C0/C1 control bytes is the purpose of this regex
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, " ")
+    // oxlint-disable-next-line no-control-regex -- OSC sequences are terminated by BEL/ESC control bytes by definition
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, " ")
+    // oxlint-disable-next-line no-control-regex -- DCS/PM/APC sequences are delimited by ESC control bytes by definition
     .replace(/\u001b[P^_].*?(?:\u001b\\|\u0007|\u009c)/g, " ")
+    // oxlint-disable-next-line no-control-regex -- single-character ESC-sequence introducer must match the ESC control byte
     .replace(/\u001b[@-_]/g, " ")
+    // oxlint-disable-next-line no-control-regex -- intentionally matches remaining C0/C1 control characters to normalize terminal output
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

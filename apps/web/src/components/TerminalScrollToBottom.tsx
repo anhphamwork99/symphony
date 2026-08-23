@@ -4,7 +4,7 @@
 // Exports: TerminalScrollToBottom
 
 import type { Terminal } from "@xterm/xterm";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconButton } from "~/components/ui/icon-button";
 import { ArrowDownIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
@@ -26,7 +26,7 @@ export function TerminalScrollToBottom({ terminal }: TerminalScrollToBottomProps
       : false;
   const visibilityRafRef = useRef<number | null>(null);
 
-  const checkPosition = () => {
+  const checkPosition = useCallback(() => {
     if (!terminal) return;
     const buf = terminal.buffer.active;
     const nextVisible = buf.viewportY < buf.baseY;
@@ -35,9 +35,9 @@ export function TerminalScrollToBottom({ terminal }: TerminalScrollToBottomProps
         ? current
         : { terminal, visible: nextVisible },
     );
-  };
+  }, [terminal]);
 
-  const scheduleVisibilityCheck = () => {
+  const scheduleVisibilityCheck = useCallback(() => {
     if (visibilityRafRef.current !== null) {
       return;
     }
@@ -45,7 +45,7 @@ export function TerminalScrollToBottom({ terminal }: TerminalScrollToBottomProps
       visibilityRafRef.current = null;
       checkPosition();
     });
-  };
+  }, [checkPosition]);
 
   useEffect(() => {
     if (!terminal) {

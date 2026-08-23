@@ -8,6 +8,7 @@ import {
   type ReactNode,
   startTransition,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -364,19 +365,22 @@ export function SingleChatSurface(props: {
     });
   };
 
-  const handleSelectEditorFile = (filePath: string) => {
-    setEditorCenterMode("file");
-    void navigate({
-      to: "/$threadId",
-      params: { threadId: props.threadId },
-      replace: true,
-      search: (previous) => ({
-        ...stripDiffSearchParams(previous),
-        view: "editor",
-        editorFilePath: filePath,
-      }),
-    });
-  };
+  const handleSelectEditorFile = useCallback(
+    (filePath: string) => {
+      setEditorCenterMode("file");
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: props.threadId },
+        replace: true,
+        search: (previous) => ({
+          ...stripDiffSearchParams(previous),
+          view: "editor",
+          editorFilePath: filePath,
+        }),
+      });
+    },
+    [navigate, props.threadId],
+  );
 
   const handleToggleEditorDirectory = (directoryPath: string) => {
     setEditorExpandedDirectories((previous) => {
@@ -445,49 +449,58 @@ export function SingleChatSurface(props: {
   // Hover warm-up shared by both surfaces' file openers: file contents land in
   // the React Query cache and the matching Shiki highlighter loads, so the
   // preview paints instantly on click.
-  const prefetchOpenerFile = (path: string) => {
-    if (!workspaceRoot) {
-      return;
-    }
-    const relativePath = resolveWorkspaceFileOpenTarget(path, workspaceRoot);
-    if (relativePath) {
-      prefetchWorkspaceFile(queryClient, workspaceRoot, relativePath);
-    }
-  };
+  const prefetchOpenerFile = useCallback(
+    (path: string) => {
+      if (!workspaceRoot) {
+        return;
+      }
+      const relativePath = resolveWorkspaceFileOpenTarget(path, workspaceRoot);
+      if (relativePath) {
+        prefetchWorkspaceFile(queryClient, workspaceRoot, relativePath);
+      }
+    },
+    [queryClient, workspaceRoot],
+  );
   // Chat surface: file references open in the right-dock file pane. References
   // outside the workspace report unhandled so chips fall back to the external
   // editor.
-  const dockFileOpener: WorkspaceFileOpener = {
-    openFile: (path) => {
-      // In-workspace references map to relative paths for the file-read RPC;
-      // binary previews in a session's scratch workspace (outside the chat
-      // workspace) open by absolute path through the local-image route.
-      const targetPath = resolveDockFileOpenTarget(path, workspaceRoot);
-      if (!targetPath) {
-        return false;
-      }
-      requestImmediateDockHydration("file");
-      openPane(props.threadId, { kind: "file", filePath: targetPath });
-      return true;
-    },
-    prefetchFile: prefetchOpenerFile,
-  };
+  const dockFileOpener = useMemo<WorkspaceFileOpener>(
+    () => ({
+      openFile: (path) => {
+        // In-workspace references map to relative paths for the file-read RPC;
+        // binary previews in a session's scratch workspace (outside the chat
+        // workspace) open by absolute path through the local-image route.
+        const targetPath = resolveDockFileOpenTarget(path, workspaceRoot);
+        if (!targetPath) {
+          return false;
+        }
+        requestImmediateDockHydration("file");
+        openPane(props.threadId, { kind: "file", filePath: targetPath });
+        return true;
+      },
+      prefetchFile: prefetchOpenerFile,
+    }),
+    [openPane, prefetchOpenerFile, props.threadId, requestImmediateDockHydration, workspaceRoot],
+  );
   // Editor surface: the center file pane is already the file viewer, so file
   // references select into it instead of opening a dock pane.
-  const editorFileOpener: WorkspaceFileOpener = {
-    openFile: (path) => {
-      if (!workspaceRoot) {
-        return false;
-      }
-      const relativePath = resolveWorkspaceFileOpenTarget(path, workspaceRoot);
-      if (!relativePath) {
-        return false;
-      }
-      handleSelectEditorFile(relativePath);
-      return true;
-    },
-    prefetchFile: prefetchOpenerFile,
-  };
+  const editorFileOpener = useMemo<WorkspaceFileOpener>(
+    () => ({
+      openFile: (path) => {
+        if (!workspaceRoot) {
+          return false;
+        }
+        const relativePath = resolveWorkspaceFileOpenTarget(path, workspaceRoot);
+        if (!relativePath) {
+          return false;
+        }
+        handleSelectEditorFile(relativePath);
+        return true;
+      },
+      prefetchFile: prefetchOpenerFile,
+    }),
+    [handleSelectEditorFile, prefetchOpenerFile, workspaceRoot],
+  );
 
   const handleSplitSurface = () => {
     if (!props.projectId) return;

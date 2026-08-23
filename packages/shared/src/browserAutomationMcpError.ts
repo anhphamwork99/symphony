@@ -24,11 +24,11 @@ export type BrowserMcpErrorDecodeContext =
   | { readonly dispatchState: "unknown" };
 
 function hasExactKeys(value: object, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
+  const actual = Object.keys(value).toSorted();
   if (actual.length !== keys.length) {
     return false;
   }
-  const expected = [...keys].sort();
+  const expected = [...keys].toSorted();
   return actual.every((key, index) => key === expected[index]);
 }
 

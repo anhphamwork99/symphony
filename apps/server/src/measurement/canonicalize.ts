@@ -67,7 +67,7 @@ export function canonicalizeManifest(tools: readonly CanonicalToolEntry[]): Uint
       "Cannot canonicalize an empty tool manifest: the effective catalog was not captured.",
     );
   }
-  const sorted = [...tools].sort((left, right) => {
+  const sorted = tools.toSorted((left, right) => {
     if (left.name < right.name) return -1;
     if (left.name > right.name) return 1;
     return 0;
@@ -84,7 +84,7 @@ export function summarizeManifest(input: ManifestCaptureInput): CanonicalManifes
   const canonicalBytes = canonicalizeManifest(input.tools);
   const toolNames = [...input.tools]
     .map((tool) => tool.name)
-    .sort((left, right) => left.localeCompare(right));
+    .toSorted((left, right) => left.localeCompare(right));
   return {
     toolNames,
     toolCount: toolNames.length,

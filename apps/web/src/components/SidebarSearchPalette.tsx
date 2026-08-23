@@ -390,7 +390,7 @@ export function SidebarSearchPalette(props: SidebarSearchPaletteProps) {
       setImportId("");
       setImportError(null);
       setIsImporting(false);
-      setAddProjectError(null);
+      setAddProjectErrorState(null);
       setIsAddingProject(false);
     }, 0);
     return () => window.clearTimeout(timeoutId);

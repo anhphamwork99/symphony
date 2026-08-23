@@ -410,14 +410,13 @@ describe("impl-09 AC1: startup recovery of pending project activation operations
       ...restartModel,
       projects: restartModel.projects.map((project) =>
         project.id === projectId
-          ? {
-              ...project,
+          ? Object.assign({}, project, {
               synaraMcpActivationOperation: {
                 ...plan.operation,
                 recoveryIdentity: undefined,
                 issuingThreadId: undefined,
               } as unknown as ProjectMcpActivationOperation,
-            }
+            })
           : project,
       ),
     };
@@ -440,13 +439,12 @@ describe("impl-09 AC1: startup recovery of pending project activation operations
       ...restartModel,
       projects: restartModel.projects.map((project) =>
         project.id === projectId
-          ? {
-              ...project,
+          ? Object.assign({}, project, {
               synaraMcpActivationOperation: {
                 ...plan.operation,
                 issuingThreadId: undefined,
               } as unknown as ProjectMcpActivationOperation,
-            }
+            })
           : project,
       ),
     };

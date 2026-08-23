@@ -22,6 +22,14 @@ import type { BrowserAnnotationDraft } from "../lib/browserAnnotations";
 const THREAD_A = ThreadId.makeUnsafe("thread-a");
 const DOCUMENT_KEY = `sha256:${"0".repeat(64)}`;
 
+function themeRoot(dark: boolean): Pick<HTMLElement, "classList"> {
+  return {
+    classList: {
+      contains: (token: string) => dark && token === "dark",
+    } as DOMTokenList,
+  };
+}
+
 function committedEvent(
   overrides: Partial<Extract<BrowserAnnotationEvent, { kind: "committed" }>> = {},
 ): Extract<BrowserAnnotationEvent, { kind: "committed" }> {
@@ -145,18 +153,12 @@ describe("browser annotation projection", () => {
 
 describe("browser annotation presentation", () => {
   it("uses the current chrome theme and readable action errors", () => {
-    const root = (dark: boolean) =>
-      ({
-        classList: {
-          contains: (token: string) => dark && token === "dark",
-        } as DOMTokenList,
-      }) as Pick<HTMLElement, "classList">;
-    expect(browserAnnotationTheme(root(false))).toMatchObject({
+    expect(browserAnnotationTheme(themeRoot(false))).toMatchObject({
       mode: "light",
       surface: "rgb(255, 255, 255)",
       primaryText: "rgb(255, 255, 255)",
     });
-    expect(browserAnnotationTheme(root(true))).toMatchObject({
+    expect(browserAnnotationTheme(themeRoot(true))).toMatchObject({
       mode: "dark",
       surface: "rgb(27, 27, 29)",
       primaryText: "rgb(24, 24, 27)",

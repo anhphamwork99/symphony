@@ -11,8 +11,10 @@
 
 import { type MessageId } from "@synara/contracts";
 import {
+  useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -99,21 +101,27 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     activeStore.get,
   );
   const anchorIndex = items.findIndex((item) => item.id === trailSnapshot.currentId);
-  const visibleIdSet = new Set(trailSnapshot.visibleIds);
-  const visibleIndexes: number[] = [];
-  items.forEach((item, index) => {
-    if (visibleIdSet.has(item.id)) {
-      visibleIndexes.push(index);
-    }
-  });
-  const visibleIndexSet = new Set(visibleIndexes);
+  const visibleIndexes = useMemo(() => {
+    const visibleIdSet = new Set(trailSnapshot.visibleIds);
+    const indexes: number[] = [];
+    items.forEach((item, index) => {
+      if (visibleIdSet.has(item.id)) {
+        indexes.push(index);
+      }
+    });
+    return indexes;
+  }, [items, trailSnapshot.visibleIds]);
+  const visibleIndexSet = useMemo(() => new Set(visibleIndexes), [visibleIndexes]);
 
   const visible = hasGutter && items.length > 1;
 
   // Tick layout depends only on the message count (fixed spacing, natural content
   // height) — never on the measured viewport — so the capped/scrolling viewport
   // can't feed its height back into the layout (no ResizeObserver loop).
-  const geometry = computeTrailGeometry({ count: items.length, spacingPx: TICK_SPACING_PX });
+  const geometry = useMemo(
+    () => computeTrailGeometry({ count: items.length, spacingPx: TICK_SPACING_PX }),
+    [items.length],
+  );
 
   // --- Hot-path refs (read inside rAF; never trigger renders) ---------------
   const rafIdRef = useRef<number | null>(null);
@@ -149,7 +157,7 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
   }, [geometry, items, anchorIndex, visibleIndexes, onSelect, visible]);
 
   // --- Imperative writers ----------------------------------------------------
-  const writeStyles = (styles: readonly TickStyle[]) => {
+  const writeStyles = useCallback((styles: readonly TickStyle[]) => {
     const refs = tickRefs.current;
     for (let i = 0; i < styles.length; i += 1) {
       const el = refs[i];
@@ -159,17 +167,17 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
       el.style.width = `${styles[i]!.width}px`;
       el.style.opacity = `${styles[i]!.opacity}`;
     }
-  };
+  }, []);
 
-  const hideTooltip = () => {
+  const hideTooltip = useCallback(() => {
     tooltipIndexRef.current = -1;
     const tip = tooltipRef.current;
     if (tip) {
       tip.style.visibility = "hidden";
     }
-  };
+  }, []);
 
-  const showTooltip = (index: number, geometry: TrailGeometry) => {
+  const showTooltip = useCallback((index: number, geometry: TrailGeometry) => {
     const tip = tooltipRef.current;
     const item = itemsRef.current[index];
     if (!tip || !item) {
@@ -199,9 +207,9 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     const offsetTop = viewport?.offsetTop ?? 0;
     tip.style.top = `${offsetTop + clampTooltipTop(visibleY, tooltipHeight, viewportHeight)}px`;
     tip.style.visibility = "visible";
-  };
+  }, []);
 
-  const applyHighlightFloors = (styles: TickStyle[]) => {
+  const applyHighlightFloors = useCallback((styles: TickStyle[]) => {
     const anchorIndexValue = anchorIndexRef.current;
     for (const index of visibleIndexesRef.current) {
       const style = styles[index];
@@ -213,10 +221,10 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     if (anchorStyle) {
       anchorStyle.opacity = Math.max(anchorStyle.opacity, TICK_ANCHOR_OPACITY);
     }
-  };
+  }, []);
 
   // Pointer/keyboard away: restore the resting rail (anchor tick highlighted).
-  const applyRest = () => {
+  const applyRest = useCallback(() => {
     const styles = computeRestStyles(
       itemsRef.current.length,
       anchorIndexRef.current,
@@ -227,11 +235,11 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     applyHighlightFloors(styles);
     writeStyles(styles);
     hideTooltip();
-  };
+  }, [applyHighlightFloors, hideTooltip, writeStyles]);
 
   // Position the ticks vertically in content space and reset to rest when idle.
   // Width changes never reflow this, so it only runs when the layout changes.
-  const layoutTicks = () => {
+  const layoutTicks = useCallback(() => {
     const geometryValue = geometryRef.current;
     if (!geometryValue) {
       return;
@@ -248,10 +256,10 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     if (latestPointerClientYRef.current === null && focusOverrideIndexRef.current === null) {
       applyRest();
     }
-  };
+  }, [applyRest]);
 
   // --- The magnification frame (single coalesced rAF) ------------------------
-  const renderFrame = () => {
+  const renderFrame = useCallback(() => {
     rafIdRef.current = null;
     const geometry = geometryRef.current;
     if (!geometry || !visibleRef.current) {
@@ -315,20 +323,20 @@ export function MessageTrail({ items, activeStore, onSelect }: MessageTrailProps
     }
     writeStyles(styles);
     showTooltip(focusedIndex, geometry);
-  };
+  }, [applyHighlightFloors, applyRest, showTooltip, writeStyles]);
 
-  const scheduleFrame = () => {
+  const scheduleFrame = useCallback(() => {
     if (rafIdRef.current === null) {
       rafIdRef.current = requestAnimationFrame(renderFrame);
     }
-  };
+  }, [renderFrame]);
 
-  const cancelFrame = () => {
+  const cancelFrame = useCallback(() => {
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
-  };
+  }, []);
 
   // --- Gutter visibility: rail only shows when the pane is wide enough --------
   // Width-only ResizeObserver; the tick layout is count-driven (see `geometry`),

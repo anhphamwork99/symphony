@@ -29,7 +29,10 @@ import {
   buildPiSubagentArtifact,
   loadPiSubagentExtensionProvenance,
 } from "../../../../scripts/lib/piSubagentArtifactStaging.ts";
-import { evaluatePiSubagentDesktopArtifactGate, SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV } from "./piSubagentDesktopArtifactGate.ts";
+import {
+  evaluatePiSubagentDesktopArtifactGate,
+  SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
+} from "./piSubagentDesktopArtifactGate.ts";
 import { probePiSubagentBridge } from "./piSubagentBridge.ts";
 import { verifyPiSubagentArtifact } from "./piSubagentArtifactVerifier.ts";
 
@@ -77,7 +80,10 @@ function writePackageCanary(nodeModulesDir: string, packageName: string, version
     )}\n`,
     "utf8",
   );
-  writeFileSync(join(packageDir, "index.js"), `throw new Error("${packageName} canary must not load");\n`);
+  writeFileSync(
+    join(packageDir, "index.js"),
+    `throw new Error("${packageName} canary must not load");\n`,
+  );
   if (packageName === "@sinclair/typebox") {
     writeFileSync(
       join(packageDir, "compile.js"),
@@ -166,7 +172,11 @@ function canonicalPath(path: string): string {
   return existsSync(path) ? realpathSync(path) : resolve(path);
 }
 
-function assertPathInClosure(resolvedPath: string, closureRoot: string, forbiddenRoots: ReadonlyArray<string>): void {
+function assertPathInClosure(
+  resolvedPath: string,
+  closureRoot: string,
+  forbiddenRoots: ReadonlyArray<string>,
+): void {
   expect(canonicalPath(resolvedPath).startsWith(canonicalPath(closureRoot))).toBe(true);
   for (const forbidden of forbiddenRoots) {
     expect(canonicalPath(resolvedPath).startsWith(canonicalPath(forbidden))).toBe(false);
@@ -181,7 +191,10 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
       { timeout: 120_000 },
       async () => {
         const provenance = loadPiSubagentExtensionProvenance(
-          join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
+          join(
+            REPO_ROOT,
+            "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json",
+          ),
         );
         const workspaceRoot = makeTempRoot("pi-ac4-real-");
         const artifactParentDir = join(workspaceRoot, "artifact-parent");
@@ -274,7 +287,10 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
             join(agentDir, "extensions"),
           ];
 
-          const hostPiPackageRoot = resolve(REPO_ROOT, "apps/server/node_modules/@earendil-works/pi-coding-agent");
+          const hostPiPackageRoot = resolve(
+            REPO_ROOT,
+            "apps/server/node_modules/@earendil-works/pi-coding-agent",
+          );
           const hostPiPackage = JSON.parse(
             readFileSync(join(hostPiPackageRoot, "package.json"), "utf8"),
           ) as {
@@ -423,10 +439,12 @@ function deriveStagedPromptMarker(stagedBytes: string): string {
       if (trimmed.includes("{{") || trimmed.includes("}}")) return false;
       return true;
     })
-    .sort((a, b) => b.length - a.length);
+    .toSorted((a, b) => b.length - a.length);
   const best = candidates[0]?.trim();
   if (best === undefined) {
-    throw new Error("Could not derive a distinctive marker from staged prompt bytes (no qualifying line).");
+    throw new Error(
+      "Could not derive a distinctive marker from staged prompt bytes (no qualifying line).",
+    );
   }
   return best;
 }
@@ -437,21 +455,22 @@ function deriveStagedPromptMarker(stagedBytes: string): string {
  * derives one distinctive marker per file from the staged bytes.
  */
 function deriveStagedPromptMarkers(artifactDir: string): StagedPromptMarkerProof {
-  const manifest = JSON.parse(
-    readFileSync(join(artifactDir, "manifest.json"), "utf8"),
-  ) as {
+  const manifest = JSON.parse(readFileSync(join(artifactDir, "manifest.json"), "utf8")) as {
     readonly files: ReadonlyArray<{ readonly path: string }>;
   };
   const promptPaths = manifest.files
     .map((record) => record.path)
     .filter((path) => path.startsWith("agent/system/"))
-    .sort();
+    .toSorted();
   if (promptPaths.length === 0) {
     throw new Error("Staged artifact carries no agent/system prompt entries.");
   }
   const markersByPath = new Map<string, string>();
   for (const relative of promptPaths) {
-    markersByPath.set(relative, deriveStagedPromptMarker(readFileSync(join(artifactDir, relative), "utf8")));
+    markersByPath.set(
+      relative,
+      deriveStagedPromptMarker(readFileSync(join(artifactDir, relative), "utf8")),
+    );
   }
   return { markersByPath };
 }
@@ -572,7 +591,7 @@ function writeHermeticAuthAndModels(agentDir: string, baseUrl: string): void {
  * request body and the assertion fails.
  */
 function installPromptLocationDecoys(decoyRoots: ReadonlyArray<string>): string[] {
-  const plantedFiles: string[] = []
+  const plantedFiles: string[] = [];
   for (const root of decoyRoots) {
     const systemDir = join(root, "system");
     mkdirSync(systemDir, { recursive: true });
@@ -610,7 +629,10 @@ function expectSnapshotUnchanged(snapshot: Map<string, string>): void {
 }
 
 /** The verifier/gate diagnostics must never carry host paths or fs noise. */
-function expectBoundedNoDecoyDiagnostic(serialized: string, forbiddenRoots: ReadonlyArray<string>): void {
+function expectBoundedNoDecoyDiagnostic(
+  serialized: string,
+  forbiddenRoots: ReadonlyArray<string>,
+): void {
   expect(serialized).not.toContain(DECOY_PROMPT_MARKER);
   expect(serialized).not.toMatch(/ENOENT|EACCES|EISDIR|EPERM/u);
   for (const root of forbiddenRoots) {
@@ -626,7 +648,10 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
       { timeout: 180_000 },
       async () => {
         const provenance = loadPiSubagentExtensionProvenance(
-          join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
+          join(
+            REPO_ROOT,
+            "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json",
+          ),
         );
         const modelServer = await startLoopbackModelServer();
         const workspaceRoot = makeTempRoot("pi-t01c-ac5-");
@@ -653,12 +678,7 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
         installUserExtensionCanaries(parentAgentDir);
 
         // Prompt-location decoys at every non-artifact prompt root.
-        installPromptLocationDecoys([
-          parentAgentDir,
-          childAgentDir,
-          cwd,
-          homeDir,
-        ]);
+        installPromptLocationDecoys([parentAgentDir, childAgentDir, cwd, homeDir]);
 
         const staged = buildPiSubagentArtifact({
           repoDir: REAL_ALFIE_REPO_DIR,
@@ -685,8 +705,14 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
         // same-length tamper of the staged subagent-system bytes must yield a
         // marker that no longer matches the untampered staged bytes (the
         // request-body proof demonstrably fails if staged bytes change).
-        const stagedSystemBytes = readFileSync(join(staged.artifactDir, subagentSystemPath), "utf8");
-        const tamperedBytes = stagedSystemBytes.replace(subagentSystemMarker, subagentSystemMarker.replace("e", "x"));
+        const stagedSystemBytes = readFileSync(
+          join(staged.artifactDir, subagentSystemPath),
+          "utf8",
+        );
+        const tamperedBytes = stagedSystemBytes.replace(
+          subagentSystemMarker,
+          subagentSystemMarker.replace("e", "x"),
+        );
         expect(Buffer.byteLength(tamperedBytes)).toBe(Buffer.byteLength(stagedSystemBytes));
         expect(tamperedBytes).not.toBe(stagedSystemBytes);
         expect(deriveStagedPromptMarker(tamperedBytes)).not.toBe(subagentSystemMarker);
@@ -722,7 +748,10 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
             modelsPath: join(parentAgentDir, "models.json"),
           });
           const registry = new ModelRegistry(modelRuntime);
-          const echoModel = registry.find(DETERMINISTIC_MODEL_PROVIDER_ID, DETERMINISTIC_ECHO_MODEL_ID);
+          const echoModel = registry.find(
+            DETERMINISTIC_MODEL_PROVIDER_ID,
+            DETERMINISTIC_ECHO_MODEL_ID,
+          );
           if (!echoModel) {
             throw new Error("deterministic echo model missing from the test registry");
           }
@@ -768,8 +797,7 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
           };
           const agentEntry = loadedExtension.tools.get("Agent");
           expect(agentEntry).toBeDefined();
-          const agentExecute = (agentEntry?.execute ??
-            agentEntry?.definition?.execute) as
+          const agentExecute = (agentEntry?.execute ?? agentEntry?.definition?.execute) as
             | ((
                 toolCallId: string,
                 params: Record<string, unknown>,
@@ -822,12 +850,13 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
           // Agent-tool LOAD alone proves nothing: the prompt bytes of the
           // staged `agent/system` closure must be IN the request body. Every
           // runtime-derived marker of every staged prompt file must appear.
-          const childBody = modelServer.bodies.find((body) =>
-            body.includes(subagentSystemMarker),
-          );
+          const childBody = modelServer.bodies.find((body) => body.includes(subagentSystemMarker));
           expect(childBody).toBeDefined();
           for (const [stagedPath, marker] of stagedMarkers.markersByPath) {
-            expect(childBody, `marker of staged ${stagedPath} missing from child request body`).toContain(marker);
+            expect(
+              childBody,
+              `marker of staged ${stagedPath} missing from child request body`,
+            ).toContain(marker);
           }
           // No decoy prompt location supplied any prompt byte.
           for (const body of modelServer.bodies) {
@@ -860,145 +889,141 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
       { timeout: 120_000 },
       async () => {
         const provenance = loadPiSubagentExtensionProvenance(
-          join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
+          join(
+            REPO_ROOT,
+            "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json",
+          ),
         );
         const modelServer = await startLoopbackModelServer();
         try {
-        const workspaceRoot = makeTempRoot("pi-t01c-neg-");
-        const goodArtifactDir = join(workspaceRoot, "good-artifact");
-        const parentAgentDir = join(workspaceRoot, "agent-home");
-        const cwd = join(workspaceRoot, "workspace");
-        const nodePathCanaryRoot = join(workspaceRoot, "node-path-canary");
-        const homeDir = join(workspaceRoot, "fake-home");
-        mkdirSync(cwd, { recursive: true });
-        mkdirSync(homeDir, { recursive: true });
+          const workspaceRoot = makeTempRoot("pi-t01c-neg-");
+          const goodArtifactDir = join(workspaceRoot, "good-artifact");
+          const parentAgentDir = join(workspaceRoot, "agent-home");
+          const cwd = join(workspaceRoot, "workspace");
+          const nodePathCanaryRoot = join(workspaceRoot, "node-path-canary");
+          const homeDir = join(workspaceRoot, "fake-home");
+          mkdirSync(cwd, { recursive: true });
+          mkdirSync(homeDir, { recursive: true });
 
-        writeHermeticAuthAndModels(parentAgentDir, modelServer.baseUrl);
-        installResolutionCanaries(nodePathCanaryRoot);
-        installResolutionCanaries(workspaceRoot);
-        installGlobalResolutionCanaries(homeDir);
-        installUserExtensionCanaries(parentAgentDir);
-        const decoyFiles = installPromptLocationDecoys([
-          parentAgentDir,
-          cwd,
-          homeDir,
-        ]);
+          writeHermeticAuthAndModels(parentAgentDir, modelServer.baseUrl);
+          installResolutionCanaries(nodePathCanaryRoot);
+          installResolutionCanaries(workspaceRoot);
+          installGlobalResolutionCanaries(homeDir);
+          installUserExtensionCanaries(parentAgentDir);
+          const decoyFiles = installPromptLocationDecoys([parentAgentDir, cwd, homeDir]);
 
-        // The GOOD staged artifact (never mutated by this leg).
-        const staged = buildPiSubagentArtifact({
-          repoDir: REAL_ALFIE_REPO_DIR,
-          artifactDir: goodArtifactDir,
-          provenance,
-        });
-        const manifestBytes = readFileSync(staged.manifestPath, "utf8");
-        const verifiedGood = await verifyPiSubagentArtifact(staged.artifactDir);
-        expect(verifiedGood.valid).toBe(true);
-
-        // Runtime-derived victim marker (review P2): the tamper control flips
-        // bytes inside a marker derived from the staged file's own bytes, not
-        // a copied static string.
-        const stagedMarkers = deriveStagedPromptMarkers(staged.artifactDir);
-        const subagentSystemPath = [...stagedMarkers.markersByPath.keys()].find((path) =>
-          path.endsWith("subagent-system.md"),
-        );
-        if (subagentSystemPath === undefined) {
-          throw new Error("staged prompt closure lacks subagent-system.md");
-        }
-        const subagentSystemMarker = stagedMarkers.markersByPath.get(subagentSystemPath)!;
-
-        // Canary/decoy no-side-effect baseline.
-        const canaryPaths = [
-          join(parentAgentDir, "extensions", "pi-subagents", "src", "index.ts"),
-          join(parentAgentDir, "extensions", "shared", "durable-preferences.js"),
-          ...decoyFiles,
-        ];
-        const canarySnapshot = snapshotFileBytes(canaryPaths);
-
-        const victimRelative = "agent/system/subagent-system.md";
-        const outsideTarget = join(workspaceRoot, "outside-prompt-payload.md");
-        writeFileSync(
-          outsideTarget,
-          `# Outside payload\n\n${DECOY_PROMPT_MARKER}\nSymlinked content living outside the artifact.\n`,
-          "utf8",
-        );
-
-        // Fresh full copy of the verified artifact per control (all regular
-        // files in a valid artifact — `cpSync` reproduces them exactly).
-        const copyArtifact = (label: string): string => {
-          const copyDir = join(workspaceRoot, label);
-          cpSync(staged.artifactDir, copyDir, { recursive: true });
-          return copyDir;
-        };
-
-        const controls = [
-          {
-            label: "deleted",
-            reason: "entry_missing" as const,
-            mutate: (dir: string) => {
-              rmSync(join(dir, victimRelative));
-            },
-          },
-          {
-            label: "tampered",
-            reason: "digest_mismatch" as const,
-            mutate: (dir: string) => {
-              const victim = join(dir, victimRelative);
-              const original = readFileSync(victim, "utf8");
-              // Same-length byte flip inside the runtime-derived marker line.
-              const marker = subagentSystemMarker;
-              const tamperedLine = marker.replace("e", "x");
-              expect(Buffer.byteLength(tamperedLine)).toBe(Buffer.byteLength(marker));
-              expect(original).toContain(marker);
-              writeFileSync(victim, original.replace(marker, tamperedLine), "utf8");
-            },
-          },
-          {
-            label: "symlinked",
-            reason: "symlink_escape" as const,
-            mutate: (dir: string) => {
-              const victim = join(dir, victimRelative);
-              rmSync(victim);
-              symlinkSync(outsideTarget, victim, "file");
-            },
-          },
-        ];
-
-        for (const control of controls) {
-          const copyDir = copyArtifact(`control-${control.label}`);
-          control.mutate(copyDir);
-
-          // Rejection by the production verifier, before any runtime use.
-          const verification = await verifyPiSubagentArtifact(copyDir);
-          expect(verification.valid).toBe(false);
-          if (!verification.valid) {
-            expect(verification.category).toBe(control.reason);
-            expect(verification.entry).toBe(victimRelative);
-          }
-          expectBoundedNoDecoyDiagnostic(JSON.stringify(verification), [
-            workspaceRoot,
-            tmpdir(),
-          ]);
-
-          // Rejection by the desktop fail-close gate with the same closed
-          // category and a bounded detail — before Pi SDK import, extension
-          // discovery, or any durable side effect (pure function, injected env).
-          const gate = await evaluatePiSubagentDesktopArtifactGate("desktop", {
-            env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: copyDir },
+          // The GOOD staged artifact (never mutated by this leg).
+          const staged = buildPiSubagentArtifact({
+            repoDir: REAL_ALFIE_REPO_DIR,
+            artifactDir: goodArtifactDir,
+            provenance,
           });
-          expect(gate.kind).toBe("unavailable");
-          if (gate.kind === "unavailable") {
-            expect(gate.reason).toBe(control.reason);
-            expectBoundedNoDecoyDiagnostic(gate.detail, [workspaceRoot, tmpdir()]);
-          }
-        }
+          const manifestBytes = readFileSync(staged.manifestPath, "utf8");
+          const verifiedGood = await verifyPiSubagentArtifact(staged.artifactDir);
+          expect(verifiedGood.valid).toBe(true);
 
-        // No runtime use occurred: zero model requests, canary/decoy material
-        // byte-identical, and the GOOD artifact still verifies untouched.
-        expect(modelServer.bodies).toHaveLength(0);
-        expectSnapshotUnchanged(canarySnapshot);
-        expect(readFileSync(staged.manifestPath, "utf8")).toBe(manifestBytes);
-        const verifiedGoodAfter = await verifyPiSubagentArtifact(staged.artifactDir);
-        expect(verifiedGoodAfter.valid).toBe(true);
+          // Runtime-derived victim marker (review P2): the tamper control flips
+          // bytes inside a marker derived from the staged file's own bytes, not
+          // a copied static string.
+          const stagedMarkers = deriveStagedPromptMarkers(staged.artifactDir);
+          const subagentSystemPath = [...stagedMarkers.markersByPath.keys()].find((path) =>
+            path.endsWith("subagent-system.md"),
+          );
+          if (subagentSystemPath === undefined) {
+            throw new Error("staged prompt closure lacks subagent-system.md");
+          }
+          const subagentSystemMarker = stagedMarkers.markersByPath.get(subagentSystemPath)!;
+
+          // Canary/decoy no-side-effect baseline.
+          const canaryPaths = [
+            join(parentAgentDir, "extensions", "pi-subagents", "src", "index.ts"),
+            join(parentAgentDir, "extensions", "shared", "durable-preferences.js"),
+            ...decoyFiles,
+          ];
+          const canarySnapshot = snapshotFileBytes(canaryPaths);
+
+          const victimRelative = "agent/system/subagent-system.md";
+          const outsideTarget = join(workspaceRoot, "outside-prompt-payload.md");
+          writeFileSync(
+            outsideTarget,
+            `# Outside payload\n\n${DECOY_PROMPT_MARKER}\nSymlinked content living outside the artifact.\n`,
+            "utf8",
+          );
+
+          // Fresh full copy of the verified artifact per control (all regular
+          // files in a valid artifact — `cpSync` reproduces them exactly).
+          const copyArtifact = (label: string): string => {
+            const copyDir = join(workspaceRoot, label);
+            cpSync(staged.artifactDir, copyDir, { recursive: true });
+            return copyDir;
+          };
+
+          const controls = [
+            {
+              label: "deleted",
+              reason: "entry_missing" as const,
+              mutate: (dir: string) => {
+                rmSync(join(dir, victimRelative));
+              },
+            },
+            {
+              label: "tampered",
+              reason: "digest_mismatch" as const,
+              mutate: (dir: string) => {
+                const victim = join(dir, victimRelative);
+                const original = readFileSync(victim, "utf8");
+                // Same-length byte flip inside the runtime-derived marker line.
+                const marker = subagentSystemMarker;
+                const tamperedLine = marker.replace("e", "x");
+                expect(Buffer.byteLength(tamperedLine)).toBe(Buffer.byteLength(marker));
+                expect(original).toContain(marker);
+                writeFileSync(victim, original.replace(marker, tamperedLine), "utf8");
+              },
+            },
+            {
+              label: "symlinked",
+              reason: "symlink_escape" as const,
+              mutate: (dir: string) => {
+                const victim = join(dir, victimRelative);
+                rmSync(victim);
+                symlinkSync(outsideTarget, victim, "file");
+              },
+            },
+          ];
+
+          for (const control of controls) {
+            const copyDir = copyArtifact(`control-${control.label}`);
+            control.mutate(copyDir);
+
+            // Rejection by the production verifier, before any runtime use.
+            const verification = await verifyPiSubagentArtifact(copyDir);
+            expect(verification.valid).toBe(false);
+            if (!verification.valid) {
+              expect(verification.category).toBe(control.reason);
+              expect(verification.entry).toBe(victimRelative);
+            }
+            expectBoundedNoDecoyDiagnostic(JSON.stringify(verification), [workspaceRoot, tmpdir()]);
+
+            // Rejection by the desktop fail-close gate with the same closed
+            // category and a bounded detail — before Pi SDK import, extension
+            // discovery, or any durable side effect (pure function, injected env).
+            const gate = await evaluatePiSubagentDesktopArtifactGate("desktop", {
+              env: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: copyDir },
+            });
+            expect(gate.kind).toBe("unavailable");
+            if (gate.kind === "unavailable") {
+              expect(gate.reason).toBe(control.reason);
+              expectBoundedNoDecoyDiagnostic(gate.detail, [workspaceRoot, tmpdir()]);
+            }
+          }
+
+          // No runtime use occurred: zero model requests, canary/decoy material
+          // byte-identical, and the GOOD artifact still verifies untouched.
+          expect(modelServer.bodies).toHaveLength(0);
+          expectSnapshotUnchanged(canarySnapshot);
+          expect(readFileSync(staged.manifestPath, "utf8")).toBe(manifestBytes);
+          const verifiedGoodAfter = await verifyPiSubagentArtifact(staged.artifactDir);
+          expect(verifiedGoodAfter.valid).toBe(true);
         } finally {
           // Review P2 cleanup: the loopback model server (and with it the
           // hermetic session resources it serves) shuts down on ANY outcome —

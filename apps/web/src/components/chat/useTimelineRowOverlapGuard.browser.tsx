@@ -9,7 +9,7 @@
 //          never pull a container up when a row shrinks.
 // Layer: Vitest browser tests
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { render } from "vitest-browser-react";
 
@@ -44,6 +44,9 @@ function StaleContainers({ handleRef }: { handleRef: { current: HarnessHandle | 
     <div style={{ position: "relative", height: 400, width: 300 }}>
       {rowHeights.map((height, index) => (
         <div
+          // The fixture's slot index is the row identity (queried back via
+          // data-overlap-container), so the index is the intended key.
+          // oxlint-disable-next-line no-array-index-key
           key={index}
           data-overlap-container={index}
           style={{

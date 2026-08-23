@@ -193,9 +193,9 @@ describe("pi catalog observer success captures (Decision 35)", () => {
       expect(artifact.lifecycleGeneration).toBe("gen-1");
       expect(artifact.phase).toBe("ready");
       expect(artifact.toolCount).toBe(2);
-      expect(artifact.entries.map((entry: { readonly name: string }) => entry.name).sort()).toEqual(
-        ["bash", "write"],
-      );
+      expect(
+        artifact.entries.map((entry: { readonly name: string }) => entry.name).toSorted(),
+      ).toEqual(["bash", "write"]);
       // Completeness: bytes and hash equal the direct canonicalization of the
       // live API result (the artifact entries ARE the getAllTools result).
       const canonical = canonicalizeManifest(toCanonicalEntries(TOOLS));

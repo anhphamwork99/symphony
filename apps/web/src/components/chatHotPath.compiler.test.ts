@@ -110,9 +110,9 @@ describe("chat hot-path React Compiler coverage", () => {
         const bailoutReasons = events
           .filter((event) => event.kind === "CompileError")
           .map((event) => event.detail?.reason ?? event.detail?.description ?? "unknown")
-          .sort();
+          .toSorted();
 
-        expect(bailoutReasons).toEqual([...module.allowedBailoutReasons].sort());
+        expect(bailoutReasons).toEqual(module.allowedBailoutReasons.toSorted());
         expect(events.some((event) => event.kind === "CompileSuccess")).toBe(true);
       },
       COMPILE_TIMEOUT_MS,

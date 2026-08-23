@@ -1291,6 +1291,24 @@ function toolErrorText(result: Record<string, unknown> | undefined): string {
   return content[0]?.text ?? "";
 }
 
+const makeCreateThreadsRequest = (id: number, requestId: string) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "tools/call",
+  params: {
+    name: "synara_create_threads",
+    arguments: {
+      requestId,
+      threads: [
+        {
+          prompt: requestId,
+          target: { provider: "codex", model: "gpt-5.5" },
+        },
+      ],
+    },
+  },
+});
+
 describe("AgentGateway", () => {
   const baseThreads = [
     makeThreadShell("thread-parent"),
@@ -1423,34 +1441,21 @@ describe("AgentGateway", () => {
     const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
     return Effect.gen(function* () {
       const harness = yield* makeHarness;
-      const request = (id: number, requestId: string) => ({
-        jsonrpc: "2.0",
-        id,
-        method: "tools/call",
-        params: {
-          name: "synara_create_threads",
-          arguments: {
-            requestId,
-            threads: [
-              {
-                prompt: requestId,
-                target: { provider: "codex", model: "gpt-5.5" },
-              },
-            ],
-          },
-        },
-      });
-
       const duplicate = yield* harness.postRaw({
         authorizationHeader: "Bearer token-parent",
-        body: [request(7, "duplicate-a"), request(7, "duplicate-b")],
+        body: [
+          makeCreateThreadsRequest(7, "duplicate-a"),
+          makeCreateThreadsRequest(7, "duplicate-b"),
+        ],
       });
       assert.equal(duplicate.status, 400);
       assert.include(JSON.stringify(duplicate.body), "Duplicate JSON-RPC request id");
 
       const oversized = yield* harness.postRaw({
         authorizationHeader: "Bearer token-parent",
-        body: Array.from({ length: 51 }, (_, index) => request(index, `oversized-${index}`)),
+        body: Array.from({ length: 51 }, (_, index) =>
+          makeCreateThreadsRequest(index, `oversized-${index}`),
+        ),
       });
       assert.equal(oversized.status, 400);
       assert.include(JSON.stringify(oversized.body), "at most 50");

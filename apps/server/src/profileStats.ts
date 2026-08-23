@@ -45,6 +45,10 @@ interface CountRow {
   readonly count: number;
 }
 
+function profileStatsErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 interface PromptActivityRow extends CountRow {
   readonly day: string | null;
   readonly hour: number | null;
@@ -634,10 +638,6 @@ export class ProfileStatsQuery extends ServiceMap.Service<
 const makeProfileStatsQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const config = yield* ServerConfig;
-
-  function profileStatsErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-  }
 
   function isMissingLegacyColumnError(error: unknown): boolean {
     return /\bno such column\b/iu.test(profileStatsErrorMessage(error));

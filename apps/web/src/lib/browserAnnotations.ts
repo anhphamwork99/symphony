@@ -198,7 +198,7 @@ export function buildBrowserAnnotationsPromptBlock(
       messageId: normalizedMessageId,
       instruction: BROWSER_ANNOTATIONS_SECURITY_INSTRUCTION,
       annotations: normalized.map((annotation) => {
-        const providerAnnotation = { ...annotation };
+        const providerAnnotation = Object.assign({}, annotation);
         delete providerAnnotation.documentKey;
         return providerAnnotation;
       }),

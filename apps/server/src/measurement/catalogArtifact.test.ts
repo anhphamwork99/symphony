@@ -99,7 +99,7 @@ describe("catalog artifact validation (Decision 35)", () => {
     });
     expect(validation.ok).toBe(true);
     if (validation.ok) {
-      expect(validation.entries.map((entry) => entry.name).sort()).toEqual(["bash", "write"]);
+      expect(validation.entries.map((entry) => entry.name).toSorted()).toEqual(["bash", "write"]);
       const summary = manifestSummaryFromArtifact({
         entries: validation.entries,
         localCaptureProduced: true,

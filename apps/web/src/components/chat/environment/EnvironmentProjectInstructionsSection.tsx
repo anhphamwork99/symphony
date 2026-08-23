@@ -3,7 +3,7 @@
 // Layer: Environment panel section
 // Exports: EnvironmentProjectInstructionsSection
 
-import { useEffect, useRef, useState, type ChangeEventHandler } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEventHandler } from "react";
 import { THREAD_NOTES_MAX_CHARS, type ProjectId } from "@synara/contracts";
 
 import { Textarea } from "~/components/ui/textarea";
@@ -46,7 +46,8 @@ function useProjectInstructionsAutosave({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  const flush = () => {
+  // Stable across renders: only touches refs, so effects/handlers can safely depend on it.
+  const flush = useCallback(() => {
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -60,7 +61,7 @@ function useProjectInstructionsAutosave({
     if (projectIdRef.current === pendingSave.projectId) {
       lastCommittedRef.current = pendingSave.value;
     }
-  };
+  }, []);
 
   useEffect(() => {
     const projectChanged = projectIdRef.current !== projectId;

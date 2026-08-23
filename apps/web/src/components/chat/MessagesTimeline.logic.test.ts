@@ -22,6 +22,50 @@ import {
 import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
 import type { TurnDiffSummary, WorktreeSetupSnapshot } from "../../types";
 
+const workEntry = (
+  id: string,
+  createdAt: string,
+  label: string,
+  tone: "thinking" | "tool" | "info" | "error" = "tool",
+): TimelineEntry => ({
+  id: `entry-${id}`,
+  kind: "work",
+  createdAt,
+  entry: { id, createdAt, label, tone },
+});
+
+const collapsedSignature = (row: {
+  collapsedTurnItems?: CollapsedTurnItem[] | undefined;
+}): string[] =>
+  (row.collapsedTurnItems ?? []).map((item) => `${item.kind}:${String(item.id)}`);
+
+const worktreeSetupSnapshot = (): WorktreeSetupSnapshot => ({
+  steps: [
+    { id: "create-branch", label: "Creating branch", status: "done" },
+    { id: "create-worktree", label: "Creating worktree", status: "done" },
+    { id: "prepare-thread", label: "Linking thread workspace", status: "active" },
+    { id: "start-session", label: "Starting session", status: "pending" },
+  ],
+});
+
+const emptyStableRows = (): StableMessagesTimelineRowsState => ({
+  byId: new Map(),
+  result: [],
+});
+
+const makeWorktreeSetupRow = (
+  status: "active" | "done",
+  open: boolean,
+): Extract<MessagesTimelineRow, { kind: "worktree-setup" }> => ({
+  kind: "worktree-setup",
+  id: "worktree-setup-row",
+  open,
+  steps: [{ id: "create-worktree", label: "Creating worktree", status }],
+});
+
+
+
+
 describe("canSubmitUserMessageEdit", () => {
   it("allows an empty edit only when hidden annotations remain attached", () => {
     expect(canSubmitUserMessageEdit({ draft: "", allowEmpty: true, disabled: false })).toBe(true);
@@ -193,11 +237,6 @@ describe("computeStableMessagesTimelineRows", () => {
   type MessageTimelineRow = Extract<MessagesTimelineRow, { kind: "message" }>;
   type WorkTimelineRow = Extract<MessagesTimelineRow, { kind: "work" }>;
 
-  const emptyStableRows = (): StableMessagesTimelineRowsState => ({
-    byId: new Map(),
-    result: [],
-  });
-
   it("replaces work rows when later tool metadata adds visible details", () => {
     const firstRows: MessagesTimelineRow[] = [
       {
@@ -294,25 +333,15 @@ describe("computeStableMessagesTimelineRows", () => {
   });
 
   it("reuses worktree-setup rows until a step status or open state changes", () => {
-    const makeRow = (
-      status: "active" | "done",
-      open: boolean,
-    ): Extract<MessagesTimelineRow, { kind: "worktree-setup" }> => ({
-      kind: "worktree-setup",
-      id: "worktree-setup-row",
-      open,
-      steps: [{ id: "create-worktree", label: "Creating worktree", status }],
-    });
-
-    const first = computeStableMessagesTimelineRows([makeRow("active", true)], emptyStableRows());
-    const unchanged = computeStableMessagesTimelineRows([makeRow("active", true)], first);
+    const first = computeStableMessagesTimelineRows([makeWorktreeSetupRow("active", true)], emptyStableRows());
+    const unchanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("active", true)], first);
     expect(unchanged).toBe(first);
 
-    const statusChanged = computeStableMessagesTimelineRows([makeRow("done", true)], unchanged);
+    const statusChanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("done", true)], unchanged);
     expect(statusChanged).not.toBe(unchanged);
     expect(statusChanged.result[0]).not.toBe(unchanged.result[0]);
 
-    const openChanged = computeStableMessagesTimelineRows([makeRow("done", false)], statusChanged);
+    const openChanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("done", false)], statusChanged);
     expect(openChanged).not.toBe(statusChanged);
     expect(openChanged.result[0]).not.toBe(statusChanged.result[0]);
   });
@@ -890,18 +919,6 @@ describe("deriveMessagesTimelineRows", () => {
     },
   });
 
-  const workEntry = (
-    id: string,
-    createdAt: string,
-    label: string,
-    tone: "thinking" | "tool" | "info" | "error" = "tool",
-  ): TimelineEntry => ({
-    id: `entry-${id}`,
-    kind: "work",
-    createdAt,
-    entry: { id, createdAt, label, tone },
-  });
-
   const proposedPlanEntry = (id: string, createdAt: string, turnId: string): TimelineEntry => ({
     id: `entry-${id}`,
     kind: "proposed-plan",
@@ -922,9 +939,6 @@ describe("deriveMessagesTimelineRows", () => {
       (row): row is MessageTimelineRow =>
         row.kind === "message" && row.message.id === MessageId.makeUnsafe(id),
     );
-
-  const collapsedSignature = (row: MessageTimelineRow): string[] =>
-    (row.collapsedTurnItems ?? []).map((item) => `${item.kind}:${String(item.id)}`);
 
   it("folds a settled turn's narration and work into one collapsed group on the terminal message", () => {
     const rows = deriveMessagesTimelineRows({
@@ -1262,15 +1276,6 @@ describe("deriveMessagesTimelineRows", () => {
       "work:synara-create-tool",
       "work:synara-create-recap",
     ]);
-  });
-
-  const worktreeSetupSnapshot = (): WorktreeSetupSnapshot => ({
-    steps: [
-      { id: "create-branch", label: "Creating branch", status: "done" },
-      { id: "create-worktree", label: "Creating worktree", status: "done" },
-      { id: "prepare-thread", label: "Linking thread workspace", status: "active" },
-      { id: "start-session", label: "Starting session", status: "pending" },
-    ],
   });
 
   it("appends an open worktree-setup row and suppresses the generic working shimmer", () => {

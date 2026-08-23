@@ -90,6 +90,40 @@ const createRuntime = (state: TargetState): BrowserAutomationVisibleRuntime => {
 
 const target = { selector: "#target" as BrowserCssSelector } as const;
 
+// Reference wildcard matcher plus an exhaustive-alphabet enumerator for the
+// glob cross-check in the "browser_wait URL globs" suite below; neither
+// captures anything, so they live at module scope instead of being
+// recreated per test run.
+const combinations = (alphabet: readonly string[], maximumLength: number): string[] => {
+  const values = [""];
+  let frontier = [""];
+  for (let length = 1; length <= maximumLength; length += 1) {
+    frontier = frontier.flatMap((prefix) => alphabet.map((character) => prefix + character));
+    values.push(...frontier);
+  }
+  return values;
+};
+const referenceMatch = (value: string, glob: string): boolean => {
+  const valueCharacters = Array.from(value);
+  const pattern = Array.from(glob);
+  let states = Array.from({ length: pattern.length + 1 }, (_, index) => index === 0);
+  for (let index = 1; index <= pattern.length; index += 1) {
+    states[index] = pattern[index - 1] === "*" && states[index - 1] === true;
+  }
+  for (const character of valueCharacters) {
+    const next = Array.from({ length: pattern.length + 1 }, () => false);
+    for (let index = 1; index <= pattern.length; index += 1) {
+      const token = pattern[index - 1];
+      next[index] =
+        token === "*"
+          ? next[index - 1] === true || states[index] === true
+          : states[index - 1] === true && (token === "?" || token === character);
+    }
+    states = next;
+  }
+  return states[pattern.length] === true;
+};
+
 describe("browser_wait URL globs", () => {
   it("matches stars, single-character wildcards, and literal RegExp metacharacters", () => {
     expect(boundedGlobMatches("https://example.test/a/b", "https://*.test/*")).toBe(true);
@@ -99,36 +133,6 @@ describe("browser_wait URL globs", () => {
   });
 
   it("matches the reference wildcard language exhaustively for small inputs", () => {
-    const combinations = (alphabet: readonly string[], maximumLength: number): string[] => {
-      const values = [""];
-      let frontier = [""];
-      for (let length = 1; length <= maximumLength; length += 1) {
-        frontier = frontier.flatMap((prefix) => alphabet.map((character) => prefix + character));
-        values.push(...frontier);
-      }
-      return values;
-    };
-    const referenceMatch = (value: string, glob: string): boolean => {
-      const valueCharacters = Array.from(value);
-      const pattern = Array.from(glob);
-      let states = Array.from({ length: pattern.length + 1 }, (_, index) => index === 0);
-      for (let index = 1; index <= pattern.length; index += 1) {
-        states[index] = pattern[index - 1] === "*" && states[index - 1] === true;
-      }
-      for (const character of valueCharacters) {
-        const next = Array.from({ length: pattern.length + 1 }, () => false);
-        for (let index = 1; index <= pattern.length; index += 1) {
-          const token = pattern[index - 1];
-          next[index] =
-            token === "*"
-              ? next[index - 1] === true || states[index] === true
-              : states[index - 1] === true && (token === "?" || token === character);
-        }
-        states = next;
-      }
-      return states[pattern.length] === true;
-    };
-
     const values = combinations(["a", "b", "🦊"], 3);
     const globs = combinations(["a", "b", "🦊", "*", "?"], 3);
     for (const value of values) {

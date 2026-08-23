@@ -194,10 +194,12 @@ export class BrowserAnnotationCoordinator {
     if (previous && input.version === previous.version) return;
     const projection: MarkerProjection = {
       version: input.version,
-      markers: parsedMarkers.map((marker) => ({
-        ...marker,
-        source: { ...marker.source },
-      })),
+      // parsedMarkers is a freshly-parsed array owned by this call; replace
+      // source in place instead of allocating a spread copy per marker.
+      markers: parsedMarkers.map((marker) => {
+        marker.source = { ...marker.source };
+        return marker;
+      }),
     };
     this.projectionsByRuntimeKey.set(key, projection);
     const runtime = this.options.resolveRuntimeByWebContentsId(
@@ -428,6 +430,9 @@ export class BrowserAnnotationCoordinator {
   }
 
   dispose(): void {
+    // finishSession removes entries from sessionsByRuntimeKey mid-iteration,
+    // so the snapshot spread below is load-bearing, not a useless copy.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const session of [...this.sessionsByRuntimeKey.values()]) {
       this.finishSession(session, "destroyed", true);
     }
@@ -536,6 +541,9 @@ export class BrowserAnnotationCoordinator {
   }
 
   private emit(event: BrowserAnnotationEvent): void {
+    // Listeners may unsubscribe during dispatch; iterating over a snapshot
+    // keeps the delivery set stable (a live Set iterator skips entries).
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const listener of [...this.listeners]) {
       try {
         listener(event);
