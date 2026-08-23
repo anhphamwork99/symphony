@@ -105,7 +105,10 @@ import { ProviderUnsupportedError } from "../provider/Errors.ts";
 import { ProviderDiscoveryServiceLive } from "../provider/Layers/ProviderDiscoveryService.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
 import { makePiAdapterLive } from "../provider/Layers/PiAdapter.ts";
-import { PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT } from "../provider/piSubagentDesktopArtifactGate.ts";
+import {
+  PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
+  SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
+} from "../provider/piSubagentDesktopArtifactGate.ts";
 import { piSubagentDesktopManagedExtensionDir } from "../provider/piSubagentManagedRuntimeBinding.ts";
 import { makeDurableProviderServiceLive } from "../provider/Layers/ProviderService.ts";
 import { PiAdapter } from "../provider/Services/PiAdapter.ts";
@@ -855,6 +858,23 @@ export interface RealPiWsHarnessDesktopManagedConfig {
   readonly artifactDir: string;
   /** Isolated user Pi agent dir supplying auth.json/models.json. */
   readonly userAgentDir: string;
+  /**
+   * Ticket 04 WP1 / Decision 0016: a COMPLETE desktop-derived backend
+   * environment (the exact object the production resolver
+   * `applyPiSubagentArtifactBackendEnv` returns for a packaged launch).
+   * When present it is passed VERBATIM to the production
+   * `piSubagentDesktopArtifactGateEnv` seam — never reconstructed,
+   * filtered, or re-derived — so removal of inherited `PI_CODING_AGENT_DIR`,
+   * replacement of a poisoned inherited locator, and preservation of
+   * legitimate user runtime configuration are all exercised together by
+   * the composition consuming it. Its locator must match `artifactDir`
+   * (the harness fails setup otherwise, since two disagreeing sources would
+   * silently reintroduce the one-key reconstruction this seam removes).
+   *
+   * When absent, the Ticket-02 legacy form is preserved exactly: the gate
+   * env is reconstructed from `artifactDir` alone.
+   */
+  readonly backendEnv?: NodeJS.ProcessEnv;
 }
 
 export interface MakeRealPiWsHarnessOptions {
@@ -1061,6 +1081,28 @@ export async function makeRealPiWsHarness(
   const ownsRootDir = true;
   const ownsModelServer = options.modelServer === undefined;
 
+  // Ticket 04 WP1 / Decision 0016: when the caller supplies a COMPLETE
+  // desktop-derived backend env, the production gate must consume that exact
+  // object — the seam exists precisely so acceptance can carry the resolver's
+  // whole derived environment (scrubbed `PI_CODING_AGENT_DIR`, release-derived
+  // locator, preserved user runtime configuration) instead of a reconstructed
+  // one-key env. Validate only that the two sources agree on the locator; a
+  // mismatch means the caller derived its env from a different artifact than
+  // the one it asked the harness to expose, which must fail closed at setup.
+  const desktopManagedBackendEnvLocator =
+    options.desktopManaged?.backendEnv?.[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV];
+  if (
+    options.desktopManaged?.backendEnv !== undefined &&
+    desktopManagedBackendEnvLocator !== options.desktopManaged.artifactDir
+  ) {
+    throw new RealPiHarnessError(
+      `desktopManaged.backendEnv locator '${
+        desktopManagedBackendEnvLocator ?? "<absent>"
+      }' does not match artifactDir '${options.desktopManaged.artifactDir}'.`,
+      "desktopManagedBackendEnvLocatorMismatch",
+    );
+  }
+
   // ── Owned temp root: state, home, workspace, agent dirs, model endpoint ──
   const rootDir = options.rootDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "synara-realpi-t17-"));
   const homeDir = path.join(rootDir, "home");
@@ -1227,17 +1269,23 @@ export async function makeRealPiWsHarness(
 
   const piAdapterLayer = makePiAdapterLive({
     completionDispatchBridge,
-    // Ticket 02 desktop managed harness leg (WP-A): production desktop
-    // gate env (release-derived artifact locator) plus the explicit user
-    // agent dir. Both are undefined in web mode — `makePiAdapterLive` then
-    // observes the real process env and the SDK's own agent-dir resolution,
-    // exactly like the web-mode composition always did.
+    // Ticket 02 desktop managed harness leg (WP-A) / Ticket 04 WP1 seam:
+    // production desktop gate env plus the explicit user agent dir. When the
+    // caller supplied a COMPLETE desktop-derived backend env (Decision 0016),
+    // that exact object is passed VERBATIM — never reconstructed or filtered;
+    // the gate reads the release-derived locator out of it like production
+    // reads it out of the spawned backend's `process.env`. Without it, the
+    // Ticket-02 legacy one-key form is preserved. Both are undefined in web
+    // mode — `makePiAdapterLive` then observes the real process env and the
+    // SDK's own agent-dir resolution, exactly like the web-mode composition
+    // always did.
     ...(options.desktopManaged === undefined
       ? {}
       : {
-          piSubagentDesktopArtifactGateEnv: {
-            SYNARA_PI_SUBAGENT_ARTIFACT_DIR: options.desktopManaged.artifactDir,
-          },
+          piSubagentDesktopArtifactGateEnv:
+            options.desktopManaged.backendEnv ?? {
+              SYNARA_PI_SUBAGENT_ARTIFACT_DIR: options.desktopManaged.artifactDir,
+            },
           piSubagentDesktopUserAgentDir: options.desktopManaged.userAgentDir,
         }),
     spawnProcess: (command, args, options) => {

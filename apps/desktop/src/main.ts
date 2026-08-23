@@ -59,7 +59,6 @@ import {
   synaraDesktopIdentity,
 } from "@synara/shared/desktopIdentity";
 import { NetService } from "@synara/shared/Net";
-import { applyShellEnvironmentHydrationMarker } from "@synara/shared/shell";
 import { RotatingFileSink } from "@synara/shared/logging";
 import { ensureStaticSnapshot, findAsarArchivePath } from "@synara/shared/staticSnapshot";
 import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness";
@@ -224,7 +223,7 @@ import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopAppSnapManager } from "./appSnapManager";
 import { hardenBrowserAnnotationWebviewPreferences } from "./browserAnnotations/webviewSecurity";
 import { LOCAL_HTML_PREVIEW_SCHEME } from "./localHtmlPreviewProtocol";
-import { applyPiSubagentArtifactBackendEnv } from "./piSubagentDesktopArtifactEnvironment";
+import { buildBackendChildSpawnEnv } from "./piSubagentDesktopArtifactEnvironment";
 import {
   registerAppSnapIpcHandlers,
   sendAppSnapCaptured,
@@ -3130,22 +3129,29 @@ function backendEnv(): NodeJS.ProcessEnv {
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
-  // Ticket 01 WP3 / Decision 0004: the managed Pi artifact locator must be
-  // release-derived and immune to inherited/renderer input, and the inherited
-  // Pi agent-dir override must never reach the backend child. Applied to a
-  // cloned env object only — `process.env` is never mutated here.
-  const piSubagentEnv = applyPiSubagentArtifactBackendEnv({
-    inheritedEnv: env,
+  return env;
+}
+
+/**
+ * Ticket 04 WP1 / Decision 0016: the backend child's spawn env is composed
+ * by the extracted production seam `buildBackendChildSpawnEnv`, which applies
+ * the managed Pi artifact resolver (`applyPiSubagentArtifactBackendEnv`), the
+ * login-shell hydration marker, and the fixed child-run keys to
+ * `backendEnv()`'s base env — nothing else sits between the resolver and
+ * `ChildProcess.spawn`. Keeping the whole composition in that seam is what
+ * lets a focused test protect the resolver-to-spawn wiring without launching
+ * Electron or an OS child.
+ */
+function backendChildSpawnEnv(serverEntry: string): NodeJS.ProcessEnv {
+  return buildBackendChildSpawnEnv({
+    baseEnv: backendEnv(),
     isPackaged: app.isPackaged,
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     exists: (candidate) => FS.existsSync(candidate),
+    shellPathHydrated: shellEnvironmentSync.pathHydrated,
+    serverEntry,
   });
-  // The backend runs the same login-shell probe at startup and does not begin listening
-  // until it returns, so an unmarked child serializes a second ~1s hydration behind ours.
-  // Written explicitly in both directions: an inherited marker must never suppress a
-  // probe when our own hydration failed and the child's PATH is the raw launch one.
-  return applyShellEnvironmentHydrationMarker(piSubagentEnv, shellEnvironmentSync.pathHydrated);
 }
 
 function scheduleBackendRestart(reason: string): void {
@@ -3386,11 +3392,7 @@ function startBackend(trigger: BackendStartTrigger = "lifecycle"): void {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
     // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-      SYNARA_SERVER_ENTRY: backendEntry,
-    },
+    env: backendChildSpawnEnv(backendEntry),
     // Keep output piped in every environment so startup blockers and readiness
     // are observable even when packaged log setup is unavailable. The fourth
     // pipe carries the browser-host capability and must never be inherited.

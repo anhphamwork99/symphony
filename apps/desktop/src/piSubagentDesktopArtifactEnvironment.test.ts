@@ -1,15 +1,27 @@
 // FILE: piSubagentDesktopArtifactEnvironment.test.ts
 // Purpose: Verifies the desktop backend env scrubs inherited Pi overrides and
 // derives the managed artifact locator only from packaged resources
-// (Ticket 01 WP3, Decision 0004 §1/§2).
+// (Ticket 01 WP3, Decision 0004 §1/§2), and that the backend child spawn env
+// is EXACTLY the resolver's derived environment plus the fixed child-run
+// keys (Ticket 04 WP1, Decision 0016 obligation 9).
 // Layer: Desktop startup tests
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { SHELL_ENVIRONMENT_HYDRATED_ENV_NAME } from "@synara/shared/shell";
+
 import {
+  BACKEND_CHILD_ELECTRON_RUN_AS_NODE_ENV,
+  BACKEND_CHILD_ELECTRON_RUN_AS_NODE_VALUE,
+  BACKEND_CHILD_SERVER_ENTRY_ENV,
   PI_SUBAGENT_ARTIFACT_DIR_NAME,
   SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
   applyPiSubagentArtifactBackendEnv,
+  buildBackendChildSpawnEnv,
 } from "./piSubagentDesktopArtifactEnvironment";
 
 const PACKAGED_APP_PATH = "/Applications/Synara.app/Contents/Resources/app.asar";
@@ -189,5 +201,118 @@ describe("applyPiSubagentArtifactBackendEnv — purity", () => {
         process.env.PI_CODING_AGENT_DIR = previousAgentDir;
       }
     }
+  });
+});
+
+// ─── Ticket 04 WP1 / Decision 0016: backendEnv() → spawn({ env }) wiring ────
+//
+// The focused spawn-wiring evidence. `buildBackendChildSpawnEnv` is the
+// extracted production seam `startBackend()` composes its
+// `ChildProcess.spawn(..., { env })` value from; proving here that its result
+// is EXACTLY the production resolver's complete derived environment plus the
+// two fixed child-run keys protects the whole resolver-to-spawn chain without
+// launching Electron or a backend OS child.
+describe("buildBackendChildSpawnEnv — production backend spawn wiring", () => {
+  it("hands the spawn exactly the resolver's complete derived environment plus the fixed child-run keys (real release-shaped layout, poisoned inherited base env)", () => {
+    // A real release-shaped packaged-resource layout on disk: the staged
+    // artifact directory exists under the packaged app tree root.
+    const releaseRoot = mkdtempSync(join(tmpdir(), "synara-t04-wiring-"));
+    try {
+      const appPath = join(releaseRoot, "app.asar");
+      const packagedArtifactDir = join(
+        appPath,
+        "apps/desktop/resources",
+        PI_SUBAGENT_ARTIFACT_DIR_NAME,
+      );
+      mkdirSync(packagedArtifactDir, { recursive: true });
+      writeFileSync(join(packagedArtifactDir, "manifest.json"), "{}\n");
+
+      // The base env `backendEnv()` would hand over: legitimate runtime
+      // configuration plus poisoned inherited Pi redirect attempts.
+      const baseEnv: NodeJS.ProcessEnv = {
+        PI_CODING_AGENT_DIR: "/attacker/global-agent-dir",
+        [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: "/attacker/inherited-locator",
+        SYNARA_MODE: "desktop",
+        SYNARA_NO_BROWSER: "1",
+        SYNARA_PORT: "43111",
+        SYNARA_HOME: "/Users/dev/Library/Synara",
+        SYNARA_AUTH_TOKEN: "auth-token-value",
+        SYNARA_DESKTOP_SHUTDOWN_TOKEN: "shutdown-token-value",
+        PATH: "/usr/bin:/bin",
+        HOME: "/home/dev",
+        SYNARA_BROWSER_HOST_PIPE: "/inherited/pipe",
+      };
+      const serverEntry = "/Applications/Synara.app/Contents/Resources/app.asar/apps/server/dist/main.js";
+
+      const spawnEnv = buildBackendChildSpawnEnv({
+        baseEnv,
+        isPackaged: true,
+        appPath,
+        resourcesPath: join(releaseRoot, "resources"),
+        exists: (candidate) => candidate === packagedArtifactDir,
+        shellPathHydrated: true,
+        serverEntry,
+      });
+
+      // The production resolver's complete derived environment, computed
+      // independently here as the exact expectation.
+      const expectedDerivedEnv = applyPiSubagentArtifactBackendEnv({
+        inheritedEnv: baseEnv,
+        isPackaged: true,
+        appPath,
+        resourcesPath: join(releaseRoot, "resources"),
+        exists: (candidate) => candidate === packagedArtifactDir,
+      });
+
+      // Exact-object contract: the spawn env is the resolver's complete
+      // result plus the hydration marker and the two fixed child-run keys —
+      // nothing reconstructed, dropped, or re-derived (Decision 0016: the
+      // harness/desktop must never rebuild a one-key environment).
+      expect(spawnEnv).toEqual({
+        ...expectedDerivedEnv,
+        [SHELL_ENVIRONMENT_HYDRATED_ENV_NAME]: "1",
+        [BACKEND_CHILD_ELECTRON_RUN_AS_NODE_ENV]: BACKEND_CHILD_ELECTRON_RUN_AS_NODE_VALUE,
+        [BACKEND_CHILD_SERVER_ENTRY_ENV]: serverEntry,
+      });
+      // Poisoned inherited overrides never reach the child spawn.
+      expect(spawnEnv.PI_CODING_AGENT_DIR).toBeUndefined();
+      expect(spawnEnv[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]).toBe(packagedArtifactDir);
+      // Legitimate user/runtime configuration survives into the child.
+      expect(spawnEnv.SYNARA_PORT).toBe("43111");
+      expect(spawnEnv.SYNARA_AUTH_TOKEN).toBe("auth-token-value");
+      expect(spawnEnv.SYNARA_BROWSER_HOST_PIPE).toBe("/inherited/pipe");
+      expect(spawnEnv.PATH).toBe("/usr/bin:/bin");
+      // The base env object itself is never mutated.
+      expect(baseEnv.PI_CODING_AGENT_DIR).toBe("/attacker/global-agent-dir");
+      expect(baseEnv[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]).toBe("/attacker/inherited-locator");
+    } finally {
+      rmSync(releaseRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a stale hydration marker when PATH hydration failed and derives no locator in a non-packaged launch", () => {
+    const spawnEnv = buildBackendChildSpawnEnv({
+      baseEnv: {
+        PI_CODING_AGENT_DIR: "/attacker/global-agent-dir",
+        [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: "/attacker/inherited-locator",
+        [SHELL_ENVIRONMENT_HYDRATED_ENV_NAME]: "1",
+        SYNARA_PORT: "43111",
+      },
+      isPackaged: false,
+      appPath: DEV_APP_PATH,
+      resourcesPath: DEV_APP_PATH,
+      exists: () => true,
+      shellPathHydrated: false,
+      serverEntry: "/repo/apps/server/dist/main.js",
+    });
+
+    expect(spawnEnv[SHELL_ENVIRONMENT_HYDRATED_ENV_NAME]).toBeUndefined();
+    expect(spawnEnv[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]).toBeUndefined();
+    expect(spawnEnv.PI_CODING_AGENT_DIR).toBeUndefined();
+    expect(spawnEnv[BACKEND_CHILD_ELECTRON_RUN_AS_NODE_ENV]).toBe(
+      BACKEND_CHILD_ELECTRON_RUN_AS_NODE_VALUE,
+    );
+    expect(spawnEnv[BACKEND_CHILD_SERVER_ENTRY_ENV]).toBe("/repo/apps/server/dist/main.js");
+    expect(spawnEnv.SYNARA_PORT).toBe("43111");
   });
 });

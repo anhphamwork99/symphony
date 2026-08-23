@@ -1,13 +1,20 @@
 // FILE: piSubagentDesktopArtifactEnvironment.ts
 // Purpose: Derives the release-controlled managed Pi artifact locator from
 // packaged resources and scrubs inherited Pi agent-dir overrides before the
-// backend child is spawned (Ticket 01 WP3, Decision 0004).
+// backend child is spawned (Ticket 01 WP3, Decision 0004), and composes the
+// EXACT environment object the backend child spawn receives (Ticket 04 WP1,
+// Decision 0016 — the `backendEnv()` → `startBackend().spawn({ env })` wiring
+// seam).
 // Layer: Desktop main-process startup helper
-// Depends: Electron packaging layout only — never inherited environment,
-// renderer input, or request/provider options.
-// Exports: the backend env derivation for the managed artifact boundary.
+// Depends: Electron packaging layout only — never renderer input or
+// request/provider options. The spawn composition step additionally consumes
+// the desktop main process's own backend base env and shell hydration state.
+// Exports: the backend env derivation and the backend child spawn env
+// composition for the managed artifact boundary.
 
 import * as Path from "node:path";
+
+import { applyShellEnvironmentHydrationMarker } from "@synara/shared/shell";
 
 /**
  * Backend env var carrying the release-derived managed Pi artifact locator.
@@ -98,4 +105,56 @@ export function applyPiSubagentArtifactBackendEnv(input: {
     }
   }
   return env;
+}
+
+/**
+ * Fixed extra environment keys the backend child spawn itself adds after the
+ * derived backend environment (Ticket 04 WP1, Decision 0016). They are
+ * Electron-run-mode/entry plumbing, never managed-Pi selection, and are kept
+ * as an exported pair so the spawn composition cannot silently grow another
+ * key that bypasses the resolver.
+ */
+export const BACKEND_CHILD_ELECTRON_RUN_AS_NODE_ENV = "ELECTRON_RUN_AS_NODE" as const;
+export const BACKEND_CHILD_ELECTRON_RUN_AS_NODE_VALUE = "1" as const;
+export const BACKEND_CHILD_SERVER_ENTRY_ENV = "SYNARA_SERVER_ENTRY" as const;
+
+/**
+ * The single production composition seam between `backendEnv()` and
+ * `startBackend()`'s `ChildProcess.spawn(..., { env })` call (Ticket 04 WP1,
+ * Decision 0016 obligation 9).
+ *
+ * Given the desktop main process's backend BASE environment (everything
+ * `backendEnv()` derives except the managed-Pi and hydration steps) and the
+ * packaged-layout facts, this returns exactly the object handed to the child
+ * spawn: the complete `applyPiSubagentArtifactBackendEnv` result, the login
+ * shell hydration marker, and the two fixed child-run keys above — nothing
+ * reconstructed, dropped, or re-derived. No Pi-specific selection,
+ * sanitization, or fallback exists between this seam and the spawn call, so a
+ * focused composition test here protects the whole wiring without launching
+ * Electron or an OS child.
+ */
+export function buildBackendChildSpawnEnv(input: {
+  /** Backend base env from `backendEnv()` (before the managed-Pi/hydration steps). */
+  readonly baseEnv: NodeJS.ProcessEnv;
+  readonly isPackaged: boolean;
+  readonly appPath: string;
+  readonly resourcesPath: string;
+  readonly exists: (candidate: string) => boolean;
+  /** Whether the main process's login-shell PATH hydration succeeded. */
+  readonly shellPathHydrated: boolean;
+  /** Backend entry file the child is spawned with. */
+  readonly serverEntry: string;
+}): NodeJS.ProcessEnv {
+  const piSubagentEnv = applyPiSubagentArtifactBackendEnv({
+    inheritedEnv: input.baseEnv,
+    isPackaged: input.isPackaged,
+    appPath: input.appPath,
+    resourcesPath: input.resourcesPath,
+    exists: input.exists,
+  });
+  return {
+    ...applyShellEnvironmentHydrationMarker(piSubagentEnv, input.shellPathHydrated),
+    [BACKEND_CHILD_ELECTRON_RUN_AS_NODE_ENV]: BACKEND_CHILD_ELECTRON_RUN_AS_NODE_VALUE,
+    [BACKEND_CHILD_SERVER_ENTRY_ENV]: input.serverEntry,
+  };
 }
