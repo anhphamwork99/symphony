@@ -55,7 +55,6 @@ function fakeSdk(overrides: {
       create: async () => ({}),
     },
     ModelRegistry: class {
-      constructor(_runtime: unknown) {}
       find(provider: string, id: string): FakeModel | undefined {
         return fakeRegistry(REGISTRY_MODELS).find(provider, id);
       }

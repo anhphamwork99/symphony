@@ -40,6 +40,23 @@ import { STIMULUS_TEXT, STIMULUS_HASH } from "../src/measurement/stimulus.ts";
 import type { RawSessionStats, RepetitionRecord } from "../src/measurement/types.ts";
 
 const REAL_RUNS = process.env.SYNARA_TOKEN_OVERHEAD_REAL_RUNS === "1";
+const canonicalLogLine = (payload: unknown) =>
+  `[2026-08-15T00:00:00.000Z] CANON: ${JSON.stringify(payload)}`;
+const rawStats = (overrides: Partial<RawSessionStats> = {}): RawSessionStats => ({
+  input: 100,
+  output: 30,
+  cacheRead: 200,
+  cacheWrite: 50,
+  total: 380,
+  ...overrides,
+});
+const zeroStats = (): RawSessionStats => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  total: 0,
+});
 
 describe("token overhead reconciliation kernel (non-gated)", () => {
   it("documents and validates the Pi SessionStats equation", () => {
@@ -81,7 +98,7 @@ describe("token overhead canonical manifest (non-gated)", () => {
       { name: "bash", description: "b", parameters: { type: "object" } },
     ];
     const first = canonicalizeManifest(entries);
-    const second = canonicalizeManifest([...entries].reverse());
+    const second = canonicalizeManifest(entries.toReversed());
     expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
     expect(sha256(first)).toBe(sha256(second));
     const summary = summarizeManifest({
@@ -103,11 +120,9 @@ describe("token overhead canonical manifest (non-gated)", () => {
 
 describe("token overhead canonical log parsing (non-gated)", () => {
   it("extracts turn.completed payloads for a thread from CANON log lines", () => {
-    const line = (payload: unknown) =>
-      `[2026-08-15T00:00:00.000Z] CANON: ${JSON.stringify(payload)}`;
     const content = [
-      line({ type: "turn.started", threadId: "t1", payload: { model: "m" } }),
-      line({
+      canonicalLogLine({ type: "turn.started", threadId: "t1", payload: { model: "m" } }),
+      canonicalLogLine({
         type: "turn.completed",
         threadId: "t1",
         payload: {
@@ -116,7 +131,7 @@ describe("token overhead canonical log parsing (non-gated)", () => {
           usage: { tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } },
         },
       }),
-      line({ type: "turn.completed", threadId: "t2", payload: { state: "completed" } }),
+      canonicalLogLine({ type: "turn.completed", threadId: "t2", payload: { state: "completed" } }),
     ].join("\n");
     const events = parseCanonicalTurnCompletedEvents(content, "t1");
     expect(events).toHaveLength(1);
@@ -130,39 +145,25 @@ describe("token overhead canonical log parsing (non-gated)", () => {
 
 describe("token overhead canonical log tool-call evidence (non-gated)", () => {
   it("extracts tool names from item.started events with tool payload data", () => {
-    const line = (payload: unknown) =>
-      `[2026-08-15T00:00:00.000Z] CANON: ${JSON.stringify(payload)}`;
     const content = [
-      line({
+      canonicalLogLine({
         type: "item.started",
         threadId: "t1",
         payload: { itemType: "bash", status: "inProgress", data: { toolName: "bash" } },
       }),
-      line({ type: "item.started", threadId: "t1", payload: { itemType: "read" } }),
-      line({ type: "item.started", threadId: "t2", payload: { data: { toolName: "other" } } }),
-      line({ type: "turn.completed", threadId: "t1", payload: { state: "completed" } }),
+      canonicalLogLine({ type: "item.started", threadId: "t1", payload: { itemType: "read" } }),
+      canonicalLogLine({
+        type: "item.started",
+        threadId: "t2",
+        payload: { data: { toolName: "other" } },
+      }),
+      canonicalLogLine({ type: "turn.completed", threadId: "t1", payload: { state: "completed" } }),
     ].join("\n");
     expect(parseCanonicalToolCallEvents(content, "t1")).toEqual(["bash"]);
   });
 });
 
 describe("token overhead records/report kernel (non-gated)", () => {
-  const raw = (overrides: Partial<RawSessionStats> = {}): RawSessionStats => ({
-    input: 100,
-    output: 30,
-    cacheRead: 200,
-    cacheWrite: 50,
-    total: 380,
-    ...overrides,
-  });
-  const zero = (): RawSessionStats => ({
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    total: 0,
-  });
-
   it("keeps invalid repetitions visible and excluded from paired analysis", () => {
     const valid: RepetitionRecord = {
       mode: "standalone",
@@ -177,13 +178,13 @@ describe("token overhead records/report kernel (non-gated)", () => {
         localCaptureProduced: true,
         catalogComplete: true,
       },
-      startup: zero(),
+      startup: zeroStats(),
       turns: [
-        makeTurnMeasurement({ turnIndex: 1, before: zero(), after: raw() }),
+        makeTurnMeasurement({ turnIndex: 1, before: zeroStats(), after: rawStats() }),
         makeTurnMeasurement({
           turnIndex: 2,
-          before: raw(),
-          after: raw({ input: 140, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 }),
+          before: rawStats(),
+          after: rawStats({ input: 140, output: 40, cacheRead: 200, cacheWrite: 50, total: 430 }),
         }),
       ],
       invalid: false,
@@ -250,8 +251,8 @@ describe("token overhead records/report kernel (non-gated)", () => {
         localCaptureProduced: false,
         catalogComplete: false,
       },
-      startup: zero(),
-      turns: [makeTurnMeasurement({ turnIndex: 1, before: zero(), after: raw() })],
+      startup: zeroStats(),
+      turns: [makeTurnMeasurement({ turnIndex: 1, before: zeroStats(), after: rawStats() })],
       invalid: false,
       exposureEvidence: {
         mode: "standalone",
@@ -355,7 +356,7 @@ describe("token overhead isolated server lifecycle (non-gated)", () => {
     const os = await import("node:os");
     const path = await import("node:path");
     const { randomUUID } = await import("node:crypto");
-    const { CommandId, ProjectId, ThreadId, MessageId } = await import("@synara/contracts");
+    const { CommandId, ProjectId, ThreadId } = await import("@synara/contracts");
     const workspaceCwd = fs.mkdtempSync(path.join(os.tmpdir(), "toh-rpc-ws-"));
     fs.writeFileSync(path.join(workspaceCwd, "README.md"), "fixture\n");
     try {

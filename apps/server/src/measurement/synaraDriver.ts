@@ -243,7 +243,7 @@ async function runSynaraRepetitionWithWorkspace(
   context: RepetitionContext,
   workspaceRoot: string,
 ): Promise<RepetitionRecord> {
-  const { client, server, options, repetitionIndex } = context;
+  const { client, options, repetitionIndex } = context;
   const projectId = ProjectId.makeUnsafe(randomUUID());
   const threadId = ThreadId.makeUnsafe(randomUUID());
   const lifecycleFailures: string[] = [];
@@ -485,7 +485,6 @@ function invalidRepetition(
   reason: string,
   workspaceRoot: string | null,
 ): RepetitionRecord {
-  const { options, repetitionIndex } = context;
   return {
     mode: context.options.mode,
     repetitionIndex: context.repetitionIndex,
@@ -754,9 +753,9 @@ function readNormalizedFromActivities(
   const candidates = detail.thread.activities.filter(
     (activity) => activity.kind === "context-window.updated" && activity.turnId === turnId,
   );
-  const latest = candidates.sort((left, right) => left.createdAt.localeCompare(right.createdAt))[
-    candidates.length - 1
-  ];
+  const latest = candidates.toSorted((left, right) =>
+    left.createdAt.localeCompare(right.createdAt),
+  )[candidates.length - 1];
   if (!latest) return undefined;
   return readUsageFromActivityPayload(latest.payload);
 }

@@ -166,7 +166,7 @@ export function pruneArchivedManagedWorktrees(input: {
         (value): value is { thread: ManagedWorktreeThreadRef; entry: ServerManagedWorktree } =>
           value.entry !== null && !activePaths.has(value.entry.path),
       )
-      .sort((left, right) =>
+      .toSorted((left, right) =>
         (right.thread.archivedAt ?? "").localeCompare(left.thread.archivedAt ?? ""),
       )
       .filter(({ entry }) => {

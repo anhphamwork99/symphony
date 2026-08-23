@@ -21,6 +21,19 @@ interface OverviewThreadSummary {
   readonly threads: Array<OverviewThreadInput>;
 }
 
+interface ExternalMcpOverviewProject {
+  readonly projectId: string;
+  readonly title: string;
+  readonly path: string;
+  readonly threads: { readonly total: number; readonly active: number };
+  readonly recentThreads?: ReadonlyArray<{
+    readonly threadId: string;
+    readonly title: string;
+    readonly state: string;
+    readonly updatedAt: string;
+  }>;
+}
+
 const MAX_RECENT_THREADS = 5;
 
 export function buildExternalMcpOverviewProjects(input: {
@@ -28,7 +41,7 @@ export function buildExternalMcpOverviewProjects(input: {
   readonly threads: ReadonlyArray<OverviewThreadInput>;
   readonly allowedProjectIds: ReadonlySet<string>;
   readonly includeThreadMetadata: boolean;
-}) {
+}): ReadonlyArray<ExternalMcpOverviewProject> {
   const threadsByProject = new Map<string, OverviewThreadSummary>();
   for (const thread of input.threads) {
     if (thread.archivedAt || !input.allowedProjectIds.has(thread.projectId)) continue;
@@ -47,24 +60,27 @@ export function buildExternalMcpOverviewProjects(input: {
     .filter((project) => input.allowedProjectIds.has(project.id))
     .map((project) => {
       const summary = threadsByProject.get(project.id);
-      return {
+      const base = {
         projectId: project.id,
         title: project.title,
         path: project.workspaceRoot,
         threads: { total: summary?.total ?? 0, active: summary?.active ?? 0 },
-        ...(input.includeThreadMetadata
-          ? {
-              recentThreads: [...(summary?.threads ?? [])]
-                .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-                .slice(0, MAX_RECENT_THREADS)
-                .map((thread) => ({
-                  threadId: thread.id,
-                  title: thread.title,
-                  state: thread.latestTurn?.state ?? "idle",
-                  updatedAt: thread.updatedAt,
-                })),
-            }
-          : {}),
+      };
+      if (!input.includeThreadMetadata) return base;
+      return {
+        projectId: base.projectId,
+        title: base.title,
+        path: base.path,
+        threads: base.threads,
+        recentThreads: [...(summary?.threads ?? [])]
+          .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+          .slice(0, MAX_RECENT_THREADS)
+          .map((thread) => ({
+            threadId: thread.id,
+            title: thread.title,
+            state: thread.latestTurn?.state ?? "idle",
+            updatedAt: thread.updatedAt,
+          })),
       };
     });
 }

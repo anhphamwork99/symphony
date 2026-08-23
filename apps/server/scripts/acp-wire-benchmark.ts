@@ -112,6 +112,7 @@ async function makeOfficialAdapter(): Promise<BenchmarkAdapter> {
 
   const peer = (async () => {
     let buffered = "";
+    // oxlint-disable-next-line no-unmodified-loop-condition -- close() toggles shared async peer state.
     while (!stopped) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -172,7 +173,7 @@ async function measureScenario(input: {
     const memory = input.observeMemory();
     maxSampleRssBytes = Math.max(maxSampleRssBytes, memory.rss);
   }
-  const sorted = [...samplesMs].sort((left, right) => left - right);
+  const sorted = samplesMs.toSorted((left, right) => left - right);
   const p50Ms = percentile(sorted, 0.5);
   return {
     name: input.name,

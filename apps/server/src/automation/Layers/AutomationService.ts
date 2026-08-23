@@ -83,6 +83,40 @@ interface AutomationCompletionEvaluationJob {
   readonly policy: Extract<AutomationCompletionPolicy, { type: "ai-evaluated" }>;
 }
 
+// Stop checks must only evaluate evidence from the just-finished heartbeat turn.
+function findRunCompletionMessages(input: {
+  readonly run: AutomationRun;
+  readonly thread: {
+    readonly messages: ReadonlyArray<{
+      readonly id: string;
+      readonly role: string;
+      readonly text: string;
+      readonly turnId: string | null;
+    }>;
+  };
+}) {
+  const runMessages = input.thread.messages.filter(
+    (message) =>
+      message.id === input.run.messageId ||
+      (input.run.turnId !== null && message.turnId === input.run.turnId),
+  );
+  const userMessage =
+    input.thread.messages.find((message) => message.id === input.run.messageId)?.text ?? "";
+  const assistantMessages = runMessages.filter((message) => message.role === "assistant");
+  const runThreadContext = runMessages
+    .slice(-8)
+    .map((message) => `${message.role}: ${message.text}`)
+    .join("\n\n");
+  return {
+    runUserMessage: userMessage,
+    runAssistantText:
+      assistantMessages.length > 0
+        ? assistantMessages.map((message) => message.text).join("\n\n")
+        : "",
+    runThreadContext,
+  };
+}
+
 /** Statuses a run can no longer leave; reconciliation never overwrites these. */
 const TERMINAL_RUN_STATUSES: ReadonlySet<AutomationRunStatus> = new Set([
   "succeeded",
@@ -1379,40 +1413,6 @@ export const AutomationServiceLive = Layer.effect(
         Effect.tap((updated) => publish({ type: "run-upserted", run: updated })),
       );
 
-    // Stop checks must only evaluate evidence from the just-finished heartbeat turn.
-    const findRunCompletionMessages = (input: {
-      readonly run: AutomationRun;
-      readonly thread: {
-        readonly messages: ReadonlyArray<{
-          readonly id: string;
-          readonly role: string;
-          readonly text: string;
-          readonly turnId: string | null;
-        }>;
-      };
-    }) => {
-      const runMessages = input.thread.messages.filter(
-        (message) =>
-          message.id === input.run.messageId ||
-          (input.run.turnId !== null && message.turnId === input.run.turnId),
-      );
-      const userMessage =
-        input.thread.messages.find((message) => message.id === input.run.messageId)?.text ?? "";
-      const assistantMessages = runMessages.filter((message) => message.role === "assistant");
-      const runThreadContext = runMessages
-        .slice(-8)
-        .map((message) => `${message.role}: ${message.text}`)
-        .join("\n\n");
-      return {
-        runUserMessage: userMessage,
-        runAssistantText:
-          assistantMessages.length > 0
-            ? assistantMessages.map((message) => message.text).join("\n\n")
-            : "",
-        runThreadContext,
-      };
-    };
-
     const staleStopCheckEvaluation = (rawEvaluation: AutomationCompletionEvaluation) => ({
       ...rawEvaluation,
       stopMatched: false,
@@ -1905,7 +1905,7 @@ export const AutomationServiceLive = Layer.effect(
       const policy = definition.notificationPolicy ?? "all";
       const unread = decision === "notify" && policy !== "failed-runs-only";
       return {
-        ...(run.result ?? {}),
+        ...run.result,
         outcome: run.result?.outcome ?? "unknown",
         summary:
           run.result?.summary ??

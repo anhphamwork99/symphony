@@ -54,7 +54,7 @@ function validateMetadata(input: {
     });
   }
   const name = input.name.trim();
-  if (!name || name.length > 255 || /[\u0000\r\n]/u.test(name)) {
+  if (!name || name.length > 255 || name.includes("\0") || /[\r\n]/u.test(name)) {
     throw new ManagedAttachmentStoreError("Attachment name is invalid.", {
       status: 400,
       code: "attachment_metadata_invalid",

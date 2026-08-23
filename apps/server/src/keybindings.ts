@@ -725,7 +725,9 @@ function migrateOutdatedSidebarSearchDefault(rules: readonly KeybindingRule[]): 
     }
 
     migratedCount += 1;
-    return SIDEBAR_SEARCH_DEFAULT_KEYBINDINGS.map((binding) => ({ ...binding }));
+    return globalThis.Array.from(SIDEBAR_SEARCH_DEFAULT_KEYBINDINGS, (binding) => ({
+      ...binding,
+    }));
   });
   return { rules: next, migratedCount };
 }

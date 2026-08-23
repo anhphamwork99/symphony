@@ -29,17 +29,7 @@ import {
   type PiSubagentCompletionDispatchBatchContent,
   type PiSubagentCompletionDispatchBatchState,
   type PiSubagentCompletionDispatchCreateResult,
-  type PiSubagentCompletionDispatchTransitionResult,
-  type CreatePiSubagentCompletionDispatchBatchInput,
-  type FailPiSubagentCompletionDispatchBatchInput,
-  type RejectPiSubagentCompletionDispatchBatchInput,
-  type RecordPiSubagentCompletionDispatchAcceptedInput,
   PI_SUBAGENT_COMPLETION_DISPATCH_ACTIVE_STATES,
-  type RecordPiSubagentCompletionOutboxInput,
-  type RecordPiSubagentAdmissionInput,
-  type RecordPiSubagentHeartbeatObservationInput,
-  type RecordPiSubagentLifecycleEventInput,
-  type RecordPiSubagentProgressObservationInput,
 } from "../Services/PiSubagentExecutionRepository.ts";
 
 interface ExecutionRow {
@@ -85,6 +75,28 @@ interface JournalRow {
   readonly metadataJson: string | null;
 }
 
+interface BatchRow {
+  readonly batchId: string;
+  readonly parentThreadId: string;
+  readonly parentCommandId: string;
+  readonly parentMessageId: string;
+  readonly fingerprintVersion: number;
+  readonly commandFingerprint: string;
+  readonly membershipJson: string;
+  readonly parentMessageText: string;
+  readonly commandPayloadJson: string;
+  readonly state: PiSubagentCompletionDispatchBatchState;
+  readonly attemptCount: number;
+  readonly acceptedReceiptSequence: number | null;
+  readonly lastError: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly acceptedAt: string | null;
+  readonly acknowledgedAt: string | null;
+  readonly supersededAt: string | null;
+  readonly exhaustedAt: string | null;
+}
+
 function rowToExecutionRecord(row: ExecutionRow): PiSubagentExecutionRecord {
   return {
     executionId: row.executionId,
@@ -118,6 +130,93 @@ function rowToExecutionRecord(row: ExecutionRow): PiSubagentExecutionRecord {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+function journalRowToEvent(
+  row: JournalRow,
+  execution: PiSubagentExecutionRecord,
+): PiSubagentLifecycleEvent {
+  return {
+    eventId: row.eventId,
+    executionId: row.executionId,
+    attemptId: row.attemptId,
+    generation: row.generation,
+    sequence: row.sequence,
+    state: row.state,
+    occurredAt: row.occurredAt,
+    parentThreadId: execution.parentThreadId,
+    parentTurnId: execution.parentTurnId,
+    parentToolCallId: execution.parentToolCallId,
+    projectId: execution.projectId,
+    diagnosticCode: row.diagnosticCode ?? undefined,
+    diagnosticMessage: row.diagnosticMessage ?? undefined,
+    metadata: row.metadataJson ? JSON.parse(row.metadataJson) : undefined,
+  };
+}
+
+function decodeBatch(row: BatchRow): PiSubagentCompletionDispatchBatch {
+  return {
+    ...row,
+    membership: JSON.parse(row.membershipJson) as readonly string[],
+  };
+}
+
+function decodeBatchOption(rows: readonly BatchRow[]) {
+  return rows.length > 0 ? Option.some(decodeBatch(rows[0]!)) : Option.none();
+}
+
+function validateBatchContent(
+  content: PiSubagentCompletionDispatchBatchContent,
+  members: readonly OutboxRow[],
+  parentThreadId: string,
+): string | null {
+  if (content.parentCommandId.trim().length === 0) {
+    return "batch parent command id must be non-empty";
+  }
+  if (content.parentMessageId.trim().length === 0) {
+    return "batch parent message id must be non-empty";
+  }
+  if (content.batchId.trim().length === 0) {
+    return "batch id must be non-empty";
+  }
+  if (content.membership.length !== members.length) {
+    return "batch membership length does not match the canonically selected members";
+  }
+  for (let index = 0; index < members.length; index += 1) {
+    if (content.membership[index] !== members[index]!.outboxId) {
+      return "batch membership is noncanonical or references an unselected member";
+    }
+  }
+  if (new Set(content.membership).size !== content.membership.length) {
+    return "batch membership contains a duplicate outbox id";
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(content.commandPayloadJson);
+  } catch {
+    return "batch command payload is not valid JSON";
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return "batch command payload must be an object";
+  }
+  const command = payload as Record<string, unknown>;
+  const message = command.message as Record<string, unknown> | undefined;
+  if (command.type !== "thread.turn.start") {
+    return "batch command payload must type thread.turn.start";
+  }
+  if (command.threadId !== parentThreadId) {
+    return "batch command payload threads a different parent than membership";
+  }
+  if (command.commandId !== content.parentCommandId) {
+    return "batch command payload commandId does not match the frozen parent command id";
+  }
+  if (message?.messageId !== content.parentMessageId) {
+    return "batch command payload messageId does not match the frozen parent message id";
+  }
+  if (message?.text !== content.parentMessageText) {
+    return "batch command payload message text does not match the frozen parent message text";
+  }
+  return null;
 }
 
 const executionColumns = (sql: SqlClient.SqlClient) => sql`
@@ -1271,26 +1370,6 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       LIMIT 1
     `;
 
-  const journalRowToEvent = (
-    row: JournalRow,
-    execution: PiSubagentExecutionRecord,
-  ): PiSubagentLifecycleEvent => ({
-    eventId: row.eventId,
-    executionId: row.executionId,
-    attemptId: row.attemptId,
-    generation: row.generation,
-    sequence: row.sequence,
-    state: row.state,
-    occurredAt: row.occurredAt,
-    parentThreadId: execution.parentThreadId,
-    parentTurnId: execution.parentTurnId,
-    parentToolCallId: execution.parentToolCallId,
-    projectId: execution.projectId,
-    diagnosticCode: row.diagnosticCode ?? undefined,
-    diagnosticMessage: row.diagnosticMessage ?? undefined,
-    metadata: row.metadataJson ? JSON.parse(row.metadataJson) : undefined,
-  });
-
   /**
    * Ticket 06 journal-first cancellation intent (T06-AC1). The `cancelling`
    * event is written BEFORE any dispatch; the desired state on the aggregate
@@ -2226,28 +2305,6 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
   // authored once at creation and replayed byte-for-byte.
   // ---------------------------------------------------------------------
 
-  interface BatchRow {
-    readonly batchId: string;
-    readonly parentThreadId: string;
-    readonly parentCommandId: string;
-    readonly parentMessageId: string;
-    readonly fingerprintVersion: number;
-    readonly commandFingerprint: string;
-    readonly membershipJson: string;
-    readonly parentMessageText: string;
-    readonly commandPayloadJson: string;
-    readonly state: PiSubagentCompletionDispatchBatchState;
-    readonly attemptCount: number;
-    readonly acceptedReceiptSequence: number | null;
-    readonly lastError: string | null;
-    readonly createdAt: string;
-    readonly updatedAt: string;
-    readonly acceptedAt: string | null;
-    readonly acknowledgedAt: string | null;
-    readonly supersededAt: string | null;
-    readonly exhaustedAt: string | null;
-  }
-
   const batchColumns = sql`
     batch_id AS "batchId",
     parent_thread_id AS "parentThreadId",
@@ -2284,14 +2341,6 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
       ),
     );
 
-  const decodeBatch = (row: BatchRow): PiSubagentCompletionDispatchBatch => ({
-    ...row,
-    membership: JSON.parse(row.membershipJson) as readonly string[],
-  });
-
-  const decodeBatchOption = (rows: readonly BatchRow[]) =>
-    rows.length > 0 ? Option.some(decodeBatch(rows[0]!)) : Option.none();
-
   /** Internal sentinel: a selected member is already claimed by another batch. */
   class CompletionBatchMemberCollisionError extends Error {
     override readonly name = "CompletionBatchMemberCollisionError";
@@ -2303,60 +2352,6 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
    * (Decision 0016 §2: duplicate / noncanonical / cross-thread / missing /
    * oversized membership fails closed; identity immutability).
    */
-  const validateBatchContent = (
-    content: PiSubagentCompletionDispatchBatchContent,
-    members: readonly OutboxRow[],
-    parentThreadId: string,
-  ): string | null => {
-    if (content.parentCommandId.trim().length === 0) {
-      return "batch parent command id must be non-empty";
-    }
-    if (content.parentMessageId.trim().length === 0) {
-      return "batch parent message id must be non-empty";
-    }
-    if (content.batchId.trim().length === 0) {
-      return "batch id must be non-empty";
-    }
-    if (content.membership.length !== members.length) {
-      return "batch membership length does not match the canonically selected members";
-    }
-    for (let index = 0; index < members.length; index += 1) {
-      if (content.membership[index] !== members[index]!.outboxId) {
-        return "batch membership is noncanonical or references an unselected member";
-      }
-    }
-    if (new Set(content.membership).size !== content.membership.length) {
-      return "batch membership contains a duplicate outbox id";
-    }
-    let payload: unknown;
-    try {
-      payload = JSON.parse(content.commandPayloadJson);
-    } catch {
-      return "batch command payload is not valid JSON";
-    }
-    if (typeof payload !== "object" || payload === null) {
-      return "batch command payload must be an object";
-    }
-    const command = payload as Record<string, unknown>;
-    const message = command.message as Record<string, unknown> | undefined;
-    if (command.type !== "thread.turn.start") {
-      return "batch command payload must type thread.turn.start";
-    }
-    if (command.threadId !== parentThreadId) {
-      return "batch command payload threads a different parent than membership";
-    }
-    if (command.commandId !== content.parentCommandId) {
-      return "batch command payload commandId does not match the frozen parent command id";
-    }
-    if (message?.messageId !== content.parentMessageId) {
-      return "batch command payload messageId does not match the frozen parent message id";
-    }
-    if (message?.text !== content.parentMessageText) {
-      return "batch command payload message text does not match the frozen parent message text";
-    }
-    return null;
-  };
-
   const createCompletionDispatchBatch: PiSubagentExecutionRepositoryShape["createCompletionDispatchBatch"] =
     (input) =>
       sql
@@ -3616,7 +3611,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
             ...(input.survivorPids !== undefined && input.survivorPids.length > 0
               ? { survivorPids: input.survivorPids }
               : {}),
-            ...(input.metadata ?? {}),
+            ...input.metadata,
           });
 
           const existing = yield* lookupJournalEvent({

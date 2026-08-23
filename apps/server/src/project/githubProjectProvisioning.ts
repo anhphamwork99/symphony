@@ -89,7 +89,9 @@ function provisioningError(
 
 function safeCloneProgressMessage(rawLine: string): string | null {
   const normalized = rawLine
+    // oxlint-disable-next-line no-control-regex -- Git clone progress may contain ANSI CSI escapes.
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    // oxlint-disable-next-line no-control-regex -- Progress sanitization intentionally strips C0 controls.
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .trim();
   if (!CLONE_PROGRESS_LINE.test(normalized)) return null;

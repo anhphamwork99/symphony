@@ -347,10 +347,9 @@ export const makeExternalMcpGateway = Effect.gen(function* () {
             capabilities: [...context.client.capabilities],
           },
           projects,
-          providers: [...availabilities].map(([provider, availability]) => ({
-            provider,
-            ...availability,
-          })),
+          providers: [...availabilities].map(([provider, availability]) =>
+            Object.assign({ provider }, availability),
+          ),
           defaults: { environment: "worktree", runtimeMode: "approval-required" },
           limits: {
             oneTaskPerRequest: true,

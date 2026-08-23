@@ -434,7 +434,10 @@ describe("external MCP stdio bridge", () => {
     const stdin = new PassThrough();
     const output: string[] = [];
     const errors: string[] = [];
-    let requestStarted = false;
+    let resolveRequestStarted!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      resolveRequestStarted = resolve;
+    });
     let aborted = false;
     const serving = serveExternalMcpStdio({
       baseDir,
@@ -448,7 +451,7 @@ describe("external MCP stdio bridge", () => {
       fetchImpl: async (url, init) => {
         const challenge = runtimeChallenge(url, init);
         if (challenge) return challenge;
-        requestStarted = true;
+        resolveRequestStarted();
         init?.signal?.addEventListener("abort", () => {
           aborted = true;
         });
@@ -458,7 +461,7 @@ describe("external MCP stdio bridge", () => {
     stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", id: "slow", method: "tools/call", params: { name: "synara_wait_for_task", arguments: { threadId: "thread-1" } } })}\n`,
     );
-    while (!requestStarted) await new Promise((resolve) => setTimeout(resolve, 1));
+    await requestStarted;
     stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "slow" } })}\n`,
     );
@@ -480,7 +483,10 @@ describe("external MCP stdio bridge", () => {
     });
     const stdin = new PassThrough();
     const output: string[] = [];
-    let slowStarted = false;
+    let resolveSlowStarted!: () => void;
+    const slowStarted = new Promise<void>((resolve) => {
+      resolveSlowStarted = resolve;
+    });
     let slowAborted = false;
     const serving = serveExternalMcpStdio({
       baseDir,
@@ -494,7 +500,7 @@ describe("external MCP stdio bridge", () => {
         if (challenge) return challenge;
         const request = JSON.parse(String(init?.body)) as { id: string };
         if (request.id === "slow") {
-          slowStarted = true;
+          resolveSlowStarted();
           init?.signal?.addEventListener("abort", () => {
             slowAborted = true;
           });
@@ -514,7 +520,7 @@ describe("external MCP stdio bridge", () => {
         { jsonrpc: "2.0", id: "fast", method: "ping" },
       ])}\n`,
     );
-    while (!slowStarted) await new Promise((resolve) => setTimeout(resolve, 1));
+    await slowStarted;
     stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "slow" } })}\n`,
     );

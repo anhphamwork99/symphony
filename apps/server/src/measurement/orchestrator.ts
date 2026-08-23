@@ -119,7 +119,6 @@ function buildReportRunSet(
   const config = runSetConfig(mode, options);
   const summary = buildRunSetSummary({ mode, repetitions });
   const evidence = evaluateEvidence(config, summary.validRepetitions);
-  const valid = summary.validRepetitions;
   return {
     config,
     repetitions,

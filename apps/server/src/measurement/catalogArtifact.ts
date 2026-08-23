@@ -246,7 +246,7 @@ export function manifestSummaryFromArtifact(input: {
   const canonicalBytes = canonicalizeManifest(input.entries);
   const toolNames = [...input.entries]
     .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right));
+    .toSorted((left, right) => left.localeCompare(right));
   return {
     toolNames,
     toolCount: toolNames.length,

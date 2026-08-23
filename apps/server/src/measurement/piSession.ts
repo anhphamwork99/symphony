@@ -11,7 +11,6 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   AgentSession,
   AgentSessionEvent,
-  AgentSessionRuntime,
   CreateAgentSessionServicesOptions,
 } from "@earendil-works/pi-coding-agent";
 
@@ -363,7 +362,7 @@ export async function runStimulusTurn(
   let settled = false;
   let settleError: unknown;
 
-  const waitForEnd = new Promise<void>((resolve, reject) => {
+  const waitForEnd = new Promise<void>((resolve) => {
     const unsubscribe = handle.session.subscribe((event) => {
       if (event.type === "tool_execution_start") {
         toolCalls.push(event.toolName);

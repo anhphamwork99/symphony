@@ -97,13 +97,14 @@ function resolveBunExecutable(): string {
   if (typeof Bun !== "undefined" && typeof process.execPath === "string") {
     return process.execPath;
   }
-  const candidates = [
-    process.env.BUN_BINARY_PATH,
-    process.env.BUN_INSTALL ? path.join(process.env.BUN_INSTALL, "bin", "bun") : undefined,
-    path.join(os.homedir(), ".bun", "bin", "bun"),
-    "bun",
-  ].filter((candidate): candidate is string => typeof candidate === "string");
-  return candidates[0] ?? "bun";
+  const candidates =
+    [
+      process.env.BUN_BINARY_PATH,
+      process.env.BUN_INSTALL ? path.join(process.env.BUN_INSTALL, "bin", "bun") : undefined,
+      path.join(os.homedir(), ".bun", "bin", "bun"),
+      "bun",
+    ].find((candidate): candidate is string => typeof candidate === "string") ?? "bun";
+  return candidates;
 }
 
 function sleep(ms: number): Promise<void> {

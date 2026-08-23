@@ -8,6 +8,7 @@ import {
 } from "./gitStatusParsing.ts";
 
 const HASH = "a".repeat(40);
+const encode = (value: string) => new TextEncoder().encode(value);
 
 describe("git status parsing", () => {
   it("parses NUL porcelain metadata and adversarial paths without splitting records", () => {
@@ -84,8 +85,6 @@ describe("git status parsing", () => {
   });
 
   it("counts byte-level text lines and rejects binary content", () => {
-    const encode = (value: string) => new TextEncoder().encode(value);
-
     expect(countTextFileLines(new Uint8Array())).toBe(0);
     expect(countTextFileLines(encode("first\nsecond\n"))).toBe(2);
     expect(countTextFileLines(encode("first\nsecond"))).toBe(2);

@@ -59,6 +59,10 @@ function stripTrailingSeparators(value: string): string {
   return value.replace(/[\\/]+$/, "");
 }
 
+function foldPathForComparison(value: string): string {
+  return process.platform === "win32" ? value.toLowerCase() : value;
+}
+
 /**
  * The relative part of `child` under `parent`, or null when `child` is not
  * under `parent` (boundary-aware: a sibling like "/Users/name2" is not under
@@ -67,9 +71,8 @@ function stripTrailingSeparators(value: string): string {
 function relativeToParent(child: string, parent: string): string | null {
   const normalizedParent = stripTrailingSeparators(parent);
   if (normalizedParent.length < 2) return null;
-  const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
-  const childFolded = fold(child);
-  const parentFolded = fold(normalizedParent);
+  const childFolded = foldPathForComparison(child);
+  const parentFolded = foldPathForComparison(normalizedParent);
   if (childFolded === parentFolded) return "";
   if (childFolded.startsWith(parentFolded + "\\") || childFolded.startsWith(parentFolded + "/")) {
     return child.slice(normalizedParent.length).replace(/^[\\/]+/, "");

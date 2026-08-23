@@ -203,14 +203,20 @@ function isProviderSessionBusy(session: TerminalSessionState, now: number): bool
 }
 
 function normalizeProviderOutputSignature(visibleText: string): string {
-  return visibleText
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
-    .replace(/\u001b[P^_].*?(?:\u001b\\|\u0007|\u009c)/g, "")
-    .replace(/[\u0000-\u001f\u007f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(-256);
+  return (
+    visibleText
+      // oxlint-disable-next-line no-control-regex -- ANSI CSI escapes intentionally contain ESC.
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+      // oxlint-disable-next-line no-control-regex -- ANSI OSC escapes intentionally contain BEL/ESC.
+      .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+      // oxlint-disable-next-line no-control-regex -- ANSI string escapes intentionally use ESC/BEL/ST.
+      .replace(/\u001b[P^_].*?(?:\u001b\\|\u0007|\u009c)/g, "")
+      // oxlint-disable-next-line no-control-regex -- Terminal normalization intentionally strips C0 controls.
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(-256)
+  );
 }
 
 const WINDOWS_DEFAULT_TERMINAL_SHELL = "powershell.exe";
@@ -954,8 +960,6 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
           existing.terminalId,
           existing.history.toString(),
         );
-      } else if (runtimeEnvChanged) {
-        existing.runtimeEnv = nextRuntimeEnv;
       }
 
       if (!existing.process) {
@@ -2269,7 +2273,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
   private async deleteAllHistoryForThread(threadId: string): Promise<void> {
     const threadPrefix = `${toSafeThreadId(threadId)}_`;
-    for (const key of [...this.persistedHistoryByKey.keys()]) {
+    for (const key of this.persistedHistoryByKey.keys()) {
       if (key.startsWith(`${threadId}\u0000`)) {
         this.persistedHistoryByKey.delete(key);
       }
