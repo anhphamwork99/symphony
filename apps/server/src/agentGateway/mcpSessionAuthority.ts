@@ -156,6 +156,9 @@ export const MCP_AUTHORITY_CREDENTIAL_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_MAX_DISPATCH_BINDINGS = 300;
 const DEFAULT_DISPATCH_BINDING_TTL_MS = 60 * 60 * 1_000;
 
+const recordIsAdmittable = (record: McpSessionAuthorityRecord, at: number): boolean =>
+  record.status === "active" && (record.authExpiresAt === null || record.authExpiresAt > at);
+
 export function makeMcpSessionAuthorityRegistry(
   options: {
     readonly now?: () => number;
@@ -173,9 +176,6 @@ export function makeMcpSessionAuthorityRegistry(
   // Insertion-ordered so the oldest entries are evicted first when capped.
   const commandAuthority = new Map<string, { readonly authorityId: string; writtenAt: number }>();
   const threadAuthority = new Map<string, { readonly authorityId: string; writtenAt: number }>();
-
-  const recordIsAdmittable = (record: McpSessionAuthorityRecord, at: number): boolean =>
-    record.status === "active" && (record.authExpiresAt === null || record.authExpiresAt > at);
 
   const pruneIndex = (index: Map<string, { authorityId: string; writtenAt: number }>) => {
     const cutoff = now() - dispatchBindingTtlMs;

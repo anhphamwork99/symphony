@@ -842,13 +842,11 @@ describe("Ticket 03 durable card truth (current-generation attachment + teardown
       expect(withEvidence[0]!.payload.card.currentTeardownEvidence).toBe("owner_unproven");
       // The orphaned aggregate's live gate closed: the LAST card event for
       // this execution carries NULL current truth (no stale teardown).
-      const lastForExecution = cardEvents
-        .filter(
-          (event) =>
-            event.type === "thread.pi-subagent-execution-updated" &&
-            event.payload.executionId === "exec-t03-silent",
-        )
-        .at(-1);
+      const lastForExecution = cardEvents.findLast(
+        (event) =>
+          event.type === "thread.pi-subagent-execution-updated" &&
+          event.payload.executionId === "exec-t03-silent",
+      );
       expect(lastForExecution?.payload.card.currentAttachment).toBeNull();
       expect(lastForExecution?.payload.card.currentTeardownEvidence).toBeNull();
     } finally {

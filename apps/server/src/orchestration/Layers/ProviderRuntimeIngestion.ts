@@ -332,7 +332,7 @@ function joinedBufferedReasoningSummary(
   if (!summary) return undefined;
   return readableReasoningDetail(
     Array.from(summary.parts.entries())
-      .sort(([left], [right]) => left - right)
+      .toSorted(([left], [right]) => left - right)
       .map(([, text]) => text.trim())
       .filter((text) => text.length > 0)
       .join("\n\n"),
@@ -593,6 +593,24 @@ export function selectProviderRuntimeJournalStream(input: {
   );
 }
 
+const cloneAssistantDeliveryModeBindings = (state: AssistantDeliveryModeBindingState) => ({
+  pendingModesByThreadId: new Map(state.pendingModesByThreadId),
+  unmatchedTurnIdsByThreadId: new Map(state.unmatchedTurnIdsByThreadId),
+  settledUnmatchedRequestDebtByThreadId: new Map(state.settledUnmatchedRequestDebtByThreadId),
+});
+
+const shiftThreadQueue = <Value>(
+  queues: Map<ThreadId, ReadonlyArray<Value>>,
+  threadId: ThreadId,
+): Value | undefined => {
+  const values = queues.get(threadId) ?? [];
+  const value = values[0];
+  if (value === undefined) return undefined;
+  if (values.length === 1) queues.delete(threadId);
+  else queues.set(threadId, values.slice(1));
+  return value;
+};
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -639,22 +657,6 @@ const make = Effect.gen(function* () {
     unmatchedTurnIdsByThreadId: new Map(),
     settledUnmatchedRequestDebtByThreadId: new Map(),
   });
-  const cloneAssistantDeliveryModeBindings = (state: AssistantDeliveryModeBindingState) => ({
-    pendingModesByThreadId: new Map(state.pendingModesByThreadId),
-    unmatchedTurnIdsByThreadId: new Map(state.unmatchedTurnIdsByThreadId),
-    settledUnmatchedRequestDebtByThreadId: new Map(state.settledUnmatchedRequestDebtByThreadId),
-  });
-  const shiftThreadQueue = <Value>(
-    queues: Map<ThreadId, ReadonlyArray<Value>>,
-    threadId: ThreadId,
-  ): Value | undefined => {
-    const values = queues.get(threadId) ?? [];
-    const value = values[0];
-    if (value === undefined) return undefined;
-    if (values.length === 1) queues.delete(threadId);
-    else queues.set(threadId, values.slice(1));
-    return value;
-  };
   const assistantDeliveryModeByTurnKey = yield* Cache.make<string, AssistantDeliveryMode>({
     capacity: ASSISTANT_DELIVERY_MODE_BY_TURN_CACHE_CAPACITY,
     timeToLive: ASSISTANT_DELIVERY_MODE_BY_TURN_TTL,

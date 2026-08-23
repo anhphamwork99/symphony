@@ -636,7 +636,7 @@ describe("provider runtime activity projection", () => {
       },
     });
     expect(
-      Object.keys((turn?.payload as { modelUsage?: Record<string, unknown> }).modelUsage ?? {}),
+      Object.keys((turn!.payload as { modelUsage?: Record<string, unknown> }).modelUsage ?? {}),
     ).toEqual(["claude-fable-5"]);
   });
 

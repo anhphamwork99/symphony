@@ -78,7 +78,7 @@ function pendingOperations(readModel: OrchestrationReadModel): ReadonlyArray<{
       pending.push({ projectId: project.id, operation });
     }
   }
-  return pending.sort((left, right) => left.projectId.localeCompare(right.projectId));
+  return pending.toSorted((left, right) => left.projectId.localeCompare(right.projectId));
 }
 
 /**

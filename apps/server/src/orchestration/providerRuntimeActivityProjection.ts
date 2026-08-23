@@ -62,7 +62,7 @@ function jsonSafeValue(value: unknown, ancestors: Set<object>): unknown {
     }
     if (Array.isArray(value)) {
       let changed = false;
-      const retained: unknown[] = new Array<unknown>(value.length);
+      const retained: unknown[] = Array.from({ length: value.length });
       for (let index = 0; index < value.length; index += 1) {
         const entry = value[index];
         // Array positions are meaningful: an unrepresentable entry becomes null

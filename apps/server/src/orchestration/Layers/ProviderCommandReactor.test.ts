@@ -114,6 +114,7 @@ const asApprovalRequestId = (value: string): ApprovalRequestId =>
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
+const passthroughGitMutation: GitCoreShape["withMutation"] = (_cwd, effect) => effect;
 
 describe("legacy provider blocker recovery", () => {
   it("keeps process lifecycle failures uncertain", () => {
@@ -474,7 +475,6 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     const publishBranch = vi.fn(() => Effect.void);
-    const withMutation: GitCoreShape["withMutation"] = (_cwd, effect) => effect;
     const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>(() =>
       Effect.fail(
         new TextGenerationError({
@@ -567,7 +567,7 @@ describe("ProviderCommandReactor", () => {
         Layer.succeed(GitCore, {
           renameBranch,
           publishBranch,
-          withMutation,
+          withMutation: passthroughGitMutation,
         } as unknown as GitCoreShape),
       ),
       Layer.provideMerge(

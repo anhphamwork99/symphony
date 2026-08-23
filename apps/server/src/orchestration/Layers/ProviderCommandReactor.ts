@@ -478,6 +478,19 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
 
+function resolveSubagentProviderThreadId(
+  threadId: ThreadId,
+  parentThreadId: ThreadId | null | undefined,
+): string | undefined {
+  if (!parentThreadId) return undefined;
+  const prefix = `subagent:${parentThreadId}:`;
+  const rawThreadId = threadId as string;
+  return rawThreadId.startsWith(prefix) ? rawThreadId.slice(prefix.length) : undefined;
+}
+
+const editResendTurnStartKey = (threadId: ThreadId, messageId: string) =>
+  `${threadId}:${messageId}`;
+
 export interface ProviderCommandReactorLiveOptions {
   readonly commandEventTimeout?: Duration.Duration;
 }
@@ -856,19 +869,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const resolveSubagentProviderThreadId = (
-    threadId: ThreadId,
-    parentThreadId: ThreadId | null | undefined,
-  ): string | undefined => {
-    if (!parentThreadId) {
-      return undefined;
-    }
-
-    const prefix = `subagent:${parentThreadId}:`;
-    const rawThreadId = threadId as string;
-    return rawThreadId.startsWith(prefix) ? rawThreadId.slice(prefix.length) : undefined;
-  };
-
   const enqueueQueuedTurnStart = (event: QueuedTurnSourceEvent) =>
     queuedTurnPromotions.enqueue({
       queuedEventSequence: event.sequence,
@@ -899,9 +899,6 @@ const make = Effect.gen(function* () {
   });
   const hasLiveProviderTurn = (threadId: ThreadId) =>
     resolveLiveProviderTurnId(threadId).pipe(Effect.map((turnId) => turnId !== undefined));
-
-  const editResendTurnStartKey = (threadId: ThreadId, messageId: string) =>
-    `${threadId}:${messageId}`;
 
   const clearEditResendTurnStartKeysForThread = (threadId: ThreadId) =>
     Effect.sync(() => {

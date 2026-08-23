@@ -205,21 +205,22 @@ describe("checkpoint revert decider", () => {
     });
     const initialReadModel: OrchestrationReadModel = {
       ...baseReadModel,
-      threads: baseReadModel.threads.map((thread) => ({
-        ...thread,
-        activities: [
-          {
-            id: EventId.makeUnsafe("old-revert-succeeded"),
-            tone: "info",
-            kind: "checkpoint.revert.succeeded",
-            summary: "Old revert completed",
-            payload: { turnCount: 0 },
-            turnId: null,
-            sequence: 5,
-            createdAt: "2026-07-18T00:00:00.000Z",
-          },
-        ],
-      })),
+      threads: baseReadModel.threads.map((thread) =>
+        Object.assign({}, thread, {
+          activities: [
+            {
+              id: EventId.makeUnsafe("old-revert-succeeded"),
+              tone: "info",
+              kind: "checkpoint.revert.succeeded",
+              summary: "Old revert completed",
+              payload: { turnCount: 0 },
+              turnId: null,
+              sequence: 5,
+              createdAt: "2026-07-18T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
     };
     const decidedRevert = await Effect.runPromise(
       decideOrchestrationCommand({

@@ -1,7 +1,6 @@
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
-  MessageId,
   ProjectId,
   ThreadId,
   type OrchestrationEvent,
