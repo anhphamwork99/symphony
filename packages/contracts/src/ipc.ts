@@ -554,6 +554,8 @@ interface BrowserControlMethods {
  * until they migrate (WP6/WP7).
  */
 export interface BrowserProjectControlMethods {
+  /** Acknowledges terminal server deletion and clears Desktop-owned state. */
+  removeProject: (input: BrowserProjectInput) => Promise<void>;
   open: (input: BrowserProjectOpenInput) => Promise<ProjectBrowserState>;
   close: (input: BrowserProjectInput) => Promise<ProjectBrowserState>;
   hide: (input: BrowserProjectInput) => Promise<void>;

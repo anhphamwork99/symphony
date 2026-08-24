@@ -1134,6 +1134,7 @@ function EventRouter() {
     let providerDiscoveryInvalidationFingerprint: string | null = null;
     let shellSnapshotSequence = -1;
     let pendingShellEvents: OrchestrationShellStreamEvent[] = [];
+    const acknowledgedProjectRemovals = new Set<ProjectId>();
     const subscribedThreadIds = new Set<ThreadId>();
     const threadSnapshotSequenceById = new Map<ThreadId, number>();
     const pendingThreadEventsById = new Map<ThreadId, OrchestrationEvent[]>();
@@ -1287,6 +1288,15 @@ function EventRouter() {
       }
     };
 
+    const applyShellEventWithDesktopProjectRemoval = (event: OrchestrationShellStreamEvent) => {
+      applyShellEvent(event);
+      if (event.kind !== "project-removed" || acknowledgedProjectRemovals.has(event.projectId)) {
+        return;
+      }
+      acknowledgedProjectRemovals.add(event.projectId);
+      void api.projectBrowser?.removeProject({ projectId: event.projectId }).catch(() => undefined);
+    };
+
     const flushShellBuffer = (snapshotSequence: number) => {
       const nextPending = pendingShellEvents
         .filter((event) => event.sequence > snapshotSequence)
@@ -1294,7 +1304,7 @@ function EventRouter() {
       pendingShellEvents = [];
       for (const event of nextPending) {
         shellSnapshotSequence = Math.max(shellSnapshotSequence, event.sequence);
-        applyShellEvent(event);
+        applyShellEventWithDesktopProjectRemoval(event);
       }
     };
 
@@ -1799,7 +1809,7 @@ function EventRouter() {
         return;
       }
       shellSnapshotSequence = item.sequence;
-      applyShellEvent(item);
+      applyShellEventWithDesktopProjectRemoval(item);
       if (item.kind === "thread-upserted") {
         reconcilePromotedDraftsFromShellThreads([item.thread]);
       }

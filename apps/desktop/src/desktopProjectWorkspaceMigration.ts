@@ -30,6 +30,12 @@ export interface DesktopProjectWorkspaceDocument {
   readonly staged: Record<string, unknown>;
   readonly published: Record<string, unknown>;
   readonly diagnostics: Record<string, string>;
+  readonly tombstones: Record<string, DesktopProjectWorkspaceDeletionTombstone>;
+}
+
+export interface DesktopProjectWorkspaceDeletionTombstone {
+  readonly projectId: ProjectId;
+  readonly deletedAt: string;
 }
 
 export type DesktopProjectWorkspaceMigrationResult =
@@ -46,6 +52,10 @@ export type DesktopProjectWorkspaceMigrationResult =
       readonly status: "unpublished";
       readonly projectId: ProjectId;
       readonly diagnostic: string;
+    }
+  | {
+      readonly status: "deleted";
+      readonly projectId: ProjectId;
     };
 
 export interface DesktopProjectWorkspaceMigrationOptions {
@@ -58,7 +68,7 @@ export interface DesktopProjectWorkspaceMigrationOptions {
 
 export interface DesktopProjectWorkspaceReadResult {
   readonly projectId: ProjectId;
-  readonly status: "published-current" | "unpublished";
+  readonly status: "published-current" | "unpublished" | "deleted";
   readonly slices: ReadonlyArray<ProjectWorkspaceSlice>;
   readonly diagnostic: string | null;
 }
@@ -69,6 +79,7 @@ function emptyDocument(diagnostic?: string): DesktopProjectWorkspaceDocument {
     staged: {},
     published: {},
     diagnostics: diagnostic ? { store: diagnostic } : {},
+    tombstones: {},
   };
 }
 
@@ -80,18 +91,38 @@ function parseDocument(value: unknown): DesktopProjectWorkspaceDocument {
   if (!isRecord(value) || value.version !== DESKTOP_PROJECT_WORKSPACE_FILE_VERSION) {
     return emptyDocument("Desktop Project workspace data is malformed or unavailable.");
   }
-  if (!isRecord(value.staged) || !isRecord(value.published) || !isRecord(value.diagnostics)) {
+  if (
+    !isRecord(value.staged) ||
+    !isRecord(value.published) ||
+    !isRecord(value.diagnostics) ||
+    (value.tombstones !== undefined && !isRecord(value.tombstones))
+  ) {
     return emptyDocument("Desktop Project workspace data is malformed or unavailable.");
   }
   const diagnostics: Record<string, string> = {};
   for (const [key, diagnostic] of Object.entries(value.diagnostics)) {
     if (typeof diagnostic === "string" && diagnostic.length > 0) diagnostics[key] = diagnostic;
   }
+  const tombstones: Record<string, DesktopProjectWorkspaceDeletionTombstone> = {};
+  for (const [projectId, tombstone] of Object.entries(value.tombstones ?? {})) {
+    if (
+      isRecord(tombstone) &&
+      tombstone.projectId === projectId &&
+      typeof tombstone.deletedAt === "string" &&
+      tombstone.deletedAt.length > 0
+    ) {
+      tombstones[projectId] = {
+        projectId: projectId as ProjectId,
+        deletedAt: tombstone.deletedAt,
+      };
+    }
+  }
   return {
     version: DESKTOP_PROJECT_WORKSPACE_FILE_VERSION,
     staged: { ...value.staged },
     published: { ...value.published },
     diagnostics,
+    tombstones,
   };
 }
 
@@ -176,6 +207,14 @@ export class DesktopProjectWorkspaceMigration {
 
   /** Read only published Project data; staged data is never mixed into a read. */
   read(projectId: ProjectId): DesktopProjectWorkspaceReadResult {
+    if (this.document.tombstones[String(projectId)] !== undefined) {
+      return {
+        projectId,
+        status: "deleted",
+        slices: [],
+        diagnostic: "Project workspace is permanently deleted.",
+      };
+    }
     const target = projectTargetFromDocument(this.document, projectId);
     const status = inspectProjectWorkspacePublishedTarget(
       { publicationMarker: target.marker, stagedSlices: target.stagedSlices },
@@ -205,6 +244,9 @@ export class DesktopProjectWorkspaceMigration {
    * snapshot; this boundary never mutates that snapshot or any Thread record.
    */
   migrate(input: ProjectWorkspaceMigrationProjectInput): DesktopProjectWorkspaceMigrationResult {
+    if (this.document.tombstones[String(input.projectId)] !== undefined) {
+      return { status: "deleted", projectId: input.projectId };
+    }
     const existing = projectTargetFromDocument(this.document, input.projectId);
     const plan = planProjectWorkspaceMigration({
       ...input,
@@ -258,6 +300,46 @@ export class DesktopProjectWorkspaceMigration {
     }
   }
 
+  /**
+   * Atomically terminate one Project's v2 Desktop state. The old v1 records
+   * are not represented by this document and therefore cannot be touched.
+   * Repeating the operation is idempotent and retains the first deletion time.
+   */
+  deleteProject(projectId: ProjectId, deletedAt: string): boolean {
+    const key = String(projectId);
+    if (this.document.tombstones[key] !== undefined) {
+      return false;
+    }
+    const previous = this.document;
+    const nextStaged = { ...this.document.staged };
+    const nextPublished = { ...this.document.published };
+    const nextDiagnostics = { ...this.document.diagnostics };
+    const nextTombstones = { ...this.document.tombstones };
+    const stagedPrefix = `synara:project-workspace:v2:stage:${projectId}:`;
+    for (const stagedKey of Object.keys(nextStaged)) {
+      if (stagedKey.startsWith(stagedPrefix)) {
+        delete nextStaged[stagedKey];
+      }
+    }
+    delete nextPublished[projectWorkspacePublicationMarkerKey(projectId)];
+    delete nextDiagnostics[key];
+    nextTombstones[key] = { projectId, deletedAt };
+    this.document = {
+      version: DESKTOP_PROJECT_WORKSPACE_FILE_VERSION,
+      staged: nextStaged,
+      published: nextPublished,
+      diagnostics: nextDiagnostics,
+      tombstones: nextTombstones,
+    };
+    try {
+      this.persist();
+      return true;
+    } catch (error) {
+      this.document = previous;
+      throw error;
+    }
+  }
+
   private persist(): void {
     writeDocument(this.filePath, this.document);
   }
@@ -286,7 +368,7 @@ export function collectDesktopProjectWorkspaceProjectIds(
   for (const key of Object.keys(document.diagnostics)) {
     // Diagnostic keys are the raw ProjectId (set/cleared per Project).
     if (key.startsWith(PROJECT_WORKSPACE_RECORD_KEY_PREFIX)) continue;
-    if (key.length > 0) {
+    if (key.length > 0 && document.tombstones[key] === undefined) {
       projectIds.add(key);
     }
   }
@@ -295,7 +377,7 @@ export function collectDesktopProjectWorkspaceProjectIds(
     const segments = key.slice(PROJECT_WORKSPACE_RECORD_KEY_PREFIX.length).split(":");
     // stage:<projectId>:<kind> | published:<projectId>
     const id = segments[0] === "stage" || segments[0] === "published" ? segments[1] : undefined;
-    if (id !== undefined && id.length > 0) {
+    if (id !== undefined && id.length > 0 && document.tombstones[id] === undefined) {
       projectIds.add(id);
     }
   }

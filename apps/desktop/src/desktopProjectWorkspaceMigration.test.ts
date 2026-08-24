@@ -124,6 +124,33 @@ describe("DesktopProjectWorkspaceMigration", () => {
     expect(migration.read(otherProjectId).status).toBe("published-current");
   });
 
+  it("atomically tombstones one Project, preserves other Projects and v1 input, and survives restart", () => {
+    const path = storePath();
+    const migration = new DesktopProjectWorkspaceMigration(path);
+    const source = legacyThread("thread-delete");
+    expect(migration.migrate({ projectId, threads: [source] }).status).toBe("published");
+    expect(migration.migrate({ projectId: otherProjectId, threads: [] }).status).toBe("published");
+    const before = JSON.stringify(source);
+
+    expect(migration.deleteProject(projectId, "2026-08-24T00:00:00.000Z")).toBe(true);
+    expect(migration.deleteProject(projectId, "2026-08-25T00:00:00.000Z")).toBe(false);
+    expect(JSON.stringify(source)).toBe(before);
+    expect(migration.read(projectId).status).toBe("deleted");
+    expect(migration.migrate({ projectId, threads: [] }).status).toBe("deleted");
+    expect(collectDesktopProjectWorkspaceProjectIds(migration.getDocument())).toEqual([
+      String(otherProjectId),
+    ]);
+
+    const reopened = new DesktopProjectWorkspaceMigration(path);
+    expect(reopened.read(projectId).status).toBe("deleted");
+    expect(reopened.migrate({ projectId, threads: [] }).status).toBe("deleted");
+    expect(reopened.read(otherProjectId).status).toBe("published-current");
+    expect(reopened.getDocument().tombstones[String(projectId)]).toEqual({
+      projectId,
+      deletedAt: "2026-08-24T00:00:00.000Z",
+    });
+  });
+
   it("retains a diagnostic for malformed desktop backing data", () => {
     const path = storePath();
     FS.mkdirSync(Path.dirname(path), { recursive: true });
@@ -195,6 +222,7 @@ describe("runDesktopProjectWorkspaceStartupMigration — production startup pass
       diagnostics: {
         "project-failed": "per-Project diagnostic key is the raw ProjectId",
       },
+      tombstones: {},
     };
     expect(collectDesktopProjectWorkspaceProjectIds(document)).toEqual([
       "project-a",

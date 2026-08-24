@@ -198,6 +198,10 @@ export class DesktopProjectWorkspaceActivation {
   private readonly activatedProjects = new Set<string>();
   /** Projects with an activation attempt in flight; concurrent first calls share it. */
   private readonly inFlightByProject = new Map<string, Promise<void>>();
+  /** Projects whose committed deletion is terminal for this activation lifetime. */
+  private readonly deletedProjectIds = new Set<string>();
+  /** Project deletion work is serialized independently per Project. */
+  private readonly removalInFlightByProject = new Map<string, Promise<void>>();
   /** Last retained diagnostic per Project (cleared on success). */
   private readonly diagnosticsByProject = new Map<string, string>();
 
@@ -205,7 +209,11 @@ export class DesktopProjectWorkspaceActivation {
     private readonly filePath: string,
     private readonly browserManager: DesktopBrowserManager,
     private readonly options: DesktopProjectWorkspaceActivationOptions = {},
-  ) {}
+  ) {
+    for (const projectId of Object.keys(readDesktopProjectWorkspaceDocument(filePath).tombstones)) {
+      this.deletedProjectIds.add(projectId);
+    }
+  }
 
   static forUserDataPath(
     userDataPath: string,
@@ -243,6 +251,7 @@ export class DesktopProjectWorkspaceActivation {
    */
   async ensureProjectWorkspaceActivated(projectId: ProjectId): Promise<void> {
     const key = String(projectId);
+    this.assertProjectNotDeleted(projectId);
     if (this.activatedProjects.has(key)) {
       return;
     }
@@ -306,15 +315,66 @@ export class DesktopProjectWorkspaceActivation {
   forgetProject(projectId: ProjectId): void {
     const key = String(projectId);
     this.activatedProjects.delete(key);
-    this.diagnosticsByProject.delete(key);
+    if (!this.deletedProjectIds.has(key)) {
+      this.diagnosticsByProject.delete(key);
+    }
     // Deliberately leaves any in-flight attempt alone: it observes the same
     // attempt the caller that started it observes (failure behavior).
+  }
+
+  /**
+   * Terminal deletion boundary. The in-memory fence is set synchronously so a
+   * concurrent or subsequent activation cannot pass its next gate. Durable
+   * cleanup waits for the Project's current activation, then persists the
+   * tombstone before clearing manager state.
+   */
+  async handleProjectRemoved(
+    projectId: ProjectId,
+    deletedAt = new Date().toISOString(),
+  ): Promise<void> {
+    const key = String(projectId);
+    this.deletedProjectIds.add(key);
+    const existingRemoval = this.removalInFlightByProject.get(key);
+    if (existingRemoval !== undefined) {
+      return existingRemoval;
+    }
+    const currentActivation = this.inFlightByProject.get(key);
+    const removal = (currentActivation?.catch(() => undefined) ?? Promise.resolve())
+      .then(() => {
+        const migration = new DesktopProjectWorkspaceMigration(this.filePath);
+        migration.deleteProject(projectId, deletedAt);
+        this.activatedProjects.delete(key);
+        this.diagnosticsByProject.delete(key);
+        this.browserManager.handleProjectRemoved(projectId);
+      })
+      .finally(() => {
+        this.removalInFlightByProject.delete(key);
+      });
+    this.removalInFlightByProject.set(key, removal);
+    return removal;
+  }
+
+  private assertProjectNotDeleted(projectId: ProjectId): void {
+    const key = String(projectId);
+    if (!this.deletedProjectIds.has(key)) {
+      const durableTombstone = readDesktopProjectWorkspaceDocument(this.filePath).tombstones[key];
+      if (durableTombstone !== undefined) {
+        this.deletedProjectIds.add(key);
+      }
+    }
+    if (this.deletedProjectIds.has(key)) {
+      throw new ProjectWorkspaceActivationError(
+        projectId,
+        "Project workspace has been permanently deleted.",
+      );
+    }
   }
 
   private async runActivation(attempt: ActivationAttempt): Promise<void> {
     const { projectId } = attempt;
     const key = String(projectId);
     try {
+      this.assertProjectNotDeleted(projectId);
       // 1. Fresh read of the durable publication. A valid current publication
       //    for this exact Project wins and is never republished over.
       let read = this.readPublication(projectId);
@@ -352,17 +412,26 @@ export class DesktopProjectWorkspaceActivation {
         //    so canonical defaults are staged and the marker is written last.
         //    `migrate` itself keeps any valid current publication intact.
         const migration = new DesktopProjectWorkspaceMigration(this.filePath, {
-          beforePublish: (candidate) => this.options.beforePublish?.(candidate),
+          beforeStage: (candidate) => this.assertProjectNotDeleted(candidate),
+          beforePublish: (candidate) => {
+            this.assertProjectNotDeleted(candidate);
+            this.options.beforePublish?.(candidate);
+          },
         });
         const result = migration.migrate({ projectId, threads: [] });
         if (result.status === "unpublished") {
           throw new Error(result.diagnostic);
         }
+        if (result.status === "deleted") {
+          this.assertProjectNotDeleted(projectId);
+        }
+        this.assertProjectNotDeleted(projectId);
         // 3. Drive the manager from a FRESHLY READ publication, never from
         //    the in-memory migration result (read-before-apply).
         read = this.readPublication(projectId);
       }
 
+      this.assertProjectNotDeleted(projectId);
       const validated = validatePublishedSlices(read);
       if ("diagnostic" in validated) {
         throw new Error(validated.diagnostic);
@@ -370,6 +439,7 @@ export class DesktopProjectWorkspaceActivation {
 
       const input = activationInputFromSlices(projectId, validated.slices);
       this.options.beforeApply?.(input);
+      this.assertProjectNotDeleted(projectId);
       // 4. Atomically apply the Desktop-owned slices BEFORE the requested
       //    operation. Device/dock/terminal slices were validated above but
       //    have no Desktop manager ownership and are never invented here.

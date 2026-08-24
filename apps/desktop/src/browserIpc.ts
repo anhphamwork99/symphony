@@ -230,6 +230,14 @@ export function registerBrowserIpcHandlers(
     browserManager.handleAnnotationGuestMessage(event.sender, payload);
   });
 
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.removeProject);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.removeProject,
+    async (_event, input: BrowserProjectInput) => {
+      await projectWorkspaceActivation.handleProjectRemoved(input.projectId);
+    },
+  );
+
   ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.open);
   ipcMain.handle(
     PROJECT_BROWSER_IPC_CHANNELS.open,

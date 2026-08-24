@@ -297,6 +297,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
   projectBrowser: {
+    removeProject: (input) => ipcRenderer.invoke(IPC.projectBrowser.removeProject, input),
     open: (input) => ipcRenderer.invoke(IPC.projectBrowser.open, input),
     close: (input) => ipcRenderer.invoke(IPC.projectBrowser.close, input),
     hide: (input) => ipcRenderer.invoke(IPC.projectBrowser.hide, input),

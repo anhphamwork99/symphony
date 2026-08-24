@@ -78,6 +78,7 @@ export const DESKTOP_IPC_CHANNELS = {
   },
   projectBrowser: {
     state: "desktop:project-browser-state",
+    removeProject: "desktop:project-browser-remove-project",
     copyLink: "desktop:project-browser-copy-link",
     open: "desktop:project-browser-open",
     close: "desktop:project-browser-close",

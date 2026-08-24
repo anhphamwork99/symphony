@@ -205,6 +205,53 @@ describe("Decision 0004 Desktop project workspace activation", () => {
     expect(manager.getProjectState({ projectId: PROJECT_B }).tabs).toEqual([]);
   });
 
+  it("serializes deletion with activation and cannot publish or apply after the synchronous fence", async () => {
+    const filePath = createWorkspacePath();
+    let activation!: DesktopProjectWorkspaceActivation;
+    let removal: Promise<void> | undefined;
+    const apply = vi.fn();
+    activation = new DesktopProjectWorkspaceActivation(
+      filePath,
+      {
+        applyProjectWorkspaceActivation: apply,
+        handleProjectRemoved: vi.fn(),
+      } as unknown as DesktopBrowserManagerType,
+      {
+        beforeApply: () => {
+          removal = activation.handleProjectRemoved(PROJECT_A, "2026-08-24T00:00:00.000Z");
+        },
+      },
+    );
+
+    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toBeInstanceOf(
+      ProjectWorkspaceActivationError,
+    );
+    await removal;
+    expect(apply).not.toHaveBeenCalled();
+    expect(new DesktopProjectWorkspaceMigration(filePath).read(PROJECT_A).status).toBe("deleted");
+    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+  });
+
+  it("deletes one Project's manager state and remains terminal across restart", async () => {
+    const filePath = createWorkspacePath();
+    const manager = new DesktopBrowserManager();
+    const activation = new DesktopProjectWorkspaceActivation(filePath, manager);
+    await activation.ensureProjectWorkspaceActivated(PROJECT_A);
+    await activation.ensureProjectWorkspaceActivated(PROJECT_B);
+    manager.openProject({ projectId: PROJECT_A, initialUrl: "https://deleted.test/" });
+    manager.openProject({ projectId: PROJECT_B, initialUrl: "https://retained.test/" });
+
+    await activation.handleProjectRemoved(PROJECT_A, "2026-08-24T00:00:00.000Z");
+    expect(manager.getProjectState({ projectId: PROJECT_A }).tabs).toEqual([]);
+    expect(manager.getProjectState({ projectId: PROJECT_B }).tabs).toHaveLength(1);
+    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+
+    const reopened = new DesktopProjectWorkspaceActivation(filePath, new DesktopBrowserManager());
+    await expect(reopened.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+    expect(reopened.isActivated(PROJECT_A)).toBe(false);
+    await reopened.ensureProjectWorkspaceActivated(PROJECT_B);
+  });
+
   it("gates automation only when a real ProjectId is present", async () => {
     const executeTool = vi.fn(async () => ({ ok: true }));
     const ensure = vi.fn(async () => undefined);
@@ -368,6 +415,9 @@ describe("Decision 0004 Project browser and annotation IPC activation gates", ()
       ensureProjectWorkspaceActivated: vi.fn(async () => {
         order.push("activate");
       }),
+      handleProjectRemoved: vi.fn(async () => {
+        order.push("remove");
+      }),
     };
     registerBrowserIpcHandlers(
       ipcMain as never,
@@ -414,5 +464,8 @@ describe("Decision 0004 Project browser and annotation IPC activation gates", ()
     expect(activation.ensureProjectWorkspaceActivated).toHaveBeenCalledTimes(
       Object.keys(inputByChannel).length,
     );
+    await handlers.get(PROJECT_BROWSER_IPC_CHANNELS.removeProject)?.(event, { projectId: PROJECT_A });
+    expect(activation.handleProjectRemoved).toHaveBeenCalledWith(PROJECT_A);
+    expect(order).toContain("remove");
   });
 });
