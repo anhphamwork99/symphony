@@ -7,11 +7,10 @@
 //       thread cleanup, and split-view navigation, so it shares only the lower-level
 //       terminalSession helpers instead of this controller.
 
-import { type ProjectId, type ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
 import { type TerminalCliKind } from "@synara/shared/terminalThreads";
 import { useState } from "react";
 
-import { useAppSettings } from "~/appSettings";
 import {
   confirmTerminalTabClose,
   resolveTerminalCloseTitle,
@@ -26,6 +25,7 @@ import {
   preflightProjectTerminalRunning,
 } from "~/components/terminal/terminalProjectRouting";
 import { toastManager } from "~/components/ui/toast";
+import type { TerminalStateScope } from "~/terminalStateStore";
 
 type TerminalMetadata = { cliKind: TerminalCliKind | null; label: string };
 type TerminalActivity = {
@@ -34,7 +34,7 @@ type TerminalActivity = {
 };
 
 export function useTerminalSurfaceController(
-  threadId: ThreadId,
+  threadId: TerminalStateScope,
   options?: {
     /**
      * Owning Project for a Project-owned dock terminal workspace (Decision
@@ -45,7 +45,6 @@ export function useTerminalSurfaceController(
     readonly projectId?: ProjectId | null;
   },
 ) {
-  const { settings } = useAppSettings();
   const projectId = options?.projectId ?? null;
   const terminalState = useTerminalStateStore((state) =>
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
@@ -122,7 +121,7 @@ export function useTerminalSurfaceController(
   };
 
   const closeTerminal = async (terminalId: string) => {
-    const api = readNativeApi();
+    const api = projectId === null ? readNativeApi() : undefined;
     const running = await resolveTerminalRunningForClose(terminalId);
     const confirmed = await confirmTerminalTabClose({
       api,
@@ -166,6 +165,10 @@ export function useTerminalSurfaceController(
   };
 
   const disposeExitedTerminal = (terminalId: string) => {
+    if (projectId !== null) {
+      void disposeAndCloseTerminalRuntime({ threadId, terminalId });
+      return;
+    }
     disposeAndCloseTerminalSession({
       api: readNativeApi(),
       threadId,

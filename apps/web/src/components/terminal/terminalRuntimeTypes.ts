@@ -3,6 +3,7 @@
 // Layer: Terminal runtime infrastructure
 
 import type { ProjectId } from "@synara/contracts";
+import type { DockTerminalScopeId } from "~/lib/dockTerminalScope";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -29,7 +30,7 @@ export function buildTerminalRuntimeKey(threadId: string, terminalId: string): s
 
 export interface TerminalRuntimeConfig {
   runtimeKey: string;
-  threadId: string;
+  threadId: string | DockTerminalScopeId;
   /**
    * Owning Project for the Right-sidebar dock terminal workspace (Decision
    * 0002). When set, every server call routes through the Project-owned

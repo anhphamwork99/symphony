@@ -16,7 +16,7 @@ function terminalEventKey(threadId: string, terminalId: string): string {
 // mapping turns each TerminalProjectEvent into a local-scope TerminalEvent keyed
 // by the runtime scope id (never by the ProjectId).
 interface ProjectEventSubscription {
-  readonly unsubscribe: () => void;
+  unsubscribe: () => void;
   listenerCount: number;
 }
 
@@ -42,13 +42,14 @@ class TerminalEventDispatcher {
     const listeners = this.listenersByKey.get(key) ?? new Set<TerminalEventListener>();
     listeners.add(listener);
     this.listenersByKey.set(key, listeners);
-    this.ensureSharedListener();
 
     let projectSubscription: ProjectEventSubscription | null = null;
     const projectId = options?.projectId ?? null;
     if (projectId !== null) {
       projectSubscription = this.ensureProjectSubscription(projectId, threadId);
       projectSubscription.listenerCount += 1;
+    } else {
+      this.ensureSharedListener();
     }
 
     return () => {

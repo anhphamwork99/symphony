@@ -12,7 +12,8 @@ import {
   Trash2,
   TriangleAlertIcon,
 } from "~/lib/icons";
-import { type ProjectId, type ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
+import type { TerminalStateScope } from "~/terminalStateStore";
 import { type TerminalActivityState, type TerminalCliKind } from "@synara/shared/terminalThreads";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -108,7 +109,7 @@ function TerminalRuntimeStatusOverlay({ status }: { status: TerminalRuntimeStatu
 }
 
 interface TerminalViewportProps {
-  threadId: ThreadId;
+  threadId: TerminalStateScope;
   /** Owning Project for a Project-owned dock terminal runtime; null = legacy. */
   projectId?: ProjectId | null;
   terminalId: string;
@@ -465,7 +466,7 @@ function TerminalViewport({
 }
 
 interface ThreadTerminalDrawerProps {
-  threadId: ThreadId;
+  threadId: TerminalStateScope;
   /** Owning Project for a Project-owned dock terminal workspace; null = legacy. */
   projectId?: ProjectId | null;
   cwd: string;

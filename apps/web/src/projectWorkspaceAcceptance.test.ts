@@ -103,7 +103,7 @@ function appStateWithThreads(...threads: readonly ThreadShell[]): AppState {
     threadsHydrated: true,
     threadIds: threads.map((thread) => thread.id),
     threadShellById: Object.fromEntries(threads.map((thread) => [thread.id, thread])),
-  } as AppState;
+  } as unknown as AppState;
 }
 
 const APP_STATE = appStateWithThreads(
@@ -121,7 +121,6 @@ function routeActiveThreadDock(activeThreadId: ThreadId | null) {
     dockState: selectRightDockState(ownerProjectId)(useRightDockStore.getState()),
     terminalScope: resolveDockTerminalScope({
       projectId: ownerProjectId,
-      hostThreadId: activeThreadId ?? threadA1,
     }),
   };
 }
@@ -175,7 +174,7 @@ describe("scenario 1 — same-Project conversation switch preserves the whole wo
     useRightDockStore.getState().openPane(projectA, { kind: "terminal" });
     useRightDockStore.getState().setActivePane(projectA, "terminal-pane");
     useRightDockStore.getState().setPreferredWidth(projectA, 520);
-    const scopeA = resolveDockTerminalScope({ projectId: projectA, hostThreadId: threadA1 });
+    const scopeA = resolveDockTerminalScope({ projectId: projectA })!;
     useTerminalStateStore.getState().newTerminal(scopeA, "t1");
     useBrowserStateStore.getState().upsertProjectState({
       version: 1,
@@ -302,7 +301,7 @@ type CapturedRequest = { method: string; payload: Record<string, unknown> };
 function installCapturingTransport(): CapturedRequest[] {
   const captured: CapturedRequest[] = [];
   const transport: WsRequestTransport = {
-    request: (method: string, payload: unknown) => {
+    request: ((method: string, payload?: unknown) => {
       captured.push({ method, payload: (payload ?? {}) as Record<string, unknown> });
       if (method === WS_METHODS.terminalProjectList) {
         return Promise.resolve([
@@ -343,7 +342,7 @@ function installCapturingTransport(): CapturedRequest[] {
         });
       }
       return Promise.resolve(undefined);
-    },
+    }) as WsRequestTransport["request"],
     subscribe: (() => () => undefined) as never,
     getCompatibility: () => ({ capabilities: [] }) as never,
     getState: (() => "open") as never,
@@ -392,7 +391,7 @@ describe("obligation 9 — ProjectId propagation over the WS surface", () => {
 
   it("the routed terminal session uses the Project surface when a ProjectId is present and never falls back silently", async () => {
     const captured = installCapturingTransport();
-    const scope = resolveDockTerminalScope({ projectId: projectA, hostThreadId: threadA1 });
+    const scope = resolveDockTerminalScope({ projectId: projectA })!;
 
     const snapshot = await openTerminalSession(
       { projectId: projectA, threadId: scope, terminalId: "t1" },
@@ -418,7 +417,7 @@ describe("obligation 9 — ProjectId propagation over the WS surface", () => {
 // ── Obligation 10: no synthetic Project-as-Thread ownership ──────────
 
 describe("obligation 10 — negative: no synthetic Project-as-Thread ownership", () => {
-  it("runtime: a Project-owned entry degrades to the legacy surface with its LOCAL scope key — never the bare ProjectId as a ThreadId owner", async () => {
+  it("runtime: a missing Project API fails explicitly and never invokes the legacy Thread surface", async () => {
     // No Project WS transport: the routed entry degrades to the legacy
     // thread-keyed surface. Assert the legacy owner it receives is the dock's
     // LOCAL runtime scope (a `dock-terminal-project:`-prefixed key), never the
@@ -433,19 +432,15 @@ describe("obligation 10 — negative: no synthetic Project-as-Thread ownership",
         },
       },
     } as never);
-    const scope = resolveDockTerminalScope({ projectId: projectA, hostThreadId: threadA1 });
-    expect(String(scope)).toBe(`dock-terminal-project:${projectA}`);
-    await openTerminalSession(
-      { projectId: projectA, threadId: scope, terminalId: "t1" },
-      { cwd: "/repo", cols: 80, rows: 24 },
-    );
-    expect(legacyOpens).toHaveLength(1);
-    const owner = String(legacyOpens[0]?.threadId);
-    expect(owner).toBe(scope);
-    expect(owner).not.toBe(String(projectA));
-    // The local scope is an explicitly-namespaced runtime key, never an
-    // unbranded ProjectId-as-ThreadId alias.
-    expect(owner.startsWith("dock-terminal-project:")).toBe(true);
+    const scope = resolveDockTerminalScope({ projectId: projectA });
+    expect(scope).not.toBeNull();
+    await expect(
+      openTerminalSession(
+        { projectId: projectA, threadId: scope!, terminalId: "t1" },
+        { cwd: "/repo", cols: 80, rows: 24 },
+      ),
+    ).rejects.toThrow("Project terminal is unavailable");
+    expect(legacyOpens).toHaveLength(0);
   });
 
   it("static: no web module exports a ProjectId→ThreadId alias and no owner cast pattern exists", async () => {
@@ -456,8 +451,24 @@ describe("obligation 10 — negative: no synthetic Project-as-Thread ownership",
     // The scope module derives a local runtime key from the ProjectId, and its
     // own contract forbids using it as an owner. Assert both the documented
     // invariant and the absence of any alias helper export.
-    expect(scopeSource).toContain("never used as a `ProjectId` alias");
+    expect(scopeSource).toContain("DockTerminalScopeId");
+    expect(scopeSource).toContain("never a `ThreadId`");
     expect(scopeSource).not.toMatch(/export function \w*(alias|hostThread|threadForProject)/i);
+
+    const browserSource = fs.readFileSync(
+      path.resolve(import.meta.dirname, "./components/BrowserPanel.tsx"),
+      "utf8",
+    );
+    const projectSurfaceStart = browserSource.indexOf("if (projectId !== null) {");
+    const legacySurfaceStart = browserSource.indexOf("  if (!api) return null;", projectSurfaceStart);
+    expect(projectSurfaceStart).toBeGreaterThanOrEqual(0);
+    expect(legacySurfaceStart).toBeGreaterThan(projectSurfaceStart);
+    const projectSurfaceSource = browserSource.slice(projectSurfaceStart, legacySurfaceStart);
+    expect(projectSurfaceSource).toContain("projectBrowser.");
+    expect(projectSurfaceSource).not.toContain("api.browser");
+    expect(browserSource).toContain(
+      "const threadBrowserState = projectId !== null ? projectBrowserState : legacyThreadBrowserState;",
+    );
 
     // Cross-layer static scan: no production source under web/server/desktop
     // composes a Project owner by casting a ProjectId into a ThreadId-typed

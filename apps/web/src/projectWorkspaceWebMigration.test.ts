@@ -24,16 +24,17 @@ function makeStorage(): ProjectWorkspaceWebStorage & {
   removed: string[];
 } {
   const backing = new Map<string, string>();
+  const removed: string[] = [];
   return {
     written: backing,
-    removed: [],
+    removed,
     getItem: (key) => backing.get(key) ?? null,
     setItem: (key, value) => {
       backing.set(key, value);
     },
     removeItem: (key) => {
       backing.delete(key);
-      this.removed.push(key);
+      removed.push(key);
     },
   };
 }
@@ -347,10 +348,7 @@ describe("activateProjectWorkspace — store application", () => {
     expect(dockState?.open).toBe(true);
     expect(dockState?.panes[0]?.kind).toBe("browser");
 
-    const scope = resolveDockTerminalScope({
-      projectId,
-      hostThreadId: ThreadId.makeUnsafe("any-thread"),
-    });
+    const scope = resolveDockTerminalScope({ projectId })!;
     const terminalState =
       useTerminalStateStore.getState().terminalStateByThreadId[scope];
     expect(terminalState?.terminalHeight).toBe(400);
@@ -430,22 +428,14 @@ describe("resolveDockTerminalScope — same-Project continuity", () => {
   it("resolves one stable scope per Project across different conversations", () => {
     const threadA = ThreadId.makeUnsafe("thread-a");
     const threadB = ThreadId.makeUnsafe("thread-b");
-    expect(resolveDockTerminalScope({ projectId, hostThreadId: threadA })).toBe(
-      resolveDockTerminalScope({ projectId, hostThreadId: threadB }),
-    );
-    expect(resolveDockTerminalScope({ projectId, hostThreadId: threadA })).not.toBe(
-      resolveDockTerminalScope({
-        projectId: otherProjectId,
-        hostThreadId: threadA,
-      }),
+    expect(resolveDockTerminalScope({ projectId })).toBe(resolveDockTerminalScope({ projectId }));
+    expect(resolveDockTerminalScope({ projectId })).not.toBe(
+      resolveDockTerminalScope({ projectId: otherProjectId }),
     );
   });
 
   it("never leaks the scope value as a ProjectId-shaped owner", () => {
-    const scope = resolveDockTerminalScope({
-      projectId,
-      hostThreadId: ThreadId.makeUnsafe("thread-a"),
-    });
+    const scope = resolveDockTerminalScope({ projectId })!;
     expect(scope.startsWith("dock-terminal-project:")).toBe(true);
     expect(scope.endsWith(projectId)).toBe(true);
   });

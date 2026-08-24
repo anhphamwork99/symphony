@@ -28,8 +28,19 @@ export interface TerminalRouteInput {
   readonly terminalId: string;
 }
 
-function projectInput(entry: TerminalRouteInput) {
-  return { projectId: entry.projectId as ProjectId, terminalId: entry.terminalId };
+export const PROJECT_TERMINAL_API_UNAVAILABLE =
+  "Project terminal is unavailable. Reconnect to a server that advertises the Project terminal capability.";
+
+function requireProjectTerminalApi() {
+  const projectApi = readProjectTerminalApi();
+  if (!projectApi) {
+    throw new Error(PROJECT_TERMINAL_API_UNAVAILABLE);
+  }
+  return projectApi;
+}
+
+function projectInput(entry: TerminalRouteInput & { readonly projectId: ProjectId }) {
+  return { projectId: entry.projectId, terminalId: entry.terminalId };
 }
 
 /** Open (or reconnect) the session, returning a replayable snapshot. */
@@ -43,19 +54,17 @@ export async function openTerminalSession(
   },
 ): Promise<TerminalSessionSnapshot> {
   if (entry.projectId !== null) {
-    const projectApi = readProjectTerminalApi();
-    if (projectApi) {
-      return projectTerminalSnapshotToThreadSnapshot(
-        await projectApi.open({
-          ...projectInput(entry),
-          cwd: input.cwd,
-          cols: input.cols,
-          rows: input.rows,
-          ...(input.env ? { env: input.env } : {}),
-        }),
-        entry.threadId,
-      );
-    }
+    const projectApi = requireProjectTerminalApi();
+    return projectTerminalSnapshotToThreadSnapshot(
+      await projectApi.open({
+        ...projectInput(entry as TerminalRouteInput & { readonly projectId: ProjectId }),
+        cwd: input.cwd,
+        cols: input.cols,
+        rows: input.rows,
+        ...(input.env ? { env: input.env } : {}),
+      }),
+      entry.threadId,
+    );
   }
   const api = readNativeApi();
   if (!api) {
@@ -74,10 +83,10 @@ export async function openTerminalSession(
 /** Write raw input to the session PTY. */
 export async function writeTerminalSession(entry: TerminalRouteInput, data: string): Promise<void> {
   if (entry.projectId !== null) {
-    const projectApi = readProjectTerminalApi();
-    if (projectApi) {
-      return projectApi.write({ ...projectInput(entry), data });
-    }
+    return requireProjectTerminalApi().write({
+      ...projectInput(entry as TerminalRouteInput & { readonly projectId: ProjectId }),
+      data,
+    });
   }
   const api = readNativeApi();
   if (!api) return;
@@ -94,10 +103,10 @@ export async function acknowledgeTerminalOutput(
   bytes: number,
 ): Promise<void> {
   if (entry.projectId !== null) {
-    const projectApi = readProjectTerminalApi();
-    if (projectApi) {
-      return projectApi.ackOutput({ ...projectInput(entry), bytes });
-    }
+    return requireProjectTerminalApi().ackOutput({
+      ...projectInput(entry as TerminalRouteInput & { readonly projectId: ProjectId }),
+      bytes,
+    });
   }
   const api = readNativeApi();
   if (!api) return;
@@ -114,10 +123,10 @@ export async function resizeTerminalSession(
   size: { cols: number; rows: number },
 ): Promise<void> {
   if (entry.projectId !== null) {
-    const projectApi = readProjectTerminalApi();
-    if (projectApi) {
-      return projectApi.resize({ ...projectInput(entry), ...size });
-    }
+    return requireProjectTerminalApi().resize({
+      ...projectInput(entry as TerminalRouteInput & { readonly projectId: ProjectId }),
+      ...size,
+    });
   }
   const api = readNativeApi();
   if (!api) return;
@@ -139,15 +148,12 @@ export async function closeTerminalSession(
   options?: { readonly deleteHistory?: boolean },
 ): Promise<void> {
   if (entry.projectId !== null) {
-    const projectApi = readProjectTerminalApi();
-    if (projectApi) {
-      await projectApi.close({
-        projectId: entry.projectId,
-        terminalId: entry.terminalId,
-        deleteHistory: options?.deleteHistory ?? true,
-      });
-      return;
-    }
+    await requireProjectTerminalApi().close({
+      projectId: entry.projectId,
+      terminalId: entry.terminalId,
+      deleteHistory: options?.deleteHistory ?? true,
+    });
+    return;
   }
   const api = readNativeApi();
   if (!api || !("close" in api.terminal) || typeof api.terminal.close !== "function") {
@@ -171,7 +177,7 @@ export async function preflightProjectTerminalRunning(
 ): Promise<boolean | null> {
   const projectApi = readProjectTerminalApi();
   if (!projectApi) {
-    return null;
+    throw new Error(PROJECT_TERMINAL_API_UNAVAILABLE);
   }
   const snapshots = await projectApi.list({ projectId }).catch(() => null);
   if (snapshots === null) {

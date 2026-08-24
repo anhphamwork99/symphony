@@ -36,8 +36,14 @@ export function DockTerminalPane(props: {
 }) {
   const scopeId = resolveDockTerminalScope({
     projectId: props.projectId,
-    hostThreadId: props.hostThreadId,
   });
+  if (scopeId === null) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
+        Project terminal is unavailable because this conversation has no resolved Project.
+      </div>
+    );
+  }
   const threadWorkspace = useStore(
     useMemo(() => createThreadWorkspaceMetadataSelector(props.hostThreadId), [props.hostThreadId]),
   );

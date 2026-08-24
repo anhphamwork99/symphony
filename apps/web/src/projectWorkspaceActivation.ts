@@ -140,9 +140,16 @@ export function applyPublishedWorkspace(
   });
 
   const terminalScope = dockTerminalProjectScope(projectId);
-  useTerminalStateStore
-    .getState()
-    .applyPublishedTerminalPresentation(terminalScope, published.terminalPresentation);
+  const terminalPresentation = published.terminalPresentation;
+  useTerminalStateStore.getState().applyPublishedTerminalPresentation(terminalScope, {
+    presentationMode: terminalPresentation.presentationMode,
+    workspaceTab: terminalPresentation.workspaceTab,
+    workspaceLayout: terminalPresentation.workspaceLayout,
+    terminalHeightPx: terminalPresentation.terminalHeightPx,
+    terminalIds: terminalPresentation.terminalIds,
+    activeTerminalId: terminalPresentation.activeTerminalId,
+    terminalLabelsById: terminalPresentation.terminalLabelsById,
+  });
 }
 
 /** Test hook: forget applied Projects so activation can be re-run in isolation. */

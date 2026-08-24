@@ -25,7 +25,7 @@ import {
   CommandId,
   ProjectId,
   ThreadId,
-  type TerminalProjectSessionSnapshot,
+  type TerminalProjectEvent,
 } from "@synara/contracts";
 import { PROJECT_WORKSPACE_CAPABILITY } from "@synara/contracts";
 import { WS_SERVER_CAPABILITIES } from "@synara/contracts";
@@ -582,7 +582,7 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
       const runtime = (
         system as unknown as { terminalRuntime: TerminalManagerRuntime }
       ).terminalRuntime;
-      const opened = await runtime.openProject(openInput("acc-archive"));
+      await runtime.openProject(openInput("acc-archive"));
       const process = system.ptyAdapter.processes[0];
       expect(process).toBeDefined();
 

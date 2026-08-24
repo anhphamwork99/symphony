@@ -60,7 +60,11 @@ import {
 import { useStore } from "../store";
 import { EMPTY_THREAD_IDS } from "../storeState";
 import { createAllThreadsSelector } from "../storeSelectors";
-import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  selectThreadTerminalState,
+  useTerminalStateStore,
+  type TerminalStateScope,
+} from "../terminalStateStore";
 import { terminalActivityFromEvent } from "../terminalActivity";
 import {
   onServerConfigUpdated,
@@ -79,7 +83,6 @@ import { invalidateProjectFileQueriesForCwds, projectQueryKeys } from "../lib/pr
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { useProjectRunStore } from "../projectRunStore";
 import {
-  dockTerminalDraftScope,
   dockTerminalProjectScope,
 } from "../lib/dockTerminalScope";
 import {
@@ -1487,22 +1490,17 @@ function EventRouter() {
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
-      const activeThreadIds = collectActiveTerminalThreadIds({
+      const activeThreadIds = new Set<TerminalStateScope>(collectActiveTerminalThreadIds({
         snapshotThreads: getThreadsFromState(useStore.getState()).map((thread) => ({
           id: thread.id,
           deletedAt: null,
           archivedAt: thread.archivedAt ?? null,
         })),
         draftThreadIds,
-      });
+      }));
       // Right-dock terminals live under the owning Project's scope (Decision
       // 0002): retain the scope of every live Project so docked terminals are
-      // never pruned by conversation churn. Draft-thread fallback scopes ride
-      // along with their thread id. Snapshot first: we mutate the set while
-      // iterating its prior membership.
-      for (const activeThreadId of Array.from(activeThreadIds)) {
-        activeThreadIds.add(dockTerminalDraftScope(activeThreadId));
-      }
+      // never pruned by conversation churn. There is no draft-thread scope.
       const snapshotThreadsForScopes = getThreadsFromState(useStore.getState());
       const seenProjectIds = new Set<string>();
       for (const thread of snapshotThreadsForScopes) {

@@ -69,8 +69,7 @@ function routeActiveThreadDock(activeThreadId: ThreadId | null) {
   const dockState = selectRightDockState(ownerProjectId)(useRightDockStore.getState());
   const terminalScope = resolveDockTerminalScope({
     projectId: ownerProjectId,
-    hostThreadId: activeThreadId ?? ThreadId.makeUnsafe(""),
-  });
+  })!
   return { ownerProjectId, dockState, terminalScope };
 }
 
@@ -84,7 +83,7 @@ describe("Project-owned dock routing — same-Project conversation switch (A →
     useRightDockStore.getState().openPane(projectA, { kind: "browser" });
     useRightDockStore.getState().openPane(projectA, { kind: "sidechat", threadId: threadA2 });
     // Seed the Project's dock terminal slice under its scope with a live runtime.
-    const scopeA = resolveDockTerminalScope({ projectId: projectA, hostThreadId: threadA1 });
+    const scopeA = resolveDockTerminalScope({ projectId: projectA })!;
     useTerminalStateStore.getState().newTerminal(scopeA, "t1");
 
     const fromA = routeActiveThreadDock(threadA1);
@@ -138,7 +137,7 @@ describe("Project-owned dock routing — same-Project conversation switch (A →
 describe("Project-owned dock routing — different-Project switch", () => {
   it("resolves a different dock slice and terminal scope key", () => {
     useRightDockStore.getState().openPane(projectA, { kind: "browser" });
-    useRightDockStore.getState().openPane(projectB, { kind: "files" });
+    useRightDockStore.getState().openPane(projectB, { kind: "file" });
 
     const fromA = routeActiveThreadDock(threadA1);
     const fromB1 = routeActiveThreadDock(threadB1);
@@ -147,11 +146,11 @@ describe("Project-owned dock routing — different-Project switch", () => {
     expect(fromB1.ownerProjectId).toBe(projectB);
     expect(fromB1.dockState).not.toBe(fromA.dockState);
     expect(fromA.terminalScope).not.toBe(fromB1.terminalScope);
-    expect(fromA.terminalScope).toBe(`dock-terminal-project:${projectA}` as ThreadId);
-    expect(fromB1.terminalScope).toBe(`dock-terminal-project:${projectB}` as ThreadId);
+    expect(fromA.terminalScope).toBe(`dock-terminal-project:${projectA}`);
+    expect(fromB1.terminalScope).toBe(`dock-terminal-project:${projectB}`);
     // Each Project reads only its own slice.
     expect(fromA.dockState.panes.map((pane) => pane.kind)).toEqual(["browser"]);
-    expect(fromB1.dockState.panes.map((pane) => pane.kind)).toEqual(["files"]);
+    expect(fromB1.dockState.panes.map((pane) => pane.kind)).toEqual(["file"]);
   });
 
   it("yields the stable default snapshot for a Project without persisted state", () => {
