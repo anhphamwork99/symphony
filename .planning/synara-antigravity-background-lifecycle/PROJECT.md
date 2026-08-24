@@ -1,6 +1,9 @@
 # PROJECT — Antigravity background lifecycle
 
-Status: candidate
+Status: accepted
+
+Final acceptance:
+`decisions/0001-accept-integrated-antigravity-background-lifecycle.md`
 
 Project home:
 `/private/tmp/symphony-agy-bg-lifecycle/.planning/synara-antigravity-background-lifecycle`
