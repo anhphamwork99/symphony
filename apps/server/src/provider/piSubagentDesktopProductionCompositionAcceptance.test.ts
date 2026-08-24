@@ -64,6 +64,9 @@ const POISONED_ARTIFACT_VALUE = "/poison/inherited/pi-subagent-artifact";
 const HOSTILE_MODEL_ID = "t04-wp2-hostile-unavailable-model";
 const LEGIT_AUTH_SENTINEL = "t04-wp2-auth-preserved";
 const LEGIT_MODELS_SENTINEL = "t04-wp2-models-preserved";
+const HOSTILE_PROTOCOL_SECRET = "sk-hostile-99";
+const HOSTILE_PROTOCOL_PATH = "/private/hostile";
+const INNOCENT_STACK_LOCATION = "PiAdapter.ts:3596:99";
 const TURN_PROMPT = "Delegate this packaged desktop acceptance task to one researcher subagent.";
 const createdRoots: string[] = [];
 
@@ -212,7 +215,10 @@ function rewriteParentDecoy(parentAgentDir: string): string {
   return decoyDir;
 }
 
-function deriveBackendEnv(layout: ReleaseLayout, poisonedAgentDir: string): {
+function deriveBackendEnv(
+  layout: ReleaseLayout,
+  poisonedAgentDir: string,
+): {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly backendEnv: NodeJS.ProcessEnv;
 } {
@@ -358,7 +364,11 @@ async function createThread(
   return threadId;
 }
 
-async function startTurn(harness: RealPiWsHarness, threadId: ThreadId, suffix: string): Promise<void> {
+async function startTurn(
+  harness: RealPiWsHarness,
+  threadId: ThreadId,
+  suffix: string,
+): Promise<void> {
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
     commandId: CommandId.makeUnsafe(`cmd-t04-wp2-turn-${suffix}`),
@@ -477,8 +487,7 @@ function assertNoSensitiveTokens(
     TURN_PROMPT,
     "prompt",
     "cause",
-    "sk-hostile",
-    "/private/hostile",
+    HOSTILE_PROTOCOL_PATH,
     ...extraForbidden,
   ]) {
     if (forbidden.length > 0) expect(detail).not.toContain(forbidden);
@@ -492,6 +501,8 @@ function assertNoSensitiveTokens(
  * hostile negotiated protocol VERSION must not reach the operator surface in
  * any contextual form: prose ("protocol 99"), JSON field values, or
  * offered/supported version enumerations. These patterns pin that intent.
+ * Stack locations and other harmless diagnostics can contain the same digits;
+ * complete hostile secret and path values remain forbidden independently.
  */
 const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
   /protocol\s*version\s*[:=#]?\s*99\b/i,
@@ -511,6 +522,14 @@ function assertNoHostileProtocolVersion(detail: string): void {
       `detail must not match hostile protocol-version pattern ${String(pattern)}`,
     ).not.toMatch(pattern);
   }
+}
+
+function assertInnocentStackNumberIsAllowed(): void {
+  const diagnostic = `Error: bounded bootstrap failure\n    at ${INNOCENT_STACK_LOCATION}`;
+  expect(diagnostic).toContain("99");
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_SECRET);
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_PATH);
+  assertNoHostileProtocolVersion(diagnostic);
 }
 
 async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
@@ -692,9 +711,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
 
       const admission = await waitFor(
         () =>
-          harness.observedAdmissions().find(
-            (event) => String(event.threadId) === String(threadId),
-          ),
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
         (event) => event.result.status !== "rejected",
         90_000,
         "one real managed Agent admission",
@@ -915,14 +932,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         label: "digest-mismatch",
         category: "digest_mismatch",
         mutate: (artifactDir) => {
-          const entry = join(
-            artifactDir,
-            "agent",
-            "extensions",
-            "pi-subagents",
-            "src",
-            "index.ts",
-          );
+          const entry = join(artifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts");
           writeFileSync(entry, `${readFileSync(entry, "utf8")}\n// corrupt byte\n`, "utf8");
         },
       },
@@ -945,7 +955,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
       {
         label: "unsupported-protocol",
         category: "unsupported_version:pi_subagent_unsupported_version",
-        forbidden: ["Hostile extension demands", "sk-hostile"],
+        forbidden: ["Hostile extension demands", HOSTILE_PROTOCOL_SECRET],
         mutate: (artifactDir) =>
           patchHandshakeArtifact(
             artifactDir,
@@ -955,7 +965,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         protocolVersion: 99,
         supportedProtocolVersions: [99],
         extensionVersion: EXTENSION_VERSION,
-        detail: "Hostile extension demands 99 sk-hostile /private/hostile",
+        detail: "Hostile extension demands protocol version 99 with secret/path material sk-hostile-99 /private/hostile",
       };`,
           ),
       },
@@ -978,6 +988,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
       },
     ];
 
+    assertInnocentStackNumberIsAllowed();
     for (const failure of failures) {
       await runFailureLeg(failure);
     }

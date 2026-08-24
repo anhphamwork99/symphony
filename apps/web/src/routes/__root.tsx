@@ -5,6 +5,7 @@ import {
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type OrchestrationThread,
+  type ProjectId,
   type ServerConfig,
   type ServerProviderStatus,
   type WsCompatibilityError,
@@ -59,7 +60,11 @@ import {
 import { useStore } from "../store";
 import { EMPTY_THREAD_IDS } from "../storeState";
 import { createAllThreadsSelector } from "../storeSelectors";
-import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  selectThreadTerminalState,
+  useTerminalStateStore,
+  type TerminalStateScope,
+} from "../terminalStateStore";
 import { terminalActivityFromEvent } from "../terminalActivity";
 import {
   onServerConfigUpdated,
@@ -77,7 +82,13 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { invalidateProjectFileQueriesForCwds, projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { useProjectRunStore } from "../projectRunStore";
-import { dockTerminalThreadId } from "../lib/dockTerminalScope";
+import {
+  dockTerminalProjectScope,
+} from "../lib/dockTerminalScope";
+import {
+  activateProjectWorkspace,
+  type ProjectWorkspaceThreadSnapshot,
+} from "../projectWorkspaceActivation";
 import { TaskCompletionNotifications } from "../notifications/taskCompletion";
 import { useWorkspacePathsStore } from "../workspacePathsStore";
 import {
@@ -277,6 +288,7 @@ function RootRouteView() {
           <AppSnapWelcomeDialog />
           <AppSnapCoordinator />
           <DesktopProjectBootstrap />
+          <ProjectWorkspaceActivation />
           <Outlet />
         </AnchoredToastProvider>
       </ToastProvider>
@@ -1042,17 +1054,34 @@ function EventRouter() {
   // Right-dock sidechat panes render a full ChatView for their embedded thread,
   // so they need a detail lease exactly like split-view panes: without one the
   // sidechat's snapshot never syncs and its transcript stays on the loading state.
-  const dockStateByThreadId = useRightDockStore((store) => store.dockStateByThreadId);
+  const dockStateByProjectId = useRightDockStore((store) => store.dockStateByProjectId);
+  // The dock belongs to the Project (Decision 0002): resolve each host
+  // thread's owning project so sidechat lease derivation reads the Project's
+  // dock slice, never a per-thread slice.
+  // Subscribe to the stable summary map (not a derived array) so the store
+  // subscription keeps reference equality between updates.
+  const sidebarThreadSummaryById = useStore((store) => store.sidebarThreadSummaryById);
+  const hostOwnerProjectIds = useMemo(() => {
+    const seen = new Set<ProjectId>();
+    for (const threadId of hostThreadIds) {
+      const projectId = sidebarThreadSummaryById[threadId]?.projectId;
+      if (projectId && !seen.has(projectId)) {
+        seen.add(projectId);
+      }
+    }
+    return [...seen];
+  }, [hostThreadIds, sidebarThreadSummaryById]);
   const visibleThreadIds = useMemo(
     () => [
       ...hostThreadIds,
       ...resolveVisibleDockSidechatThreadIds({
         dockRendered: routeSearch.view !== "editor",
-        dockStateByThreadId,
-        hostThreadIds,
+        dockStateByProjectId,
+        hostProjectIds: hostOwnerProjectIds,
+        hostThreadIds: hostThreadIds,
       }),
     ],
-    [dockStateByThreadId, hostThreadIds, routeSearch.view],
+    [dockStateByProjectId, hostOwnerProjectIds, hostThreadIds, routeSearch.view],
   );
   const retainedThreadIds = useRetainedThreadDetailIds();
   const serverThreadIdSet = useMemo(() => new Set(serverThreadIds), [serverThreadIds]);
@@ -1105,6 +1134,7 @@ function EventRouter() {
     let providerDiscoveryInvalidationFingerprint: string | null = null;
     let shellSnapshotSequence = -1;
     let pendingShellEvents: OrchestrationShellStreamEvent[] = [];
+    const acknowledgedProjectRemovals = new Set<ProjectId>();
     const subscribedThreadIds = new Set<ThreadId>();
     const threadSnapshotSequenceById = new Map<ThreadId, number>();
     const pendingThreadEventsById = new Map<ThreadId, OrchestrationEvent[]>();
@@ -1258,6 +1288,15 @@ function EventRouter() {
       }
     };
 
+    const applyShellEventWithDesktopProjectRemoval = (event: OrchestrationShellStreamEvent) => {
+      applyShellEvent(event);
+      if (event.kind !== "project-removed" || acknowledgedProjectRemovals.has(event.projectId)) {
+        return;
+      }
+      acknowledgedProjectRemovals.add(event.projectId);
+      void api.projectBrowser?.removeProject({ projectId: event.projectId }).catch(() => undefined);
+    };
+
     const flushShellBuffer = (snapshotSequence: number) => {
       const nextPending = pendingShellEvents
         .filter((event) => event.sequence > snapshotSequence)
@@ -1265,7 +1304,7 @@ function EventRouter() {
       pendingShellEvents = [];
       for (const event of nextPending) {
         shellSnapshotSequence = Math.max(shellSnapshotSequence, event.sequence);
-        applyShellEvent(event);
+        applyShellEventWithDesktopProjectRemoval(event);
       }
     };
 
@@ -1461,19 +1500,28 @@ function EventRouter() {
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
-      const activeThreadIds = collectActiveTerminalThreadIds({
+      const activeThreadIds = new Set<TerminalStateScope>(collectActiveTerminalThreadIds({
         snapshotThreads: getThreadsFromState(useStore.getState()).map((thread) => ({
           id: thread.id,
           deletedAt: null,
           archivedAt: thread.archivedAt ?? null,
         })),
         draftThreadIds,
-      });
-      // Right-dock terminals live under a synthetic scope derived from each active
-      // thread; retain those scopes so docked terminals are not pruned mid-session.
-      // Snapshot first: we mutate the set while iterating its prior membership.
-      for (const activeThreadId of Array.from(activeThreadIds)) {
-        activeThreadIds.add(dockTerminalThreadId(activeThreadId));
+      }));
+      // Right-dock terminals live under the owning Project's scope (Decision
+      // 0002): retain the scope of every live Project so docked terminals are
+      // never pruned by conversation churn. There is no draft-thread scope.
+      const snapshotThreadsForScopes = getThreadsFromState(useStore.getState());
+      const seenProjectIds = new Set<string>();
+      for (const thread of snapshotThreadsForScopes) {
+        // Deletion authority is the store's `threadIds` collection itself: the
+        // normalized projection tombstones deleted threads out of it, so a
+        // thread present here is durable and non-deleted. Only archived threads
+        // must be skipped client-side.
+        if (thread.archivedAt != null) continue;
+        if (seenProjectIds.has(thread.projectId)) continue;
+        seenProjectIds.add(thread.projectId);
+        activeThreadIds.add(dockTerminalProjectScope(thread.projectId));
       }
       removeOrphanedTerminalStates(activeThreadIds);
     };
@@ -1761,7 +1809,7 @@ function EventRouter() {
         return;
       }
       shellSnapshotSequence = item.sequence;
-      applyShellEvent(item);
+      applyShellEventWithDesktopProjectRemoval(item);
       if (item.kind === "thread-upserted") {
         reconcilePromotedDraftsFromShellThreads([item.thread]);
       }
@@ -2197,6 +2245,52 @@ function EventRouter() {
     }
     void reconcile(subscribedThreadIds);
   }, [subscribedThreadIds]);
+
+  return null;
+}
+
+/**
+ * Activate the Project-owned Right-sidebar workspace (Decision 0002, WP6):
+ * once the shell snapshot is hydrated, run the v1→v2 localStorage migration
+ * for every known Project (marker-gated, idempotent, v1 untouched) and apply
+ * the published slices into the live stores. An unpublished/incomplete
+ * boundary never activates; readers keep their prior compatible state and the
+ * next activation attempt retries from the same snapshot.
+ */
+function ProjectWorkspaceActivation() {
+  const threadsHydrated = useStore((store) => store.threadsHydrated);
+  const threads = useStore(selectAllThreads);
+
+  useEffect(() => {
+    if (!threadsHydrated || typeof window === "undefined") {
+      return;
+    }
+    const threadsByProject = new Map<string, ProjectWorkspaceThreadSnapshot[]>();
+    for (const thread of threads) {
+      const bucket = threadsByProject.get(thread.projectId) ?? [];
+      bucket.push({
+        threadId: thread.id,
+        projectId: thread.projectId,
+        // Decision 0002 C.1 orders candidates by the durable Thread
+        // `updatedAt` only. The web Thread type marks it optional, and
+        // `settledAt`/`createdAt` are different timestamps whose use would
+        // fabricate an ordering authority — so a missing `updatedAt` fails
+        // closed (the policy drops the thread as not durably orderable).
+        updatedAt: thread.updatedAt ?? null,
+        deletedAt: null,
+        archivedAt: thread.archivedAt ?? null,
+      });
+      threadsByProject.set(thread.projectId, bucket);
+    }
+    for (const [projectId, projectThreads] of threadsByProject) {
+      activateProjectWorkspace({
+        projectId: projectId as ProjectId,
+        threads: projectThreads,
+        storage: window.localStorage,
+        nowIso: new Date().toISOString(),
+      });
+    }
+  }, [threads, threadsHydrated]);
 
   return null;
 }

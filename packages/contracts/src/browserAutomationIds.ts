@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { CommandId, EnvironmentId, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas";
+import { CommandId, EnvironmentId, NonNegativeInt, PositiveInt, ProjectId, ThreadId } from "./baseSchemas";
 import { BoundedUtf8String, utf8ByteLength } from "./browserAutomationBounds";
 
 const BrowserUuidId = <Brand extends string>(brand: Brand) =>
@@ -25,6 +25,15 @@ export const BrowserEnvironmentId = EnvironmentId.check(
 );
 export const BrowserThreadId = ThreadId.check(
   Schema.makeFilter((value: typeof ThreadId.Type) => utf8ByteLength(value) <= 128),
+);
+/**
+ * The owning Project of a browser automation workspace (Decision 0002): a
+ * real `ProjectId`, bounded like `BrowserThreadId`. It is never a `ProjectId`
+ * disguised as a `ThreadId` — automation state routes by Project ownership,
+ * while conversation-scoped references keep `BrowserThreadId`.
+ */
+export const BrowserProjectId = ProjectId.check(
+  Schema.makeFilter((value: typeof ProjectId.Type) => utf8ByteLength(value) <= 128),
 );
 export const BrowserCommandId = CommandId.check(
   Schema.makeFilter((value: typeof CommandId.Type) => utf8ByteLength(value) <= 128),
@@ -59,6 +68,7 @@ export type BrowserElementRef = typeof BrowserElementRef.Type;
 export type BrowserIdempotencyKey = typeof BrowserIdempotencyKey.Type;
 export type BrowserEnvironmentId = typeof BrowserEnvironmentId.Type;
 export type BrowserThreadId = typeof BrowserThreadId.Type;
+export type BrowserProjectId = typeof BrowserProjectId.Type;
 export type BrowserCommandId = typeof BrowserCommandId.Type;
 export type BrowserAuthorizationRequestId = typeof BrowserAuthorizationRequestId.Type;
 export type BrowserAuthorizationEpoch = typeof BrowserAuthorizationEpoch.Type;

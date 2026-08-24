@@ -4591,7 +4591,11 @@ export default function ChatView({
   );
   // The terminal's panel toggle mirrors the right dock's collapse control: it shows
   // or hides the side panel only when this thread already has a pane to show.
-  const rightDockOpen = useRightDockStore((store) => selectRightDockState(threadId)(store).open);
+  // The dock belongs to the Project (Decision 0002): these flags track the
+  // Project-owned workspace, not the active conversation.
+  const rightDockOpen = useRightDockStore(
+    (store) => selectRightDockState(activeProjectId)(store).open,
+  );
   const isMobileViewport = useIsMobile();
   // Temporary threads are visually identical to regular chats — they use the same
   // Environment panel + header controls. "Temporary" is purely a sidebar badge +
@@ -4653,12 +4657,13 @@ export default function ChatView({
     providerOptions: providerOptionsForDispatch ?? null,
   });
   const hasRightDockPanes = useRightDockStore(
-    (store) => selectRightDockState(threadId)(store).panes.length > 0,
+    (store) => selectRightDockState(activeProjectId)(store).panes.length > 0,
   );
   const setRightDockOpen = useRightDockStore((store) => store.setDockOpen);
   const toggleRightDock = useCallback(() => {
-    setRightDockOpen(threadId, !rightDockOpen);
-  }, [rightDockOpen, setRightDockOpen, threadId]);
+    if (activeProjectId === null) return;
+    setRightDockOpen(activeProjectId, !rightDockOpen);
+  }, [activeProjectId, rightDockOpen, setRightDockOpen]);
   const terminalDrawerProps = useMemo(
     () => ({
       threadId,

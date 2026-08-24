@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 
+import { PROJECT_WORKSPACE_CAPABILITY } from "./projectWorkspace";
 import { NonNegativeInt } from "./baseSchemas";
 
 export const WS_PROTOCOL_EPOCH = 1;
@@ -54,6 +55,11 @@ export const WS_SERVER_CAPABILITIES = [
   // Optional feature capability: older servers may omit it without making the
   // rest of a newer client unusable during a staggered rollout.
   WS_GITHUB_PROJECT_PROVISIONING_CAPABILITY,
+  // Optional feature capability (same rollout convention): the server keys
+  // Right-sidebar workspace operations by the owning Project and runs the
+  // staged v1→v2 workspace publication before command-ready. Older servers
+  // omit it and a newer client keeps its legacy Thread-keyed reads.
+  PROJECT_WORKSPACE_CAPABILITY,
   // Single-handshake connect: negotiation is available over plain HTTP at
   // WS_NEGOTIATE_HTTP_PATH, so a connect costs exactly one WebSocket upgrade.
   "transport.http-negotiate",

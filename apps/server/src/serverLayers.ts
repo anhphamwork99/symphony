@@ -61,6 +61,8 @@ import { ThreadDiagnosticsQueryLive } from "./diagnostics/Layers/ThreadDiagnosti
 import { ManagedAttachmentCleanupLive } from "./managedAttachmentCleanup";
 import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService";
 import { PiSubagentExecutionRepositoryLive } from "./persistence/Layers/PiSubagentExecutionRepository";
+import { ProjectWorkspaceStoreLive } from "./projectWorkspace/Layers/ProjectWorkspaceStore";
+import { ProjectWorkspaceMigrationCoordinatorLive } from "./projectWorkspace/projectWorkspaceMigrationCoordinator";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { makePiSubagentParentEffectDispatcher } from "./provider/piSubagentParentEffectDispatcher";
 import { makePiSubagentExecutionCardBridge } from "./provider/piSubagentExecutionCardBridge";
@@ -193,6 +195,7 @@ export function makeServerRuntimeServicesLayer(
       Layer.provideMerge(profileStatsArchiveLayer),
       Layer.provideMerge(OrchestrationLayerLive),
       Layer.provideMerge(TerminalLayerLive),
+      Layer.provideMerge(ProjectWorkspaceStoreLive),
     ),
     DeviceServiceLive,
   );
@@ -283,6 +286,8 @@ export function makeServerRuntimeServicesLayer(
     managedAttachmentCleanupLayer,
     AutomationRepositoryLive,
     PiSubagentExecutionRepositoryLive,
+    ProjectWorkspaceStoreLive,
+    ProjectWorkspaceMigrationCoordinatorLive,
     AgentGatewayOperationRepositoryLive,
     ExternalMcpRepositoryLive,
     externalMcpServiceLayer,

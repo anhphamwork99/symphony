@@ -5,6 +5,7 @@ import {
   DEFAULT_TERMINAL_ID,
   DEVICE_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
+  ProjectId,
   ThreadId,
   WS_BOOTSTRAP_METHOD,
   WS_BOOTSTRAP_PATH,
@@ -18,6 +19,7 @@ import {
   WsRpcError,
   PullRequestsUnavailableError,
   type DeviceEvent,
+  type DeviceProjectEvent,
   type GitActionProgressEvent,
   type GitHubProjectProvisionProgressEvent,
   type GitWorktreeSetupProgressEvent,
@@ -1145,6 +1147,82 @@ const makeWsRpcHandlersLayer = () =>
       // critical section below (same pattern as the impl-08 reconcile path).
       const mcpSessionAuthority = yield* McpSessionAuthority;
 
+      // WP5: raw device manager handlers. The WS group below spreads these and
+      // then overrides ONLY the three Project-owned request routes with the
+      // active-Project admission guard; the Thread-keyed device routes are the
+      // untouched legacy surface.
+      const deviceHandlers = makeWsDeviceHandlers(deviceService);
+
+      // Admission (review remediation): the OWNING Project must exist and not
+      // be deleted in the authoritative orchestration read model — the Project
+      // terminal workspace is owned by a real Project record, so a nonexistent
+      // or deleted ProjectId is rejected before the terminal runtime is
+      // touched. `list`/`close`/subscription stay admission-free: they are the
+      // truthful surfaces the deletion flow itself uses.
+      const requireActiveProjectForTerminal = (projectId: ProjectId) =>
+        orchestrationEngine.getReadModel().pipe(
+          Effect.flatMap((readModel) => {
+            const project = readModel.projects.find(
+              (candidate) => candidate.id === projectId && candidate.kind === "project",
+            );
+            if (project === undefined) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' does not exist; project terminals require an existing Project.`,
+                  code: "PROJECT_NOT_FOUND",
+                  retryable: false,
+                }),
+              );
+            }
+            if (project.deletedAt !== null) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' was deleted; its terminal workspace no longer exists.`,
+                  code: "PROJECT_DELETED",
+                  retryable: false,
+                }),
+              );
+            }
+            return Effect.void;
+          }),
+        );
+
+      // WP5 (Decision 0002): the same active-Project admission for the
+      // Project-owned device workspace. A device attachment must belong to a
+      // real, live Project — a nonexistent or deleted ProjectId is rejected
+      // before the device runtime is touched, so a stale client can never
+      // fabricate a workspace for a Project that no longer exists. All three
+      // request routes are guarded (unlike terminals, no deletion-flow surface
+      // needs an admission-free device read); the event subscription is not a
+      // request and stays a plain stream.
+      const requireActiveProjectForDevice = (projectId: ProjectId) =>
+        orchestrationEngine.getReadModel().pipe(
+          Effect.flatMap((readModel) => {
+            const project = readModel.projects.find(
+              (candidate) => candidate.id === projectId && candidate.kind === "project",
+            );
+            if (project === undefined) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' does not exist; project devices require an existing Project.`,
+                  code: "PROJECT_NOT_FOUND",
+                  retryable: false,
+                }),
+              );
+            }
+            if (project.deletedAt !== null) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' was deleted; its device workspace no longer exists.`,
+                  code: "PROJECT_DELETED",
+                  retryable: false,
+                }),
+              );
+            }
+            return Effect.void;
+          }),
+        );
+
       return AdmittedWsFeatureRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           rpcEffect(
@@ -1922,6 +2000,78 @@ const makeWsRpcHandlersLayer = () =>
             ),
           ),
 
+        // ── Project-owned terminal routes (Decision 0002) ──────────────
+        // Same runtime machinery as the thread routes above, keyed by the
+        // real ProjectId. Project terminals never touch the thread title
+        // tracker: their lifetime is the Project workspace, not a
+        // conversation, so conversation rename side effects do not apply.
+        [WS_METHODS.terminalProjectOpen]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.openProject(input)),
+            ),
+            "Failed to open project terminal",
+          ),
+        [WS_METHODS.terminalProjectWrite]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.writeProject(input)),
+            ),
+            "Failed to write project terminal",
+          ),
+        [WS_METHODS.terminalProjectAckOutput]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.ackOutputProject(input)),
+            ),
+            "Failed to acknowledge project terminal output",
+          ),
+        [WS_METHODS.terminalProjectResize]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.resizeProject(input)),
+            ),
+            "Failed to resize project terminal",
+          ),
+        [WS_METHODS.terminalProjectClear]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.clearProject(input)),
+            ),
+            "Failed to clear project terminal",
+          ),
+        [WS_METHODS.terminalProjectRestart]: (input) =>
+          rpcEffect(
+            requireActiveProjectForTerminal(input.projectId).pipe(
+              Effect.andThen(terminalManager.restartProject(input)),
+            ),
+            "Failed to restart project terminal",
+          ),
+        [WS_METHODS.terminalProjectClose]: (input) =>
+          rpcEffect(terminalManager.closeProject(input), "Failed to close project terminal"),
+        [WS_METHODS.terminalProjectList]: (input) =>
+          // Preflight surface for the WP6 delete-confirmation warning: the
+          // client lists the Project's terminals (with truthful exited/
+          // running state) before warning about active work.
+          rpcEffect(
+            terminalManager.listProjectTerminals({ projectId: input.projectId }),
+            "Failed to list project terminals",
+          ),
+        [WS_METHODS.subscribeTerminalProjectEvents]: (_, { clientId }) =>
+          // Lossless for the same reason as thread terminal events.
+          streamAdmission.guard(
+            clientId,
+            { key: "terminal.project.events" },
+            Stream.callback((queue) =>
+              Effect.gen(function* () {
+                const unsubscribe = yield* terminalManager.subscribeProject((event) => {
+                  Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                });
+                yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+              }),
+            ),
+          ),
+
         [WS_METHODS.serverGetConfig]: () =>
           rpcEffect(loadServerConfig, "Failed to load server config"),
         [WS_METHODS.serverGetEnvironment]: () =>
@@ -2276,7 +2426,57 @@ const makeWsRpcHandlersLayer = () =>
             ),
           ),
 
-        ...makeWsDeviceHandlers(deviceService),
+        ...deviceHandlers,
+        // ── Project-owned device admission (WP5, Decision 0002) ─────
+        // `makeWsDeviceHandlers` provides the raw manager calls; these thin
+        // overrides wrap exactly the three project request routes in the
+        // active-Project guard declared above. Thread-keyed device routes are
+        // untouched (legacy surface).
+        [DEVICE_WS_METHODS.getProjectState]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.getProjectState](input)),
+            ),
+            "Failed to read project device state",
+          ),
+        [DEVICE_WS_METHODS.attachProject]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.attachProject](input)),
+            ),
+            "Failed to attach device to project",
+          ),
+        [DEVICE_WS_METHODS.detachProject]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.detachProject](input)),
+            ),
+            "Failed to detach device from project",
+          ),
+        [DEVICE_WS_METHODS.subscribeProjectEvents]: (_, { clientId }) =>
+          // Project-keyed pushes: every event names its owning ProjectId, so a
+          // single lossy stream serves every Project pane (full versioned
+          // snapshots; see the thread-events comment above). Same
+          // `Stream.never`-when-unsupported contract as `device.events` so a
+          // zombie-socket reconnect loop cannot start on platforms without a
+          // device engine.
+          streamAdmission.guard(
+            clientId,
+            { key: "device.project.events" },
+            deviceService?.supported !== true
+              ? Stream.never
+              : bufferLiveUiStream(
+                  Stream.callback<DeviceProjectEvent>((queue) =>
+                    Effect.gen(function* () {
+                      const unsubscribe = deviceService.manager.onProjectEvent((event) => {
+                        Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                      });
+                      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+                    }),
+                  ),
+                  { label: "device.project.events" },
+                ),
+          ),
         [DEVICE_WS_METHODS.subscribeEvents]: (_, { clientId }) =>
           streamAdmission.guard(
             clientId,

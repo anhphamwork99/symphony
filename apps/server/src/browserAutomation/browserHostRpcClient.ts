@@ -2,7 +2,7 @@ import * as FS from "node:fs";
 import * as Net from "node:net";
 import * as OS from "node:os";
 
-import type { BrowserToolName, ProviderKind, ThreadId } from "@synara/contracts";
+import type { BrowserToolName, ProjectId, ProviderKind, ThreadId } from "@synara/contracts";
 
 const FRAME_HEADER_BYTES = 4;
 // A bounded 8 MiB PNG expands to roughly 10.7 MiB as base64 inside the
@@ -258,7 +258,15 @@ export interface BrowserHostToolCall {
   readonly capability: string;
   readonly sessionKey: string;
   readonly provider: ProviderKind;
+  /** Caller conversation; provenance only (Decision 0002). */
   readonly threadId: ThreadId;
+  /**
+   * The real owning Project of the browser automation workspace, resolved
+   * server-side. Forwarded as `project_id` so the desktop host can key
+   * automation affinity by Project; hosts that predate the field ignore it
+   * (additive JSON-RPC params), which keeps the legacy frame compatible.
+   */
+  readonly projectId?: ProjectId;
   readonly name: BrowserToolName;
   readonly arguments: Record<string, unknown>;
   /** Server-resolved authenticated thread workspace. Never sourced from MCP arguments. */
@@ -314,6 +322,7 @@ export async function callBrowserHostTool(input: BrowserHostToolCall): Promise<u
         session_id: input.sessionKey,
         provider: input.provider,
         thread_id: input.threadId,
+        ...(input.projectId === undefined ? {} : { project_id: input.projectId }),
         name: input.name,
         arguments: { ...input.arguments, timeoutMs: executeBudget },
         ...(input.workspaceRoot === undefined ? {} : { workspace_root: input.workspaceRoot }),

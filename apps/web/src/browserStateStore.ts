@@ -1,16 +1,24 @@
 /**
- * Lightweight browser metadata cache keyed by thread.
+ * Lightweight browser metadata cache keyed by the owning workspace.
  *
  * The live browser surface stays in Electron; the web app only keeps enough
- * state to render tabs/toolbars and survive thread switches predictably.
+ * state to render tabs/toolbars and survive workspace switches predictably.
+ *
+ * Project ownership (Decision 0002): the Project-keyed records below are the
+ * v2 Right-sidebar browser workspace — one slice per Project, shared directly
+ * by every Main conversation in it. The Thread-keyed records remain the legacy
+ * v1 cache for the not-yet-migrated desktop bridge surface; published Project
+ * data wins and the two are never merged.
  */
 
-import type { ThreadBrowserState, ThreadId } from "@synara/contracts";
+import type { ProjectBrowserState, ProjectId, ThreadBrowserState, ThreadId } from "@synara/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { isPlainObject, sanitizeStringKeyedRecord } from "./persistedRecord";
 
-const BROWSER_STATE_STORAGE_KEY = "synara:browser-state:v1";
+// v2 is the Project-keyed boundary; the v1 Thread-keyed blob stays on disk
+// untouched as the migration input and rollback source (Decision 0002 G).
+const BROWSER_STATE_STORAGE_KEY = "synara:browser-state:v2";
 const BROWSER_HISTORY_LIMIT = 12;
 const EMPTY_BROWSER_HISTORY: BrowserHistoryEntry[] = [];
 
@@ -27,9 +35,15 @@ export interface BrowserHistoryEntry {
 }
 
 interface BrowserStateStore {
+  /** Legacy v1 Thread-keyed cache (desktop bridge surface, retained read-only). */
   threadStatesByThreadId: Record<string, ThreadBrowserState | undefined>;
+  /** v2 Project-owned workspace state (published Project data wins). */
+  projectStatesByProjectId: Record<string, ProjectBrowserState | undefined>;
   recentHistoryByThreadId: Record<string, BrowserHistoryEntry[] | undefined>;
+  /** v2 Project-keyed recent history, shared by every Main conversation. */
+  recentHistoryByProjectId: Record<string, BrowserHistoryEntry[] | undefined>;
   upsertThreadState: (state: ThreadBrowserState) => void;
+  upsertProjectState: (state: ProjectBrowserState) => void;
   removeThreadState: (threadId: ThreadId) => void;
 }
 
@@ -141,7 +155,9 @@ export const useBrowserStateStore = create<BrowserStateStore>()(
   persist(
     (set) => ({
       threadStatesByThreadId: {},
+      projectStatesByProjectId: {},
       recentHistoryByThreadId: {},
+      recentHistoryByProjectId: {},
       upsertThreadState: (state) =>
         set((current) => {
           const previousState = current.threadStatesByThreadId[state.threadId];
@@ -182,6 +198,44 @@ export const useBrowserStateStore = create<BrowserStateStore>()(
               : current.recentHistoryByThreadId,
           };
         }),
+      upsertProjectState: (state) =>
+        set((current) => {
+          const previousState = current.projectStatesByProjectId[state.projectId];
+          // Same monotonic-version guard as the Thread cache: a delayed
+          // response must never roll Project browser chrome back.
+          if (previousState && previousState.version >= state.version) {
+            return current;
+          }
+          const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+          const orderedTabs = activeTab
+            ? [activeTab, ...state.tabs.filter((tab) => tab.id !== activeTab.id)]
+            : state.tabs;
+          const previousHistory =
+            current.recentHistoryByProjectId[state.projectId] ?? EMPTY_BROWSER_HISTORY;
+          const nextHistory = orderedTabs.reduce(
+            (entries, tab) =>
+              upsertRecentHistoryEntry(entries, {
+                url: tab.lastCommittedUrl ?? tab.url,
+                title: tab.title,
+                tabId: tab.id,
+              }),
+            previousHistory,
+          );
+          const historyChanged = !sameBrowserHistoryEntries(previousHistory, nextHistory);
+
+          return {
+            projectStatesByProjectId: {
+              ...current.projectStatesByProjectId,
+              [state.projectId]: state,
+            },
+            recentHistoryByProjectId: historyChanged
+              ? {
+                  ...current.recentHistoryByProjectId,
+                  [state.projectId]: nextHistory,
+                }
+              : current.recentHistoryByProjectId,
+          };
+        }),
       removeThreadState: (threadId) =>
         set((current) => {
           if (!Object.hasOwn(current.threadStatesByThreadId, threadId)) {
@@ -206,11 +260,16 @@ export const useBrowserStateStore = create<BrowserStateStore>()(
       storage: createJSONStorage(() => browserStateStorage),
       partialize: (state) => ({
         recentHistoryByThreadId: state.recentHistoryByThreadId,
+        recentHistoryByProjectId: state.recentHistoryByProjectId,
       }),
       merge: (persisted, current) => ({
         ...current,
         recentHistoryByThreadId: sanitizeRecentHistoryByThreadId(
           (persisted as { recentHistoryByThreadId?: unknown } | undefined)?.recentHistoryByThreadId,
+        ),
+        recentHistoryByProjectId: sanitizeRecentHistoryByThreadId(
+          (persisted as { recentHistoryByProjectId?: unknown } | undefined)
+            ?.recentHistoryByProjectId,
         ),
       }),
     },
@@ -227,4 +286,19 @@ export function selectThreadBrowserHistory(
   threadId: ThreadId,
 ): (store: BrowserStateStore) => BrowserHistoryEntry[] {
   return (store) => store.recentHistoryByThreadId[threadId] ?? EMPTY_BROWSER_HISTORY;
+}
+
+/** v2 Project-owned browser workspace state (undefined until published/pushed). */
+export function selectProjectBrowserState(
+  projectId: ProjectId | null,
+): (store: BrowserStateStore) => ProjectBrowserState | undefined {
+  return (store) => (projectId ? store.projectStatesByProjectId[projectId] : undefined);
+}
+
+/** v2 Project-owned recent history, shared by every Main conversation. */
+export function selectProjectBrowserHistory(
+  projectId: ProjectId | null,
+): (store: BrowserStateStore) => BrowserHistoryEntry[] {
+  return (store) =>
+    (projectId ? store.recentHistoryByProjectId[projectId] : undefined) ?? EMPTY_BROWSER_HISTORY;
 }

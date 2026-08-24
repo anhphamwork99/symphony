@@ -230,7 +230,8 @@ import type {
 } from "./orchestration";
 import type { PiSubagentResultReadResult, PiSubagentTranscriptReadResult } from "./piSubagents";
 import type { EditorId } from "./editor";
-import type { ThreadId } from "./baseSchemas";
+import type { ProjectId, ThreadId } from "./baseSchemas";
+import type { BrowserAnnotationProjectMethods } from "./browserAnnotations";
 import type {
   ProviderComposerCapabilities,
   ProviderGetComposerCapabilitiesInput,
@@ -339,6 +340,55 @@ export interface ThreadBrowserState {
   activeTabId: string | null;
   tabs: BrowserTabState[];
   lastError: string | null;
+}
+
+// ── Project-owned browser workspace (IPC surface) ────────────
+//
+// The Right-sidebar browser workspace belongs to a Project (Decision 0002).
+// These interfaces carry the owning `ProjectId` directly — never a
+// `ProjectId` cast to a `ThreadId` or an inferred host conversation. The
+// Thread-keyed interfaces above remain the legacy v1 surface until every
+// consumer migrates.
+
+export interface ProjectBrowserState {
+  projectId: ProjectId;
+  version: number;
+  open: boolean;
+  activeTabId: string | null;
+  tabs: BrowserTabState[];
+  lastError: string | null;
+}
+
+export interface BrowserProjectInput {
+  projectId: ProjectId;
+}
+
+export interface BrowserProjectOpenInput {
+  projectId: ProjectId;
+  initialUrl?: string;
+}
+
+export interface BrowserProjectTabInput {
+  projectId: ProjectId;
+  tabId: string;
+}
+
+export interface BrowserProjectNavigateInput {
+  projectId: ProjectId;
+  tabId?: string;
+  url: string;
+}
+
+export interface BrowserProjectNewTabInput {
+  projectId: ProjectId;
+  url?: string;
+  activate?: boolean;
+}
+
+export interface BrowserProjectSetPanelBoundsInput {
+  projectId: ProjectId;
+  bounds: BrowserPanelBounds | null;
+  surface?: "native" | "renderer";
 }
 
 export interface BrowserOpenInput {
@@ -497,6 +547,31 @@ interface BrowserControlMethods {
   onState: (listener: (state: ThreadBrowserState) => void) => () => void;
 }
 
+/**
+ * Project-owned browser control surface. Mirrors `BrowserControlMethods` with
+ * the owning `ProjectId` as the workspace key; separate from the Thread-keyed
+ * interface so existing desktop/web implementations stay source-compatible
+ * until they migrate (WP6/WP7).
+ */
+export interface BrowserProjectControlMethods {
+  /** Acknowledges terminal server deletion and clears Desktop-owned state. */
+  removeProject: (input: BrowserProjectInput) => Promise<void>;
+  open: (input: BrowserProjectOpenInput) => Promise<ProjectBrowserState>;
+  close: (input: BrowserProjectInput) => Promise<ProjectBrowserState>;
+  hide: (input: BrowserProjectInput) => Promise<void>;
+  getState: (input: BrowserProjectInput) => Promise<ProjectBrowserState>;
+  setPanelBounds: (input: BrowserProjectSetPanelBoundsInput) => Promise<void>;
+  navigate: (input: BrowserProjectNavigateInput) => Promise<ProjectBrowserState>;
+  reload: (input: BrowserProjectTabInput) => Promise<ProjectBrowserState>;
+  goBack: (input: BrowserProjectTabInput) => Promise<ProjectBrowserState>;
+  goForward: (input: BrowserProjectTabInput) => Promise<ProjectBrowserState>;
+  newTab: (input: BrowserProjectNewTabInput) => Promise<ProjectBrowserState>;
+  closeTab: (input: BrowserProjectTabInput) => Promise<ProjectBrowserState>;
+  selectTab: (input: BrowserProjectTabInput) => Promise<ProjectBrowserState>;
+  openDevTools: (input: BrowserProjectTabInput) => Promise<void>;
+  onState: (listener: (state: ProjectBrowserState) => void) => () => void;
+}
+
 export interface DesktopNotificationInput {
   title: string;
   body?: string;
@@ -597,6 +672,14 @@ export interface DesktopBridge {
       listener: (request: BrowserUseOpenPanelRequest) => void,
     ) => () => void;
     onBrowserCopyLink: (listener: (event: BrowserCopyLinkEvent) => void) => () => void;
+  };
+  /**
+   * Project-owned browser workspace surface (Decision 0002). Optional until
+   * the desktop main process migrates (WP7); absent means the Thread-keyed
+   * `browser` surface above is the only one this build provides.
+   */
+  projectBrowser?: BrowserProjectControlMethods & {
+    annotations: BrowserAnnotationProjectMethods;
   };
 }
 
@@ -854,6 +937,14 @@ export interface NativeApi {
   browser: BrowserControlMethods & {
     annotations: BrowserAnnotationMethods;
     onCopyLink: (callback: (event: BrowserCopyLinkEvent) => void) => () => void;
+  };
+  /**
+   * Project-owned browser workspace surface (Decision 0002). Optional until
+   * the WS shim migrates (WP6); absent means the Thread-keyed `browser`
+   * surface above is the only one this build provides.
+   */
+  projectBrowser?: BrowserProjectControlMethods & {
+    annotations: BrowserAnnotationProjectMethods;
   };
   // macOS-only in practice: off darwin the server answers `list`/`getThreadState`
   // with an `unsupported-platform` availability and refuses the rest, so the pane

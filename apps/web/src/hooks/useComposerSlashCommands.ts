@@ -31,7 +31,7 @@ import type { ComposerCommandItem } from "../components/chat/ComposerCommandMenu
 import { buildNextProviderOptions } from "../providerModelOptions";
 import { resolveForkThreadEnvironment } from "../lib/threadEnvironment";
 import { type SplitViewId } from "../splitViewStore";
-import { useRightDockStore } from "../rightDockStore";
+import { resolveDockOwnerProjectId, useRightDockStore } from "../rightDockStore";
 import { registerSidechatCreator } from "../lib/sidechatCreatorRegistry";
 import { downloadUrlAsBlob } from "../lib/browserDownload";
 import { resolveWsHttpUrl } from "../lib/wsHttpUrl";
@@ -339,7 +339,14 @@ export function useComposerSlashCommands(input: {
             selectedModelSelection,
             initialPrompt,
             openSidechat: (sidechatThreadId) => {
-              useRightDockStore.getState().openPane(activeThread.id, {
+              // The dock belongs to the Project (Decision 0002): resolve the
+              // owner from the active thread's durable projectId, never the
+              // thread itself.
+              const ownerProjectId = resolveDockOwnerProjectId({
+                threadProjectId: activeThread.projectId,
+              });
+              if (ownerProjectId === null) return;
+              useRightDockStore.getState().openPane(ownerProjectId, {
                 kind: "sidechat",
                 threadId: sidechatThreadId,
               });

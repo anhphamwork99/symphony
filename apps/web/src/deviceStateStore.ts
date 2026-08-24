@@ -1,28 +1,38 @@
 /**
- * Thread-scoped device metadata cache.
+ * Device metadata cache keyed by the owning workspace.
  *
  * The live simulator surface is a canvas fed by binary frames; this store keeps
  * only the metadata the pane chrome needs (device list, attachment, agent
- * activity, availability) so a thread switch renders instantly and a late push
- * can never roll the pane back to an older generation.
+ * activity, availability) so a workspace switch renders instantly and a late
+ * push can never roll the pane back to an older generation.
+ *
+ * Project ownership (Decision 0002): the Project-keyed records are the v2
+ * Right-sidebar device workspace — one slice per Project, shared directly by
+ * every Main conversation in it and surviving conversation/Project navigation.
+ * The Thread-keyed records remain the legacy v1 cache.
  *
  * Deliberately not persisted: device boot state is only meaningful while the
  * server that reported it is alive, and a stale "Booted" from last week's
  * session would render a picker that lies.
  */
 
-import type { ThreadDeviceState, ThreadId } from "@synara/contracts";
+import type { ProjectDeviceState, ProjectId, ThreadDeviceState, ThreadId } from "@synara/contracts";
 import { create } from "zustand";
 
 interface DeviceStateStore {
+  /** Legacy v1 Thread-keyed cache (retained; legacy server surface). */
   threadStatesByThreadId: Record<string, ThreadDeviceState | undefined>;
+  /** v2 Project-owned device workspace state (published Project data wins). */
+  projectStatesByProjectId: Record<string, ProjectDeviceState | undefined>;
   upsertThreadState: (state: ThreadDeviceState) => void;
+  upsertProjectState: (state: ProjectDeviceState) => void;
   removeThreadState: (threadId: ThreadId) => void;
   clear: () => void;
 }
 
 export const useDeviceStateStore = create<DeviceStateStore>()((set) => ({
   threadStatesByThreadId: {},
+  projectStatesByProjectId: {},
   upsertThreadState: (state) =>
     set((current) => {
       const previousState = current.threadStatesByThreadId[state.threadId];
@@ -40,6 +50,20 @@ export const useDeviceStateStore = create<DeviceStateStore>()((set) => ({
         },
       };
     }),
+  upsertProjectState: (state) =>
+    set((current) => {
+      const previousState = current.projectStatesByProjectId[state.projectId];
+      // Same monotonic-version guard as the Thread cache.
+      if (previousState && previousState.version >= state.version) {
+        return current;
+      }
+      return {
+        projectStatesByProjectId: {
+          ...current.projectStatesByProjectId,
+          [state.projectId]: state,
+        },
+      };
+    }),
   removeThreadState: (threadId) =>
     set((current) => {
       if (!Object.hasOwn(current.threadStatesByThreadId, threadId)) {
@@ -49,7 +73,7 @@ export const useDeviceStateStore = create<DeviceStateStore>()((set) => ({
       delete nextThreadStatesByThreadId[threadId];
       return { threadStatesByThreadId: nextThreadStatesByThreadId };
     }),
-  clear: () => set({ threadStatesByThreadId: {} }),
+  clear: () => set({ threadStatesByThreadId: {}, projectStatesByProjectId: {} }),
 }));
 
 // Dev-only handle so the pane's availability and setup states — which otherwise
@@ -63,4 +87,10 @@ export function selectThreadDeviceState(
   threadId: ThreadId,
 ): (store: DeviceStateStore) => ThreadDeviceState | undefined {
   return (store) => store.threadStatesByThreadId[threadId];
+}
+
+export function selectProjectDeviceState(
+  projectId: ProjectId | null,
+): (store: DeviceStateStore) => ProjectDeviceState | undefined {
+  return (store) => (projectId ? store.projectStatesByProjectId[projectId] : undefined);
 }

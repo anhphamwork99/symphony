@@ -1,9 +1,14 @@
 // FILE: rightDockStore.logic.ts
-// Purpose: Pure, testable transitions for the right dock (tabbed multi-pane right sidebar).
+// Purpose: Pure, testable transitions for the right dock (tabbed multi-pane right
+//          sidebar), keyed by the owning Project (Decision 0002).
 // Layer: UI state helpers
 // Exports: dock pane types, default-state factory, and immutable open/close/activate helpers.
 
 import type { ProjectId, ThreadId, TurnId } from "@synara/contracts";
+import {
+  PROJECT_WORKSPACE_DOCK_MAX_WIDTH_PX,
+  PROJECT_WORKSPACE_DOCK_MIN_WIDTH_PX,
+} from "@synara/contracts";
 import { isPlainObject, sanitizeStringKeyedRecord } from "./persistedRecord";
 
 // Single source of truth for the dock pane kinds. The union type, the runtime
@@ -40,13 +45,32 @@ export interface RightDockPane {
   pullRequestRepository: string | null;
   pullRequestNumber: number | null;
   pullRequestInitialTab: PullRequestInitialTab | null;
+  /**
+   * Explicit restoration failure for unavailable backing content. The pane is
+   * retained with this actionable message — never silently removed or replaced
+   * (Decision 0002 / Project Contract scenario 5).
+   */
+  restorationDiagnostic: string | null;
 }
 
-export interface RightDockThreadState {
+export interface RightDockProjectState {
   open: boolean;
+  /**
+   * The remembered dock width preference. Rendering-time viewport clamping
+   * never writes it back (scenario 8), so only user-intended widths persist.
+   * Null means "no remembered preference" (open at the half-shell default).
+   */
+  preferredWidthPx: number | null;
   panes: RightDockPane[];
   activePaneId: string | null;
 }
+
+/**
+ * Legacy alias for pre-Project call sites that only consume the shape (dock
+ * hosts building state with these pure transitions). The state IS
+ * Project-owned; nothing about the shape is Thread-specific.
+ */
+export type RightDockThreadState = RightDockProjectState;
 
 // File previews are the only multi-instance dock kind. Side chats share one
 // destination and switch the embedded thread inside it.
@@ -62,12 +86,24 @@ export function isSingletonPaneKind(kind: RightDockPaneKind): boolean {
   return SINGLETON_PANE_KINDS.has(kind);
 }
 
-export function createDefaultRightDockState(): RightDockThreadState {
+export function createDefaultRightDockState(): RightDockProjectState {
   return {
     open: false,
+    preferredWidthPx: null,
     panes: [],
     activePaneId: null,
   };
+}
+
+/** Validate a persisted preferred dock width against the workspace dock bounds. */
+export function sanitizePreferredDockWidthPx(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return null;
+  }
+  if (value < PROJECT_WORKSPACE_DOCK_MIN_WIDTH_PX || value > PROJECT_WORKSPACE_DOCK_MAX_WIDTH_PX) {
+    return null;
+  }
+  return value;
 }
 
 export function isRightDockPaneKind(value: unknown): value is RightDockPaneKind {
@@ -111,10 +147,15 @@ function sanitizePersistedPane(value: unknown): RightDockPane | null {
       candidate.pullRequestInitialTab === "code"
         ? candidate.pullRequestInitialTab
         : null,
+    restorationDiagnostic:
+      typeof candidate.restorationDiagnostic === "string" &&
+      candidate.restorationDiagnostic.trim().length > 0
+        ? candidate.restorationDiagnostic
+        : null,
   };
 }
 
-export function sanitizeRightDockThreadState(value: unknown): RightDockThreadState {
+export function sanitizeRightDockProjectState(value: unknown): RightDockProjectState {
   if (!isPlainObject(value)) {
     return createDefaultRightDockState();
   }
@@ -145,16 +186,23 @@ export function sanitizeRightDockThreadState(value: unknown): RightDockThreadSta
       : (panes[0]?.id ?? null);
   return {
     open: candidate.open === true,
+    preferredWidthPx: sanitizePreferredDockWidthPx(candidate.preferredWidthPx),
     panes,
     activePaneId,
   };
 }
 
-export function sanitizeRightDockStateByThreadId(
+/** Legacy alias: the sanitizer is shape-identical for pre-Project call sites. */
+export const sanitizeRightDockThreadState = sanitizeRightDockProjectState;
+
+/** Legacy alias retained for the pre-Project record sanitizer call sites. */
+export const sanitizeRightDockStateByThreadId = sanitizeRightDockStateByProjectId;
+
+export function sanitizeRightDockStateByProjectId(
   value: unknown,
-): Record<string, RightDockThreadState> {
+): Record<string, RightDockProjectState> {
   return sanitizeStringKeyedRecord(value, (raw) =>
-    raw === undefined ? null : sanitizeRightDockThreadState(raw),
+    raw === undefined ? null : sanitizeRightDockProjectState(raw),
   );
 }
 
@@ -162,6 +210,7 @@ export interface OpenPaneInput {
   paneId: string;
   kind: RightDockPaneKind;
   threadId?: ThreadId | null;
+  restorationDiagnostic?: string | null;
   diffTurnId?: TurnId | null;
   diffFilePath?: string | null;
   filePath?: string | null;
@@ -183,6 +232,7 @@ function createPane(input: OpenPaneInput): RightDockPane {
     pullRequestRepository: input.pullRequestRepository ?? null,
     pullRequestNumber: input.pullRequestNumber ?? null,
     pullRequestInitialTab: input.pullRequestInitialTab ?? null,
+    restorationDiagnostic: input.restorationDiagnostic ?? null,
   };
 }
 
@@ -219,7 +269,7 @@ function singletonPaneReopenPatch(input: OpenPaneInput): Partial<RightDockPane> 
 // Multi-instance file panes reuse an existing pane when it already shows the
 // requested path, so re-clicking a file focuses its tab instead of duplicating it.
 function findMatchingMultiInstancePane(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   input: OpenPaneInput,
 ): RightDockPane | undefined {
   if (input.kind === "file") {
@@ -230,7 +280,7 @@ function findMatchingMultiInstancePane(
 }
 
 function findSingletonPane(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   kind: RightDockPaneKind,
 ): RightDockPane | undefined {
   return state.panes.find((pane) => pane.kind === kind);
@@ -240,9 +290,9 @@ function findSingletonPane(
 // the existing pane and merge diff metadata; multi-instance kinds add a new
 // pane unless one already shows the same content (thread / file).
 export function openPaneInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   input: OpenPaneInput,
-): RightDockThreadState {
+): RightDockProjectState {
   if (isSingletonPaneKind(input.kind)) {
     const existing = findSingletonPane(state, input.kind);
     if (existing) {
@@ -250,18 +300,29 @@ export function openPaneInState(
       const nextPanes = patch
         ? state.panes.map((pane) => (pane.id === existing.id ? { ...pane, ...patch } : pane))
         : state.panes;
-      return { open: true, panes: nextPanes, activePaneId: existing.id };
+      return {
+        open: true,
+        preferredWidthPx: state.preferredWidthPx,
+        panes: nextPanes,
+        activePaneId: existing.id,
+      };
     }
   } else {
     const existing = findMatchingMultiInstancePane(state, input);
     if (existing) {
-      return { open: true, panes: state.panes, activePaneId: existing.id };
+      return {
+        open: true,
+        preferredWidthPx: state.preferredWidthPx,
+        panes: state.panes,
+        activePaneId: existing.id,
+      };
     }
   }
 
   const pane = createPane(input);
   return {
     open: true,
+    preferredWidthPx: state.preferredWidthPx,
     panes: [...state.panes, pane],
     activePaneId: pane.id,
   };
@@ -284,9 +345,9 @@ function resolveActiveAfterRemoval(
 }
 
 export function closePaneInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   paneId: string,
-): RightDockThreadState {
+): RightDockProjectState {
   const removedIndex = state.panes.findIndex((pane) => pane.id === paneId);
   if (removedIndex === -1) {
     return state;
@@ -302,15 +363,16 @@ export function closePaneInState(
     // An open dock with no panes is the launcher state. Closing the final tab
     // returns to that launcher instead of collapsing the entire dock.
     open: state.open,
+    preferredWidthPx: state.preferredWidthPx,
     panes: nextPanes,
     activePaneId: nextActiveId,
   };
 }
 
 export function setActivePaneInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   paneId: string,
-): RightDockThreadState {
+): RightDockProjectState {
   if (!state.panes.some((pane) => pane.id === paneId)) {
     return state;
   }
@@ -318,9 +380,9 @@ export function setActivePaneInState(
 }
 
 export function setDockOpenInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   open: boolean,
-): RightDockThreadState {
+): RightDockProjectState {
   if (state.open === open) {
     return state;
   }
@@ -328,7 +390,7 @@ export function setDockOpenInState(
 }
 
 export function updatePaneInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   paneId: string,
   patch: Partial<
     Pick<
@@ -341,9 +403,10 @@ export function updatePaneInState(
       | "pullRequestRepository"
       | "pullRequestNumber"
       | "pullRequestInitialTab"
+      | "restorationDiagnostic"
     >
   >,
-): RightDockThreadState {
+): RightDockProjectState {
   let changed = false;
   const nextPanes = state.panes.map((pane) => {
     if (pane.id !== paneId) {
@@ -358,7 +421,8 @@ export function updatePaneInState(
       nextPane.pullRequestProjectId !== pane.pullRequestProjectId ||
       nextPane.pullRequestRepository !== pane.pullRequestRepository ||
       nextPane.pullRequestNumber !== pane.pullRequestNumber ||
-      nextPane.pullRequestInitialTab !== pane.pullRequestInitialTab
+      nextPane.pullRequestInitialTab !== pane.pullRequestInitialTab ||
+      nextPane.restorationDiagnostic !== pane.restorationDiagnostic
     ) {
       changed = true;
       return nextPane;
@@ -372,9 +436,9 @@ export function updatePaneInState(
 // kind is the active visible pane, collapse the dock (preserving tabs);
 // otherwise open/focus it.
 export function toggleSingletonPaneInState(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   input: OpenPaneInput,
-): RightDockThreadState {
+): RightDockProjectState {
   const existing = findSingletonPane(state, input.kind);
   if (existing && state.open && state.activePaneId === existing.id) {
     return { ...state, open: false };
@@ -382,7 +446,7 @@ export function toggleSingletonPaneInState(
   return openPaneInState(state, input);
 }
 
-export function resolveActivePane(state: RightDockThreadState): RightDockPane | null {
+export function resolveActivePane(state: RightDockProjectState): RightDockPane | null {
   if (!state.open || state.activePaneId === null) {
     return null;
   }
@@ -390,7 +454,7 @@ export function resolveActivePane(state: RightDockThreadState): RightDockPane | 
 }
 
 export function findMissingSidechatPaneIds(
-  state: RightDockThreadState,
+  state: RightDockProjectState,
   existingThreadIds: ReadonlySet<ThreadId>,
 ): readonly string[] {
   return state.panes.flatMap((pane) =>
@@ -405,17 +469,22 @@ export function findMissingSidechatPaneIds(
 // the scarce live-stream budget.
 export function resolveVisibleDockSidechatThreadIds(input: {
   dockRendered: boolean;
-  dockStateByThreadId: Record<string, RightDockThreadState | undefined>;
-  hostThreadIds: readonly ThreadId[];
+  dockStateByProjectId: Record<string, RightDockProjectState | undefined>;
+  hostProjectIds: readonly ProjectId[];
+  /**
+   * Host conversation ids, so a sidechat embedding a Main conversation of the
+   * same visible surface needs no second detail lease.
+   */
+  hostThreadIds?: readonly ThreadId[];
 }): ThreadId[] {
   if (!input.dockRendered) {
     return [];
   }
 
   const sidechatThreadIds: ThreadId[] = [];
-  const seenThreadIds = new Set<ThreadId>(input.hostThreadIds);
-  for (const hostThreadId of input.hostThreadIds) {
-    const dockState = input.dockStateByThreadId[hostThreadId];
+  const seenThreadIds = new Set<ThreadId>(input.hostThreadIds ?? []);
+  for (const hostProjectId of input.hostProjectIds) {
+    const dockState = input.dockStateByProjectId[hostProjectId];
     if (!dockState) {
       continue;
     }

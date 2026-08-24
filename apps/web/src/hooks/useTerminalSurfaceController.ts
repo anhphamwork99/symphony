@@ -7,11 +7,10 @@
 //       thread cleanup, and split-view navigation, so it shares only the lower-level
 //       terminalSession helpers instead of this controller.
 
-import { type ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
 import { type TerminalCliKind } from "@synara/shared/terminalThreads";
 import { useState } from "react";
 
-import { useAppSettings } from "~/appSettings";
 import {
   confirmTerminalTabClose,
   resolveTerminalCloseTitle,
@@ -21,6 +20,12 @@ import { readNativeApi } from "~/nativeApi";
 import { selectThreadTerminalState, useTerminalStateStore } from "~/terminalStateStore";
 import { randomTerminalId } from "~/components/terminal/terminalIds";
 import { disposeAndCloseTerminalSession } from "~/components/terminal/terminalSession";
+import {
+  closeTerminalSession,
+  preflightProjectTerminalRunning,
+} from "~/components/terminal/terminalProjectRouting";
+import { toastManager } from "~/components/ui/toast";
+import type { TerminalStateScope } from "~/terminalStateStore";
 
 type TerminalMetadata = { cliKind: TerminalCliKind | null; label: string };
 type TerminalActivity = {
@@ -28,8 +33,19 @@ type TerminalActivity = {
   agentState: "running" | "attention" | "review" | null;
 };
 
-export function useTerminalSurfaceController(threadId: ThreadId) {
-  const { settings } = useAppSettings();
+export function useTerminalSurfaceController(
+  threadId: TerminalStateScope,
+  options?: {
+    /**
+     * Owning Project for a Project-owned dock terminal workspace (Decision
+     * 0002). `threadId` then names only the local store/runtime scope; every
+     * server call (open/write/close and the close preflight) routes through the
+     * Project-owned surface keyed by the real ProjectId.
+     */
+    readonly projectId?: ProjectId | null;
+  },
+) {
+  const projectId = options?.projectId ?? null;
   const terminalState = useTerminalStateStore((state) =>
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
   );
@@ -82,16 +98,34 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
     bumpFocusRequest();
   };
 
-  const closeTerminal = async (terminalId: string) => {
-    const api = readNativeApi();
-    const confirmed = await confirmTerminalTabClose({
-      api,
-      enabled: shouldPromptForTerminalClose({
-        confirmationEnabled: settings.confirmTerminalTabClose,
+  /**
+   * Truthful running state for the close warning. Project-owned terminals
+   * preflight the server's live status (`terminal.project.list`) so an
+   * idle-looking tab that still owns a running process still warns, and a
+   * running-looking tab that already exited does not. The local view is the
+   * fallback when the preflight cannot run (legacy surface, transport hiccup).
+   */
+  const resolveTerminalRunningForClose = async (terminalId: string): Promise<boolean> => {
+    const localRunning =
+      shouldPromptForTerminalClose({
+        confirmationEnabled: true,
         runningTerminalIds: terminalState.runningTerminalIds,
         terminalAttentionStatesById: terminalState.terminalAttentionStatesById,
         terminalId,
-      }),
+      }) || terminalState.runningTerminalIds.includes(terminalId);
+    if (projectId === null) {
+      return localRunning;
+    }
+    const preflight = await preflightProjectTerminalRunning(projectId, terminalId);
+    return preflight ?? localRunning;
+  };
+
+  const closeTerminal = async (terminalId: string) => {
+    const api = projectId === null ? readNativeApi() : undefined;
+    const running = await resolveTerminalRunningForClose(terminalId);
+    const confirmed = await confirmTerminalTabClose({
+      api,
+      enabled: running,
       terminalTitle: resolveTerminalCloseTitle({
         terminalId,
         terminalLabelsById: terminalState.terminalLabelsById,
@@ -99,6 +133,30 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
       }),
     });
     if (!confirmed) {
+      // Cancel leaves both the process and the UI in a truthful, untouched state.
+      return;
+    }
+    if (projectId !== null) {
+      // A rejected close must leave the tab, the terminal state, and the live
+      // xterm runtime untouched (truthful failure, no pretend success): surface
+      // the server's failure to the user and keep the workspace exactly as it
+      // was. Only a confirmed close disposes the runtime and replaces the tab.
+      try {
+        await closeTerminalSession({ projectId, threadId, terminalId }, { deleteHistory: true });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not close terminal",
+          description:
+            error instanceof Error
+              ? `${error.message} The terminal tab stays open.`
+              : "The close request failed. The terminal tab stays open.",
+        });
+        return;
+      }
+      disposeAndCloseTerminalRuntime({ threadId, terminalId });
+      closeTerminalAndEnsureReplacementStore(threadId, terminalId, randomTerminalId());
+      bumpFocusRequest();
       return;
     }
     disposeAndCloseTerminalSession({ api, threadId, terminalId });
@@ -107,6 +165,10 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
   };
 
   const disposeExitedTerminal = (terminalId: string) => {
+    if (projectId !== null) {
+      void disposeAndCloseTerminalRuntime({ threadId, terminalId });
+      return;
+    }
     disposeAndCloseTerminalSession({
       api: readNativeApi(),
       threadId,
@@ -161,4 +223,22 @@ export function useTerminalSurfaceController(threadId: ThreadId) {
     setTerminalMetadata,
     setTerminalActivity,
   };
+}
+
+/**
+ * Dispose only the local xterm runtime for a Project-owned terminal. Server
+ * teardown goes through the Project surface in `closeTerminal`.
+ */
+async function disposeAndCloseTerminalRuntime(input: {
+  threadId: string;
+  terminalId: string;
+}): Promise<void> {
+  try {
+    const { terminalRuntimeRegistry } = await import(
+      "~/components/terminal/terminalRuntimeRegistry"
+    );
+    terminalRuntimeRegistry.disposeTerminal(input.threadId, input.terminalId);
+  } catch (error) {
+    console.error("Failed to dispose terminal runtime", { ...input, error });
+  }
 }

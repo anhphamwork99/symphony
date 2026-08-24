@@ -25,7 +25,8 @@ interface TrackedRequest {
 }
 
 interface DiagnosticsState {
-  readonly threadId: string;
+  /** Owning workspace identity as text (t:<thread> / p:<project> provenance). */
+  readonly ownerLabel: string;
   readonly tabId: string;
   readonly startedAt: BrowserLogsOutput["startedAt"];
   readonly entries: BrowserLogEntry[];
@@ -150,6 +151,16 @@ const optionalStatus = (value: unknown): number | undefined =>
  * payloads, so browser_logs cannot become an accidental secret-exfiltration
  * channel.
  */
+function ownerLabel(runtime: BrowserAutomationVisibleRuntime): string {
+  const owner =
+    runtime.owner ??
+    (runtime.threadId === undefined
+      ? null
+      : { kind: "thread" as const, threadId: runtime.threadId });
+  if (owner === null) return "unknown";
+  return owner.kind === "thread" ? `t:${owner.threadId}` : `p:${owner.projectId}`;
+}
+
 export class BrowserDiagnosticsStore {
   private readonly stateByWebContents = new WeakMap<WebContents, DiagnosticsState>();
 
@@ -157,7 +168,7 @@ export class BrowserDiagnosticsStore {
     throwIfAborted(signal);
     const existing = this.stateByWebContents.get(runtime.webContents);
     if (existing) {
-      if (existing.threadId === runtime.threadId && existing.tabId === runtime.tabId) {
+      if (existing.ownerLabel === ownerLabel(runtime) && existing.tabId === runtime.tabId) {
         await existing.initialized;
         throwIfAborted(signal);
         return;
@@ -316,7 +327,7 @@ export class BrowserDiagnosticsStore {
       state.requests.clear();
     };
     state = {
-      threadId: runtime.threadId,
+      ownerLabel: ownerLabel(runtime),
       tabId: runtime.tabId,
       startedAt: nowIso(),
       entries: [],

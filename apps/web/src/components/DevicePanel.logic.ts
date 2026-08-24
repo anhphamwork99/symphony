@@ -17,6 +17,7 @@ import type {
   DeviceSetupStepId,
   DeviceToolchain,
   DeviceUdid,
+  ProjectDeviceState,
   ThreadDeviceState,
 } from "@synara/contracts";
 
@@ -773,10 +774,15 @@ export function deviceSetupCheckingLabel(steps: readonly DeviceSetupStep[]): str
   return next.id === "install-xcode" ? "Checking for Xcode…" : "Checking your setup…";
 }
 
-// ── Thread state helpers ─────────────────────────────────────────────
+// ── Device state helpers ─────────────────────────────────────────────
+
+type DeviceStateWithAttachment = Pick<
+  ThreadDeviceState | ProjectDeviceState,
+  "attachedDeviceUdid" | "devices"
+>;
 
 export function attachedDeviceFromThreadState(
-  state: ThreadDeviceState | undefined,
+  state: DeviceStateWithAttachment | undefined,
 ): DeviceDescriptor | null {
   if (!state?.attachedDeviceUdid) return null;
   return state.devices.find((device) => device.udid === state.attachedDeviceUdid) ?? null;
@@ -808,7 +814,7 @@ export interface PendingDeviceSelection {
  * intent immediately and reconcile when the real descriptor arrives.
  */
 export function resolveDisplayedDevice(input: {
-  readonly threadState: ThreadDeviceState | undefined;
+  readonly threadState: DeviceStateWithAttachment | undefined;
   readonly pending: PendingDeviceSelection | null;
 }): DeviceDescriptor | null {
   const attached = attachedDeviceFromThreadState(input.threadState);

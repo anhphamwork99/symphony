@@ -76,9 +76,34 @@ export const DESKTOP_IPC_CHANNELS = {
       guestMessage: "desktop:browser-annotations-guest-message",
     },
   },
+  projectBrowser: {
+    state: "desktop:project-browser-state",
+    removeProject: "desktop:project-browser-remove-project",
+    copyLink: "desktop:project-browser-copy-link",
+    open: "desktop:project-browser-open",
+    close: "desktop:project-browser-close",
+    hide: "desktop:project-browser-hide",
+    getState: "desktop:project-browser-get-state",
+    setBounds: "desktop:project-browser-set-bounds",
+    navigate: "desktop:project-browser-navigate",
+    reload: "desktop:project-browser-reload",
+    goBack: "desktop:project-browser-go-back",
+    goForward: "desktop:project-browser-go-forward",
+    newTab: "desktop:project-browser-new-tab",
+    closeTab: "desktop:project-browser-close-tab",
+    selectTab: "desktop:project-browser-select-tab",
+    openDevTools: "desktop:project-browser-open-devtools",
+    annotations: {
+      start: "desktop:project-browser-annotations-start",
+      cancel: "desktop:project-browser-annotations-cancel",
+      syncMarkers: "desktop:project-browser-annotations-sync-markers",
+      event: "desktop:project-browser-annotations-event",
+    },
+  },
 } as const;
 
 export const BROWSER_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.browser;
+export const PROJECT_BROWSER_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.projectBrowser;
 export const BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL = "desktop:browser-annotations-guest-command";
 export const APPSNAP_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.appSnap;
 export const DESKTOP_WS_URL_CHANNEL = DESKTOP_IPC_CHANNELS.wsUrl;

@@ -48,6 +48,10 @@ import {
   DeviceListResult,
   DeviceOpenUrlInput,
   DevicePressButtonInput,
+  DeviceProjectAttachInput,
+  DeviceProjectEvent,
+  DeviceProjectGetStateInput,
+  DeviceProjectInput,
   DeviceScreenshotInput,
   DeviceScreenshotResult,
   DeviceStartRecordingInput,
@@ -61,6 +65,7 @@ import {
   DeviceTapInput,
   DeviceThreadInput,
   DeviceTypeTextInput,
+  ProjectDeviceState,
   ThreadDeviceState,
 } from "./device";
 import { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
@@ -219,6 +224,16 @@ import {
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
+  TerminalProjectAckOutputInput,
+  TerminalProjectClearInput,
+  TerminalProjectCloseInput,
+  TerminalProjectEvent,
+  TerminalProjectInput,
+  TerminalProjectOpenInput,
+  TerminalProjectResizeInput,
+  TerminalProjectRestartInput,
+  TerminalProjectSessionSnapshot,
+  TerminalProjectWriteInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
@@ -631,6 +646,37 @@ export const WsSubscribeDeviceEventsRpc = Rpc.make(DEVICE_WS_METHODS.subscribeEv
   stream: true,
 });
 
+// Project-owned device pane endpoints (WP1 ProjectDevice schemas; Decision
+// 0002). The owning Project is identified by its real ProjectId; a caller
+// Thread is provenance only and never infers the workspace owner.
+export const WsDeviceProjectGetStateRpc = Rpc.make(DEVICE_WS_METHODS.getProjectState, {
+  payload: DeviceProjectGetStateInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsDeviceProjectAttachRpc = Rpc.make(DEVICE_WS_METHODS.attachProject, {
+  payload: DeviceProjectAttachInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsDeviceProjectDetachRpc = Rpc.make(DEVICE_WS_METHODS.detachProject, {
+  payload: DeviceProjectInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsSubscribeDeviceProjectEventsRpc = Rpc.make(
+  DEVICE_WS_METHODS.subscribeProjectEvents,
+  {
+    payload: Schema.Struct({}),
+    success: DeviceProjectEvent,
+    error: WsRpcError,
+    stream: true,
+  },
+);
+
 export const WsDeviceRpcGroup = RpcGroup.make(
   WsDeviceListRpc,
   WsDeviceBootRpc,
@@ -652,6 +698,10 @@ export const WsDeviceRpcGroup = RpcGroup.make(
   WsDeviceDescribeUiRpc,
   WsDeviceScrollToElementRpc,
   WsSubscribeDeviceEventsRpc,
+  WsDeviceProjectGetStateRpc,
+  WsDeviceProjectAttachRpc,
+  WsDeviceProjectDetachRpc,
+  WsSubscribeDeviceProjectEventsRpc,
 );
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -905,6 +955,68 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   error: WsRpcError,
   stream: true,
 });
+
+// Project-owned terminal endpoints (WP1 TerminalProject schemas). The
+// Right-sidebar terminal workspace belongs to the Project (Decision 0002):
+// every command and event carries the real ProjectId, never a pseudo-ThreadId.
+export const WsTerminalProjectOpenRpc = Rpc.make(WS_METHODS.terminalProjectOpen, {
+  payload: TerminalProjectOpenInput,
+  success: TerminalProjectSessionSnapshot,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectWriteRpc = Rpc.make(WS_METHODS.terminalProjectWrite, {
+  payload: TerminalProjectWriteInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectAckOutputRpc = Rpc.make(WS_METHODS.terminalProjectAckOutput, {
+  payload: TerminalProjectAckOutputInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectResizeRpc = Rpc.make(WS_METHODS.terminalProjectResize, {
+  payload: TerminalProjectResizeInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectClearRpc = Rpc.make(WS_METHODS.terminalProjectClear, {
+  payload: TerminalProjectClearInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectRestartRpc = Rpc.make(WS_METHODS.terminalProjectRestart, {
+  payload: TerminalProjectRestartInput,
+  success: TerminalProjectSessionSnapshot,
+  error: WsRpcError,
+});
+
+export const WsTerminalProjectCloseRpc = Rpc.make(WS_METHODS.terminalProjectClose, {
+  payload: TerminalProjectCloseInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+/** Preflight/list surface for Project-owned terminals (deletion warnings). */
+export const WsTerminalProjectListRpc = Rpc.make(WS_METHODS.terminalProjectList, {
+  payload: TerminalProjectInput,
+  success: Schema.Array(TerminalProjectSessionSnapshot),
+  error: WsRpcError,
+});
+
+export const WsSubscribeTerminalProjectEventsRpc = Rpc.make(
+  WS_METHODS.subscribeTerminalProjectEvents,
+  {
+    payload: Schema.Struct({}),
+    success: TerminalProjectEvent,
+    error: WsRpcError,
+    stream: true,
+  },
+);
 
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
@@ -1294,6 +1406,15 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,
+  WsTerminalProjectOpenRpc,
+  WsTerminalProjectWriteRpc,
+  WsTerminalProjectAckOutputRpc,
+  WsTerminalProjectResizeRpc,
+  WsTerminalProjectClearRpc,
+  WsTerminalProjectRestartRpc,
+  WsTerminalProjectCloseRpc,
+  WsTerminalProjectListRpc,
+  WsSubscribeTerminalProjectEventsRpc,
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
   WsServerGetSettingsRpc,

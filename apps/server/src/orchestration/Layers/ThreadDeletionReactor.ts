@@ -1,4 +1,4 @@
-import { ThreadId, type OrchestrationEvent } from "@synara/contracts";
+import { ProjectId, ThreadId, type OrchestrationEvent } from "@synara/contracts";
 import { makeDrainableWorker, startDrainableWorkerProducers } from "@synara/shared/DrainableWorker";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
 
@@ -6,6 +6,7 @@ import { DeviceService } from "../../device/Services/DeviceService";
 import { ProfileStatsArchive } from "../../profileStatsArchive";
 import { ProviderService } from "../../provider/Services/ProviderService";
 import { TerminalManager } from "../../terminal/Services/Manager";
+import { ProjectWorkspaceStore } from "../../projectWorkspace/Services/ProjectWorkspaceStore";
 import { THREAD_RETENTION_COMMAND_ID_PREFIX } from "../../threadRetention";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery";
@@ -16,6 +17,7 @@ import {
 
 type ThreadDeletedEvent = Extract<OrchestrationEvent, { type: "thread.deleted" }>;
 type ThreadArchivedEvent = Extract<OrchestrationEvent, { type: "thread.archived" }>;
+type ProjectDeletedEvent = Extract<OrchestrationEvent, { type: "project.deleted" }>;
 type ThreadLifecycleCleanupEvent = ThreadDeletedEvent | ThreadArchivedEvent;
 
 // Crash recovery / backfill: threads soft-deleted before the purge could run
@@ -33,6 +35,12 @@ export function isThreadLifecycleCleanupEvent(
   event: OrchestrationEvent,
 ): event is ThreadLifecycleCleanupEvent {
   return event.type === "thread.deleted" || event.type === "thread.archived";
+}
+
+export function isProjectDeletedEvent(
+  event: OrchestrationEvent,
+): event is ProjectDeletedEvent {
+  return event.type === "project.deleted";
 }
 
 export function isThreadCurrentlyArchived(
@@ -106,6 +114,12 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  // Optional: the Project workspace store participates only in the
+  // idempotent postcondition cleanup below; engine-transactional deletion is
+  // the primary path and does not depend on this reactor.
+  const projectWorkspaceStore = Option.getOrUndefined(
+    yield* Effect.serviceOption(ProjectWorkspaceStore),
+  );
 
   const refreshCommandReadModelAfterPurge = (threadId: string) =>
     orchestrationEngine.refreshCommandReadModel().pipe(
@@ -265,24 +279,110 @@ const make = Effect.gen(function* () {
     yield* purgeThreadData(event);
   });
 
+  /**
+   * WP4 (Decision 0002): `project.deleted` post-event handling. The PRIMARY
+   * settlement already happened pre-commit inside the engine (settle before
+   * the command commits; workspace rows deleted in the same transaction as
+   * the event). This worker only enforces the postcondition idempotently:
+   * any Project terminal session that somehow outlived the commit is settled
+   * again (a truthful no-op when none remain) and any residual workspace rows
+   * are deleted. It never runs BEFORE deletion and never deletes state for a
+   * Project that was not already deleted.
+   */
+  const processProjectDeleted = Effect.fn(function* (event: ProjectDeletedEvent) {
+    const projectId = ProjectId.makeUnsafe(event.payload.projectId);
+    // WP5 (Decision 0002): settle the deleted Project's device attachment
+    // AFTER the committed deletion (the same postcondition position as the
+    // terminal settlement above). Idempotent and scoped to this one Project:
+    // detaching clears the attachment truthfully and every OTHER Project's
+    // attachment is untouched. A device Synara booted that no other workspace
+    // still watches falls back to the normal idle ladder inside the manager.
+    yield* Effect.service(DeviceService).pipe(
+      Effect.flatMap((service) =>
+        Effect.promise(() => service.manager.handleProjectRemoved(projectId)),
+      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning(
+          "project deletion device attachment cleanup skipped",
+          {
+            projectId,
+            cause: Cause.pretty(cause),
+          },
+        );
+      }),
+    );
+    const residuals = yield* Effect.result(
+      terminalManager.settleProjectTerminals({ projectId }),
+    );
+    if (residuals._tag === "Failure") {
+      yield* Effect.logWarning("project deletion postcondition terminal settlement failed", {
+        projectId,
+        failure:
+          residuals.failure instanceof Error
+            ? residuals.failure.message
+            : String(residuals.failure),
+      });
+      return;
+    }
+    for (const result of residuals.success) {
+      if (result.outcome !== "settled") {
+        yield* Effect.logWarning(
+          "project deletion postcondition settlement reported an unproven residual terminal",
+          {
+            projectId,
+            terminalId: result.terminalId,
+            outcome: result.outcome,
+            detail: result.detail,
+          },
+        );
+      }
+    }
+    if (projectWorkspaceStore === undefined) {
+      return;
+    }
+    yield* projectWorkspaceStore
+      .deleteProjectWorkspace({ projectId })
+      .pipe(Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning(
+          "project deletion postcondition workspace cleanup skipped",
+          {
+            projectId,
+            cause: Cause.pretty(cause),
+          },
+        );
+      }));
+  });
+
   const processThreadLifecycleEvent = (event: ThreadLifecycleCleanupEvent) =>
     event.type === "thread.deleted" ? processThreadDeleted(event) : cleanupArchivedThread(event);
 
-  const processThreadLifecycleEventSafely = (event: ThreadLifecycleCleanupEvent) =>
-    processThreadLifecycleEvent(event).pipe(
+  type LifecycleCleanupEvent = ThreadLifecycleCleanupEvent | ProjectDeletedEvent;
+
+  const processLifecycleEventSafely = (event: LifecycleCleanupEvent) =>
+    (isProjectDeletedEvent(event)
+      ? processProjectDeleted(event)
+      : processThreadLifecycleEvent(event)
+    ).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
         return Effect.logWarning("thread lifecycle cleanup reactor failed to process event", {
           eventType: event.type,
-          threadId: event.payload.threadId,
+          projectId: isProjectDeletedEvent(event) ? event.payload.projectId : undefined,
+          threadId: !isProjectDeletedEvent(event) ? event.payload.threadId : undefined,
           cause: Cause.pretty(cause),
         });
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processThreadLifecycleEventSafely, {
+  const worker = yield* makeDrainableWorker(processLifecycleEventSafely, {
     capacity: THREAD_LIFECYCLE_REACTOR_CAPACITY,
   });
 
@@ -292,7 +392,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* Effect.forkScoped(
           Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-            if (!isThreadLifecycleCleanupEvent(event)) {
+            if (!isThreadLifecycleCleanupEvent(event) && !isProjectDeletedEvent(event)) {
               return Effect.void;
             }
             return worker.enqueue(event);

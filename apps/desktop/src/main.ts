@@ -190,11 +190,19 @@ import {
 import { buildGitHubReleasesPageUrl, resolveGitHubUpdateSource } from "./githubUpdateFeed";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 import { BROWSER_SESSION_PARTITION, DesktopBrowserManager } from "./browserManager";
+import { DesktopBrowserAutomationHost } from "./browserAutomation/desktopBrowserAutomationHost";
+import {
+  createActivationGatedAutomationHost,
+  DesktopProjectWorkspaceActivation,
+} from "./desktopProjectWorkspaceActivation";
 import {
   registerBrowserIpcHandlers,
   sendBrowserAnnotationEvent,
   sendBrowserCopyLink,
   sendBrowserState,
+  sendProjectBrowserAnnotationEvent,
+  sendProjectBrowserCopyLink,
+  sendProjectBrowserState,
 } from "./browserIpc";
 import {
   BrowserHostPipeServer,
@@ -202,6 +210,7 @@ import {
   resolveBrowserHostPipeBackendEnv,
 } from "./browserUsePipeServer";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
+import { runDesktopProjectWorkspaceStartupMigration } from "./desktopProjectWorkspaceMigration";
 import {
   repairBrowserProfileFromBridgeManifest,
   resolveDesktopAppDataBase,
@@ -352,8 +361,12 @@ let restoreStdIoCapture: (() => void) | null = null;
 let unreadBackgroundNotificationCount = 0;
 let browserPerfInterval: ReturnType<typeof setInterval> | null = null;
 const annotationGuestPreload = Path.join(__dirname, "guestPreload.js");
+let projectWorkspaceActivation: DesktopProjectWorkspaceActivation | null = null;
 const browserManager = new DesktopBrowserManager({
   annotationPreloadPath: annotationGuestPreload,
+  onProjectWorkspaceDeactivated: (projectId) => {
+    projectWorkspaceActivation?.forgetProject(projectId);
+  },
   beforeInputEvent: (event, input) => {
     if (
       isKeyboardShortcutsHelpChord(
@@ -382,6 +395,10 @@ const browserManager = new DesktopBrowserManager({
     return target ? handleDesktopPhysicalZoomShortcut(event, input, target) : false;
   },
 });
+projectWorkspaceActivation = DesktopProjectWorkspaceActivation.forUserDataPath(
+  userDataPath,
+  browserManager,
+);
 let browserHostPipeServer: BrowserHostPipeServer | null = null;
 let appSnapManager: DesktopAppSnapManager | null = null;
 let configuredUpdaterCacheDirName: string | null = null;
@@ -396,6 +413,18 @@ browserManager.subscribeCopyLink((event) => {
 
 browserManager.subscribeAnnotationEvents((event) => {
   sendBrowserAnnotationEvent(mainWindow?.webContents, event);
+});
+
+browserManager.subscribeProjectState((state) => {
+  sendProjectBrowserState(mainWindow?.webContents, state);
+});
+
+browserManager.subscribeProjectCopyLink((event) => {
+  sendProjectBrowserCopyLink(mainWindow?.webContents, event);
+});
+
+browserManager.subscribeProjectAnnotationEvents((event) => {
+  sendProjectBrowserAnnotationEvent(mainWindow?.webContents, event);
 });
 
 function startBrowserPerformanceLogging(): void {
@@ -430,12 +459,19 @@ async function ensureBrowserHostPipeServer(): Promise<void> {
   if (browserHostPipeServer || !SYNARA_BROWSER_HOST_PIPE_PATH) {
     return;
   }
-  const server = new BrowserHostPipeServer(browserManager, {
-    capability: DESKTOP_BROWSER_HOST_CAPABILITY,
+  const activation = projectWorkspaceActivation;
+  if (!activation) {
+    throw new Error("Project workspace activation is unavailable.");
+  }
+  const rawAutomationHost = new DesktopBrowserAutomationHost(browserManager, {
     requestOpenPanel: (threadId) => {
       if (!threadId) return;
       mainWindow?.webContents.send(IPC.browser.requestOpenPanel, { threadId });
     },
+  });
+  const server = new BrowserHostPipeServer(browserManager, {
+    capability: DESKTOP_BROWSER_HOST_CAPABILITY,
+    automationHost: createActivationGatedAutomationHost(rawAutomationHost, activation),
   });
   await server.start();
   browserHostPipeServer = server;
@@ -3953,7 +3989,11 @@ function registerIpcHandlers(): void {
   }
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
-  registerBrowserIpcHandlers(ipcMain, browserManager);
+  const activation = projectWorkspaceActivation;
+  if (!activation) {
+    throw new Error("Project workspace activation is unavailable.");
+  }
+  registerBrowserIpcHandlers(ipcMain, browserManager, activation);
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -4395,6 +4435,51 @@ async function bootstrap(): Promise<void> {
 
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   await reserveBackendEndpoint("bootstrap");
+
+  // WP7 production wiring (Decision 0002 F): converge the Project workspace
+  // publication markers in the real userData store BEFORE any IPC handler is
+  // registered — `registerIpcHandlers()` exposes the Project browser surface,
+  // and no renderer may observe a half-staged Project workspace through it.
+  // The pass only touches Projects the durable document already names, never
+  // reads v1 records (the desktop boundary owns none), and never cleans up.
+  // Failures surface as diagnostics and stay retryable on the next start.
+  const workspaceMigrationOutcome = runDesktopProjectWorkspaceStartupMigration({
+    userDataPath: app.getPath("userData"),
+  });
+  if (workspaceMigrationOutcome.diagnostic !== null) {
+    console.warn(
+      "[Synara workspace] Project workspace startup migration unavailable:",
+      workspaceMigrationOutcome.diagnostic,
+    );
+  }
+  for (const result of workspaceMigrationOutcome.results) {
+    if (result.status === "unpublished") {
+      console.warn(
+        `[Synara workspace] Project workspace ${result.projectId} left unpublished and retryable:`,
+        result.diagnostic,
+      );
+    }
+  }
+
+  const activation = projectWorkspaceActivation;
+  if (!activation) {
+    throw new Error("Project workspace activation is unavailable.");
+  }
+  const activationOutcome = await activation.activateKnownProjects();
+  if (activationOutcome.diagnostic !== null) {
+    console.warn(
+      "[Synara workspace] Project workspace startup activation unavailable:",
+      activationOutcome.diagnostic,
+    );
+  }
+  for (const result of activationOutcome.results) {
+    if (result.status === "failed") {
+      console.warn(
+        `[Synara workspace] Project workspace ${result.projectId} activation blocked and retryable:`,
+        result.diagnostic,
+      );
+    }
+  }
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");

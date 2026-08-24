@@ -12,7 +12,8 @@ import {
   Trash2,
   TriangleAlertIcon,
 } from "~/lib/icons";
-import { type ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
+import type { TerminalStateScope } from "~/terminalStateStore";
 import { type TerminalActivityState, type TerminalCliKind } from "@synara/shared/terminalThreads";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -108,7 +109,9 @@ function TerminalRuntimeStatusOverlay({ status }: { status: TerminalRuntimeStatu
 }
 
 interface TerminalViewportProps {
-  threadId: ThreadId;
+  threadId: TerminalStateScope;
+  /** Owning Project for a Project-owned dock terminal runtime; null = legacy. */
+  projectId?: ProjectId | null;
   terminalId: string;
   terminalLabel: string;
   terminalCliKind?: TerminalCliKind | null;
@@ -131,6 +134,7 @@ interface TerminalViewportProps {
 
 function TerminalViewport({
   threadId,
+  projectId = null,
   terminalId,
   terminalLabel,
   terminalCliKind: terminalCliKindProp,
@@ -174,6 +178,7 @@ function TerminalViewport({
     () => ({
       runtimeKey,
       threadId,
+      projectId,
       terminalId,
       terminalLabel,
       terminalCliKind,
@@ -195,6 +200,7 @@ function TerminalViewport({
       onSessionExited,
       onTerminalActivityChange,
       onTerminalMetadataChange,
+      projectId,
       runtimeEnvPayload,
       runtimeKey,
       terminalCliKind,
@@ -460,7 +466,9 @@ function TerminalViewport({
 }
 
 interface ThreadTerminalDrawerProps {
-  threadId: ThreadId;
+  threadId: TerminalStateScope;
+  /** Owning Project for a Project-owned dock terminal workspace; null = legacy. */
+  projectId?: ProjectId | null;
   cwd: string;
   runtimeEnv?: Record<string, string>;
   height: number;
@@ -508,6 +516,7 @@ interface ThreadTerminalDrawerProps {
 
 export default function ThreadTerminalDrawer({
   threadId,
+  projectId = null,
   cwd,
   runtimeEnv,
   height,
@@ -744,6 +753,7 @@ export default function ThreadTerminalDrawer({
                 <TerminalViewport
                   key={terminalId}
                   threadId={threadId}
+                  projectId={projectId}
                   terminalId={terminalId}
                   terminalLabel={terminalVisualIdentityById.get(terminalId)?.title ?? "Terminal"}
                   terminalCliKind={terminalVisualIdentityById.get(terminalId)?.cliKind ?? null}

@@ -1,6 +1,6 @@
 # Synara Project-owned Right-sidebar workspace
 
-Status: product contract OWNER-CONFIRMED; implementation not started.
+Status: FINAL ACCEPTED at candidate `c03a4a511` by Decision 0006.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Switching between Main conversations in one Project must leave the Right sidebar
 
 ## Current behavior and cause
 
-Right-dock panes, terminal presentation, browser state, and split-view state are currently selected primarily by `ThreadId`. Switching conversations selects a different Thread-scoped state slice; a conversation without prior state therefore appears to reset the Right sidebar. The persistent Project expansion state in the left navigation is a separate concern and is not the reported defect.
+Right-dock panes, terminal presentation, browser state, and split-view state were previously selected primarily by `ThreadId`. The accepted implementation gives the Right-sidebar workspace explicit Project ownership while preserving real nested Thread identity where content requires it. The persistent Project expansion state in the left navigation remains a separate concern.
 
 ## Accepted product contract
 
@@ -46,4 +46,7 @@ Right-dock panes, terminal presentation, browser state, and split-view state are
 
 - Canonical vocabulary: `CONTEXT.md`
 - Architecture decision: `docs/adr/0001-project-owned-right-sidebar-workspace.md`
+- Ownership and migration: `decisions/0002-explicit-project-ownership-and-legacy-migration.md`
+- Desktop activation: `decisions/0004-desktop-authoritative-lazy-project-workspace-activation.md`
+- Final acceptance: `decisions/0006-final-acceptance-candidate-c03a4a511.md`
 - One-time local cleanup decision: `decisions/0001-one-time-synara-work-cleanup.md`

@@ -8,14 +8,24 @@ import path from "node:path";
 
 import {
   DEFAULT_TERMINAL_ID,
+  ProjectId,
   TerminalAckOutputInput,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalOpenInput,
+  TerminalProjectAckOutputInput,
+  TerminalProjectClearInput,
+  TerminalProjectCloseInput,
+  TerminalProjectEvent,
+  TerminalProjectOpenInput,
+  TerminalProjectResizeInput,
+  TerminalProjectRestartInput,
+  TerminalProjectWriteInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalWriteInput,
   type TerminalEvent,
+  type TerminalProjectSessionSnapshot,
   type TerminalSessionSnapshot,
 } from "@synara/contracts";
 import { describeErrorMessage } from "@synara/shared/errorMessages";
@@ -48,8 +58,10 @@ import {
   TerminalManager,
   TerminalManagerShape,
   type TerminalCloseOpenedAtOrBeforeInput,
+  type TerminalProjectSettlementResult,
+  type TerminalSessionOwner,
   TerminalSessionState,
-  TerminalStartInput,
+  type TerminalStartPayload,
 } from "../Services/Manager";
 import {
   capHistoryByLimits,
@@ -109,6 +121,9 @@ const DEFAULT_OPEN_ROWS = 30;
 const PROVIDER_INPUT_ACTIVITY_GRACE_MS = 120_000;
 const PROVIDER_OUTPUT_ACTIVITY_GRACE_MS = 30_000;
 const SHUTDOWN_ESCALATION_SETTLE_MS = 25;
+/** Extra proof window beyond `processKillGraceMs` before deletion settlement
+ * reports "uncertain" instead of "settled" (SIGKILL escalation included). */
+const TERMINAL_SETTLE_PROOF_GRACE_MS = 500;
 const TERMINAL_ENV_BLOCKLIST = new Set([
   "PORT",
   "ELECTRON_RENDERER_PORT",
@@ -164,6 +179,14 @@ const decodeTerminalAckOutputInput = Schema.decodeUnknownSync(TerminalAckOutputI
 const decodeTerminalResizeInput = Schema.decodeUnknownSync(TerminalResizeInput);
 const decodeTerminalClearInput = Schema.decodeUnknownSync(TerminalClearInput);
 const decodeTerminalCloseInput = Schema.decodeUnknownSync(TerminalCloseInput);
+
+const decodeTerminalProjectOpenInput = Schema.decodeUnknownSync(TerminalProjectOpenInput);
+const decodeTerminalProjectRestartInput = Schema.decodeUnknownSync(TerminalProjectRestartInput);
+const decodeTerminalProjectWriteInput = Schema.decodeUnknownSync(TerminalProjectWriteInput);
+const decodeTerminalProjectAckOutputInput = Schema.decodeUnknownSync(TerminalProjectAckOutputInput);
+const decodeTerminalProjectResizeInput = Schema.decodeUnknownSync(TerminalProjectResizeInput);
+const decodeTerminalProjectClearInput = Schema.decodeUnknownSync(TerminalProjectClearInput);
+const decodeTerminalProjectCloseInput = Schema.decodeUnknownSync(TerminalProjectCloseInput);
 
 type TerminalSubprocessChecker = (
   terminalPid: number,
@@ -643,12 +666,50 @@ function toSafeThreadId(threadId: string): string {
   return `terminal_${Encoding.encodeBase64Url(threadId)}`;
 }
 
+/** Project-owned history lives under its own on-disk namespace. */
+function toSafeProjectId(projectId: string): string {
+  return `terminal_project_${Encoding.encodeBase64Url(projectId)}`;
+}
+
+/**
+ * Project terminal admission-fence state (WP4 review remediation).
+ *
+ * `deleting`: a `project.delete` dispatch has begun its settlement sequence;
+ * no new Project terminal may be opened or spawned until the dispatch
+ * finishes (settled→`deleted`, or rejected/rolled back→fence released).
+ *
+ * `deleted`: `project.deleted` has COMMITTED. The fence is retained for the
+ * server's lifetime so a stale client can never reopen a terminal for a
+ * Project whose workspace no longer exists. The terminal runtime is
+ * authoritative here even when the orchestration read model lags.
+ */
+type ProjectTerminalFenceState = "deleting" | "deleted";
+
 function toSafeTerminalId(terminalId: string): string {
   return Encoding.encodeBase64Url(terminalId);
 }
 
-function toSessionKey(threadId: string, terminalId: string): string {
-  return `${threadId}\u0000${terminalId}`;
+/** Stable owner-scoped map key; the kind discriminator prevents any Project
+ * identifier from ever colliding with a Thread identifier. */
+function toOwnerKey(owner: TerminalSessionOwner): string {
+  return owner.kind === "thread"
+    ? `thread\u0000${owner.threadId}`
+    : `project\u0000${owner.projectId}`;
+}
+
+function ownerLabel(owner: TerminalSessionOwner): string {
+  return owner.kind === "thread" ? owner.threadId : owner.projectId;
+}
+
+function requireOwnerThreadId(owner: TerminalSessionOwner): string {
+  if (owner.kind !== "thread") {
+    throw new Error("Terminal operation is thread-scoped but the session is Project-owned");
+  }
+  return owner.threadId;
+}
+
+function toSessionKey(owner: TerminalSessionOwner, terminalId: string): string {
+  return `${toOwnerKey(owner)}\u0000${terminalId}`;
 }
 
 function shouldExcludeTerminalEnvKey(key: string): boolean {
@@ -744,6 +805,7 @@ function sanitizePersistedTerminalHistory(history: string): string {
 
 interface TerminalManagerEvents {
   event: [event: TerminalEvent];
+  projectEvent: [event: TerminalProjectEvent];
 }
 
 interface TerminalManagerOptions {
@@ -800,6 +862,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   /** Delay of the currently scheduled poll, so activity can pull it forward. */
   private currentSubprocessPollDelayMs = 0;
   private readonly killEscalationTimers = new Map<PtyProcess, KillEscalationHandle>();
+  /** Project terminal admission fence; see {@link ProjectTerminalFenceState}. */
+  private readonly projectTerminalFences = new Map<string, ProjectTerminalFenceState>();
   private readonly logger = createLogger("terminal");
 
   constructor(options: TerminalManagerOptions) {
@@ -860,149 +924,225 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
   async open(raw: TerminalOpenInput): Promise<TerminalSessionSnapshot> {
     const input = decodeTerminalOpenInput(raw);
-    return this.runWithThreadLock(input.threadId, async () => {
-      await this.assertValidCwd(input.cwd);
-
-      const sessionKey = toSessionKey(input.threadId, input.terminalId);
-      const existing = this.sessions.get(sessionKey);
-      if (!existing) {
-        await this.flushPersistQueue(input.threadId, input.terminalId);
-        const history = await this.readHistory(input.threadId, input.terminalId);
-        const cols = input.cols ?? DEFAULT_OPEN_COLS;
-        const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-        const openedAt = new Date().toISOString();
-        const session: TerminalSessionState = {
-          threadId: input.threadId,
-          terminalId: input.terminalId,
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    return this.runWithOwnerLock(owner, async () => {
+      await this.openOwnerSession(
+        owner,
+        {
           cwd: input.cwd,
-          status: "starting",
-          pid: null,
-          history: TerminalHistoryBuffer.fromString(history, this.historyLimits()),
-          pendingHistoryControlSequence: "",
-          exitCode: null,
-          exitSignal: null,
-          updatedAt: openedAt,
-          lastOpenedAt: openedAt,
+          cols: input.cols,
+          rows: input.rows,
+          env: input.env,
+          streamOutput: input.streamOutput,
+        },
+        input.terminalId,
+      );
+      const session = this.requireSession(owner, input.terminalId);
+      if (session.owner.kind !== "thread") {
+        throw new Error("Terminal session ownership changed during open");
+      }
+      return this.snapshot(session) as TerminalSessionSnapshot;
+    });
+  }
+
+  async openProject(raw: TerminalProjectOpenInput): Promise<TerminalProjectSessionSnapshot> {
+    const input = decodeTerminalProjectOpenInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    this.assertProjectTerminalAdmitted(owner);
+    return this.runWithOwnerLock(owner, async () => {
+      await this.openOwnerSession(
+        owner,
+        {
+          cwd: input.cwd,
+          cols: input.cols,
+          rows: input.rows,
+          env: input.env,
+          streamOutput: input.streamOutput,
+        },
+        input.terminalId,
+      );
+      const session = this.requireSession(owner, input.terminalId);
+      if (session.owner.kind !== "project") {
+        throw new Error("Terminal session ownership changed during open");
+      }
+      return this.snapshot(session) as TerminalProjectSessionSnapshot;
+    });
+  }
+
+  /**
+   * Shared open-or-attach body for both owner kinds. Reusing an existing
+   * session keeps the SAME live PTY and history — for a Project terminal this
+   * is what makes reconnect/conversation-switch resume one process instead of
+   * respawning.
+   */
+  private async openOwnerSession(
+    owner: TerminalSessionOwner,
+    input: Omit<TerminalOpenInput, "threadId" | "terminalId">,
+    terminalId: string,
+  ): Promise<void> {
+    await this.assertValidCwd(input.cwd);
+
+    const sessionKey = toSessionKey(owner, terminalId);
+    const existing = this.sessions.get(sessionKey);
+    if (!existing) {
+      await this.flushPersistQueue(owner, terminalId);
+      const history = await this.readHistory(owner, terminalId);
+      const cols = input.cols ?? DEFAULT_OPEN_COLS;
+      const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+      const openedAt = new Date().toISOString();
+      const session: TerminalSessionState = {
+        owner,
+        terminalId,
+        cwd: input.cwd,
+        status: "starting",
+        pid: null,
+        history: TerminalHistoryBuffer.fromString(history, this.historyLimits()),
+        pendingHistoryControlSequence: "",
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: openedAt,
+        lastOpenedAt: openedAt,
+        cols,
+        rows,
+        process: null,
+        unsubscribeData: null,
+        unsubscribeExit: null,
+        hasRunningSubprocess: false,
+        detectedCliKind: cliKindFromRuntimeEnv(normalizedRuntimeEnv(input.env)),
+        providerDescendantObserved: false,
+        managedAgentRunning: false,
+        managedAgentState: null,
+        managedAgentObserved: false,
+        runtimeEnv: normalizedRuntimeEnv(input.env),
+        pendingInputBuffer: "",
+        modeReplayTracker: null,
+        pendingOutputChunks: [],
+        pendingOutputLength: 0,
+        outputFlushTimer: null,
+        streamOutput: input.streamOutput ?? true,
+        outputPaused: false,
+        outputBufferPauseRequested: false,
+        outputAckPauseRequested: false,
+        outputAckObserved: false,
+        outputUnackedBytes: 0,
+        outputAckResumeTimer: null,
+        lastInputAt: null,
+        lastOutputAt: null,
+        lastOutputSignature: null,
+      };
+      this.sessions.set(sessionKey, session);
+      this.evictInactiveSessionsIfNeeded();
+      await this.startSession(
+        session,
+        {
+          cwd: input.cwd,
           cols,
           rows,
-          process: null,
-          unsubscribeData: null,
-          unsubscribeExit: null,
-          hasRunningSubprocess: false,
-          detectedCliKind: cliKindFromRuntimeEnv(normalizedRuntimeEnv(input.env)),
-          providerDescendantObserved: false,
-          managedAgentRunning: false,
-          managedAgentState: null,
-          managedAgentObserved: false,
-          runtimeEnv: normalizedRuntimeEnv(input.env),
-          pendingInputBuffer: "",
-          modeReplayTracker: null,
-          pendingOutputChunks: [],
-          pendingOutputLength: 0,
-          outputFlushTimer: null,
-          streamOutput: input.streamOutput ?? true,
-          outputPaused: false,
-          outputBufferPauseRequested: false,
-          outputAckPauseRequested: false,
-          outputAckObserved: false,
-          outputUnackedBytes: 0,
-          outputAckResumeTimer: null,
-          lastInputAt: null,
-          lastOutputAt: null,
-          lastOutputSignature: null,
-        };
-        this.sessions.set(sessionKey, session);
-        this.evictInactiveSessionsIfNeeded();
-        await this.startSession(session, { ...input, cols, rows }, "started");
-        return this.snapshot(session);
+          ...(input.env !== undefined ? { env: input.env } : {}),
+          ...(input.streamOutput !== undefined ? { streamOutput: input.streamOutput } : {}),
+        },
+        "started",
+      );
+      return;
+    }
+
+    existing.lastOpenedAt = new Date().toISOString();
+    // A re-open may flip headless mode (e.g. a viewer attaching later); honor it
+    // when explicitly provided, otherwise keep the session's current mode.
+    if (input.streamOutput !== undefined) {
+      existing.streamOutput = input.streamOutput;
+    }
+    const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+    const currentRuntimeEnv = existing.runtimeEnv;
+    const targetCols = input.cols ?? existing.cols;
+    const targetRows = input.rows ?? existing.rows;
+    const runtimeEnvChanged =
+      JSON.stringify(currentRuntimeEnv) !== JSON.stringify(nextRuntimeEnv);
+
+    if (existing.process) {
+      // A renderer reattach/reconcile is not an explicit restart; keep the live
+      // PTY's original cwd/env so UI drift cannot SIGTERM a running agent.
+      if (existing.cwd !== input.cwd || runtimeEnvChanged) {
+        this.logger.warn("ignoring terminal open cwd/env change for running session", {
+          ownerKind: existing.owner.kind,
+          ownerId: ownerLabel(existing.owner),
+          terminalId: existing.terminalId,
+          currentCwd: existing.cwd,
+          requestedCwd: input.cwd,
+          runtimeEnvChanged,
+        });
       }
+    } else if (existing.cwd !== input.cwd || runtimeEnvChanged) {
+      this.stopProcess(existing);
+      existing.cwd = input.cwd;
+      existing.runtimeEnv = nextRuntimeEnv;
+      resetSessionHistory(existing);
+      await this.persistHistory(existing.owner, existing.terminalId, existing.history.toString());
+    } else if (existing.status === "exited" || existing.status === "error") {
+      existing.runtimeEnv = nextRuntimeEnv;
+      resetSessionHistory(existing);
+      await this.persistHistory(existing.owner, existing.terminalId, existing.history.toString());
+    }
 
-      existing.lastOpenedAt = new Date().toISOString();
-      // A re-open may flip headless mode (e.g. a viewer attaching later); honor it
-      // when explicitly provided, otherwise keep the session's current mode.
-      if (input.streamOutput !== undefined) {
-        existing.streamOutput = input.streamOutput;
-      }
-      const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
-      const currentRuntimeEnv = existing.runtimeEnv;
-      const targetCols = input.cols ?? existing.cols;
-      const targetRows = input.rows ?? existing.rows;
-      const runtimeEnvChanged =
-        JSON.stringify(currentRuntimeEnv) !== JSON.stringify(nextRuntimeEnv);
+    if (!existing.process) {
+      await this.startSession(
+        existing,
+        {
+          cwd: input.cwd,
+          cols: targetCols,
+          rows: targetRows,
+          ...(input.env !== undefined ? { env: input.env } : {}),
+        },
+        "started",
+      );
+      return;
+    }
 
-      if (existing.process) {
-        // A renderer reattach/reconcile is not an explicit restart; keep the live
-        // PTY's original cwd/env so UI drift cannot SIGTERM a running agent.
-        if (existing.cwd !== input.cwd || runtimeEnvChanged) {
-          this.logger.warn("ignoring terminal open cwd/env change for running session", {
-            threadId: existing.threadId,
-            terminalId: existing.terminalId,
-            currentCwd: existing.cwd,
-            requestedCwd: input.cwd,
-            runtimeEnvChanged,
-          });
-        }
-      } else if (existing.cwd !== input.cwd || runtimeEnvChanged) {
-        this.stopProcess(existing);
-        existing.cwd = input.cwd;
-        existing.runtimeEnv = nextRuntimeEnv;
-        resetSessionHistory(existing);
-        await this.persistHistory(
-          existing.threadId,
-          existing.terminalId,
-          existing.history.toString(),
-        );
-      } else if (existing.status === "exited" || existing.status === "error") {
-        existing.runtimeEnv = nextRuntimeEnv;
-        resetSessionHistory(existing);
-        await this.persistHistory(
-          existing.threadId,
-          existing.terminalId,
-          existing.history.toString(),
-        );
-      }
+    // Reattaching a renderer to a still-running session: discard the previous
+    // client's ACK accounting and resume reads so a reconnect-while-paused can
+    // never leave this terminal frozen.
+    this.resetOutputAckTracking(existing);
 
-      if (!existing.process) {
-        await this.startSession(
-          existing,
-          { ...input, cols: targetCols, rows: targetRows },
-          "started",
-        );
-        return this.snapshot(existing);
-      }
+    if (existing.cols !== targetCols || existing.rows !== targetRows) {
+      existing.cols = targetCols;
+      existing.rows = targetRows;
+      existing.process.resize(targetCols, targetRows);
+      existing.modeReplayTracker?.resize(targetCols, targetRows);
+      existing.updatedAt = new Date().toISOString();
+    }
 
-      // Reattaching a renderer to a still-running session: discard the previous
-      // client's ACK accounting and resume reads so a reconnect-while-paused can
-      // never leave this terminal frozen.
-      this.resetOutputAckTracking(existing);
-
-      if (existing.cols !== targetCols || existing.rows !== targetRows) {
-        existing.cols = targetCols;
-        existing.rows = targetRows;
-        existing.process.resize(targetCols, targetRows);
-        existing.modeReplayTracker?.resize(targetCols, targetRows);
-        existing.updatedAt = new Date().toISOString();
-      }
-
-      // Drain any batched-but-unparsed output so the reconnect snapshot carries
-      // the latest history and an up-to-date mode-replay preamble.
-      this.flushOutputBuffer(existing);
-      return this.snapshot(existing);
-    });
+    // Drain any batched-but-unparsed output so the reconnect snapshot carries
+    // the latest history and an up-to-date mode-replay preamble.
+    this.flushOutputBuffer(existing);
   }
 
   async write(raw: TerminalWriteInput): Promise<void> {
     const input = decodeTerminalWriteInput(raw);
-    const session = this.requireSession(input.threadId, input.terminalId);
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.writeOwnerSession(owner, input.terminalId, input.data);
+  }
+
+  async writeProject(raw: TerminalProjectWriteInput): Promise<void> {
+    const input = decodeTerminalProjectWriteInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    await this.writeOwnerSession(owner, input.terminalId, input.data);
+  }
+
+  private async writeOwnerSession(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+    data: string,
+  ): Promise<void> {
+    const session = this.requireSession(owner, terminalId);
     if (!session.process || session.status !== "running") {
       if (session.status === "exited") {
         return;
       }
       throw new Error(
-        `Terminal is not running for thread: ${input.threadId}, terminal: ${input.terminalId}`,
+        `Terminal is not running for ${owner.kind}: ${ownerLabel(owner)}, terminal: ${terminalId}`,
       );
     }
-    const nextIdentityState = consumeTerminalIdentityInput(session.pendingInputBuffer, input.data);
+    const nextIdentityState = consumeTerminalIdentityInput(session.pendingInputBuffer, data);
     session.pendingInputBuffer = nextIdentityState.buffer;
     if (
       nextIdentityState.identity &&
@@ -1012,7 +1152,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       session.providerDescendantObserved = false;
       this.emitActivityEvent(session);
     }
-    const submittedPrompt = input.data.includes("\r") || input.data.includes("\n");
+    const submittedPrompt = data.includes("\r") || data.includes("\n");
     if (submittedPrompt && session.detectedCliKind !== null && !session.hasRunningSubprocess) {
       session.hasRunningSubprocess = true;
       this.emitActivityEvent(session);
@@ -1020,16 +1160,31 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     session.lastInputAt = Date.now();
     // Typing may spawn a subprocess; restore fast subprocess polling promptly.
     this.bumpSubprocessPolling();
-    session.process.write(input.data);
+    session.process.write(data);
   }
 
   async ackOutput(raw: TerminalAckOutputInput): Promise<void> {
     const input = decodeTerminalAckOutputInput(raw);
-    const session = this.sessions.get(toSessionKey(input.threadId, input.terminalId));
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.ackOwnerOutput(owner, input.terminalId, input.bytes);
+  }
+
+  async ackOutputProject(raw: TerminalProjectAckOutputInput): Promise<void> {
+    const input = decodeTerminalProjectAckOutputInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    await this.ackOwnerOutput(owner, input.terminalId, input.bytes);
+  }
+
+  private async ackOwnerOutput(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+    bytes: number,
+  ): Promise<void> {
+    const session = this.sessions.get(toSessionKey(owner, terminalId));
     if (!session) return;
 
     session.outputAckObserved = true;
-    session.outputUnackedBytes = Math.max(0, session.outputUnackedBytes - input.bytes);
+    session.outputUnackedBytes = Math.max(0, session.outputUnackedBytes - bytes);
     if (session.outputUnackedBytes <= OUTPUT_ACK_LOW_WATERMARK) {
       session.outputAckPauseRequested = false;
     }
@@ -1041,122 +1196,217 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
   async resize(raw: TerminalResizeInput): Promise<void> {
     const input = decodeTerminalResizeInput(raw);
-    const session = this.requireSession(input.threadId, input.terminalId);
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.resizeOwnerSession(owner, input.terminalId, input.cols, input.rows);
+  }
+
+  async resizeProject(raw: TerminalProjectResizeInput): Promise<void> {
+    const input = decodeTerminalProjectResizeInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    await this.resizeOwnerSession(owner, input.terminalId, input.cols, input.rows);
+  }
+
+  private async resizeOwnerSession(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
+    const session = this.requireSession(owner, terminalId);
     if (!session.process || session.status !== "running") {
       throw new Error(
-        `Terminal is not running for thread: ${input.threadId}, terminal: ${input.terminalId}`,
+        `Terminal is not running for ${owner.kind}: ${ownerLabel(owner)}, terminal: ${terminalId}`,
       );
     }
-    session.cols = input.cols;
-    session.rows = input.rows;
+    session.cols = cols;
+    session.rows = rows;
     session.updatedAt = new Date().toISOString();
-    session.process.resize(input.cols, input.rows);
-    session.modeReplayTracker?.resize(input.cols, input.rows);
+    session.process.resize(cols, rows);
+    session.modeReplayTracker?.resize(cols, rows);
   }
 
   async clear(raw: TerminalClearInput): Promise<void> {
     const input = decodeTerminalClearInput(raw);
-    await this.runWithThreadLock(input.threadId, async () => {
-      const session = this.requireSession(input.threadId, input.terminalId);
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.clearOwnerSession(owner, input.terminalId);
+  }
+
+  async clearProject(raw: TerminalProjectClearInput): Promise<void> {
+    const input = decodeTerminalProjectClearInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    await this.clearOwnerSession(owner, input.terminalId);
+  }
+
+  private async clearOwnerSession(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): Promise<void> {
+    await this.runWithOwnerLock(owner, async () => {
+      const session = this.requireSession(owner, terminalId);
       resetSessionHistory(session);
       session.updatedAt = new Date().toISOString();
-      await this.persistHistory(input.threadId, input.terminalId, session.history.toString());
-      this.emitEvent({
-        type: "cleared",
-        threadId: input.threadId,
-        terminalId: input.terminalId,
-        createdAt: new Date().toISOString(),
+      await this.persistHistory(owner, terminalId, session.history.toString());
+      this.emitSessionEvent(session, {
+        thread: (base) => ({ type: "cleared", ...base }),
+        project: (base) => ({ type: "cleared", ...base }),
       });
     });
   }
 
   async restart(raw: TerminalRestartInput): Promise<TerminalSessionSnapshot> {
     const input = decodeTerminalRestartInput(raw);
-    return this.runWithThreadLock(input.threadId, async () => {
-      await this.assertValidCwd(input.cwd);
-
-      const sessionKey = toSessionKey(input.threadId, input.terminalId);
-      let session = this.sessions.get(sessionKey);
-      if (!session) {
-        const cols = input.cols ?? DEFAULT_OPEN_COLS;
-        const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-        const openedAt = new Date().toISOString();
-        session = {
-          threadId: input.threadId,
-          terminalId: input.terminalId,
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    return this.runWithOwnerLock(owner, async () => {
+      const session = await this.restartOwnerSession(
+        owner,
+        {
           cwd: input.cwd,
-          status: "starting",
-          pid: null,
-          history: new TerminalHistoryBuffer(this.historyLimits()),
-          pendingHistoryControlSequence: "",
-          exitCode: null,
-          exitSignal: null,
-          updatedAt: openedAt,
-          lastOpenedAt: openedAt,
-          cols,
-          rows,
-          process: null,
-          unsubscribeData: null,
-          unsubscribeExit: null,
-          hasRunningSubprocess: false,
-          detectedCliKind: cliKindFromRuntimeEnv(normalizedRuntimeEnv(input.env)),
-          providerDescendantObserved: false,
-          managedAgentRunning: false,
-          managedAgentState: null,
-          managedAgentObserved: false,
-          runtimeEnv: normalizedRuntimeEnv(input.env),
-          pendingInputBuffer: "",
-          modeReplayTracker: null,
-          pendingOutputChunks: [],
-          pendingOutputLength: 0,
-          outputFlushTimer: null,
-          // Restart has no headless mode of its own; fresh sessions stream normally
-          // and existing sessions (below) keep whatever mode they were opened with.
-          streamOutput: true,
-          outputPaused: false,
-          outputBufferPauseRequested: false,
-          outputAckPauseRequested: false,
-          outputAckObserved: false,
-          outputUnackedBytes: 0,
-          outputAckResumeTimer: null,
-          lastOutputSignature: null,
-          lastInputAt: null,
-          lastOutputAt: null,
-        } satisfies TerminalSessionState;
-        this.sessions.set(sessionKey, session);
-        this.evictInactiveSessionsIfNeeded();
-      } else {
-        this.stopProcess(session);
-        session.cwd = input.cwd;
-        session.runtimeEnv = normalizedRuntimeEnv(input.env);
+          cols: input.cols,
+          rows: input.rows,
+          env: input.env,
+        },
+        input.terminalId,
+      );
+      if (session.owner.kind !== "thread") {
+        throw new Error("Terminal session ownership changed during restart");
       }
-
-      if (!session) {
-        throw new Error(
-          `Terminal session was not initialized for thread: ${input.threadId}, terminal: ${input.terminalId}`,
-        );
-      }
-
-      session.lastOpenedAt = new Date().toISOString();
-      const cols = input.cols ?? session.cols;
-      const rows = input.rows ?? session.rows;
-
-      resetSessionHistory(session);
-      await this.persistHistory(input.threadId, input.terminalId, session.history.toString());
-      await this.startSession(session, { ...input, cols, rows }, "restarted");
-      return this.snapshot(session);
+      return this.snapshot(session) as TerminalSessionSnapshot;
     });
+  }
+
+  async restartProject(raw: TerminalProjectRestartInput): Promise<TerminalProjectSessionSnapshot> {
+    const input = decodeTerminalProjectRestartInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    this.assertProjectTerminalAdmitted(owner);
+    return this.runWithOwnerLock(owner, async () => {
+      const session = await this.restartOwnerSession(
+        owner,
+        {
+          cwd: input.cwd,
+          cols: input.cols,
+          rows: input.rows,
+          env: input.env,
+        },
+        input.terminalId,
+      );
+      if (session.owner.kind !== "project") {
+        throw new Error("Terminal session ownership changed during restart");
+      }
+      return this.snapshot(session) as TerminalProjectSessionSnapshot;
+    });
+  }
+
+  private async restartOwnerSession(
+    owner: TerminalSessionOwner,
+    input: Omit<TerminalRestartInput, "threadId" | "terminalId">,
+    terminalId: string,
+  ): Promise<TerminalSessionState> {
+    await this.assertValidCwd(input.cwd);
+
+    const sessionKey = toSessionKey(owner, terminalId);
+    let session = this.sessions.get(sessionKey);
+    if (!session) {
+      const cols = input.cols ?? DEFAULT_OPEN_COLS;
+      const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+      const openedAt = new Date().toISOString();
+      session = {
+        owner,
+        terminalId,
+        cwd: input.cwd,
+        status: "starting",
+        pid: null,
+        history: new TerminalHistoryBuffer(this.historyLimits()),
+        pendingHistoryControlSequence: "",
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: openedAt,
+        lastOpenedAt: openedAt,
+        cols,
+        rows,
+        process: null,
+        unsubscribeData: null,
+        unsubscribeExit: null,
+        hasRunningSubprocess: false,
+        detectedCliKind: cliKindFromRuntimeEnv(normalizedRuntimeEnv(input.env)),
+        providerDescendantObserved: false,
+        managedAgentRunning: false,
+        managedAgentState: null,
+        managedAgentObserved: false,
+        runtimeEnv: normalizedRuntimeEnv(input.env),
+        pendingInputBuffer: "",
+        modeReplayTracker: null,
+        pendingOutputChunks: [],
+        pendingOutputLength: 0,
+        outputFlushTimer: null,
+        // Restart has no headless mode of its own; fresh sessions stream normally
+        // and existing sessions (below) keep whatever mode they were opened with.
+        streamOutput: true,
+        outputPaused: false,
+        outputBufferPauseRequested: false,
+        outputAckPauseRequested: false,
+        outputAckObserved: false,
+        outputUnackedBytes: 0,
+        outputAckResumeTimer: null,
+        lastOutputSignature: null,
+        lastInputAt: null,
+        lastOutputAt: null,
+      } satisfies TerminalSessionState;
+      this.sessions.set(sessionKey, session);
+      this.evictInactiveSessionsIfNeeded();
+    } else {
+      this.stopProcess(session);
+      session.cwd = input.cwd;
+      session.runtimeEnv = normalizedRuntimeEnv(input.env);
+    }
+
+    if (!session) {
+      throw new Error(
+        `Terminal session was not initialized for ${owner.kind}: ${ownerLabel(owner)}, terminal: ${terminalId}`,
+      );
+    }
+
+    session.lastOpenedAt = new Date().toISOString();
+    const cols = input.cols ?? session.cols;
+    const rows = input.rows ?? session.rows;
+
+    resetSessionHistory(session);
+    await this.persistHistory(owner, terminalId, session.history.toString());
+    await this.startSession(
+      session,
+      {
+        cwd: input.cwd,
+        cols,
+        rows,
+        ...(input.env !== undefined ? { env: input.env } : {}),
+      },
+      "restarted",
+    );
+    return session;
   }
 
   async close(raw: TerminalCloseInput): Promise<void> {
     const input = decodeTerminalCloseInput(raw);
-    await this.runWithThreadLock(input.threadId, async () => {
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.runWithOwnerLock(owner, async () => {
       if (input.terminalId) {
-        await this.closeSession(input.threadId, input.terminalId, input.deleteHistory === true);
+        await this.closeSession(owner, input.terminalId, input.deleteHistory === true);
         return;
       }
 
-      await this.closeThreadSessions(input.threadId, input.deleteHistory === true);
+      await this.closeOwnerSessions(owner, input.deleteHistory === true);
+    });
+  }
+
+  async closeProject(raw: TerminalProjectCloseInput): Promise<void> {
+    const input = decodeTerminalProjectCloseInput(raw);
+    const owner: TerminalSessionOwner = { kind: "project", projectId: input.projectId };
+    await this.runWithOwnerLock(owner, async () => {
+      if (input.terminalId) {
+        await this.closeSession(owner, input.terminalId, input.deleteHistory === true);
+        return;
+      }
+
+      await this.closeOwnerSessions(owner, input.deleteHistory === true);
     });
   }
 
@@ -1165,38 +1415,219 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     if (!Number.isFinite(cutoff)) {
       throw new Error(`Invalid terminal archive fence timestamp: ${input.openedAtOrBefore}`);
     }
-    await this.runWithThreadLock(input.threadId, () =>
-      this.closeThreadSessions(
-        input.threadId,
+    const owner: TerminalSessionOwner = { kind: "thread", threadId: input.threadId };
+    await this.runWithOwnerLock(owner, () =>
+      this.closeOwnerSessions(
+        owner,
         false,
         (session) => Date.parse(session.lastOpenedAt) <= cutoff,
       ),
     );
   }
 
-  private async closeThreadSessions(
-    threadId: string,
+  private async closeOwnerSessions(
+    owner: TerminalSessionOwner,
     deleteHistory: boolean,
     shouldClose: (session: TerminalSessionState) => boolean = () => true,
   ): Promise<void> {
-    const threadSessions = this.sessionsForThread(threadId).filter(shouldClose);
-    for (const session of threadSessions) {
+    const ownerSessions = this.sessionsForOwner(owner).filter(shouldClose);
+    for (const session of ownerSessions) {
       this.stopProcess(session);
-      this.sessions.delete(toSessionKey(session.threadId, session.terminalId));
+      this.sessions.delete(toSessionKey(session.owner, session.terminalId));
     }
     await Promise.all(
-      threadSessions.map((session) => this.flushPersistQueue(session.threadId, session.terminalId)),
+      ownerSessions.map((session) =>
+        this.flushPersistQueue(session.owner, session.terminalId),
+      ),
     );
-    for (const session of threadSessions) {
-      this.releasePersistedHistoryCache(session.threadId, session.terminalId);
+    for (const session of ownerSessions) {
+      this.releasePersistedHistoryCache(session.owner, session.terminalId);
     }
 
     if (deleteHistory) {
-      await this.deleteAllHistoryForThread(threadId);
+      await this.deleteAllHistoryForOwner(owner);
     }
-    if (threadSessions.length > 0) {
+    if (ownerSessions.length > 0) {
       this.updateSubprocessPollingState();
     }
+  }
+
+  // ── Project-owned terminal runtime (Decision 0002) ─────────────────
+
+  /**
+   * Reject admission to a Project whose terminals are fenced. Throws for
+   * `deleting` (settlement in flight) and `deleted` (workspace committed
+   * away). Reads happen WITHOUT the owner lock: the fence is per-Project
+   * admission state, not per-session state, and the deletion path must never
+   * hold a terminal lock across the orchestration SQL transaction.
+   */
+  private assertProjectTerminalAdmitted(owner: TerminalSessionOwner): void {
+    if (owner.kind !== "project") {
+      return;
+    }
+    const fence = this.projectTerminalFences.get(owner.projectId);
+    if (fence === undefined) {
+      return;
+    }
+    throw new Error(
+      fence === "deleting"
+        ? `Project '${owner.projectId}' is being deleted: its terminals are being settled and cannot be opened.`
+        : `Project '${owner.projectId}' was deleted: its terminal workspace no longer exists.`,
+    );
+  }
+
+  /**
+   * Begin the deletion admission fence for a Project BEFORE settlement runs.
+   * Idempotent re-begin keeps the strongest live state (`deleted` stays
+   * `deleted`; only an unfenced Project becomes `deleting`).
+   */
+  beginProjectDeletionFence(projectId: ProjectId): void {
+    if (!this.projectTerminalFences.has(projectId)) {
+      this.projectTerminalFences.set(projectId, "deleting");
+    }
+  }
+
+  /**
+   * Promote a `deleting` fence to the retained `deleted` state after the
+   * `project.deleted` event (and workspace delete) COMMIT. Never downgrades
+   * and never re-fences an already-deleted Project differently.
+   */
+  commitProjectDeletionFence(projectId: ProjectId): void {
+    this.projectTerminalFences.set(projectId, "deleted");
+  }
+
+  /**
+   * Release a fence whose deletion did NOT commit (unproven settlement
+   * rejection or transaction rollback) so the Project's terminals remain
+   * usable. A `deleted` fence is NEVER released: the deletion committed.
+   */
+  releaseProjectDeletionFence(projectId: ProjectId): void {
+    if (this.projectTerminalFences.get(projectId) === "deleting") {
+      this.projectTerminalFences.delete(projectId);
+    }
+  }
+
+  /** Current fence state for a Project (diagnostics/tests). */
+  projectDeletionFenceState(projectId: ProjectId): ProjectTerminalFenceState | null {
+    return this.projectTerminalFences.get(projectId) ?? null;
+  }
+
+  /**
+   * Snapshot every Project-owned terminal session (preflight surface for
+   * deletion warnings and workspace restore diagnostics).
+   */
+  async listProjectTerminals(projectId: ProjectId): Promise<TerminalProjectSessionSnapshot[]> {
+    const owner: TerminalSessionOwner = { kind: "project", projectId };
+    return this.sessionsForOwner(owner)
+      .map((session) => {
+        if (session.owner.kind !== "project") {
+          throw new Error("Terminal session ownership changed during list");
+        }
+        return this.snapshot(session) as TerminalProjectSessionSnapshot;
+      })
+      .toSorted((left, right) => left.terminalId.localeCompare(right.terminalId));
+  }
+
+  /**
+   * Settle every Project-owned terminal truthfully (Decision 0002 deletion
+   * settlement). Per terminal:
+   * - not running (exited/error, no process) → "settled"
+   * - running → observe process exit after the normal SIGTERM→SIGKILL
+   *   escalation: observed exit → "settled"; no observed exit within the
+   *   proof window → "uncertain" (signals sent, no proof — never reported
+   *   as settled); teardown throw → "failed".
+   *
+   * RETENTION RULE: sessions and their on-disk history are removed ONLY when
+   * EVERY outcome is "settled". Any "uncertain" or "failed" outcome keeps
+   * ALL of the Project's sessions and history untouched so the caller's
+   * retry re-observes the same state instead of silently discarding evidence
+   * for terminals that were never proven stopped. Stop signals were already
+   * sent to each terminal above, so a retained "uncertain" session keeps its
+   * truthfully-transitioned (exited) state rather than a live one.
+   *
+   * Idempotent: re-running after full settlement reports an empty list;
+   * re-running after an unproven attempt re-evaluates the retained sessions.
+   */
+  async settleProjectTerminals(projectId: ProjectId): Promise<TerminalProjectSettlementResult[]> {
+    const owner: TerminalSessionOwner = { kind: "project", projectId };
+    return this.runWithOwnerLock(owner, async () => {
+      const sessions = this.sessionsForOwner(owner);
+      const results: TerminalProjectSettlementResult[] = [];
+
+      for (const session of sessions) {
+        const process = session.process;
+        let outcome: TerminalProjectSettlementResult["outcome"];
+        let detail: string | null = null;
+
+        if (!process || session.status !== "running") {
+          if (session.status === "starting" && !process) {
+            // A session still mid-spawn has no observable process to prove
+            // stopped; claiming settled would be unproven.
+            outcome = "uncertain";
+            detail = "session was still starting; no process existed to settle";
+          } else {
+            outcome = "settled";
+            detail = null;
+          }
+        } else {
+          const exited = new Promise<boolean>((resolve) => {
+            const unsubscribe = process.onExit(() => {
+              unsubscribe();
+              resolve(true);
+            });
+          });
+          try {
+            this.stopProcess(session);
+            const proofWindowMs = this.processKillGraceMs + TERMINAL_SETTLE_PROOF_GRACE_MS;
+            const timeout = new Promise<boolean>((resolve) => {
+              const timer = setTimeout(() => resolve(false), proofWindowMs);
+              timer.unref?.();
+            });
+            const observedExit = await Promise.race([exited, timeout]);
+            outcome = observedExit ? "settled" : "uncertain";
+            if (!observedExit) {
+              detail =
+                "stop signals were sent but no process exit was observed within the proof window";
+            }
+          } catch (error) {
+            outcome = "failed";
+            detail = error instanceof Error ? error.message : String(error);
+          }
+        }
+
+        results.push({ projectId, terminalId: session.terminalId, outcome, detail });
+      }
+
+      const unproven = results.some((result) => result.outcome !== "settled");
+      if (unproven) {
+        // Truthful retention: at least one terminal was not PROVEN stopped, so
+        // nothing is removed. The Project's terminal workspace stays fully
+        // observable for the caller's retry; outcomes above still report the
+        // per-terminal truth. Stop signals already fired, so each session's
+        // status reflects its post-signal state truthfully.
+        return results;
+      }
+
+      // Every terminal proven settled: remove every Project session and its
+      // history. The Project itself is deleted, so its terminal workspace must
+      // not outlive it.
+      for (const session of sessions) {
+        this.stopProcess(session);
+        this.sessions.delete(toSessionKey(session.owner, session.terminalId));
+      }
+      await Promise.all(
+        sessions.map((session) => this.flushPersistQueue(session.owner, session.terminalId)),
+      );
+      for (const session of sessions) {
+        this.releasePersistedHistoryCache(session.owner, session.terminalId);
+      }
+      if (sessions.length > 0) {
+        await this.deleteAllHistoryForOwner(owner);
+        this.updateSubprocessPollingState();
+      }
+
+      return results;
+    });
   }
 
   dispose(): void {
@@ -1246,7 +1677,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
   private async startSession(
     session: TerminalSessionState,
-    input: TerminalStartInput,
+    input: TerminalStartPayload,
     eventType: "started" | "restarted",
   ): Promise<void> {
     this.stopProcess(session);
@@ -1344,19 +1775,27 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         this.onProcessExit(session, event);
       });
       this.updateSubprocessPollingState();
-      this.emitEvent({
-        type: eventType,
-        threadId: session.threadId,
-        terminalId: session.terminalId,
-        createdAt: new Date().toISOString(),
-        snapshot: this.snapshot(session),
+      const snapshot = this.snapshot(session);
+      this.emitSessionEvent(session, {
+        thread: (base) =>
+          ({
+            type: eventType,
+            ...base,
+            snapshot: snapshot as TerminalSessionSnapshot,
+          }) as TerminalEvent,
+        project: (base) =>
+          ({
+            type: eventType,
+            ...base,
+            snapshot: snapshot as TerminalProjectSessionSnapshot,
+          }) as TerminalProjectEvent,
       });
       if (session.detectedCliKind) {
         this.emitActivityEvent(session);
       }
     } catch (error) {
       if (ptyProcess) {
-        this.killProcessWithEscalation(ptyProcess, session.threadId, session.terminalId);
+        this.killProcessWithEscalation(ptyProcess, session.owner, session.terminalId);
       }
       session.status = "error";
       session.pid = null;
@@ -1371,15 +1810,13 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       this.evictInactiveSessionsIfNeeded();
       this.updateSubprocessPollingState();
       const message = describeErrorMessage(error, "Terminal start failed");
-      this.emitEvent({
-        type: "error",
-        threadId: session.threadId,
-        terminalId: session.terminalId,
-        createdAt: new Date().toISOString(),
-        message,
+      this.emitSessionEvent(session, {
+        thread: (base) => ({ type: "error", ...base, message }) as TerminalEvent,
+        project: (base) => ({ type: "error", ...base, message }) as TerminalProjectEvent,
       });
       this.logger.error("failed to start terminal", {
-        threadId: session.threadId,
+        ownerKind: session.owner.kind,
+        ownerId: ownerLabel(session.owner),
         terminalId: session.terminalId,
         error: message,
         ...(startedShell ? { shell: startedShell } : {}),
@@ -1488,13 +1925,9 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     // history above, but skip the live broadcast so unviewed background output
     // never reaches the WebSocket fanout.
     if (session.streamOutput) {
-      this.emitEvent({
-        type: "output",
-        threadId: session.threadId,
-        terminalId: session.terminalId,
-        createdAt: new Date().toISOString(),
-        data,
-        byteLength,
+      this.emitSessionEvent(session, {
+        thread: (base) => ({ type: "output", ...base, data, byteLength }) as TerminalEvent,
+        project: (base) => ({ type: "output", ...base, data, byteLength }) as TerminalProjectEvent,
       });
     }
     if (session.outputAckObserved) {
@@ -1535,7 +1968,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         session.outputAckPauseRequested = false;
         session.outputUnackedBytes = 0;
         this.logger.warn("terminal output force-resumed by ack watchdog", {
-          threadId: session.threadId,
+          ownerKind: session.owner.kind,
+          ownerId: ownerLabel(session.owner),
           terminalId: session.terminalId,
         });
         this.syncOutputReadPause(session);
@@ -1588,7 +2022,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     } catch (error) {
       session.modeReplayTracker = null;
       this.logger.warn("terminal mode replay tracker unavailable", {
-        threadId: session.threadId,
+        ownerKind: session.owner.kind,
+        ownerId: ownerLabel(session.owner),
         terminalId: session.terminalId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1607,7 +2042,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       tracker.feed(data);
     } catch (error) {
       this.logger.warn("terminal mode replay tracker feed failed", {
-        threadId: session.threadId,
+        ownerKind: session.owner.kind,
+        ownerId: ownerLabel(session.owner),
         terminalId: session.terminalId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1616,14 +2052,15 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   }
 
   private buildModeReplayPreamble(session: TerminalSessionState): string {
-    if (session.status !== "running") return "";
     const tracker = session.modeReplayTracker;
     if (!tracker) return "";
+    if (session.status !== "running") return "";
     try {
       return tracker.buildPreamble();
     } catch (error) {
       this.logger.warn("terminal mode replay preamble failed", {
-        threadId: session.threadId,
+        ownerKind: session.owner.kind,
+        ownerId: ownerLabel(session.owner),
         terminalId: session.terminalId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1655,13 +2092,16 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
     session.exitSignal = Number.isInteger(event.signal) ? event.signal : null;
     session.updatedAt = new Date().toISOString();
-    this.emitEvent({
-      type: "exited",
-      threadId: session.threadId,
-      terminalId: session.terminalId,
-      createdAt: new Date().toISOString(),
-      exitCode: session.exitCode,
-      exitSignal: session.exitSignal,
+    this.emitSessionEvent(session, {
+      thread: (base) =>
+        ({ type: "exited", ...base, exitCode: session.exitCode, exitSignal: session.exitSignal }) as TerminalEvent,
+      project: (base) =>
+        ({
+          type: "exited",
+          ...base,
+          exitCode: session.exitCode,
+          exitSignal: session.exitSignal,
+        }) as TerminalProjectEvent,
     });
     this.evictInactiveSessionsIfNeeded();
     this.updateSubprocessPollingState();
@@ -1689,7 +2129,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     session.status = "exited";
     session.pendingHistoryControlSequence = "";
     session.updatedAt = new Date().toISOString();
-    this.killProcessWithEscalation(process, session.threadId, session.terminalId);
+    this.killProcessWithEscalation(process, session.owner, session.terminalId);
     this.evictInactiveSessionsIfNeeded();
     this.updateSubprocessPollingState();
   }
@@ -1716,7 +2156,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
 
   private killProcessWithEscalation(
     ptyProcess: PtyProcess,
-    threadId: string,
+    owner: TerminalSessionOwner,
     terminalId: string,
   ): void {
     this.clearKillEscalationTimer(ptyProcess);
@@ -1732,7 +2172,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
           return;
         }
         this.logger.warn("process signal failed", {
-          threadId,
+          ownerKind: owner.kind,
+          ownerId: ownerLabel(owner),
           terminalId,
           pid,
           signal,
@@ -1755,7 +2196,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
               ? `tree-kill ${signal} failed`
               : `captured process ${signal} failed`,
             {
-              threadId,
+              ownerKind: owner.kind,
+              ownerId: ownerLabel(owner),
               terminalId,
               pid: context.pid,
               rootPid: pid,
@@ -1811,25 +2253,25 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     inactiveSessions.sort(
       (left, right) =>
         left.updatedAt.localeCompare(right.updatedAt) ||
-        left.threadId.localeCompare(right.threadId) ||
+        ownerLabel(left.owner).localeCompare(ownerLabel(right.owner)) ||
         left.terminalId.localeCompare(right.terminalId),
     );
     const toEvict = inactiveSessions.length - this.maxRetainedInactiveSessions;
     for (const session of inactiveSessions.slice(0, toEvict)) {
-      const key = toSessionKey(session.threadId, session.terminalId);
+      const key = toSessionKey(session.owner, session.terminalId);
       this.flushOutputBuffer(session);
       this.sessions.delete(key);
-      this.clearPersistTimer(session.threadId, session.terminalId);
+      this.clearPersistTimer(session.owner, session.terminalId);
       this.pendingPersistHistory.delete(key);
       // Release the cached history reference once the final write lands (the write
       // re-populates it on completion). The session is gone, so retaining it would
       // leak up to historyByteLimit per evicted key for the server's lifetime.
       void this.enqueuePersistWrite(
-        session.threadId,
+        session.owner,
         session.terminalId,
         session.history.toString(),
       ).finally(() => {
-        this.releasePersistedHistoryCache(session.threadId, session.terminalId);
+        this.releasePersistedHistoryCache(session.owner, session.terminalId);
       });
       this.clearKillEscalationTimer(session.process);
     }
@@ -1842,28 +2284,28 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
    * always persists the latest content, even after the session is removed.
    */
   private queuePersist(session: TerminalSessionState): void {
-    const persistenceKey = toSessionKey(session.threadId, session.terminalId);
+    const persistenceKey = toSessionKey(session.owner, session.terminalId);
     this.pendingPersistHistory.set(persistenceKey, () => session.history.toString());
-    this.schedulePersist(session.threadId, session.terminalId);
+    this.schedulePersist(session.owner, session.terminalId);
   }
 
   private async persistHistory(
-    threadId: string,
+    owner: TerminalSessionOwner,
     terminalId: string,
     history: string,
   ): Promise<void> {
-    const persistenceKey = toSessionKey(threadId, terminalId);
-    this.clearPersistTimer(threadId, terminalId);
+    const persistenceKey = toSessionKey(owner, terminalId);
+    this.clearPersistTimer(owner, terminalId);
     this.pendingPersistHistory.delete(persistenceKey);
-    await this.enqueuePersistWrite(threadId, terminalId, history);
+    await this.enqueuePersistWrite(owner, terminalId, history);
   }
 
   private enqueuePersistWrite(
-    threadId: string,
+    owner: TerminalSessionOwner,
     terminalId: string,
     history: string,
   ): Promise<void> {
-    const persistenceKey = toSessionKey(threadId, terminalId);
+    const persistenceKey = toSessionKey(owner, terminalId);
     const task = async () => {
       if (this.persistedHistoryByKey.get(persistenceKey) === history) {
         return;
@@ -1871,7 +2313,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       // Atomic replace: write a temp file then rename, so a crash mid-write can
       // never leave a torn history file. History is byte-capped, so this writes
       // at most ~historyByteLimit bytes regardless of total output volume.
-      const finalPath = this.historyPath(threadId, terminalId);
+      const finalPath = this.historyPath(owner, terminalId);
       const tempPath = `${finalPath}.tmp-${process.pid}-${(this.persistTempCounter += 1)}`;
       try {
         await fs.promises.writeFile(tempPath, history, {
@@ -1892,7 +2334,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       .then(task)
       .catch((error) => {
         this.logger.warn("failed to persist terminal history", {
-          threadId,
+          ownerKind: owner.kind,
+          ownerId: ownerLabel(owner),
           terminalId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1906,38 +2349,41 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         this.pendingPersistHistory.has(persistenceKey) &&
         !this.persistTimers.has(persistenceKey)
       ) {
-        this.schedulePersist(threadId, terminalId);
+        this.schedulePersist(owner, terminalId);
       }
     });
     void finalized.catch(() => undefined);
     return finalized;
   }
 
-  private schedulePersist(threadId: string, terminalId: string): void {
-    const persistenceKey = toSessionKey(threadId, terminalId);
+  private schedulePersist(owner: TerminalSessionOwner, terminalId: string): void {
+    const persistenceKey = toSessionKey(owner, terminalId);
     if (this.persistTimers.has(persistenceKey)) return;
     const timer = setTimeout(() => {
       this.persistTimers.delete(persistenceKey);
       const materialize = this.pendingPersistHistory.get(persistenceKey);
       if (materialize === undefined) return;
       this.pendingPersistHistory.delete(persistenceKey);
-      void this.enqueuePersistWrite(threadId, terminalId, materialize());
+      void this.enqueuePersistWrite(owner, terminalId, materialize());
     }, this.persistDebounceMs);
     timer.unref?.();
     this.persistTimers.set(persistenceKey, timer);
   }
 
-  private clearPersistTimer(threadId: string, terminalId: string): void {
-    const persistenceKey = toSessionKey(threadId, terminalId);
+  private clearPersistTimer(owner: TerminalSessionOwner, terminalId: string): void {
+    const persistenceKey = toSessionKey(owner, terminalId);
     const timer = this.persistTimers.get(persistenceKey);
     if (!timer) return;
     clearTimeout(timer);
     this.persistTimers.delete(persistenceKey);
   }
 
-  private async readHistory(threadId: string, terminalId: string): Promise<string> {
-    const nextPath = this.historyPath(threadId, terminalId);
-    const persistenceKey = toSessionKey(threadId, terminalId);
+  private async readHistory(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): Promise<string> {
+    const nextPath = this.historyPath(owner, terminalId);
+    const persistenceKey = toSessionKey(owner, terminalId);
     try {
       const raw = await fs.promises.readFile(nextPath, "utf8");
       await repairPrivateFile(nextPath);
@@ -1959,11 +2405,14 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       }
     }
 
-    if (terminalId !== DEFAULT_TERMINAL_ID) {
+    // Only thread-owned default terminals have a pre-multi-terminal legacy
+    // transcript filename. Project-owned terminals have no legacy path.
+    if (owner.kind !== "thread" || terminalId !== DEFAULT_TERMINAL_ID) {
+      this.persistedHistoryByKey.set(persistenceKey, "");
       return "";
     }
 
-    const legacyPath = this.legacyHistoryPath(threadId);
+    const legacyPath = this.legacyHistoryPath(owner.threadId);
     try {
       const raw = await fs.promises.readFile(legacyPath, "utf8");
       const capped = capHistoryByLimits(sanitizePersistedTerminalHistory(raw), {
@@ -1982,7 +2431,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         await fs.promises.rm(legacyPath, { force: true });
       } catch (cleanupError) {
         this.logger.warn("failed to remove legacy terminal history", {
-          threadId,
+          threadId: owner.threadId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
         });
       }
@@ -1997,32 +2446,39 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     }
   }
 
-  private async deleteHistory(threadId: string, terminalId: string): Promise<void> {
-    this.persistedHistoryByKey.delete(toSessionKey(threadId, terminalId));
-    const deletions = [fs.promises.rm(this.historyPath(threadId, terminalId), { force: true })];
-    if (terminalId === DEFAULT_TERMINAL_ID) {
-      deletions.push(fs.promises.rm(this.legacyHistoryPath(threadId), { force: true }));
+  private async deleteHistory(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): Promise<void> {
+    this.persistedHistoryByKey.delete(toSessionKey(owner, terminalId));
+    const deletions = [fs.promises.rm(this.historyPath(owner, terminalId), { force: true })];
+    if (owner.kind === "thread" && terminalId === DEFAULT_TERMINAL_ID) {
+      deletions.push(fs.promises.rm(this.legacyHistoryPath(owner.threadId), { force: true }));
     }
     try {
       await Promise.all(deletions);
     } catch (error) {
       this.logger.warn("failed to delete terminal history", {
-        threadId,
+        ownerKind: owner.kind,
+        ownerId: ownerLabel(owner),
         terminalId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  private async flushPersistQueue(threadId: string, terminalId: string): Promise<void> {
-    const persistenceKey = toSessionKey(threadId, terminalId);
-    this.clearPersistTimer(threadId, terminalId);
+  private async flushPersistQueue(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): Promise<void> {
+    const persistenceKey = toSessionKey(owner, terminalId);
+    this.clearPersistTimer(owner, terminalId);
 
     while (true) {
       const materialize = this.pendingPersistHistory.get(persistenceKey);
       if (materialize !== undefined) {
         this.pendingPersistHistory.delete(persistenceKey);
-        await this.enqueuePersistWrite(threadId, terminalId, materialize());
+        await this.enqueuePersistWrite(owner, terminalId, materialize());
       }
 
       const pending = this.persistQueues.get(persistenceKey);
@@ -2181,7 +2637,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
             }
           } catch (error) {
             this.logger.warn("failed to check terminal subprocess activity", {
-              threadId: session.threadId,
+              ownerKind: session.owner.kind,
+              ownerId: ownerLabel(session.owner),
               terminalId: session.terminalId,
               terminalPid,
               error: error instanceof Error ? error.message : String(error),
@@ -2189,7 +2646,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
             return;
           }
 
-          const liveSession = this.sessions.get(toSessionKey(session.threadId, session.terminalId));
+          const liveSession = this.sessions.get(toSessionKey(session.owner, session.terminalId));
           if (!liveSession || liveSession.status !== "running" || liveSession.pid !== terminalPid) {
             return;
           }
@@ -2235,21 +2692,21 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   }
 
   private async closeSession(
-    threadId: string,
+    owner: TerminalSessionOwner,
     terminalId: string,
     deleteHistory: boolean,
   ): Promise<void> {
-    const key = toSessionKey(threadId, terminalId);
+    const key = toSessionKey(owner, terminalId);
     const session = this.sessions.get(key);
     if (session) {
       this.stopProcess(session);
       this.sessions.delete(key);
     }
     this.updateSubprocessPollingState();
-    await this.flushPersistQueue(threadId, terminalId);
-    this.releasePersistedHistoryCache(threadId, terminalId);
+    await this.flushPersistQueue(owner, terminalId);
+    this.releasePersistedHistoryCache(owner, terminalId);
     if (deleteHistory) {
-      await this.deleteHistory(threadId, terminalId);
+      await this.deleteHistory(owner, terminalId);
     }
   }
 
@@ -2263,18 +2720,23 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
    * the lifetime of the process. Dropping the entry costs at most one redundant file
    * write later; `readHistory` re-populates it when the terminal is reopened.
    */
-  private releasePersistedHistoryCache(threadId: string, terminalId: string): void {
-    this.persistedHistoryByKey.delete(toSessionKey(threadId, terminalId));
+  private releasePersistedHistoryCache(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): void {
+    this.persistedHistoryByKey.delete(toSessionKey(owner, terminalId));
   }
 
-  private sessionsForThread(threadId: string): TerminalSessionState[] {
-    return [...this.sessions.values()].filter((session) => session.threadId === threadId);
+  private sessionsForOwner(owner: TerminalSessionOwner): TerminalSessionState[] {
+    const ownerKey = toOwnerKey(owner);
+    return [...this.sessions.values()].filter(
+      (session) => toOwnerKey(session.owner) === ownerKey,
+    );
   }
 
-  private async deleteAllHistoryForThread(threadId: string): Promise<void> {
-    const threadPrefix = `${toSafeThreadId(threadId)}_`;
+  private async deleteAllHistoryForOwner(owner: TerminalSessionOwner): Promise<void> {
     for (const key of this.persistedHistoryByKey.keys()) {
-      if (key.startsWith(`${threadId}\u0000`)) {
+      if (key.startsWith(`${toOwnerKey(owner)}\u0000`)) {
         this.persistedHistoryByKey.delete(key);
       }
     }
@@ -2283,34 +2745,51 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       const removals = entries
         .filter((entry) => entry.isFile())
         .map((entry) => entry.name)
-        .filter(
-          (name) =>
-            name === `${toSafeThreadId(threadId)}.log` ||
-            name === `${legacySafeThreadId(threadId)}.log` ||
-            name.startsWith(threadPrefix),
-        )
+        .filter((name) => this.isHistoryFileForOwner(name, owner))
         .map((name) => fs.promises.rm(path.join(this.logsDir, name), { force: true }));
       await Promise.all(removals);
     } catch (error) {
-      this.logger.warn("failed to delete terminal histories for thread", {
-        threadId,
+      this.logger.warn("failed to delete terminal histories for owner", {
+        ownerKind: owner.kind,
+        ownerId: ownerLabel(owner),
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  private requireSession(threadId: string, terminalId: string): TerminalSessionState {
-    const session = this.sessions.get(toSessionKey(threadId, terminalId));
+  /** Whether an on-disk history filename belongs to this owner. */
+  private isHistoryFileForOwner(name: string, owner: TerminalSessionOwner): boolean {
+    if (owner.kind === "project") {
+      const projectPart = toSafeProjectId(owner.projectId);
+      return name === `${projectPart}.log` || name.startsWith(`${projectPart}_`);
+    }
+    const threadId = requireOwnerThreadId(owner);
+    const threadPart = toSafeThreadId(threadId);
+    return (
+      name === `${threadPart}.log` ||
+      name === `${legacySafeThreadId(threadId)}.log` ||
+      name.startsWith(`${threadPart}_`)
+    );
+  }
+
+  private requireSession(
+    owner: TerminalSessionOwner,
+    terminalId: string,
+  ): TerminalSessionState {
+    const session = this.sessions.get(toSessionKey(owner, terminalId));
     if (!session) {
-      throw new Error(`Unknown terminal thread: ${threadId}, terminal: ${terminalId}`);
+      throw new Error(
+        `Unknown terminal ${owner.kind}: ${ownerLabel(owner)}, terminal: ${terminalId}`,
+      );
     }
     return session;
   }
 
-  private snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
+  private snapshot(
+    session: TerminalSessionState,
+  ): TerminalSessionSnapshot | TerminalProjectSessionSnapshot {
     const replayPreamble = this.buildModeReplayPreamble(session);
-    return {
-      threadId: session.threadId,
+    const base = {
       terminalId: session.terminalId,
       cwd: session.cwd,
       status: session.status,
@@ -2321,26 +2800,77 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       exitSignal: session.exitSignal,
       updatedAt: session.updatedAt,
     };
+    if (session.owner.kind === "project") {
+      return {
+        projectId: ProjectId.makeUnsafe(session.owner.projectId),
+        ...base,
+      };
+    }
+    return { threadId: session.owner.threadId, ...base };
   }
 
   private emitActivityEvent(session: TerminalSessionState): void {
-    this.emitEvent({
-      type: "activity",
-      threadId: session.threadId,
-      terminalId: session.terminalId,
-      createdAt: new Date().toISOString(),
+    const activity = {
       hasRunningSubprocess: session.hasRunningSubprocess,
       cliKind: session.detectedCliKind,
       agentState: deriveActivityAgentState(session),
+    };
+    this.emitSessionEvent(session, {
+      thread: (base) => ({ type: "activity", ...base, ...activity }) as TerminalEvent,
+      project: (base) => ({ type: "activity", ...base, ...activity }) as TerminalProjectEvent,
     });
+  }
+
+  /**
+   * Emit an event for a session under its OWNER kind: thread-owned sessions
+   * emit `TerminalEvent` on the legacy channel, Project-owned sessions emit
+   * `TerminalProjectEvent` on the Project channel. The owner discriminator —
+   * never a shared field — picks both the base identity and the channel, so a
+   * Project terminal can never surface branded as a Thread terminal.
+   */
+  private emitSessionEvent(
+    session: TerminalSessionState,
+    builders: {
+      thread: (base: { threadId: string; terminalId: string; createdAt: string }) => TerminalEvent;
+      project: (base: {
+        projectId: ProjectId;
+        terminalId: string;
+        createdAt: string;
+      }) => TerminalProjectEvent;
+    },
+  ): void {
+    const createdAt = new Date().toISOString();
+    if (session.owner.kind === "project") {
+      this.emit("projectEvent", builders.project({
+        projectId: ProjectId.makeUnsafe(session.owner.projectId),
+        terminalId: session.terminalId,
+        createdAt,
+      }));
+      return;
+    }
+    this.emit(
+      "event",
+      builders.thread({
+        threadId: session.owner.threadId,
+        terminalId: session.terminalId,
+        createdAt,
+      }),
+    );
   }
 
   private emitEvent(event: TerminalEvent): void {
     this.emit("event", event);
   }
 
-  private historyPath(threadId: string, terminalId: string): string {
-    const threadPart = toSafeThreadId(threadId);
+  private historyPath(owner: TerminalSessionOwner, terminalId: string): string {
+    if (owner.kind === "project") {
+      // Project history is a separate on-disk namespace; the terminal id is
+      // always encoded explicitly so no Project file can collide with a
+      // legacy Thread transcript filename.
+      const projectPart = toSafeProjectId(owner.projectId);
+      return path.join(this.logsDir, `${projectPart}_${toSafeTerminalId(terminalId)}.log`);
+    }
+    const threadPart = toSafeThreadId(owner.threadId);
     if (terminalId === DEFAULT_TERMINAL_ID) {
       return path.join(this.logsDir, `${threadPart}.log`);
     }
@@ -2351,20 +2881,24 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     return path.join(this.logsDir, `${legacySafeThreadId(threadId)}.log`);
   }
 
-  private async runWithThreadLock<T>(threadId: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.threadLocks.get(threadId) ?? Promise.resolve();
+  private async runWithOwnerLock<T>(
+    owner: TerminalSessionOwner,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const ownerKey = toOwnerKey(owner);
+    const previous = this.threadLocks.get(ownerKey) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.threadLocks.set(threadId, current);
+    this.threadLocks.set(ownerKey, current);
     await previous.catch(() => undefined);
     try {
       return await task();
     } finally {
       release();
-      if (this.threadLocks.get(threadId) === current) {
-        this.threadLocks.delete(threadId);
+      if (this.threadLocks.get(ownerKey) === current) {
+        this.threadLocks.delete(ownerKey);
       }
     }
   }
@@ -2423,11 +2957,88 @@ export const TerminalManagerLive = Layer.effect(
           catch: (cause) =>
             terminalErrorFromCause("Failed to close archived thread terminals", cause),
         }),
+      openProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.openProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to open project terminal", cause),
+        }),
+      writeProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.writeProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to write to project terminal", cause),
+        }),
+      ackOutputProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.ackOutputProject(input),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to acknowledge project terminal output", cause),
+        }),
+      resizeProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.resizeProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to resize project terminal", cause),
+        }),
+      clearProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.clearProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to clear project terminal", cause),
+        }),
+      restartProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.restartProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to restart project terminal", cause),
+        }),
+      closeProject: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.closeProject(input),
+          catch: (cause) => terminalErrorFromCause("Failed to close project terminal", cause),
+        }),
+      listProjectTerminals: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.listProjectTerminals(input.projectId),
+          catch: (cause) => terminalErrorFromCause("Failed to list project terminals", cause),
+        }),
+      settleProjectTerminals: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.settleProjectTerminals(input.projectId),
+          catch: (cause) => terminalErrorFromCause("Failed to settle project terminals", cause),
+        }),
+      beginProjectDeletionFence: (input) =>
+        Effect.try({
+          try: () => runtime.beginProjectDeletionFence(input.projectId),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to begin project terminal deletion fence", cause),
+        }),
+      commitProjectDeletionFence: (input) =>
+        Effect.try({
+          try: () => runtime.commitProjectDeletionFence(input.projectId),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to commit project terminal deletion fence", cause),
+        }),
+      releaseProjectDeletionFence: (input) =>
+        Effect.try({
+          try: () => runtime.releaseProjectDeletionFence(input.projectId),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to release project terminal deletion fence", cause),
+        }),
+      projectDeletionFenceState: (input) =>
+        Effect.try({
+          try: () => runtime.projectDeletionFenceState(input.projectId),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to read project terminal deletion fence", cause),
+        }),
       subscribe: (listener) =>
         Effect.sync(() => {
           runtime.on("event", listener);
           return () => {
             runtime.off("event", listener);
+          };
+        }),
+      subscribeProject: (listener) =>
+        Effect.sync(() => {
+          runtime.on("projectEvent", listener);
+          return () => {
+            runtime.off("projectEvent", listener);
           };
         }),
       dispose: Effect.promise(() => runtime.disposeForShutdown()),

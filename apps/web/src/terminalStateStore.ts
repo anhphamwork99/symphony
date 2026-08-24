@@ -9,6 +9,7 @@ import { type TerminalActivityState, type TerminalCliKind } from "@synara/shared
 import type { ThreadId } from "@synara/contracts";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { DockTerminalScopeId } from "./lib/dockTerminalScope";
 import { createDeferredPersistStorage, flushStorageBeforePageHide } from "./lib/storage";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -50,7 +51,21 @@ export interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
-const TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v1";
+// Store keys are a discriminated local-owner union (Decision 0003 item 1):
+// a real `ThreadId` names an actual conversation's bottom-drawer terminal
+// workspace; a `DockTerminalScopeId` names one Project-owned right-dock
+// terminal workspace. The two brands are disjoint, so a Project-derived key
+// can never be branded (or cast) as a conversation identity.
+export type TerminalStateScope = ThreadId | DockTerminalScopeId;
+
+// v2 is the Project-keyed workspace boundary: dock terminal store keys are
+// local `DockTerminalScopeId`s (lib/dockTerminalScope) and the v1
+// Thread-keyed blob stays on disk untouched as the migration input and
+// rollback source (Decision 0002 G).
+const TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v2";
+const LEGACY_TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v1";
+
+export const TERMINAL_STATE_LEGACY_STORAGE_KEY = LEGACY_TERMINAL_STATE_STORAGE_KEY;
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -471,18 +486,18 @@ function stripVolatileTerminalRuntimeState(state: ThreadTerminalState): ThreadTe
 }
 
 export function sanitizePersistedTerminalStateByThreadId(
-  terminalStateByThreadId: Record<ThreadId, ThreadTerminalState> | null | undefined,
-): Record<ThreadId, ThreadTerminalState> {
-  const next: Record<ThreadId, ThreadTerminalState> = {};
-  for (const [threadId, state] of Object.entries(terminalStateByThreadId ?? {})) {
+  terminalStateByScope: Record<TerminalStateScope, ThreadTerminalState> | null | undefined,
+): Record<TerminalStateScope, ThreadTerminalState> {
+  const next: Record<TerminalStateScope, ThreadTerminalState> = {};
+  for (const [scopeKey, state] of Object.entries(terminalStateByScope ?? {})) {
     // Dedicated Workspace pages used synthetic `workspace:*` terminal scopes.
     // Drop those retired entries while hydrating the shared terminal store.
-    if (threadId.startsWith("workspace:")) {
+    if (scopeKey.startsWith("workspace:")) {
       continue;
     }
     const sanitized = stripVolatileTerminalRuntimeState(state);
     if (!isDefaultThreadTerminalState(sanitized)) {
-      next[threadId as ThreadId] = sanitized;
+      next[scopeKey as TerminalStateScope] = sanitized;
     }
   }
   return next;
@@ -1175,99 +1190,116 @@ function setThreadTerminalActivity(
 }
 
 export function selectThreadTerminalState(
-  terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>,
-  threadId: ThreadId,
+  terminalStateByScope: Record<TerminalStateScope, ThreadTerminalState>,
+  scope: TerminalStateScope,
 ): ThreadTerminalState {
-  if (threadId.length === 0) {
+  if (scope.length === 0) {
     return getDefaultThreadTerminalState();
   }
-  return terminalStateByThreadId[threadId] ?? getDefaultThreadTerminalState();
+  return terminalStateByScope[scope] ?? getDefaultThreadTerminalState();
 }
 
 function updateTerminalStateByThreadId(
-  terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>,
-  threadId: ThreadId,
+  terminalStateByScope: Record<TerminalStateScope, ThreadTerminalState>,
+  scope: TerminalStateScope,
   updater: (state: ThreadTerminalState) => ThreadTerminalState,
-): Record<ThreadId, ThreadTerminalState> {
-  if (threadId.length === 0) {
-    return terminalStateByThreadId;
+): Record<TerminalStateScope, ThreadTerminalState> {
+  if (scope.length === 0) {
+    return terminalStateByScope;
   }
 
-  const current = selectThreadTerminalState(terminalStateByThreadId, threadId);
+  const current = selectThreadTerminalState(terminalStateByScope, scope);
   const next = updater(current);
   if (next === current) {
-    return terminalStateByThreadId;
+    return terminalStateByScope;
   }
 
   if (isDefaultThreadTerminalState(next)) {
-    if (terminalStateByThreadId[threadId] === undefined) {
-      return terminalStateByThreadId;
+    if (terminalStateByScope[scope] === undefined) {
+      return terminalStateByScope;
     }
-    const { [threadId]: _removed, ...rest } = terminalStateByThreadId;
-    return rest as Record<ThreadId, ThreadTerminalState>;
+    const { [scope]: _removed, ...rest } = terminalStateByScope;
+    return rest as Record<TerminalStateScope, ThreadTerminalState>;
   }
 
   return {
-    ...terminalStateByThreadId,
-    [threadId]: next,
+    ...terminalStateByScope,
+    [scope]: next,
   };
 }
 
 interface TerminalStateStoreState {
-  terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
-  openChatThreadPage: (threadId: ThreadId) => void;
-  openTerminalThreadPage: (threadId: ThreadId, options?: { terminalOnly?: boolean }) => void;
-  setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
-  setTerminalPresentationMode: (threadId: ThreadId, mode: ThreadTerminalPresentationMode) => void;
-  setTerminalWorkspaceLayout: (threadId: ThreadId, layout: ThreadTerminalWorkspaceLayout) => void;
-  setTerminalWorkspaceTab: (threadId: ThreadId, tab: ThreadTerminalWorkspaceTab) => void;
-  setTerminalHeight: (threadId: ThreadId, height: number) => void;
+  terminalStateByThreadId: Record<TerminalStateScope, ThreadTerminalState>;
+  openChatThreadPage: (threadId: TerminalStateScope) => void;
+  openTerminalThreadPage: (threadId: TerminalStateScope, options?: { terminalOnly?: boolean }) => void;
+  setTerminalOpen: (threadId: TerminalStateScope, open: boolean) => void;
+  setTerminalPresentationMode: (threadId: TerminalStateScope, mode: ThreadTerminalPresentationMode) => void;
+  setTerminalWorkspaceLayout: (threadId: TerminalStateScope, layout: ThreadTerminalWorkspaceLayout) => void;
+  setTerminalWorkspaceTab: (threadId: TerminalStateScope, tab: ThreadTerminalWorkspaceTab) => void;
+  setTerminalHeight: (threadId: TerminalStateScope, height: number) => void;
   setTerminalMetadata: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     terminalId: string,
     metadata: { cliKind: TerminalCliKind | null; label: string },
   ) => void;
   setTerminalCliKind: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     terminalId: string,
     cliKind: TerminalCliKind | null,
   ) => void;
   setTerminalTitleOverride: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     terminalId: string,
     titleOverride: string | null | undefined,
   ) => void;
-  splitTerminal: (threadId: ThreadId, terminalId: string) => void;
-  splitTerminalLeft: (threadId: ThreadId, terminalId: string) => void;
-  splitTerminalRight: (threadId: ThreadId, terminalId: string) => void;
-  splitTerminalDown: (threadId: ThreadId, terminalId: string) => void;
-  splitTerminalUp: (threadId: ThreadId, terminalId: string) => void;
-  newTerminal: (threadId: ThreadId, terminalId: string) => void;
-  newTerminalTab: (threadId: ThreadId, targetTerminalId: string, terminalId: string) => void;
-  openNewFullWidthTerminal: (threadId: ThreadId, terminalId: string) => void;
-  closeWorkspaceChat: (threadId: ThreadId) => void;
-  setActiveTerminal: (threadId: ThreadId, terminalId: string) => void;
-  closeTerminal: (threadId: ThreadId, terminalId: string) => void;
+  splitTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
+  splitTerminalLeft: (threadId: TerminalStateScope, terminalId: string) => void;
+  splitTerminalRight: (threadId: TerminalStateScope, terminalId: string) => void;
+  splitTerminalDown: (threadId: TerminalStateScope, terminalId: string) => void;
+  splitTerminalUp: (threadId: TerminalStateScope, terminalId: string) => void;
+  newTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
+  newTerminalTab: (threadId: TerminalStateScope, targetTerminalId: string, terminalId: string) => void;
+  openNewFullWidthTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
+  closeWorkspaceChat: (threadId: TerminalStateScope) => void;
+  setActiveTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
+  closeTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
   closeTerminalAndEnsureReplacement: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     terminalId: string,
     replacementTerminalId: string,
   ) => void;
-  closeExitedTerminal: (threadId: ThreadId, terminalId: string) => TerminalExitDisposition;
-  closeTerminalGroup: (threadId: ThreadId, groupId: string) => void;
+  closeExitedTerminal: (threadId: TerminalStateScope, terminalId: string) => TerminalExitDisposition;
+  closeTerminalGroup: (threadId: TerminalStateScope, groupId: string) => void;
   resizeTerminalSplit: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     groupId: string,
     splitId: string,
     weights: number[],
   ) => void;
   setTerminalActivity: (
-    threadId: ThreadId,
+    threadId: TerminalStateScope,
     terminalId: string,
     activity: { agentState: TerminalActivityState | null; hasRunningSubprocess: boolean },
   ) => void;
-  clearTerminalState: (threadId: ThreadId) => void;
-  removeOrphanedTerminalStates: (activeThreadIds: Set<ThreadId>) => void;
+  clearTerminalState: (threadId: TerminalStateScope) => void;
+  removeOrphanedTerminalStates: (activeThreadIds: Set<TerminalStateScope>) => void;
+  /**
+   * Apply a published v2 migration terminal-presentation slice for one dock
+   * terminal scope (idempotent; only the migration activator calls this after
+   * the publication marker is durable).
+   */
+  applyPublishedTerminalPresentation: (
+    scopeId: TerminalStateScope,
+    slice: {
+      presentationMode: ThreadTerminalPresentationMode;
+      workspaceTab: ThreadTerminalWorkspaceTab;
+      workspaceLayout: ThreadTerminalWorkspaceLayout;
+      terminalHeightPx: number;
+      terminalIds: ReadonlyArray<string>;
+      activeTerminalId: string;
+      terminalLabelsById: Record<string, string>;
+    },
+  ) => void;
 }
 
 // Defers partialize + JSON.stringify off the hot set() path (terminal layout
@@ -1293,7 +1325,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
   persist(
     (set) => {
       const updateTerminal = (
-        threadId: ThreadId,
+        threadId: TerminalStateScope,
         updater: (state: ThreadTerminalState) => ThreadTerminalState,
       ) => {
         set((state) => {
@@ -1397,6 +1429,26 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               delete next[id as ThreadId];
             }
             return { terminalStateByThreadId: next };
+          }),
+        applyPublishedTerminalPresentation: (scopeId, slice) =>
+          set((state) => {
+            const current = selectThreadTerminalState(state.terminalStateByThreadId, scopeId);
+            const migrated = normalizeThreadTerminalState({
+              ...current,
+              presentationMode: slice.presentationMode,
+              workspaceActiveTab: slice.workspaceTab,
+              workspaceLayout: slice.workspaceLayout,
+              terminalHeight: slice.terminalHeightPx,
+              terminalIds: [...slice.terminalIds],
+              activeTerminalId: slice.activeTerminalId,
+              terminalLabelsById: slice.terminalLabelsById,
+            });
+            return {
+              terminalStateByThreadId: {
+                ...state.terminalStateByThreadId,
+                [scopeId]: migrated,
+              },
+            };
           }),
       };
     },

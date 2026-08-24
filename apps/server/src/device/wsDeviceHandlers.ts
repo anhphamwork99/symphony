@@ -10,6 +10,7 @@
  */
 import {
   DEVICE_WS_METHODS,
+  ProjectId,
   ThreadId,
   WsRpcError,
   type DeviceAttachInput,
@@ -27,6 +28,9 @@ import {
   type DeviceListResult,
   type DeviceOpenUrlInput,
   type DevicePressButtonInput,
+  type DeviceProjectAttachInput,
+  type DeviceProjectGetStateInput,
+  type DeviceProjectInput,
   type DeviceScreenshotInput,
   type DeviceScreenshotResult,
   type DeviceStartRecordingInput,
@@ -40,6 +44,7 @@ import {
   type DeviceTapInput,
   type DeviceThreadInput,
   type DeviceTypeTextInput,
+  type ProjectDeviceState,
   type ThreadDeviceState,
 } from "@synara/contracts";
 import { Effect } from "effect";
@@ -134,12 +139,21 @@ export interface WsDeviceHandlers {
   readonly [DEVICE_WS_METHODS.describeUi]: (
     input: DeviceDescribeUiInput,
   ) => Effect.Effect<DeviceDescribeUiResult, WsRpcError>;
+  readonly [DEVICE_WS_METHODS.getProjectState]: (
+    input: DeviceProjectGetStateInput,
+  ) => Effect.Effect<ProjectDeviceState, WsRpcError>;
+  readonly [DEVICE_WS_METHODS.attachProject]: (
+    input: DeviceProjectAttachInput,
+  ) => Effect.Effect<ProjectDeviceState, WsRpcError>;
+  readonly [DEVICE_WS_METHODS.detachProject]: (
+    input: DeviceProjectInput,
+  ) => Effect.Effect<ProjectDeviceState, WsRpcError>;
 }
 
 /**
- * Build the nineteen request handlers. The twentieth method
- * (`subscribeEvents`) is a stream and is wired in `wsRpc.ts` where the stream
- * admission guard lives.
+ * Build the request handlers. The stream methods (`subscribeEvents` and
+ * `subscribeProjectEvents`) are wired in `wsRpc.ts` where the stream admission
+ * guard lives.
  */
 export function makeWsDeviceHandlers(
   deviceService: DeviceServiceShape | undefined,
@@ -164,6 +178,21 @@ export function makeWsDeviceHandlers(
           availability: { kind: "unsupported-platform", platform: process.platform },
           lastError: null,
         } satisfies ThreadDeviceState),
+      // Project twin: the pane calls this on open to decide what to render, so
+      // it answers with a real snapshot naming the unsupported platform (and
+      // the owning Project) rather than an error the pane must translate.
+      [DEVICE_WS_METHODS.getProjectState]: (input) =>
+        Effect.succeed({
+          projectId: input.projectId,
+          version: 0,
+          attachedDeviceUdid: null,
+          devices: [],
+          agentActive: false,
+          availability: { kind: "unsupported-platform", platform: process.platform },
+          lastError: null,
+        } satisfies ProjectDeviceState),
+      [DEVICE_WS_METHODS.attachProject]: () => unsupported(),
+      [DEVICE_WS_METHODS.detachProject]: () => unsupported(),
       [DEVICE_WS_METHODS.tap]: () => unsupported(),
       [DEVICE_WS_METHODS.swipe]: () => unsupported(),
       [DEVICE_WS_METHODS.typeText]: () => unsupported(),
@@ -184,6 +213,10 @@ export function makeWsDeviceHandlers(
   const threadState = (state: ThreadDeviceState): ThreadDeviceState => ({
     ...state,
     threadId: ThreadId.makeUnsafe(state.threadId),
+  });
+  const projectState = (state: ProjectDeviceState): ProjectDeviceState => ({
+    ...state,
+    projectId: ProjectId.makeUnsafe(state.projectId),
   });
 
   return {
@@ -268,5 +301,25 @@ export function makeWsDeviceHandlers(
         );
         return { udid: input.udid, element: match.node, tapPoint: match.point };
       }, "Failed to scroll to element"),
+
+    // ── Project-owned device routes (Decision 0002) ────────────────
+    // Same device engine as the thread routes above, keyed by the real
+    // ProjectId. The Project admission guard (PROJECT_NOT_FOUND /
+    // PROJECT_DELETED) is applied in `wsRpc.ts` BEFORE these handlers run.
+    [DEVICE_WS_METHODS.getProjectState]: (input) =>
+      attempt(
+        () => manager.getProjectState(input.projectId).then(projectState),
+        "Failed to read project device state",
+      ),
+    [DEVICE_WS_METHODS.attachProject]: (input) =>
+      attempt(
+        () => manager.attachProject(input.projectId, input.udid).then(projectState),
+        "Failed to attach device to project",
+      ),
+    [DEVICE_WS_METHODS.detachProject]: (input) =>
+      attempt(
+        () => manager.detachProject(input.projectId).then(projectState),
+        "Failed to detach device from project",
+      ),
   };
 }

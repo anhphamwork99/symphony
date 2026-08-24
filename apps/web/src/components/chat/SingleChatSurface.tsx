@@ -162,8 +162,13 @@ export function SingleChatSurface(props: {
   const navigate = useNavigate();
   const createSplitView = useSplitViewStore((store) => store.createFromThread);
   const createSplitViewFromDrop = useSplitViewStore((store) => store.createFromDrop);
+  // The dock is owned by the Project (Decision 0002): every Main conversation
+  // in this Project reads and writes the same slice. Keying by ProjectId means
+  // a same-Project conversation switch changes no key, copies nothing, resets
+  // nothing, and keeps the dock (and its terminal runtimes) alive.
+  const dockOwnerProjectId = props.projectId;
   const dockState = useRightDockStore(
-    useMemo(() => selectRightDockState(props.threadId), [props.threadId]),
+    useMemo(() => selectRightDockState(dockOwnerProjectId), [dockOwnerProjectId]),
   );
   const openPane = useRightDockStore((store) => store.openPane);
   const toggleSingletonPane = useRightDockStore((store) => store.toggleSingletonPane);
@@ -171,6 +176,7 @@ export function SingleChatSurface(props: {
   const setActivePane = useRightDockStore((store) => store.setActivePane);
   const setDockOpen = useRightDockStore((store) => store.setDockOpen);
   const updatePane = useRightDockStore((store) => store.updatePane);
+  const setPreferredWidth = useRightDockStore((store) => store.setPreferredWidth);
   const activeProject = useStore(
     useMemo(() => createProjectSelector(props.projectId), [props.projectId]),
   );
@@ -289,26 +295,26 @@ export function SingleChatSurface(props: {
 
   const handleToggleDiff = () => {
     requestImmediateDockHydration("diff");
-    toggleSingletonPane(props.threadId, { kind: "diff" });
+    toggleSingletonPane(dockOwnerProjectId, { kind: "diff" });
   };
   const handleToggleBrowser = () => {
     requestImmediateDockHydration("browser");
-    toggleSingletonPane(props.threadId, { kind: "browser" });
+    toggleSingletonPane(dockOwnerProjectId, { kind: "browser" });
   };
   const handleToggleDevice = () => {
     requestImmediateDockHydration("device");
-    toggleSingletonPane(props.threadId, { kind: "device" });
+    toggleSingletonPane(dockOwnerProjectId, { kind: "device" });
   };
   const handleToggleRightDock = () => {
-    setDockOpen(props.threadId, !dockState.open);
+    setDockOpen(dockOwnerProjectId, !dockState.open);
   };
   const handleOpenBrowserUrl = () => {
     requestImmediateDockHydration("browser");
-    openPane(props.threadId, { kind: "browser" });
+    openPane(dockOwnerProjectId, { kind: "browser" });
   };
   const handleOpenTurnDiff = (turnId: TurnId, filePath?: string) => {
     requestImmediateDockHydration("diff");
-    openPane(props.threadId, {
+    openPane(dockOwnerProjectId, {
       kind: "diff",
       diffTurnId: turnId,
       diffFilePath: filePath ?? null,
@@ -317,7 +323,7 @@ export function SingleChatSurface(props: {
 
   const handleOpenWorkspaceSearchFile = (relativePath: string) => {
     requestImmediateDockHydration("file");
-    openPane(props.threadId, { kind: "file", filePath: relativePath });
+    openPane(dockOwnerProjectId, { kind: "file", filePath: relativePath });
   };
 
   // Ctrl/Cmd+P opens the file-name search palette; Ctrl/Cmd+Shift+F opens the
@@ -475,12 +481,18 @@ export function SingleChatSurface(props: {
           return false;
         }
         requestImmediateDockHydration("file");
-        openPane(props.threadId, { kind: "file", filePath: targetPath });
+        openPane(dockOwnerProjectId, { kind: "file", filePath: targetPath });
         return true;
       },
       prefetchFile: prefetchOpenerFile,
     }),
-    [openPane, prefetchOpenerFile, props.threadId, requestImmediateDockHydration, workspaceRoot],
+    [
+      dockOwnerProjectId,
+      openPane,
+      prefetchOpenerFile,
+      requestImmediateDockHydration,
+      workspaceRoot,
+    ],
   );
   // Editor surface: the center file pane is already the file viewer, so file
   // references select into it instead of opening a dock pane.
@@ -556,16 +568,16 @@ export function SingleChatSurface(props: {
 
     if (panelPatch.panel === "browser") {
       requestImmediateDockHydration("browser");
-      openPane(props.threadId, { kind: "browser" });
+      openPane(dockOwnerProjectId, { kind: "browser" });
     } else if (panelPatch.panel === "diff") {
       requestImmediateDockHydration("diff");
-      openPane(props.threadId, {
+      openPane(dockOwnerProjectId, {
         kind: "diff",
         diffTurnId: panelPatch.diffTurnId ?? null,
         diffFilePath: panelPatch.diffFilePath ?? null,
       });
     } else {
-      setDockOpen(props.threadId, false);
+      setDockOpen(dockOwnerProjectId, false);
     }
     void navigate({
       to: "/$threadId",
@@ -580,19 +592,20 @@ export function SingleChatSurface(props: {
     props.threadId,
     requestImmediateDockHydration,
     setDockOpen,
+    dockOwnerProjectId,
   ]);
 
   useBrowserPanelDesktopBridge({
     onToggle: () => {
       requestImmediateDockHydration("browser");
-      toggleSingletonPane(props.threadId, { kind: "browser" });
+      toggleSingletonPane(dockOwnerProjectId, { kind: "browser" });
     },
     onOpen: (requestedThreadId) => {
       routeSingleBrowserPanelOpenRequest({
         currentThreadId: props.threadId,
         requestedThreadId,
         requestImmediateBrowserHydration: () => requestImmediateDockHydration("browser"),
-        openBrowserPane: (threadId) => openPane(threadId, { kind: "browser" }),
+        openBrowserPane: () => openPane(dockOwnerProjectId, { kind: "browser" }),
       });
     },
   });
@@ -604,7 +617,7 @@ export function SingleChatSurface(props: {
             currentThreadId: props.threadId,
             requestedThreadId: event.threadId,
             requestImmediateDeviceHydration: () => requestImmediateDockHydration("device"),
-            openDevicePane: (threadId) => openPane(threadId, { kind: "device" }),
+            openDevicePane: () => openPane(dockOwnerProjectId, { kind: "device" }),
             navigateToThread: (threadId) => {
               void navigate({
                 to: "/$threadId",
@@ -655,7 +668,7 @@ export function SingleChatSurface(props: {
         if (pane?.threadId) {
           clearSidechatPaneRetention(pane.threadId);
         }
-        closePane(props.threadId, paneId);
+        closePane(dockOwnerProjectId, paneId);
         continue;
       }
       timerIds.push(
@@ -663,7 +676,7 @@ export function SingleChatSurface(props: {
           if (pane?.threadId) {
             clearSidechatPaneRetention(pane.threadId);
           }
-          closePane(props.threadId, paneId);
+          closePane(dockOwnerProjectId, paneId);
         }, remainingGraceMs),
       );
     }
@@ -679,6 +692,7 @@ export function SingleChatSurface(props: {
     sidechatPaneRetentionVersion,
     threadSummaries,
     threadsHydrated,
+    dockOwnerProjectId,
   ]);
   const editorProjectOptions = projects.flatMap((project) =>
     project.kind === "project" ? [{ id: project.id, name: project.name }] : [],
@@ -783,13 +797,23 @@ export function SingleChatSurface(props: {
         });
       return;
     }
-    openPane(props.threadId, { kind });
+    openPane(dockOwnerProjectId, { kind });
   };
 
   const renderDockPane = (
     pane: RightDockPane,
     context: { runtimeMode: DockPaneRuntimeMode; isActive: boolean; isVisible: boolean },
   ): ReactNode => {
+    // Unavailable backing content keeps its pane with an actionable diagnostic —
+    // never a silent removal or a default replacement (scenario 5).
+    if (pane.restorationDiagnostic !== null) {
+      return (
+        <PanelStateMessage>
+          This {getRightDockPaneMeta(pane.kind).label.toLowerCase()} could not be restored.{" "}
+          {pane.restorationDiagnostic}
+        </PanelStateMessage>
+      );
+    }
     switch (pane.kind) {
       case "browser":
         return (
@@ -797,7 +821,8 @@ export function SingleChatSurface(props: {
             <LazyBrowserPanel
               mode="sidebar"
               threadId={props.threadId}
-              onClosePanel={() => closePane(props.threadId, pane.id)}
+              projectId={dockOwnerProjectId}
+              onClosePanel={() => closePane(dockOwnerProjectId, pane.id)}
               runtimeMode={context.runtimeMode}
               onRequestLive={requestActiveDockPaneLive}
             />
@@ -809,7 +834,8 @@ export function SingleChatSurface(props: {
             <LazyDevicePanel
               mode="sidebar"
               threadId={props.threadId}
-              onClosePanel={() => closePane(props.threadId, pane.id)}
+              projectId={dockOwnerProjectId}
+              onClosePanel={() => closePane(dockOwnerProjectId, pane.id)}
               runtimeMode={context.runtimeMode}
               isVisible={context.isVisible}
               onRequestLive={requestActiveDockPaneLive}
@@ -822,9 +848,9 @@ export function SingleChatSurface(props: {
             <PullRequestDockPane
               pane={pane}
               pollingEnabled={context.isVisible}
-              onClose={() => closePane(props.threadId, pane.id)}
+              onClose={() => closePane(dockOwnerProjectId, pane.id)}
               onSelectPullRequest={(number) =>
-                updatePane(props.threadId, pane.id, {
+                updatePane(dockOwnerProjectId, pane.id, {
                   pullRequestNumber: number,
                   pullRequestInitialTab: "summary",
                 })
@@ -843,12 +869,12 @@ export function SingleChatSurface(props: {
               diffFilePath: pane.diffFilePath,
             }}
             onUpdatePanelState={(patch) =>
-              updatePane(props.threadId, pane.id, {
+              updatePane(dockOwnerProjectId, pane.id, {
                 diffTurnId: patch.diffTurnId ?? null,
                 diffFilePath: patch.diffFilePath ?? null,
               })
             }
-            onClosePanel={() => closePane(props.threadId, pane.id)}
+            onClosePanel={() => closePane(dockOwnerProjectId, pane.id)}
             liveRefreshEnabled={context.isActive && dockState.open}
             queriesEnabled={context.isActive && dockState.open}
           />
@@ -868,7 +894,7 @@ export function SingleChatSurface(props: {
               hostThreadId={props.threadId}
               projectId={props.projectId}
               isActive={context.isActive && dockState.open}
-              onClosePanel={() => closePane(props.threadId, pane.id)}
+              onClosePanel={() => closePane(dockOwnerProjectId, pane.id)}
             />
           </Suspense>
         );
@@ -878,7 +904,7 @@ export function SingleChatSurface(props: {
             <GitPanel
               hostThreadId={props.threadId}
               projectId={props.projectId}
-              onClose={() => closePane(props.threadId, pane.id)}
+              onClose={() => closePane(dockOwnerProjectId, pane.id)}
             />
           </Suspense>
         );
@@ -927,7 +953,7 @@ export function SingleChatSurface(props: {
             onToggleBrowser={noopChatSurfaceAction}
             onOpenBrowserUrl={noopChatSurfaceAction}
             onOpenTurnDiff={noopChatSurfaceAction}
-            onCloseThreadPane={() => closePane(props.threadId, pane.id)}
+            onCloseThreadPane={() => closePane(dockOwnerProjectId, pane.id)}
           />
         );
       default:
@@ -937,7 +963,7 @@ export function SingleChatSurface(props: {
 
   const handleSelectDockPane = (paneId: string) => {
     requestImmediateDockHydration(dockState.panes.find((pane) => pane.id === paneId)?.kind);
-    setActivePane(props.threadId, paneId);
+    setActivePane(dockOwnerProjectId, paneId);
   };
 
   // The editor file path arrives via the URL, so an attacker-crafted link can
@@ -1115,12 +1141,18 @@ export function SingleChatSurface(props: {
           launcherItems={dockLauncherItems}
           motionKey={props.threadId}
           activePaneRuntimeMode={activePaneRuntimeMode}
+          preferredWidthPx={dockState.preferredWidthPx}
+          onPreferredWidthChange={
+            dockOwnerProjectId
+              ? (widthPx) => setPreferredWidth(dockOwnerProjectId, widthPx)
+              : undefined
+          }
           {...(paneLabelOverrides ? { paneLabelOverrides } : {})}
           {...(paneIconOverrides ? { paneIconOverrides } : {})}
           onSelectPane={handleSelectDockPane}
-          onClosePane={(paneId) => closePane(props.threadId, paneId)}
-          onCollapse={() => setDockOpen(props.threadId, false)}
-          onOpenChange={(open) => setDockOpen(props.threadId, open)}
+          onClosePane={(paneId) => closePane(dockOwnerProjectId, paneId)}
+          onCollapse={() => setDockOpen(dockOwnerProjectId, false)}
+          onOpenChange={(open) => setDockOpen(dockOwnerProjectId, open)}
           onAddPane={handleAddDockPane}
           renderPane={renderDockPane}
         />

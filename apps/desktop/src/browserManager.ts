@@ -17,6 +17,11 @@ import type { WebContents } from "electron";
 import type {
   BrowserAnnotationCancelInput,
   BrowserAnnotationEvent,
+  BrowserAnnotationProjectCancelInput,
+  BrowserAnnotationProjectEvent,
+  BrowserAnnotationProjectSession,
+  BrowserAnnotationProjectStartInput,
+  BrowserAnnotationProjectSyncMarkersInput,
   BrowserAnnotationSession,
   BrowserAnnotationStartInput,
   BrowserAnnotationSyncMarkersInput,
@@ -28,10 +33,18 @@ import type {
   BrowserNewTabInput,
   BrowserOpenInput,
   BrowserPanelBounds,
+  BrowserProjectInput,
+  BrowserProjectNavigateInput,
+  BrowserProjectNewTabInput,
+  BrowserProjectOpenInput,
+  BrowserProjectSetPanelBoundsInput,
+  BrowserProjectTabInput,
   BrowserSetPanelBoundsInput,
   BrowserTabInput,
   BrowserTabState,
   BrowserThreadInput,
+  ProjectBrowserState,
+  ProjectId,
   ThreadBrowserState,
   ThreadId,
 } from "@synara/contracts";
@@ -73,8 +86,16 @@ const BROWSER_AUTOMATION_INPUT_RELEASE_GRACE_MS = 100;
 const BROWSER_ERROR_ABORTED = -3;
 
 type BrowserStateListener = (state: ThreadBrowserState) => void;
+type BrowserProjectStateListener = (state: ProjectBrowserState) => void;
+
+/** Project-owned mirror of {@link BrowserCopyLinkEvent}. */
+export interface ProjectBrowserCopyLinkEvent {
+  readonly projectId: ProjectId;
+  readonly url: string;
+}
 type BrowserCopyLinkListener = (event: BrowserCopyLinkEvent) => void;
 type BrowserHumanControlListener = () => void;
+type ProjectBrowserCopyLinkListener = (event: ProjectBrowserCopyLinkEvent) => void;
 type BrowserAutomationWindowOpenListener = (event: BrowserAutomationWindowOpenEvent) => void;
 type BrowserAutomationDownloadListener = (event: BrowserAutomationDownloadEvent) => void;
 
@@ -106,13 +127,13 @@ interface BrowserAutomationDownloadLease {
 }
 
 interface BrowserAutomationSideEffectProvenance {
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly humanControlEpoch: number;
 }
 
 interface LiveTabRuntime {
   key: string;
-  threadId: ThreadId;
+  owner: BrowserWorkspaceOwner;
   tabId: string;
   webContents: WebContents;
   view: WebContentsView | null;
@@ -121,7 +142,7 @@ interface LiveTabRuntime {
 }
 
 interface OAuthPopupContext {
-  threadId: ThreadId;
+  owner: BrowserWorkspaceOwner;
   tabId: string;
 }
 
@@ -135,7 +156,7 @@ interface NativeBrowserViewVisibility {
 }
 
 interface PendingRuntimeSync {
-  threadId: ThreadId;
+  owner: BrowserWorkspaceOwner;
   tabId: string;
   faviconUrls?: string[];
 }
@@ -146,7 +167,7 @@ interface PendingWindowOpenTask {
 }
 
 interface PendingAutomationWindowOpenCommit {
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly sourceTabId: string;
   readonly sourceWebContents: WebContents;
   readonly tab: BrowserTabState;
@@ -155,7 +176,7 @@ interface PendingAutomationWindowOpenCommit {
 
 interface PendingStatePublication {
   readonly handle: ReturnType<typeof setTimeout>;
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly reattachActiveTab: boolean;
   readonly rendererGuestToReset?: WebContents;
 }
@@ -188,7 +209,22 @@ interface BrowserPerformanceSnapshot {
 }
 
 export interface BrowserAutomationVisibleRuntime {
-  readonly threadId: ThreadId;
+  /** Owning workspace (Decision 0002): Project when known, legacy Thread otherwise. */
+  /**
+   * Owning workspace. Current manager-created runtimes always provide this;
+   * optional keeps existing low-level CDP test fixtures and legacy callers
+   * source-compatible while the Project surface is adopted.
+   */
+  readonly owner?: BrowserWorkspaceOwner;
+  /**
+   * Caller/provenance conversation for legacy Thread-keyed automation
+   * surfaces (panel reveal, host bookkeeping). Present only when the owning
+   * workspace is a Thread: a Project-owned runtime carries `owner` and
+   * `projectId` instead — there is no synthetic Thread alias (Decision 0002).
+   */
+  readonly threadId: ThreadId | undefined;
+  /** Owning Project when the workspace is Project-owned. */
+  readonly projectId?: ProjectId;
   readonly tabId: string;
   readonly webContents: WebContents;
   /**
@@ -200,30 +236,37 @@ export interface BrowserAutomationVisibleRuntime {
 }
 
 export interface BrowserAutomationPrepareTabInput {
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly url?: string;
   readonly reuse: boolean;
 }
 
-export interface BrowserAutomationPrepareNavigationInput extends BrowserTabInput {
+export interface BrowserAutomationPrepareNavigationInput {
+  readonly owner: BrowserWorkspaceOwner;
+  readonly tabId: string;
   readonly url: string;
 }
 
 export interface BrowserAutomationWindowOpenEvent {
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly sourceTabId: string;
   readonly kind: "tab" | "popup" | "blocked";
   readonly openedTabId: string | null;
 }
 
 export interface BrowserAutomationDownloadEvent {
-  readonly threadId: ThreadId;
+  readonly owner: BrowserWorkspaceOwner;
   readonly sourceTabId: string;
 }
 
 export interface DesktopBrowserManagerOptions {
   beforeInputEvent?: (event: Electron.Event, input: Electron.Input) => boolean;
   annotationPreloadPath?: string;
+  /**
+   * Notified when a Project's workspace is deleted (Decision 0004): the
+   * activation boundary clears only that Project's bookkeeping in response.
+   */
+  onProjectWorkspaceDeactivated?: (projectId: ProjectId) => void;
 }
 
 function createBrowserTab(url = ABOUT_BLANK_URL): BrowserTabState {
@@ -242,22 +285,31 @@ function createBrowserTab(url = ABOUT_BLANK_URL): BrowserTabState {
   };
 }
 
-function defaultThreadBrowserState(threadId: ThreadId): ThreadBrowserState {
-  return {
-    threadId,
-    version: 0,
-    open: false,
-    activeTabId: null,
-    tabs: [],
-    lastError: null,
-  };
+function threadOwner(threadId: ThreadId): { kind: "thread"; threadId: ThreadId } {
+  return { kind: "thread", threadId };
 }
 
-function cloneThreadState(state: ThreadBrowserState): ThreadBrowserState {
-  return {
-    ...state,
-    tabs: state.tabs.map((tab) => ({ ...tab })),
-  };
+
+/** Map an internal owner onto the annotation coordinator's owner union. */
+function toAnnotationOwner(owner: BrowserWorkspaceOwner): { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId } {
+  return owner;
+}
+
+/**
+ * Provenance fields for a visible automation runtime: the real ThreadId for a
+ * Thread-owned workspace, the real ProjectId for a Project-owned one. A
+ * Project runtime never carries a ThreadId — there is no synthetic alias.
+ */
+function runtimeOwnerProvenance(owner: BrowserWorkspaceOwner): {
+  threadId: ThreadId | undefined;
+  projectId?: ProjectId;
+} {
+  if (owner.kind === "thread") return { threadId: owner.threadId };
+  return { threadId: undefined, projectId: owner.projectId };
+}
+
+function projectOwner(projectId: ProjectId): { kind: "project"; projectId: ProjectId } {
+  return { kind: "project", projectId };
 }
 
 function defaultTitleForUrl(url: string): string {
@@ -335,8 +387,107 @@ function mapBrowserLoadError(errorCode: number): string {
   }
 }
 
-function buildRuntimeKey(threadId: ThreadId, tabId: string): string {
-  return `${threadId}:${tabId}`;
+/**
+ * Internal owner of one browser workspace (Decision 0002): the Right-sidebar
+ * browser workspace belongs to the real `ProjectId` and is shared by every
+ * Main conversation in that Project. `thread` is the unchanged legacy v1
+ * owner surface. Every derived workspace/runtime key carries a disjoint
+ * `t:`/`p:` prefix, so a `ProjectId` can never collide with — or alias — a
+ * `ThreadId`, and no synthetic Thread identity is ever fabricated.
+ */
+export type BrowserWorkspaceOwner =
+  | { readonly kind: "thread"; readonly threadId: ThreadId }
+  | { readonly kind: "project"; readonly projectId: ProjectId };
+
+/** Collision-free workspace key for one owner (not branded as a ThreadId). */
+export function browserOwnerWorkspaceKey(owner: BrowserWorkspaceOwner): string {
+  return owner.kind === "thread" ? `t:${owner.threadId}` : `p:${owner.projectId}`;
+}
+
+/** Collision-free runtime key for one owner's tab. */
+export function browserOwnerRuntimeKey(owner: BrowserWorkspaceOwner, tabId: string): string {
+  return owner.kind === "thread"
+    ? `t:${owner.threadId}:${tabId}`
+    : `p:${owner.projectId}:${tabId}`;
+}
+
+/** Structural equality of two owners via their canonical keys. */
+export function browserOwnersEqual(
+  left: BrowserWorkspaceOwner,
+  right: BrowserWorkspaceOwner,
+): boolean {
+  return browserOwnerWorkspaceKey(left) === browserOwnerWorkspaceKey(right);
+}
+
+/** Owner + tab identity shared by the owner-generic core. */
+export interface BrowserOwnerTabInput {
+  readonly owner: BrowserWorkspaceOwner;
+  readonly tabId: string;
+}
+
+/**
+ * Owner-generic internal workspace state. Identical tab semantics for Thread
+ * (legacy v1) and Project (v2) owners; public projections add the owner
+ * identity field at the API boundary (see the to*BrowserState functions).
+ */
+interface OwnerWorkspaceState {
+  version: number;
+  open: boolean;
+  activeTabId: string | null;
+  tabs: BrowserTabState[];
+  lastError: string | null;
+}
+
+function defaultOwnerWorkspaceState(): OwnerWorkspaceState {
+  return {
+    version: 0,
+    open: false,
+    activeTabId: null,
+    tabs: [],
+    lastError: null,
+  };
+}
+
+/** Structural slice the state-sync helpers actually consume. */
+interface WorkspaceTabErrorView {
+  activeTabId: string | null;
+  tabs: BrowserTabState[];
+  lastError: string | null;
+}
+
+function cloneOwnerState(state: OwnerWorkspaceState): OwnerWorkspaceState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) => ({ ...tab })),
+  };
+}
+
+function toThreadBrowserState(
+  owner: { readonly kind: "thread"; readonly threadId: ThreadId },
+  state: OwnerWorkspaceState,
+): ThreadBrowserState {
+  return {
+    threadId: owner.threadId,
+    version: state.version,
+    open: state.open,
+    activeTabId: state.activeTabId,
+    tabs: state.tabs.map((tab) => ({ ...tab })),
+    lastError: state.lastError,
+  };
+}
+
+function toProjectBrowserState(
+  owner: { readonly kind: "project"; readonly projectId: ProjectId },
+  state: OwnerWorkspaceState,
+): ProjectBrowserState {
+  return {
+    projectId: owner.projectId,
+    version: state.version,
+    open: state.open,
+    activeTabId: state.activeTabId,
+    tabs: state.tabs.map((tab) => ({ ...tab })),
+    lastError: state.lastError,
+  };
 }
 
 function browserBoundsSignature(bounds: BrowserPanelBounds | null): string {
@@ -392,21 +543,33 @@ function browserAutomationInputMatches(
 
 export class DesktopBrowserManager {
   private window: BrowserWindow | null = null;
-  private activeThreadId: ThreadId | null = null;
+  private activeOwner: BrowserWorkspaceOwner | null = null;
   private activeBounds: BrowserPanelBounds | null = null;
-  private activeBoundsThreadId: ThreadId | null = null;
+  private activeBoundsOwner: BrowserWorkspaceOwner | null = null;
   private attachedRuntimeKey: string | null = null;
   private attachedBoundsSignature: string | null = null;
-  private readonly states = new Map<ThreadId, ThreadBrowserState>();
-  private readonly threadVersionById = new Map<ThreadId, number>();
-  private readonly snapshotCacheByThreadId = new Map<
-    ThreadId,
-    { version: number; snapshot: ThreadBrowserState }
+  // Owner-keyed workspace registries (Decision 0002). Keys are the disjoint
+  // `t:`/`p:` strings from browserOwnerWorkspaceKey — never a branded
+  // ThreadId — so legacy Thread workspaces and Project workspaces cannot
+  // alias one another.
+  private readonly states = new Map<string, OwnerWorkspaceState>();
+  private readonly ownerVersionByKey = new Map<string, number>();
+  private readonly snapshotCacheByOwnerKey = new Map<
+    string,
+    { version: number; snapshot: OwnerWorkspaceState }
   >();
-  private readonly lastEmittedVersionByThreadId = new Map<ThreadId, number>();
-  private readonly humanControlEpochByThreadId = new Map<ThreadId, number>();
-  private readonly humanControlListenersByThreadId = new Map<
-    ThreadId,
+  private readonly threadProjectionCacheByKey = new Map<
+    string,
+    { version: number; projection: ThreadBrowserState }
+  >();
+  private readonly projectProjectionCacheByKey = new Map<
+    string,
+    { version: number; projection: ProjectBrowserState }
+  >();
+  private readonly lastEmittedVersionByOwnerKey = new Map<string, number>();
+  private readonly humanControlEpochByOwnerKey = new Map<string, number>();
+  private readonly humanControlListenersByOwnerKey = new Map<
+    string,
     Set<BrowserHumanControlListener>
   >();
   private readonly expectedAutomationInputsByRuntimeKey = new Map<
@@ -439,14 +602,18 @@ export class DesktopBrowserManager {
   private readonly runtimeLastActiveAtByKey = new Map<string, number>();
   private readonly pendingRuntimeSyncs = new Map<string, PendingRuntimeSync>();
   private readonly listeners = new Set<BrowserStateListener>();
+  private readonly projectListeners = new Set<BrowserProjectStateListener>();
   private readonly copyLinkListeners = new Set<BrowserCopyLinkListener>();
+  private readonly projectCopyLinkListeners = new Set<ProjectBrowserCopyLinkListener>();
   private readonly annotations: BrowserAnnotationCoordinator;
+  /** Projects whose workspace publication this manager already applied (Decision 0004). */
+  private readonly activatedProjectWorkspaceKeys = new Set<string>();
   // OAuth/sign-in popups opened by pages via `window.open`. Tracked so they can be sized over
   // the panel and torn down cleanly without leaking native windows.
   private readonly popupRuntimes = new Map<BrowserWindow, OAuthPopupRuntime>();
   private readonly sessionPolicy: BrowserSessionPolicy;
   private readonly tabSuspendTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly suspendTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  private readonly suspendTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private backgroundAutomationEvictionTimer: ReturnType<typeof setTimeout> | null = null;
   private runtimeSyncFlushScheduled = false;
   private disposed = false;
@@ -473,15 +640,77 @@ export class DesktopBrowserManager {
       resolveVisibleRuntime: (input) => {
         const runtime = this.getVisibleAutomationRuntime(input);
         return {
-          threadId: runtime.threadId,
+          threadId: input.threadId,
           tabId: runtime.tabId,
           webContents: runtime.webContents,
         };
       },
+      resolveProjectVisibleRuntime: (input) => {
+        try {
+          const runtime = this.getVisibleOwnerAutomationRuntime({
+            owner: projectOwner(input.projectId),
+            tabId: input.tabId,
+          });
+          return {
+            projectId: input.projectId,
+            tabId: runtime.tabId,
+            webContents: runtime.webContents,
+          };
+        } catch {
+          return null;
+        }
+      },
       resolveRuntimeByWebContentsId: (webContentsId) =>
         this.toAnnotationRuntime(this.findRuntimeByWebContentsId(webContentsId)),
-      markHumanControl: (threadId) => this.markHumanControl(threadId),
+      markHumanControl: (owner) => this.markOwnerHumanControl(owner),
     });
+  }
+
+  // ── Owner-keyed annotation bridge ───────────────────────────────────
+  // The coordinator is keyed by BrowserAnnotationWorkspaceOwner with disjoint
+  // t:/p: keys: Thread and Project sessions can never alias. Project-owned
+  // runtimes route through the coordinator's Project surface directly; there
+  // is no cross-owner mapping anywhere (Decision 0002).
+  private clearOwnerAnnotationProjection(owner: BrowserWorkspaceOwner, tabId: string): void {
+    this.annotations.clearOwnerProjection(toAnnotationOwner(owner), tabId);
+  }
+
+  private handleOwnerAnnotationRuntimeDetached(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+    reason: "detached" | "destroyed" | "replaced",
+  ): void {
+    this.annotations.handleOwnerRuntimeDetached(
+      toAnnotationOwner(owner),
+      tabId,
+      webContentsId,
+      reason,
+    );
+  }
+
+  private handleOwnerAnnotationNavigation(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    this.annotations.handleOwnerNavigation(toAnnotationOwner(owner), tabId, webContentsId);
+  }
+
+  private handleOwnerAnnotationInPageNavigation(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    this.annotations.handleOwnerInPageNavigation(toAnnotationOwner(owner), tabId, webContentsId);
+  }
+
+  private recoverOwnerAnnotationNavigation(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    this.annotations.recoverOwnerNavigation(toAnnotationOwner(owner), tabId, webContentsId);
   }
 
   setWindow(window: BrowserWindow | null): void {
@@ -495,11 +724,11 @@ export class DesktopBrowserManager {
     }
     this.window = window;
     if (window) {
-      const bounds = this.activeThreadId
-        ? this.getVisibleBoundsForThread(this.activeThreadId)
+      const bounds = this.activeOwner
+        ? this.getVisibleBoundsForOwner(this.activeOwner)
         : null;
-      if (this.activeThreadId && bounds) {
-        this.attachActiveTab(this.activeThreadId, bounds);
+      if (this.activeOwner && bounds) {
+        this.attachActiveTab(this.activeOwner, bounds);
       }
       return;
     }
@@ -532,7 +761,7 @@ export class DesktopBrowserManager {
   }
 
   syncAnnotationMarkers(input: BrowserAnnotationSyncMarkersInput): void {
-    const state = this.states.get(input.threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(threadOwner(input.threadId)));
     if (!state?.tabs.some((tab) => tab.id === input.tabId)) {
       throw new Error("The requested browser tab is not available in this thread.");
     }
@@ -544,7 +773,7 @@ export class DesktopBrowserManager {
     tabId?: string;
     annotationId: string;
   }): { readonly tabId: string; readonly url: string } | null {
-    const state = this.states.get(input.threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(threadOwner(input.threadId)));
     if (!state) {
       return null;
     }
@@ -567,6 +796,56 @@ export class DesktopBrowserManager {
     return this.annotations.isInteractive(threadId);
   }
 
+  // ── Owner-keyed annotation surface (Decision 0002, WP7 stage 2A) ────
+  //
+  // Project annotation requests route through these methods directly; the
+  // coordinator keys every session/projection by the owning ProjectId, so a
+  // Project surface can never observe a Thread's sessions or vice versa.
+
+  startProjectAnnotation(
+    input: BrowserAnnotationProjectStartInput,
+  ): BrowserAnnotationProjectSession {
+    return this.annotations.startForProject(input);
+  }
+
+  cancelProjectAnnotation(input: BrowserAnnotationProjectCancelInput): void {
+    this.annotations.cancelForProject(input);
+  }
+
+  syncProjectAnnotationMarkers(input: BrowserAnnotationProjectSyncMarkersInput): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(projectOwner(input.projectId)));
+    if (!state?.tabs.some((tab) => tab.id === input.tabId)) {
+      throw new Error("The requested browser tab is not available in this project.");
+    }
+    this.annotations.syncMarkersForProject(input);
+  }
+
+  resolveProjectAnnotationNavigationTarget(input: {
+    projectId: ProjectId;
+    tabId?: string;
+    annotationId: string;
+  }): { readonly tabId: string; readonly url: string } | null {
+    const state = this.states.get(browserOwnerWorkspaceKey(projectOwner(input.projectId)));
+    if (!state) {
+      return null;
+    }
+    const target = this.annotations.resolveProjectAnnotationNavigationTarget(input);
+    if (!target || !state.tabs.some((tab) => tab.id === target.tabId)) {
+      return null;
+    }
+    return { tabId: target.tabId, url: target.liveUrl };
+  }
+
+  subscribeProjectAnnotationEvents(
+    listener: (event: BrowserAnnotationProjectEvent) => void,
+  ): () => void {
+    return this.annotations.subscribeProjectEvents(listener);
+  }
+
+  isOwnerAnnotationInteractive(owner: BrowserWorkspaceOwner): boolean {
+    return this.annotations.isInteractiveByOwner(toAnnotationOwner(owner));
+  }
+
   isTrustedRenderer(webContentsId: number): boolean {
     return Boolean(
       this.window && !this.window.isDestroyed() && this.window.webContents.id === webContentsId,
@@ -583,7 +862,18 @@ export class DesktopBrowserManager {
     input: BrowserTabInput,
     listener: BrowserAutomationWindowOpenListener,
   ): () => void {
-    const key = buildRuntimeKey(input.threadId, input.tabId);
+    return this.trackOwnerAutomationWindowOpen(
+      { owner: threadOwner(input.threadId), tabId: input.tabId },
+      listener,
+    );
+  }
+
+  /** Owner-generic core behind {@link trackAutomationWindowOpen}. */
+  trackOwnerAutomationWindowOpen(
+    input: BrowserOwnerTabInput,
+    listener: BrowserAutomationWindowOpenListener,
+  ): () => void {
+    const key = browserOwnerRuntimeKey(input.owner, input.tabId);
     const listeners = this.automationWindowOpenListenersByRuntimeKey.get(key) ?? new Set();
     listeners.add(listener);
     this.automationWindowOpenListenersByRuntimeKey.set(key, listeners);
@@ -609,9 +899,20 @@ export class DesktopBrowserManager {
     input: BrowserTabInput,
     listener: BrowserAutomationDownloadListener,
   ): () => void {
-    const key = buildRuntimeKey(input.threadId, input.tabId);
+    return this.trackOwnerAutomationDownload(
+      { owner: threadOwner(input.threadId), tabId: input.tabId },
+      listener,
+    );
+  }
+
+  /** Owner-generic core behind {@link trackAutomationDownload}. */
+  trackOwnerAutomationDownload(
+    input: BrowserOwnerTabInput,
+    listener: BrowserAutomationDownloadListener,
+  ): () => void {
+    const key = browserOwnerRuntimeKey(input.owner, input.tabId);
     const listeners = this.automationDownloadListenersByRuntimeKey.get(key) ?? new Set();
-    const humanControlEpoch = this.getAutomationHumanControlEpoch(input.threadId);
+    const humanControlEpoch = this.getOwnerAutomationHumanControlEpoch(input.owner);
     const lease: BrowserAutomationDownloadLease = {
       listener,
       humanControlEpoch,
@@ -623,7 +924,7 @@ export class DesktopBrowserManager {
     // marker per logical runtime until genuine human input advances the epoch
     // or the runtime is destroyed.
     this.automationSideEffectProvenanceByRuntimeKey.set(key, {
-      threadId: input.threadId,
+      owner: input.owner,
       humanControlEpoch,
     });
     this.beginAutomationGesture(key);
@@ -658,7 +959,7 @@ export class DesktopBrowserManager {
     context: OAuthPopupContext,
     listenerDisposers: Array<() => void>,
   ): void {
-    const { threadId, tabId } = context;
+    const { owner, tabId } = context;
 
     const blockUnsafeMainFrameNavigation = (
       details: Electron.Event<
@@ -688,13 +989,13 @@ export class DesktopBrowserManager {
     // schemes are denied here: browser content must never launch an OS handler implicitly.
     webContents.setWindowOpenHandler((details) => {
       const { url } = details;
-      const automationGestureActive = this.isAutomationGestureActive(threadId, tabId);
+      const automationGestureActive = this.isOwnerAutomationGestureActive(owner, tabId);
       const isWebUrl =
         url.startsWith("http://") || url.startsWith("https://") || url === ABOUT_BLANK_URL;
       if (!isWebUrl) {
         if (automationGestureActive) {
           this.emitAutomationWindowOpen({
-            threadId,
+            owner,
             sourceTabId: tabId,
             kind: "blocked",
             openedTabId: null,
@@ -712,7 +1013,7 @@ export class DesktopBrowserManager {
       if (kind === "popup") {
         if (automationGestureActive) {
           this.emitAutomationWindowOpen({
-            threadId,
+            owner,
             sourceTabId: tabId,
             kind: "popup",
             openedTabId: null,
@@ -733,7 +1034,7 @@ export class DesktopBrowserManager {
       // WebContents is still opening the window. Defer the canonical tab
       // transition until after the handler has returned to Electron.
       this.scheduleWindowOpenTab({
-        threadId,
+        owner,
         sourceTabId: tabId,
         sourceWebContents: webContents,
         url,
@@ -743,7 +1044,7 @@ export class DesktopBrowserManager {
     });
 
     const didCreateWindow = (childWindow: BrowserWindow) => {
-      this.registerOAuthPopupWindow(childWindow, { threadId, tabId });
+      this.registerOAuthPopupWindow(childWindow, { owner, tabId });
     };
     webContents.on("did-create-window", didCreateWindow);
     listenerDisposers.push(() => {
@@ -754,12 +1055,12 @@ export class DesktopBrowserManager {
   private findRuntimeContext(webContents: WebContents): OAuthPopupContext | null {
     for (const runtime of this.runtimes.values()) {
       if (runtime.webContents === webContents) {
-        return { threadId: runtime.threadId, tabId: runtime.tabId };
+        return { owner: runtime.owner, tabId: runtime.tabId };
       }
     }
     for (const popup of this.popupRuntimes.values()) {
       if (!popup.window.isDestroyed() && popup.window.webContents === webContents) {
-        return { threadId: popup.threadId, tabId: popup.tabId };
+        return { owner: popup.owner, tabId: popup.tabId };
       }
     }
     return null;
@@ -771,8 +1072,8 @@ export class DesktopBrowserManager {
     if (!context) {
       return;
     }
-    const runtimeKey = buildRuntimeKey(context.threadId, context.tabId);
-    const currentHumanEpoch = this.getAutomationHumanControlEpoch(context.threadId);
+    const runtimeKey = browserOwnerRuntimeKey(context.owner, context.tabId);
+    const currentHumanEpoch = this.getOwnerAutomationHumanControlEpoch(context.owner);
     const provenance = this.automationSideEffectProvenanceByRuntimeKey.get(runtimeKey);
     if (!provenance || provenance.humanControlEpoch !== currentHumanEpoch) {
       // A manual download after genuine user input remains native Electron
@@ -785,20 +1086,20 @@ export class DesktopBrowserManager {
     // the side effect has been contained so listener failures cannot leak it.
     input.event.preventDefault();
     this.emitAutomationDownload({
-      threadId: context.threadId,
+      owner: context.owner,
       sourceTabId: context.tabId,
     });
   }
 
   private scheduleWindowOpenTab(input: {
-    readonly threadId: ThreadId;
+    readonly owner: BrowserWorkspaceOwner;
     readonly sourceTabId: string;
     readonly sourceWebContents: WebContents;
     readonly url: string;
     readonly automationGestureActive: boolean;
   }): void {
     if (this.disposed) return;
-    const key = buildRuntimeKey(input.threadId, input.sourceTabId);
+    const key = browserOwnerRuntimeKey(input.owner, input.sourceTabId);
     // One native activation can surface duplicate callbacks in embedded guest
     // runtimes. Only the first decision may create a canonical Synara tab.
     if (
@@ -814,11 +1115,11 @@ export class DesktopBrowserManager {
       if (
         this.disposed ||
         input.sourceWebContents.isDestroyed() ||
-        !this.isCurrentWindowOpenSource(input.threadId, input.sourceTabId, input.sourceWebContents)
+        !this.isCurrentWindowOpenSource(input.owner, input.sourceTabId, input.sourceWebContents)
       ) {
         return;
       }
-      const sourceState = this.states.get(input.threadId);
+      const sourceState = this.states.get(browserOwnerWorkspaceKey(input.owner));
       if (!sourceState?.open || !sourceState.tabs.some((tab) => tab.id === input.sourceTabId)) {
         return;
       }
@@ -830,29 +1131,25 @@ export class DesktopBrowserManager {
         }, BROWSER_AUTOMATION_WINDOW_OPEN_FALLBACK_MS);
         fallbackTimer.unref?.();
         this.pendingAutomationWindowOpenCommitsByRuntimeKey.set(key, {
-          threadId: input.threadId,
+          owner: input.owner,
           sourceTabId: input.sourceTabId,
           sourceWebContents: input.sourceWebContents,
           tab,
           fallbackTimer,
         });
         this.emitAutomationWindowOpen({
-          threadId: input.threadId,
+          owner: input.owner,
           sourceTabId: input.sourceTabId,
           kind: "tab",
           openedTabId: tab.id,
         });
       } else {
-        this.newTab({
-          threadId: input.threadId,
-          url: input.url,
-          activate: true,
-        });
+        this.newOwnerTab(input.owner, { url: input.url, activate: true });
       }
       if (!input.automationGestureActive) {
-        const bounds = this.getVisibleBoundsForThread(input.threadId);
-        if (this.activeThreadId === input.threadId && bounds) {
-          this.attachActiveTab(input.threadId, bounds);
+        const bounds = this.getVisibleBoundsForOwner(input.owner);
+        if (this.isActiveOwner(input.owner) && bounds) {
+          this.attachActiveTab(input.owner, bounds);
         }
       }
     });
@@ -864,15 +1161,15 @@ export class DesktopBrowserManager {
   }
 
   private isCurrentWindowOpenSource(
-    threadId: ThreadId,
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     webContents: WebContents,
   ): boolean {
-    const runtime = this.runtimes.get(buildRuntimeKey(threadId, tabId));
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, tabId));
     if (runtime?.webContents === webContents) return true;
     for (const popup of this.popupRuntimes.values()) {
       if (
-        popup.threadId === threadId &&
+        browserOwnersEqual(popup.owner, owner) &&
         popup.tabId === tabId &&
         popup.window.webContents === webContents
       ) {
@@ -891,14 +1188,14 @@ export class DesktopBrowserManager {
       this.disposed ||
       pending.sourceWebContents.isDestroyed() ||
       !this.isCurrentWindowOpenSource(
-        pending.threadId,
+        pending.owner,
         pending.sourceTabId,
         pending.sourceWebContents,
       )
     ) {
       return;
     }
-    const state = this.states.get(pending.threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(pending.owner));
     if (
       !state?.open ||
       !state.tabs.some((tab) => tab.id === pending.sourceTabId) ||
@@ -910,18 +1207,18 @@ export class DesktopBrowserManager {
     state.tabs = [...state.tabs, pending.tab];
     state.activeTabId = pending.tab.id;
     pending.tab.runtimeSurface = "native";
-    this.automationRuntimeKeys.add(buildRuntimeKey(pending.threadId, pending.tab.id));
+    this.automationRuntimeKeys.add(browserOwnerRuntimeKey(pending.owner, pending.tab.id));
     syncThreadLastError(state);
-    this.markThreadStateChanged(pending.threadId);
+    this.markOwnerStateChanged(pending.owner);
     // The host can now reconcile openedTabId from canonical state, but the
     // renderer must not remove the source guest until Electron has completely
     // unwound the native window-open activation and the click response.
-    this.scheduleDeferredStatePublication(key, pending.threadId, true);
+    this.scheduleDeferredStatePublication(key, pending.owner, true);
   }
 
   private scheduleDeferredStatePublication(
     key: string,
-    threadId: ThreadId,
+    owner: BrowserWorkspaceOwner,
     reattachActiveTab: boolean,
     rendererGuestToReset?: WebContents,
   ): void {
@@ -930,17 +1227,17 @@ export class DesktopBrowserManager {
       const pending = this.pendingStatePublicationsByKey.get(key);
       if (!pending || pending.handle !== handle) return;
       this.pendingStatePublicationsByKey.delete(key);
-      if (this.disposed || !this.states.has(threadId)) return;
+      if (this.disposed || !this.states.has(browserOwnerWorkspaceKey(owner))) return;
       if (pending.rendererGuestToReset && !pending.rendererGuestToReset.isDestroyed()) {
         void pending.rendererGuestToReset.loadURL(ABOUT_BLANK_URL).catch(() => {
           // The logical tab is already closed and unroutable. A guest destroyed
           // concurrently by the renderer needs no further cleanup here.
         });
       }
-      this.emitState(threadId);
-      const bounds = pending.reattachActiveTab ? this.getVisibleBoundsForThread(threadId) : null;
-      if (pending.reattachActiveTab && this.activeThreadId === threadId && bounds) {
-        this.attachActiveTab(threadId, bounds);
+      this.emitOwnerState(owner);
+      const bounds = pending.reattachActiveTab ? this.getVisibleBoundsForOwner(owner) : null;
+      if (pending.reattachActiveTab && this.isActiveOwner(owner) && bounds) {
+        this.attachActiveTab(owner, bounds);
       }
     }, BROWSER_DEFERRED_PUBLICATION_DELAY_MS);
     // This timer is part of the observable close/window-open handshake. Keep it
@@ -949,7 +1246,7 @@ export class DesktopBrowserManager {
     // renderer displaying a WebView for a tab that is already closed.
     this.pendingStatePublicationsByKey.set(key, {
       handle,
-      threadId,
+      owner,
       reattachActiveTab,
       ...(rendererGuestToReset ? { rendererGuestToReset } : {}),
     });
@@ -962,8 +1259,8 @@ export class DesktopBrowserManager {
     this.pendingAutomationWindowOpenCommitsByRuntimeKey.delete(key);
   }
 
-  private clearPendingWindowOpenTask(threadId: ThreadId, tabId: string): void {
-    const key = buildRuntimeKey(threadId, tabId);
+  private clearPendingWindowOpenTask(owner: BrowserWorkspaceOwner, tabId: string): void {
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const pending = this.pendingWindowOpenTasksByRuntimeKey.get(key);
     if (pending) {
       clearImmediate(pending.handle);
@@ -1015,7 +1312,7 @@ export class DesktopBrowserManager {
       if (input.type !== "keyDown") {
         return;
       }
-      this.markHumanControl(runtime.threadId);
+      this.markOwnerHumanControl(runtime.owner);
       const key = input.key.toLowerCase();
       const isCloseChord =
         key === "escape" ||
@@ -1037,7 +1334,7 @@ export class DesktopBrowserManager {
         input.type === "mouseWheel" ||
         input.type === "contextMenu"
       ) {
-        this.markHumanControl(runtime.threadId);
+        this.markOwnerHumanControl(runtime.owner);
       }
     };
     webContents.on("before-mouse-event", markPopupPointerControl);
@@ -1094,9 +1391,9 @@ export class DesktopBrowserManager {
     popup.setBounds(nextBounds);
   }
 
-  private updatePopupWindowsForThread(threadId: ThreadId): void {
+  private updatePopupWindowsForOwner(owner: BrowserWorkspaceOwner): void {
     for (const runtime of this.popupRuntimes.values()) {
-      if (runtime.threadId === threadId) {
+      if (browserOwnersEqual(runtime.owner, owner)) {
         this.centerPopupWindow(runtime);
       }
     }
@@ -1113,13 +1410,13 @@ export class DesktopBrowserManager {
     }
   }
 
-  private closePopupWindowsForThread(threadId: ThreadId): void {
-    this.closePopupWindowsWhere((runtime) => runtime.threadId === threadId);
+  private closePopupWindowsForOwner(owner: BrowserWorkspaceOwner): void {
+    this.closePopupWindowsWhere((runtime) => browserOwnersEqual(runtime.owner, owner));
   }
 
-  private closePopupWindowsForTab(threadId: ThreadId, tabId: string): void {
+  private closePopupWindowsForTab(owner: BrowserWorkspaceOwner, tabId: string): void {
     this.closePopupWindowsWhere(
-      (runtime) => runtime.threadId === threadId && runtime.tabId === tabId,
+      (runtime) => browserOwnersEqual(runtime.owner, owner) && runtime.tabId === tabId,
     );
   }
 
@@ -1153,22 +1450,26 @@ export class DesktopBrowserManager {
     this.automationRuntimeKeys.clear();
     this.automationRuntimeProtectedUntilByKey.clear();
     this.listeners.clear();
+    this.projectListeners.clear();
     this.copyLinkListeners.clear();
+    this.projectCopyLinkListeners.clear();
     this.states.clear();
-    this.threadVersionById.clear();
-    this.snapshotCacheByThreadId.clear();
-    this.lastEmittedVersionByThreadId.clear();
-    this.humanControlEpochByThreadId.clear();
-    this.humanControlListenersByThreadId.clear();
+    this.ownerVersionByKey.clear();
+    this.snapshotCacheByOwnerKey.clear();
+    this.threadProjectionCacheByKey.clear();
+    this.projectProjectionCacheByKey.clear();
+    this.lastEmittedVersionByOwnerKey.clear();
+    this.humanControlEpochByOwnerKey.clear();
+    this.humanControlListenersByOwnerKey.clear();
     this.expectedAutomationInputsByRuntimeKey.clear();
     this.automationGestureDepthByRuntimeKey.clear();
     this.automationWindowOpenListenersByRuntimeKey.clear();
     this.automationDownloadListenersByRuntimeKey.clear();
     this.automationSideEffectProvenanceByRuntimeKey.clear();
     this.window = null;
-    this.activeThreadId = null;
+    this.activeOwner = null;
     this.activeBounds = null;
-    this.activeBoundsThreadId = null;
+    this.activeBoundsOwner = null;
     this.attachedBoundsSignature = null;
     this.runtimeSyncFlushScheduled = false;
   }
@@ -1182,36 +1483,122 @@ export class DesktopBrowserManager {
   }
 
   getAutomationHumanControlEpoch(threadId: ThreadId): number {
-    return this.humanControlEpochByThreadId.get(threadId) ?? 0;
+    return this.getOwnerAutomationHumanControlEpoch(threadOwner(threadId));
   }
 
   subscribeAutomationHumanControl(
     threadId: ThreadId,
     listener: BrowserHumanControlListener,
   ): () => void {
-    let listeners = this.humanControlListenersByThreadId.get(threadId);
+    return this.subscribeOwnerAutomationHumanControl(threadOwner(threadId), listener);
+  }
+
+  /** Owner-generic human-control epoch (Decision 0002). */
+  getOwnerAutomationHumanControlEpoch(owner: BrowserWorkspaceOwner): number {
+    return this.humanControlEpochByOwnerKey.get(browserOwnerWorkspaceKey(owner)) ?? 0;
+  }
+
+  /** Owner-generic human-control subscription (Decision 0002). */
+  subscribeOwnerAutomationHumanControl(
+    owner: BrowserWorkspaceOwner,
+    listener: BrowserHumanControlListener,
+  ): () => void {
+    const key = browserOwnerWorkspaceKey(owner);
+    let listeners = this.humanControlListenersByOwnerKey.get(key);
     if (!listeners) {
       listeners = new Set();
-      this.humanControlListenersByThreadId.set(threadId, listeners);
+      this.humanControlListenersByOwnerKey.set(key, listeners);
     }
     listeners.add(listener);
     return () => {
       listeners?.delete(listener);
-      if (listeners?.size === 0) this.humanControlListenersByThreadId.delete(threadId);
+      if (listeners?.size === 0) this.humanControlListenersByOwnerKey.delete(key);
     };
   }
 
+  /** Legacy Thread-keyed automation surface (provenance caller for v1 hosts). */
+  prepareAutomationTab(input: {
+    readonly threadId: ThreadId;
+    readonly url?: string;
+    readonly reuse: boolean;
+  }): ThreadBrowserState {
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.prepareOwnerAutomationTab({
+        owner,
+        ...(input.url === undefined ? {} : { url: input.url }),
+        reuse: input.reuse,
+      }),
+    );
+  }
+
+  /** Selects a scoped tab for a legacy Thread-keyed automation caller. */
+  selectAutomationTab(input: BrowserTabInput): ThreadBrowserState {
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.selectOwnerAutomationTab({ owner, tabId: input.tabId }),
+    );
+  }
+
+  /** Projects a navigation for a legacy Thread-keyed automation caller. */
+  prepareAutomationNavigation(input: {
+    readonly threadId: ThreadId;
+    readonly tabId: string;
+    readonly url: string;
+  }): ThreadBrowserState {
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.prepareOwnerAutomationNavigation({ owner, tabId: input.tabId, url: input.url }),
+    );
+  }
+
+  /** Returns the visible runtime for a legacy Thread-keyed automation caller. */
+  getVisibleAutomationRuntime(input: BrowserTabInput): BrowserAutomationVisibleRuntime {
+    return this.getVisibleOwnerAutomationRuntime({
+      owner: threadOwner(input.threadId),
+      tabId: input.tabId,
+    });
+  }
+
+  /** Returns the canonical runtime for a legacy Thread-keyed automation caller. */
+  async getAutomationRuntime(
+    input: BrowserTabInput,
+    options: { readonly restore?: boolean } = {},
+  ): Promise<BrowserAutomationVisibleRuntime> {
+    return this.getOwnerAutomationRuntime(
+      { owner: threadOwner(input.threadId), tabId: input.tabId },
+      options,
+    );
+  }
+
+  /** Closes a tab for a legacy Thread-keyed automation caller. */
+  closeAutomationTab(input: BrowserTabInput): ThreadBrowserState {
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.closeOwnerAutomationTab({ owner, tabId: input.tabId }),
+    );
+  }
+
   /** Prepares an agent-owned tab whose native runtime can outlive the chat route. */
-  prepareAutomationTab(input: BrowserAutomationPrepareTabInput): ThreadBrowserState {
-    const hadExistingTab = (this.states.get(input.threadId)?.tabs.length ?? 0) > 0;
-    const state = this.ensureWorkspace(input.threadId, input.url);
+  prepareOwnerAutomationTab(input: {
+    readonly owner: BrowserWorkspaceOwner;
+    readonly url?: string | undefined;
+    readonly reuse: boolean;
+  }): OwnerWorkspaceState {
+    const hadExistingTab =
+      (this.states.get(browserOwnerWorkspaceKey(input.owner))?.tabs.length ?? 0) > 0;
+    const state = this.ensureOwnerWorkspace(input.owner, input.url);
     let tab = input.reuse || !hadExistingTab ? this.getActiveTab(state) : null;
     if (!tab) {
       tab = createBrowserTab(normalizeUrlInput(input.url));
       state.tabs = [...state.tabs, tab];
     }
 
-    this.claimAutomationTab(input.threadId, tab);
+    this.claimOwnerAutomationTab(input.owner, tab);
 
     if (input.url !== undefined) {
       const nextUrl = normalizeUrlInput(input.url);
@@ -1223,41 +1610,43 @@ export class DesktopBrowserManager {
     state.open = true;
     state.activeTabId = tab.id;
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.markOwnerStateChanged(input.owner);
+    this.emitOwnerState(input.owner);
+    return state;
   }
 
   /** Selects a scoped tab and keeps it available to background automation. */
-  selectAutomationTab(input: BrowserTabInput): ThreadBrowserState {
-    const state = this.states.get(input.threadId);
+  selectOwnerAutomationTab(input: BrowserOwnerTabInput): OwnerWorkspaceState {
+    const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
 
     let didChange = false;
-    didChange = this.claimAutomationTab(input.threadId, tab) || didChange;
+    didChange = this.claimOwnerAutomationTab(input.owner, tab) || didChange;
     if (state.activeTabId !== tab.id) {
       state.activeTabId = tab.id;
       didChange = true;
     }
     didChange = syncThreadLastError(state) || didChange;
     if (didChange) {
-      this.markThreadStateChanged(input.threadId);
-      this.emitState(input.threadId);
+      this.markOwnerStateChanged(input.owner);
+      this.emitOwnerState(input.owner);
     }
-    return this.snapshotThreadState(input.threadId, state);
+    return state;
   }
 
   /** Projects a navigation into the persistent agent-owned runtime state. */
-  prepareAutomationNavigation(input: BrowserAutomationPrepareNavigationInput): ThreadBrowserState {
-    const state = this.states.get(input.threadId);
+  prepareOwnerAutomationNavigation(
+    input: BrowserAutomationPrepareNavigationInput,
+  ): OwnerWorkspaceState {
+    const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
-    this.claimAutomationTab(input.threadId, tab);
+    this.claimOwnerAutomationTab(input.owner, tab);
     const nextUrl = normalizeUrlInput(input.url);
     tab.url = nextUrl;
     tab.title = defaultTitleForUrl(nextUrl);
@@ -1265,9 +1654,9 @@ export class DesktopBrowserManager {
     tab.lastError = null;
     state.activeTabId = tab.id;
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.markOwnerStateChanged(input.owner);
+    this.emitOwnerState(input.owner);
+    return state;
   }
 
   /**
@@ -1275,17 +1664,19 @@ export class DesktopBrowserManager {
    * whether it is a native agent view or a legacy renderer guest. Annotation
    * callers rely on this method never constructing or revealing a runtime.
    */
-  getVisibleAutomationRuntime(input: BrowserTabInput): BrowserAutomationVisibleRuntime {
-    const state = this.states.get(input.threadId);
+  getVisibleOwnerAutomationRuntime(
+    input: BrowserOwnerTabInput,
+  ): BrowserAutomationVisibleRuntime {
+    const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
     if (state.activeTabId !== tab.id) {
-      throw new Error("The requested browser tab is not the visible tab for this thread.");
+      throw new Error("The requested browser tab is not the visible tab for this workspace.");
     }
 
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, tab.id));
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(input.owner, tab.id));
     if (!runtime || runtime.webContents.isDestroyed()) {
       throw new Error("The visible browser page is not ready yet.");
     }
@@ -1293,37 +1684,39 @@ export class DesktopBrowserManager {
       if (
         !runtime.view ||
         !this.window ||
-        this.activeThreadId !== input.threadId ||
+        !this.isActiveOwner(input.owner) ||
         this.attachedRuntimeKey !== runtime.key ||
-        this.getVisibleBoundsForThread(input.threadId) === null
+        this.getVisibleBoundsForOwner(input.owner) === null
       ) {
         throw new Error("The requested native browser page is not currently visible.");
       }
       return {
-        threadId: input.threadId,
+        owner: input.owner,
+        ...runtimeOwnerProvenance(input.owner),
         tabId: tab.id,
         webContents: runtime.webContents,
-        expectAgentInput: (signal) => this.expectAutomationInput(input.threadId, tab.id, signal),
+        expectAgentInput: (signal) => this.expectOwnerAutomationInput(input.owner, tab.id, signal),
       };
     }
     // A renderer guest can remain alive briefly while its panel is hidden or a
-    // different thread is becoming active. It is not the user-visible browser
+    // different workspace is becoming active. It is not the user-visible browser
     // during that interval, so routing CDP to it would create exactly the split
     // brain this boundary exists to prevent.
     if (
       this.window &&
-      (this.activeThreadId !== input.threadId ||
+      (!this.isActiveOwner(input.owner) ||
         this.attachedRuntimeKey !== runtime.key ||
-        this.getVisibleBoundsForThread(input.threadId) === null ||
+        this.getVisibleBoundsForOwner(input.owner) === null ||
         runtime.webContents.hostWebContents?.id !== this.window.webContents.id)
     ) {
       throw new Error("The requested browser webview is not currently visible.");
     }
     return {
-      threadId: input.threadId,
+      owner: input.owner,
+      ...runtimeOwnerProvenance(input.owner),
       tabId: tab.id,
       webContents: runtime.webContents,
-      expectAgentInput: (signal) => this.expectAutomationInput(input.threadId, tab.id, signal),
+      expectAgentInput: (signal) => this.expectOwnerAutomationInput(input.owner, tab.id, signal),
     };
   }
 
@@ -1332,26 +1725,26 @@ export class DesktopBrowserManager {
    * Agent tabs are native WebContentsViews: hiding a view changes only its
    * bounds, never the page process, DOM, history, or in-flight navigation.
    */
-  async getAutomationRuntime(
-    input: BrowserTabInput,
+  async getOwnerAutomationRuntime(
+    input: BrowserOwnerTabInput,
     options: { readonly restore?: boolean } = {},
   ): Promise<BrowserAutomationVisibleRuntime> {
-    const state = this.states.get(input.threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
     if (state.activeTabId !== tab.id) {
-      throw new Error("The requested browser tab is not the active tab for this thread.");
+      throw new Error("The requested browser tab is not the active tab for this workspace.");
     }
 
-    const didChange = this.claimAutomationTab(input.threadId, tab);
-    const runtime = this.ensureLiveRuntime(input.threadId, tab.id);
+    const didChange = this.claimOwnerAutomationTab(input.owner, tab);
+    const runtime = this.ensureOwnerLiveRuntime(input.owner, tab.id);
     this.noteAutomationRuntimeUse(runtime.key);
     const expectedUrl = normalizeUrlInput(tab.lastCommittedUrl ?? tab.url);
     const currentUrl = this.sessionPolicy.resolveDisplayUrl(runtime.webContents.getURL());
     if ((options.restore ?? true) && (currentUrl.length === 0 || currentUrl !== expectedUrl)) {
-      await this.loadTab(input.threadId, tab.id, { force: true, runtime });
+      await this.loadOwnerTab(input.owner, tab.id, { force: true, runtime });
     } else if (!(options.restore ?? true) && currentUrl.length === 0) {
       // A fresh WebContentsView has no main frame until its first load. Bootstrap
       // an inert document so the host's subsequent CDP Page.navigate can observe
@@ -1362,30 +1755,31 @@ export class DesktopBrowserManager {
       tab.lastCommittedUrl = null;
       tab.lastError = null;
     } else {
-      this.queueRuntimeStateSync(input.threadId, tab.id);
+      this.queueOwnerRuntimeStateSync(input.owner, tab.id);
     }
     if (didChange) {
-      this.markThreadStateChanged(input.threadId);
-      this.emitState(input.threadId);
+      this.markOwnerStateChanged(input.owner);
+      this.emitOwnerState(input.owner);
     }
     return {
-      threadId: input.threadId,
+      owner: input.owner,
+      ...runtimeOwnerProvenance(input.owner),
       tabId: tab.id,
       webContents: runtime.webContents,
-      expectAgentInput: (signal) => this.expectAutomationInput(input.threadId, tab.id, signal),
+      expectAgentInput: (signal) => this.expectOwnerAutomationInput(input.owner, tab.id, signal),
     };
   }
 
   /** Closes a tab without selecting or constructing a native fallback. */
-  closeAutomationTab(input: BrowserTabInput): ThreadBrowserState {
-    const state = this.states.get(input.threadId);
+  closeOwnerAutomationTab(input: BrowserOwnerTabInput): OwnerWorkspaceState {
+    const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
 
-    this.closePopupWindowsForTab(input.threadId, input.tabId);
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, input.tabId));
+    this.closePopupWindowsForTab(input.owner, input.tabId);
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(input.owner, input.tabId));
     const preservesRendererGuest = Boolean(
       runtime &&
       !runtime.ownsWebContents &&
@@ -1394,41 +1788,52 @@ export class DesktopBrowserManager {
     const defersFinalRendererRemoval = Boolean(
       runtime && !runtime.ownsWebContents && !preservesRendererGuest,
     );
-    this.destroyRuntime(input.threadId, input.tabId, {
+    this.destroyOwnerRuntime(input.owner, input.tabId, {
       preserveRendererDebugger: preservesRendererGuest,
     });
-    this.annotations.clearProjection(input.threadId, input.tabId);
-    this.rendererOnlyRuntimeKeys.delete(buildRuntimeKey(input.threadId, input.tabId));
-    this.automationRuntimeKeys.delete(buildRuntimeKey(input.threadId, input.tabId));
+    this.clearOwnerAnnotationProjection(input.owner, input.tabId);
+    this.rendererOnlyRuntimeKeys.delete(browserOwnerRuntimeKey(input.owner, input.tabId));
+    this.automationRuntimeKeys.delete(browserOwnerRuntimeKey(input.owner, input.tabId));
     state.tabs = state.tabs.filter((candidate) => candidate.id !== input.tabId);
     if (state.activeTabId === input.tabId) {
       state.activeTabId = state.tabs.at(-1)?.id ?? null;
     }
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
+    this.markOwnerStateChanged(input.owner);
     if (defersFinalRendererRemoval) {
       // Removing a live <webview> from an IPC state callback while the close
       // request is still unwinding can deadlock Electron. Publish on the next
       // frame after the debugger has detached and the tool response can drain.
       this.scheduleDeferredStatePublication(
-        buildRuntimeKey(input.threadId, input.tabId),
-        input.threadId,
+        browserOwnerRuntimeKey(input.owner, input.tabId),
+        input.owner,
         false,
         runtime?.webContents,
       );
     } else {
-      const bounds = this.getVisibleBoundsForThread(input.threadId);
-      if (this.activeThreadId === input.threadId && state.activeTabId && bounds) {
-        this.attachActiveTab(input.threadId, bounds);
+      const bounds = this.getVisibleBoundsForOwner(input.owner);
+      if (this.isActiveOwner(input.owner) && state.activeTabId && bounds) {
+        this.attachActiveTab(input.owner, bounds);
       }
-      this.emitState(input.threadId);
+      this.emitOwnerState(input.owner);
     }
-    return this.snapshotThreadState(input.threadId, state);
+    return state;
   }
 
   open(input: BrowserOpenInput): ThreadBrowserState {
-    const previousState = this.states.get(input.threadId);
-    const nextInitialUrl = input.initialUrl ? normalizeUrlInput(input.initialUrl) : null;
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.openOwner(threadOwner(input.threadId), input.initialUrl),
+    );
+  }
+
+  /** Owner-generic open core (Decision 0002). */
+  private openOwner(
+    owner: BrowserWorkspaceOwner,
+    initialUrl?: string | undefined,
+  ): OwnerWorkspaceState {
+    const previousState = this.states.get(browserOwnerWorkspaceKey(owner));
+    const nextInitialUrl = initialUrl ? normalizeUrlInput(initialUrl) : null;
     const previousActiveTab = previousState ? this.getActiveTab(previousState) : null;
     const willNavigateExistingTab =
       nextInitialUrl !== null &&
@@ -1439,145 +1844,458 @@ export class DesktopBrowserManager {
     // opens that change visibility still advance the epoch; URL changes flow
     // through navigate(), which advances it exactly once.
     if (previousState?.open !== true && !willNavigateExistingTab) {
-      this.markHumanControl(input.threadId);
+      this.markOwnerHumanControl(owner);
     }
-    const state = this.ensureWorkspace(input.threadId, input.initialUrl);
+    const state = this.ensureOwnerWorkspace(owner, initialUrl);
     const didChange = !state.open;
     state.open = true;
     const activeTab = nextInitialUrl ? this.getActiveTab(state) : null;
     if (nextInitialUrl && activeTab && activeTab.url !== nextInitialUrl) {
-      return this.navigate({
-        threadId: input.threadId,
-        tabId: activeTab.id,
-        url: nextInitialUrl,
-      });
+      this.navigateOwner(owner, activeTab.id, nextInitialUrl);
+      return this.states.get(browserOwnerWorkspaceKey(owner)) ?? state;
     }
 
     const nextDidChange = syncThreadLastError(state) || didChange;
 
     if (
       this.activeBounds &&
-      this.activeBoundsThreadId === input.threadId &&
-      (this.activeThreadId === null || this.activeThreadId === input.threadId)
+      this.activeBoundsOwner !== null &&
+      browserOwnersEqual(this.activeBoundsOwner, owner) &&
+      (this.activeOwner === null || this.isActiveOwner(owner))
     ) {
       const visibleTab = this.getActiveTab(state);
       if (!isBlankBrowserTabUrl(visibleTab)) {
-        this.activateThread(input.threadId, this.activeBounds);
+        this.activateOwner(owner, this.activeBounds);
       }
     }
 
     if (nextDidChange) {
-      this.markThreadStateChanged(input.threadId);
+      this.markOwnerStateChanged(owner);
     }
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.emitOwnerState(owner);
+    return state;
   }
 
   close(input: BrowserThreadInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    this.clearSuspendTimer(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.closeOwner(threadOwner(input.threadId)),
+    );
+  }
 
-    if (this.activeThreadId === input.threadId) {
+  /** Owner-generic close core (explicit user close only — never navigation). */
+  private closeOwner(owner: BrowserWorkspaceOwner): OwnerWorkspaceState {
+    this.markOwnerHumanControl(owner);
+    this.clearSuspendTimer(owner);
+
+    if (this.isActiveOwner(owner)) {
       this.detachAttachedRuntime();
-      this.activeThreadId = null;
+      this.activeOwner = null;
     }
-    this.clearActiveBoundsForThread(input.threadId);
-    this.closePopupWindowsForThread(input.threadId);
+    this.clearActiveBoundsForOwner(owner);
+    this.closePopupWindowsForOwner(owner);
 
-    const existingState = this.states.get(input.threadId);
-    this.destroyThreadRuntimes(input.threadId);
+    const existingState = this.states.get(browserOwnerWorkspaceKey(owner));
+    this.destroyOwnerRuntimes(owner);
     for (const tab of existingState?.tabs ?? []) {
-      this.annotations.clearProjection(input.threadId, tab.id);
-      this.rendererOnlyRuntimeKeys.delete(buildRuntimeKey(input.threadId, tab.id));
-      this.automationRuntimeKeys.delete(buildRuntimeKey(input.threadId, tab.id));
+      this.clearOwnerAnnotationProjection(owner, tab.id);
+      this.rendererOnlyRuntimeKeys.delete(browserOwnerRuntimeKey(owner, tab.id));
+      this.automationRuntimeKeys.delete(browserOwnerRuntimeKey(owner, tab.id));
     }
 
-    const state = this.getOrCreateState(input.threadId);
+    const state = this.getOrCreateOwnerState(owner);
     state.open = false;
     state.activeTabId = null;
     state.tabs = [];
     state.lastError = null;
-    this.markThreadStateChanged(input.threadId);
-    this.lastEmittedVersionByThreadId.delete(input.threadId);
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.markOwnerStateChanged(owner);
+    this.lastEmittedVersionByOwnerKey.delete(browserOwnerWorkspaceKey(owner));
+    this.emitOwnerState(owner);
+    return state;
   }
 
   hide(input: BrowserThreadInput): void {
-    const state = this.states.get(input.threadId);
+    this.hideOwner(threadOwner(input.threadId));
+  }
+
+  // ── Project-owned browser workspace API (Decision 0002, WP7) ────────
+  //
+  // Mirrors BrowserProjectControlMethods from @synara/contracts. Every method
+  // keys the workspace by the real ProjectId; the same Project reached from
+  // different Main conversations (provenance) resolves one workspace.
+
+  openProject(input: BrowserProjectOpenInput): ProjectBrowserState {
+    const owner = projectOwner(input.projectId);
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.openOwner(
+        owner,
+        input.initialUrl === undefined ? undefined : input.initialUrl,
+      ),
+    );
+  }
+
+  closeProject(input: BrowserProjectInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.closeOwner(projectOwner(input.projectId)),
+    );
+  }
+
+  hideProject(input: BrowserProjectInput): void {
+    this.hideOwner(projectOwner(input.projectId));
+  }
+
+  getProjectState(input: BrowserProjectInput): ProjectBrowserState {
+    return this.projectStateProjection(projectOwner(input.projectId));
+  }
+
+  setProjectPanelBounds(input: BrowserProjectSetPanelBoundsInput): void {
+    this.setOwnerPanelBounds(projectOwner(input.projectId), input.bounds, input.surface);
+  }
+
+  navigateProject(input: BrowserProjectNavigateInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.navigateOwner(projectOwner(input.projectId), input.tabId, input.url),
+    );
+  }
+
+  reloadProject(input: BrowserProjectTabInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.reloadOwnerTab({ owner: projectOwner(input.projectId), tabId: input.tabId }),
+    );
+  }
+
+  goBackProject(input: BrowserProjectTabInput): ProjectBrowserState {
+    const owner = projectOwner(input.projectId);
+    this.markOwnerHumanControl(owner);
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, input.tabId));
+    if (runtime && canWebContentsGoBack(runtime.webContents)) {
+      runtime.webContents.goBack();
+    }
+    return this.getProjectState({ projectId: input.projectId });
+  }
+
+  goForwardProject(input: BrowserProjectTabInput): ProjectBrowserState {
+    const owner = projectOwner(input.projectId);
+    this.markOwnerHumanControl(owner);
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, input.tabId));
+    if (runtime && canWebContentsGoForward(runtime.webContents)) {
+      runtime.webContents.goForward();
+    }
+    return this.getProjectState({ projectId: input.projectId });
+  }
+
+  newProjectTab(input: BrowserProjectNewTabInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.newOwnerTab(projectOwner(input.projectId), {
+        ...(input.url === undefined ? {} : { url: input.url }),
+        ...(input.activate === undefined ? {} : { activate: input.activate }),
+      }),
+    );
+  }
+
+  closeProjectTab(input: BrowserProjectTabInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.closeOwnerTab({ owner: projectOwner(input.projectId), tabId: input.tabId }),
+    );
+  }
+
+  selectProjectTab(input: BrowserProjectTabInput): ProjectBrowserState {
+    return toProjectBrowserState(
+      { kind: "project", projectId: input.projectId },
+      this.selectOwnerTab({ owner: projectOwner(input.projectId), tabId: input.tabId }),
+    );
+  }
+
+  openProjectDevTools(input: BrowserProjectTabInput): void {
+    this.openOwnerDevTools({ owner: projectOwner(input.projectId), tabId: input.tabId });
+  }
+
+  captureProjectScreenshot(input: BrowserProjectTabInput): Promise<BrowserCaptureScreenshotResult> {
+    return this.captureOwnerScreenshot({
+      owner: projectOwner(input.projectId),
+      tabId: input.tabId,
+    });
+  }
+
+  copyProjectScreenshotToClipboard(input: BrowserProjectTabInput): Promise<void> {
+    return this.copyOwnerScreenshotToClipboard({
+      owner: projectOwner(input.projectId),
+      tabId: input.tabId,
+    });
+  }
+
+  copyProjectLink(input: BrowserProjectTabInput): void {
+    this.copyOwnerLink({ owner: projectOwner(input.projectId), tabId: input.tabId });
+  }
+
+  // ── Project workspace activation application (Decision 0004) ────────
+  //
+  // Applies the Desktop-owned slices of one freshly read, freshly validated
+  // publication: browser tabs/active tab/open state plus the durable
+  // annotation marker projection. The ENTIRE bundle is validated before any
+  // mutation, so a rejected bundle leaves zero observable manager state, and
+  // success is remembered per manager lifetime — a later activation request
+  // for the same Project never reapplies over newer live mutations.
+
+  /** Has this Project's workspace been hydrated already in this lifetime? */
+  isProjectWorkspaceActivated(projectId: ProjectId): boolean {
+    return this.activatedProjectWorkspaceKeys.has(browserOwnerWorkspaceKey(projectOwner(projectId)));
+  }
+
+  applyProjectWorkspaceActivation(input: {
+    readonly projectId: ProjectId;
+    readonly browser: {
+      readonly open: boolean;
+      readonly activeTabId: string | null;
+      readonly tabs: ReadonlyArray<{
+        readonly id: string;
+        readonly url: string;
+        readonly title: string;
+      }>;
+    };
+    readonly annotations: ReadonlyArray<{
+      readonly id: string;
+      readonly tabId: string;
+      readonly ordinal: number;
+      readonly documentKey: string;
+    }>;
+  }): void {
+    const owner = projectOwner(input.projectId);
+    const key = browserOwnerWorkspaceKey(owner);
+    if (this.activatedProjectWorkspaceKeys.has(key)) {
+      // Already applied in this manager lifetime: never reapplied over newer
+      // live mutations (Decision 0004 item 4).
+      return;
+    }
+
+    // ── Validate the entire bundle before any mutation. ──
+    const tabIds = new Set<string>();
+    for (const tab of input.browser.tabs) {
+      if (
+        typeof tab.id !== "string" ||
+        tab.id.length === 0 ||
+        typeof tab.url !== "string" ||
+        typeof tab.title !== "string"
+      ) {
+        throw new Error("Project workspace browser publication has a malformed tab.");
+      }
+      if (tabIds.has(tab.id)) {
+        throw new Error("Project workspace browser publication has duplicate tab ids.");
+      }
+      tabIds.add(tab.id);
+    }
+    if (
+      input.browser.activeTabId !== null &&
+      !tabIds.has(input.browser.activeTabId)
+    ) {
+      throw new Error(
+        "Project workspace browser publication names an active tab that does not exist.",
+      );
+    }
+    const annotationIds = new Set<string>();
+    for (const marker of input.annotations) {
+      if (
+        typeof marker.id !== "string" ||
+        marker.id.length === 0 ||
+        !Number.isSafeInteger(marker.ordinal) ||
+        marker.ordinal <= 0 ||
+        typeof marker.documentKey !== "string" ||
+        marker.documentKey.length === 0
+      ) {
+        throw new Error(
+          "Project workspace annotation publication has a malformed marker.",
+        );
+      }
+      // The annotation projection may reference only valid tabs.
+      if (!tabIds.has(marker.tabId)) {
+        throw new Error(
+          "Project workspace annotation publication references a tab the browser slice does not restore.",
+        );
+      }
+      if (annotationIds.has(marker.id)) {
+        throw new Error(
+          "Project workspace annotation publication has duplicate marker ids.",
+        );
+      }
+      annotationIds.add(marker.id);
+    }
+
+    // ── Apply atomically: metadata only, no fabricated native runtime. ──
+    // Restored tabs are suspended renderer-surface metadata; normal runtime
+    // restoration owns the transition to a live native surface.
+    const state: OwnerWorkspaceState = {
+      version: (this.ownerVersionByKey.get(key) ?? 0) + 1,
+      open: input.browser.open,
+      activeTabId: input.browser.activeTabId,
+      tabs: input.browser.tabs.map((tab) => ({
+        ...createBrowserTab(tab.url),
+        id: tab.id,
+        title: tab.title,
+      })),
+      lastError: null,
+    };
+    this.states.set(key, state);
+    this.ownerVersionByKey.set(key, state.version);
+    this.snapshotCacheByOwnerKey.delete(key);
+    this.threadProjectionCacheByKey.delete(key);
+    this.projectProjectionCacheByKey.delete(key);
+    this.lastEmittedVersionByOwnerKey.delete(key);
+    this.annotations.seedProjectWorkspaceMarkers({
+      projectId: input.projectId,
+      markers: [...input.annotations],
+    });
+    // The hydrated workspace counts as activated only once everything —
+    // including the annotation seed — has been applied.
+    this.activatedProjectWorkspaceKeys.add(key);
+    this.emitOwnerState(owner);
+  }
+
+  subscribeProjectState(listener: BrowserProjectStateListener): () => void {
+    this.projectListeners.add(listener);
+    return () => {
+      this.projectListeners.delete(listener);
+    };
+  }
+  subscribeProjectCopyLink(listener: (event: ProjectBrowserCopyLinkEvent) => void): () => void {
+    this.projectCopyLinkListeners.add(listener);
+    return () => {
+      this.projectCopyLinkListeners.delete(listener);
+    };
+  }
+
+  /**
+   * A committed `project.deleted` is terminal for that Project's browser
+   * workspace (WP7 deletion settlement). Tears down the Project's runtimes and
+   * state; every OTHER Project's and Thread's workspace is untouched. An
+   * unknown Project is a no-op. Navigation and visibility changes never reach
+   * this path.
+   */
+  handleProjectRemoved(projectId: ProjectId): void {
+    const owner = projectOwner(projectId);
+    const key = browserOwnerWorkspaceKey(owner);
+    if (!this.states.has(key)) {
+      return;
+    }
+    if (this.isActiveOwner(owner)) {
+      this.detachAttachedRuntime();
+      this.activeOwner = null;
+    }
+    this.clearActiveBoundsForOwner(owner);
+    this.clearSuspendTimer(owner);
+    this.closePopupWindowsForOwner(owner);
+    this.destroyOwnerRuntimes(owner);
+    const existingState = this.states.get(key);
+    for (const tab of existingState?.tabs ?? []) {
+      this.clearOwnerAnnotationProjection(owner, tab.id);
+    }
+    this.states.delete(key);
+    this.ownerVersionByKey.delete(key);
+    this.snapshotCacheByOwnerKey.delete(key);
+    this.threadProjectionCacheByKey.delete(key);
+    this.projectProjectionCacheByKey.delete(key);
+    this.lastEmittedVersionByOwnerKey.delete(key);
+    this.humanControlEpochByOwnerKey.delete(key);
+    this.humanControlListenersByOwnerKey.delete(key);
+    // Deletion clears ONLY this Project's manager state and activation
+    // bookkeeping (Decision 0004 item 8): the hydrated-workspace memory and
+    // the seeded durable annotation markers go with it; every other Project —
+    // and the activation boundary itself — is notified, not torn down.
+    this.activatedProjectWorkspaceKeys.delete(key);
+    this.annotations.clearProjectWorkspaceSeededMarkers(projectId);
+    this.options.onProjectWorkspaceDeactivated?.(projectId);
+  }
+
+  /** Owner-generic hide core. Visibility change is never ownership termination. */
+  private hideOwner(owner: BrowserWorkspaceOwner): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
     const activeTab = state ? this.getActiveTab(state) : null;
     const keepsAgentRuntimeAlive = Boolean(
-      activeTab && this.automationRuntimeKeys.has(buildRuntimeKey(input.threadId, activeTab.id)),
+      activeTab && this.automationRuntimeKeys.has(browserOwnerRuntimeKey(owner, activeTab.id)),
     );
     if (!keepsAgentRuntimeAlive) {
-      this.markHumanControl(input.threadId);
+      this.markOwnerHumanControl(owner);
     }
-    if (this.activeThreadId === input.threadId) {
+    if (this.isActiveOwner(owner)) {
       this.detachAttachedRuntime();
-      this.activeThreadId = null;
+      this.activeOwner = null;
     }
 
     if (!state?.open) {
       return;
     }
 
-    this.scheduleThreadSuspend(input.threadId);
+    this.scheduleOwnerSuspend(owner);
     this.enforceBackgroundAutomationRuntimeBudget();
   }
 
   getState(input: BrowserThreadInput): ThreadBrowserState {
-    return this.snapshotThreadState(input.threadId);
+    return this.threadStateProjection(threadOwner(input.threadId));
   }
 
   setPanelBounds(input: BrowserSetPanelBoundsInput): void {
+    this.setOwnerPanelBounds(threadOwner(input.threadId), input.bounds, input.surface);
+  }
+
+  /** Owner-generic bounds core. Navigation/visibility never terminates a workspace. */
+  private setOwnerPanelBounds(
+    owner: BrowserWorkspaceOwner,
+    bounds: BrowserPanelBounds | null,
+    surface?: "native" | "renderer",
+  ): void {
     this.perfCounters.setPanelBoundsCalls += 1;
-    const state = this.getOrCreateState(input.threadId);
-    const nextBounds = normalizeBounds(input.bounds);
+    const state = this.getOrCreateOwnerState(owner);
+    const nextBounds = normalizeBounds(bounds);
     const nextBoundsSignature = browserBoundsSignature(nextBounds);
     const activeTabId = this.getActiveTab(state)?.id ?? null;
-    const activeRuntimeKey = activeTabId ? buildRuntimeKey(input.threadId, activeTabId) : null;
+    const activeRuntimeKey = activeTabId ? browserOwnerRuntimeKey(owner, activeTabId) : null;
     const activeRuntime = activeRuntimeKey ? this.runtimes.get(activeRuntimeKey) : null;
     const requiresRenderer = activeRuntimeKey
       ? this.rendererOnlyRuntimeKeys.has(activeRuntimeKey)
       : false;
-    this.setActiveBounds(input.threadId, nextBounds);
+    this.setActiveBounds(owner, nextBounds);
 
     if (!state.open || nextBounds === null) {
-      if (this.activeThreadId === input.threadId) {
+      if (this.isActiveOwner(owner)) {
         this.detachAttachedRuntime();
-        this.activeThreadId = null;
-        this.scheduleThreadSuspend(input.threadId);
+        this.activeOwner = null;
+        this.scheduleOwnerSuspend(owner);
       }
       return;
     }
 
     if (
-      input.surface === "native" &&
+      surface === "native" &&
       !requiresRenderer &&
       activeTabId &&
       activeRuntime &&
       !activeRuntime.ownsWebContents
     ) {
       // Sheet mode renders more reliably with the native WebContentsView than a translated <webview>.
-      this.destroyRuntime(input.threadId, activeTabId);
+      this.destroyOwnerRuntime(owner, activeTabId);
       const activeTab = this.getTab(state, activeTabId);
       if (activeTab) {
         suspendTabState(activeTab);
-        this.markThreadStateChanged(input.threadId);
+        this.markOwnerStateChanged(owner);
       }
       this.attachedRuntimeKey = null;
       this.attachedBoundsSignature = null;
     }
 
-    if ((input.surface === "renderer" || requiresRenderer) && activeTabId && !activeRuntime) {
-      this.activateThreadForPendingRenderer(input.threadId, nextBounds);
+    if ((surface === "renderer" || requiresRenderer) && activeTabId && !activeRuntime) {
+      this.activateOwnerForPendingRenderer(owner, nextBounds);
       return;
     }
 
     // Bounds sync fires often during panel motion. If the visible runtime and
     // applied viewport are already current, avoid waking the browser stack again.
     if (
-      this.activeThreadId === input.threadId &&
+      this.isActiveOwner(owner) &&
       this.attachedRuntimeKey === activeRuntimeKey &&
       this.attachedBoundsSignature === nextBoundsSignature
     ) {
@@ -1585,9 +2303,9 @@ export class DesktopBrowserManager {
       return;
     }
 
-    this.updatePopupWindowsForThread(input.threadId);
+    this.updatePopupWindowsForOwner(owner);
 
-    if (this.activeThreadId === input.threadId) {
+    if (this.isActiveOwner(owner)) {
       if (activeRuntimeKey && this.attachedRuntimeKey === activeRuntimeKey) {
         const runtime = this.runtimes.get(activeRuntimeKey);
         if (runtime) {
@@ -1596,20 +2314,34 @@ export class DesktopBrowserManager {
           return;
         }
       }
-      this.attachActiveTab(input.threadId, nextBounds);
+      this.attachActiveTab(owner, nextBounds);
       return;
     }
 
-    this.activateThread(input.threadId, nextBounds);
+    this.activateOwner(owner, nextBounds);
   }
 
   // Adopts the renderer-owned <webview> so the visible page and browser host tools
   // share one WebContents instead of racing a hidden native WebContentsView.
   attachWebview(input: BrowserAttachWebviewInput, hostWebContentsId: number): ThreadBrowserState {
-    const state = this.states.get(input.threadId);
-    const tab = state ? this.getTab(state, input.tabId) : null;
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.attachOwnerWebview(owner, input.tabId, input.webContentsId, hostWebContentsId),
+    );
+  }
+
+  /** Owner-generic renderer-guest adoption core. */
+  private attachOwnerWebview(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+    hostWebContentsId: number,
+  ): OwnerWorkspaceState {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
+    const tab = state ? this.getTab(state, tabId) : null;
     if (!state?.open || !tab) {
-      throw new Error("The requested browser tab is not available in this thread.");
+      throw new Error("The requested browser tab is not available in this workspace.");
     }
     if (state.activeTabId !== tab.id) {
       throw new Error("A visible browser webview can only attach to the active tab.");
@@ -1618,9 +2350,9 @@ export class DesktopBrowserManager {
       // A late renderer attach can race the state update that promotes a tab to
       // background automation. Keep the native runtime canonical; the panel
       // will remove this unused guest when it observes the new surface.
-      return this.snapshotThreadState(input.threadId, state);
+      return state;
     }
-    const webContents = electronWebContents.fromId(input.webContentsId);
+    const webContents = electronWebContents.fromId(webContentsId);
     if (!webContents || webContents.isDestroyed()) {
       throw new Error("The visible browser webview is not available.");
     }
@@ -1633,10 +2365,10 @@ export class DesktopBrowserManager {
       throw new Error("The browser webview does not belong to this Synara window and partition.");
     }
 
-    const key = buildRuntimeKey(input.threadId, tab.id);
+    const key = browserOwnerRuntimeKey(owner, tab.id);
     const existingRendererRuntime = this.findRendererRuntimeByWebContentsId(webContents.id);
     if (existingRendererRuntime && existingRendererRuntime.key !== key) {
-      this.destroyRuntime(existingRendererRuntime.threadId, existingRendererRuntime.tabId, {
+      this.destroyOwnerRuntime(existingRendererRuntime.owner, existingRendererRuntime.tabId, {
         preserveRendererDebugger: true,
         annotationReason: "replaced",
       });
@@ -1652,14 +2384,14 @@ export class DesktopBrowserManager {
           // destroyed it during a shell reload), after which retries may bind.
           throw new Error("This browser tab is already attached to another visible webview.");
         }
-        this.destroyRuntime(input.threadId, tab.id, {
+        this.destroyOwnerRuntime(owner, tab.id, {
           preserveAutomationDownloadTracking: true,
           annotationReason: "replaced",
         });
       }
       const runtime: LiveTabRuntime = {
         key,
-        threadId: input.threadId,
+        owner,
         tabId: tab.id,
         webContents,
         view: null,
@@ -1671,7 +2403,7 @@ export class DesktopBrowserManager {
     }
     this.rendererOnlyRuntimeKeys.add(key);
 
-    const bounds = this.getVisibleBoundsForThread(input.threadId);
+    const bounds = this.getVisibleBoundsForOwner(owner);
     const runtime = this.runtimes.get(key);
     if (runtime && bounds) {
       this.attachRuntime(runtime, bounds);
@@ -1682,11 +2414,11 @@ export class DesktopBrowserManager {
       isLocalFileUrl(expectedUrl) &&
       this.sessionPolicy.resolveDisplayUrl(webContents.getURL()) !== expectedUrl;
     if (requiresLocalPreviewBootstrap) {
-      void this.loadTab(input.threadId, tab.id, {
+      void this.loadOwnerTab(owner, tab.id, {
         force: true,
         ...(runtime ? { runtime } : {}),
       });
-      return this.snapshotThreadState(input.threadId, state);
+      return state;
     }
 
     const didChange = tab.status !== LIVE_TAB_STATUS || tab.lastError !== null;
@@ -1694,92 +2426,117 @@ export class DesktopBrowserManager {
     tab.lastError = null;
     const nextDidChange = syncThreadLastError(state) || didChange;
     if (nextDidChange) {
-      this.markThreadStateChanged(input.threadId);
+      this.markOwnerStateChanged(owner);
     }
-    this.queueRuntimeStateSync(input.threadId, tab.id);
+    this.queueOwnerRuntimeStateSync(owner, tab.id);
     if (nextDidChange) {
-      this.emitState(input.threadId);
+      this.emitOwnerState(owner);
     }
-    return this.snapshotThreadState(input.threadId, state);
+    return state;
   }
 
   // Drops main-process ownership of a renderer-owned <webview> that React removed.
   // The webContents id guard keeps stale cleanup calls from tearing down a newly attached view.
   detachWebview(input: BrowserDetachWebviewInput): void {
-    const state = this.states.get(input.threadId);
-    const tab = state ? this.getTab(state, input.tabId) : null;
+    this.detachOwnerWebview(threadOwner(input.threadId), input.tabId, input.webContentsId);
+  }
+
+  private detachOwnerWebview(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
+    const tab = state ? this.getTab(state, tabId) : null;
     if (!state || !tab) {
       return;
     }
 
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, input.tabId));
-    if (!runtime || runtime.ownsWebContents || runtime.webContents.id !== input.webContentsId) {
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, tabId));
+    if (!runtime || runtime.ownsWebContents || runtime.webContents.id !== webContentsId) {
       return;
     }
 
-    this.destroyRuntime(input.threadId, input.tabId);
+    this.destroyOwnerRuntime(owner, tabId);
     const didChange = suspendTabState(tab) || syncThreadLastError(state);
     if (didChange) {
-      this.markThreadStateChanged(input.threadId);
-      this.emitState(input.threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
   }
 
   navigate(input: BrowserNavigateInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
-    const tab = this.resolveTab(state, input.tabId);
-    const nextUrl = normalizeUrlInput(input.url);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.navigateOwner(threadOwner(input.threadId), input.tabId, input.url),
+    );
+  }
+
+  /** Owner-generic navigate core. */
+  private navigateOwner(owner: BrowserWorkspaceOwner, tabId: string | undefined, url: string): OwnerWorkspaceState {
+    this.markOwnerHumanControl(owner);
+    const state = this.ensureOwnerWorkspace(owner);
+    const tab = this.resolveTab(state, tabId);
+    const nextUrl = normalizeUrlInput(url);
     tab.url = nextUrl;
     tab.title = defaultTitleForUrl(nextUrl);
     tab.lastCommittedUrl = null;
     tab.lastError = null;
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
+    this.markOwnerStateChanged(owner);
 
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, tab.id));
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, tab.id));
     if (runtime) {
-      const bounds = this.getVisibleBoundsForThread(input.threadId);
+      const bounds = this.getVisibleBoundsForOwner(owner);
       if (state.activeTabId === tab.id && bounds) {
         this.attachRuntime(runtime, bounds);
       }
-      void this.loadTab(input.threadId, tab.id, { force: true, runtime });
+      void this.loadOwnerTab(owner, tab.id, { force: true, runtime });
     } else if (
-      this.activeThreadId === input.threadId &&
-      !this.rendererOnlyRuntimeKeys.has(buildRuntimeKey(input.threadId, tab.id))
+      this.isActiveOwner(owner) &&
+      !this.rendererOnlyRuntimeKeys.has(browserOwnerRuntimeKey(owner, tab.id))
     ) {
       // Load the target tab directly so we don't clobber its pending URL with a
-      // thread-wide runtime sync from the old live page state.
-      const nextRuntime = this.ensureLiveRuntime(input.threadId, tab.id);
-      this.clearSuspendTimer(input.threadId);
-      const bounds = this.getVisibleBoundsForThread(input.threadId);
+      // workspace-wide runtime sync from the old live page state.
+      const nextRuntime = this.ensureOwnerLiveRuntime(owner, tab.id);
+      this.clearSuspendTimer(owner);
+      const bounds = this.getVisibleBoundsForOwner(owner);
       if (state.activeTabId === tab.id && bounds) {
         this.attachRuntime(nextRuntime, bounds);
       }
-      void this.loadTab(input.threadId, tab.id, { force: true, runtime: nextRuntime });
+      void this.loadOwnerTab(owner, tab.id, { force: true, runtime: nextRuntime });
     }
 
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.emitOwnerState(owner);
+    return state;
   }
 
   reload(input: BrowserTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
+    const owner = threadOwner(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.reloadOwnerTab({ owner, tabId: input.tabId }),
+    );
+  }
+
+  private reloadOwnerTab(input: BrowserOwnerTabInput): OwnerWorkspaceState {
+    this.markOwnerHumanControl(input.owner);
+    const state = this.ensureOwnerWorkspace(input.owner);
     const tab = this.resolveTab(state, input.tabId);
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, tab.id));
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(input.owner, tab.id));
     if (runtime) {
       runtime.webContents.reload();
-    } else if (this.activeThreadId === input.threadId) {
-      this.resumeThread(input.threadId);
-      void this.loadTab(input.threadId, tab.id, { force: true });
+    } else if (this.isActiveOwner(input.owner)) {
+      this.resumeOwner(input.owner);
+      void this.loadOwnerTab(input.owner, tab.id, { force: true });
     }
-    return this.snapshotThreadState(input.threadId, state);
+    return state;
   }
 
   goBack(input: BrowserTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, input.tabId));
+    const owner = threadOwner(input.threadId);
+    this.markOwnerHumanControl(owner);
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, input.tabId));
     if (runtime && canWebContentsGoBack(runtime.webContents)) {
       runtime.webContents.goBack();
     }
@@ -1787,8 +2544,9 @@ export class DesktopBrowserManager {
   }
 
   goForward(input: BrowserTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const runtime = this.runtimes.get(buildRuntimeKey(input.threadId, input.tabId));
+    const owner = threadOwner(input.threadId);
+    this.markOwnerHumanControl(owner);
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, input.tabId));
     if (runtime && canWebContentsGoForward(runtime.webContents)) {
       runtime.webContents.goForward();
     }
@@ -1796,43 +2554,68 @@ export class DesktopBrowserManager {
   }
 
   newTab(input: BrowserNewTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.newOwnerTab(threadOwner(input.threadId), {
+        ...(input.url === undefined ? {} : { url: input.url }),
+        ...(input.activate === undefined ? {} : { activate: input.activate }),
+      }),
+    );
+  }
+
+  /** Owner-generic new-tab core. */
+  private newOwnerTab(
+    owner: BrowserWorkspaceOwner,
+    input: {
+      readonly url?: string | undefined;
+      readonly activate?: boolean | undefined;
+    },
+  ): OwnerWorkspaceState {
+    this.markOwnerHumanControl(owner);
+    const state = this.ensureOwnerWorkspace(owner);
     const tab = createBrowserTab(normalizeUrlInput(input.url));
     state.tabs = [...state.tabs, tab];
     if (input.activate !== false || !state.activeTabId) {
       state.activeTabId = tab.id;
     }
 
-    if (this.activeThreadId === input.threadId) {
-      this.resumeThread(input.threadId);
-      const bounds = this.getVisibleBoundsForThread(input.threadId);
+    if (this.isActiveOwner(owner)) {
+      this.resumeOwner(owner);
+      const bounds = this.getVisibleBoundsForOwner(owner);
       if (state.activeTabId === tab.id && bounds) {
-        this.attachActiveTab(input.threadId, bounds, { forceLoad: true });
+        this.attachActiveTab(owner, bounds, { forceLoad: true });
       }
     } else {
       tab.status = "suspended";
     }
 
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.markOwnerStateChanged(owner);
+    this.emitOwnerState(owner);
+    return state;
   }
 
   closeTab(input: BrowserTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.closeOwnerTab({ owner: threadOwner(input.threadId), tabId: input.tabId }),
+    );
+  }
+
+  /** Owner-generic close-tab core. */
+  private closeOwnerTab(input: BrowserOwnerTabInput): OwnerWorkspaceState {
+    this.markOwnerHumanControl(input.owner);
+    const state = this.ensureOwnerWorkspace(input.owner);
     const nextTabs = state.tabs.filter((tab) => tab.id !== input.tabId);
     if (nextTabs.length === state.tabs.length) {
-      return this.snapshotThreadState(input.threadId, state);
+      return state;
     }
 
-    this.closePopupWindowsForTab(input.threadId, input.tabId);
-    this.destroyRuntime(input.threadId, input.tabId);
-    this.annotations.clearProjection(input.threadId, input.tabId);
-    this.rendererOnlyRuntimeKeys.delete(buildRuntimeKey(input.threadId, input.tabId));
-    this.automationRuntimeKeys.delete(buildRuntimeKey(input.threadId, input.tabId));
+    this.closePopupWindowsForTab(input.owner, input.tabId);
+    this.destroyOwnerRuntime(input.owner, input.tabId);
+    this.clearOwnerAnnotationProjection(input.owner, input.tabId);
+    this.rendererOnlyRuntimeKeys.delete(browserOwnerRuntimeKey(input.owner, input.tabId));
+    this.automationRuntimeKeys.delete(browserOwnerRuntimeKey(input.owner, input.tabId));
     state.tabs = nextTabs;
 
     if (nextTabs.length === 0) {
@@ -1844,83 +2627,94 @@ export class DesktopBrowserManager {
       state.activeTabId = replacementTab.id;
       state.lastError = null;
 
-      this.markThreadStateChanged(input.threadId);
-      this.emitState(input.threadId);
-      return this.snapshotThreadState(input.threadId, state);
+      this.markOwnerStateChanged(input.owner);
+      this.emitOwnerState(input.owner);
+      return state;
     }
 
     if (!state.activeTabId || state.activeTabId === input.tabId) {
       state.activeTabId = nextTabs[Math.max(0, nextTabs.length - 1)]?.id ?? null;
     }
 
-    const bounds = this.getVisibleBoundsForThread(input.threadId);
-    if (this.activeThreadId === input.threadId && bounds) {
-      this.attachActiveTab(input.threadId, bounds);
+    const bounds = this.getVisibleBoundsForOwner(input.owner);
+    if (this.isActiveOwner(input.owner) && bounds) {
+      this.attachActiveTab(input.owner, bounds);
     }
 
     syncThreadLastError(state);
-    this.markThreadStateChanged(input.threadId);
-    this.emitState(input.threadId);
-    return this.snapshotThreadState(input.threadId, state);
+    this.markOwnerStateChanged(input.owner);
+    this.emitOwnerState(input.owner);
+    return state;
   }
 
   selectTab(input: BrowserTabInput): ThreadBrowserState {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
-    const tab = this.resolveTab(state, input.tabId);
-    this.activateTab(input.threadId, state, tab);
+    return toThreadBrowserState(
+      { kind: "thread", threadId: input.threadId },
+      this.selectOwnerTab({ owner: threadOwner(input.threadId), tabId: input.tabId }),
+    );
+  }
 
-    if (this.activeThreadId === input.threadId) {
-      this.resumeThread(input.threadId);
-      const bounds = this.getVisibleBoundsForThread(input.threadId);
+  private selectOwnerTab(input: BrowserOwnerTabInput): OwnerWorkspaceState {
+    this.markOwnerHumanControl(input.owner);
+    const state = this.ensureOwnerWorkspace(input.owner);
+    const tab = this.resolveTab(state, input.tabId);
+    this.activateOwnerTab(input.owner, state, tab);
+
+    if (this.isActiveOwner(input.owner)) {
+      this.resumeOwner(input.owner);
+      const bounds = this.getVisibleBoundsForOwner(input.owner);
       if (bounds) {
-        this.attachActiveTab(input.threadId, bounds);
+        this.attachActiveTab(input.owner, bounds);
       }
     }
 
-    return this.snapshotThreadState(input.threadId, state);
+    return state;
   }
 
   openDevTools(input: BrowserTabInput): void {
-    this.markHumanControl(input.threadId);
-    const state = this.ensureWorkspace(input.threadId);
-    const tab = this.resolveTab(state, input.tabId);
-    this.activateTab(input.threadId, state, tab);
+    this.openOwnerDevTools({ owner: threadOwner(input.threadId), tabId: input.tabId });
+  }
 
-    this.resumeThread(input.threadId);
-    const runtime = this.ensureLiveRuntime(input.threadId, tab.id);
-    const bounds = this.getVisibleBoundsForThread(input.threadId);
+  private openOwnerDevTools(input: BrowserOwnerTabInput): void {
+    this.markOwnerHumanControl(input.owner);
+    const state = this.ensureOwnerWorkspace(input.owner);
+    const tab = this.resolveTab(state, input.tabId);
+    this.activateOwnerTab(input.owner, state, tab);
+
+    this.resumeOwner(input.owner);
+    const runtime = this.ensureOwnerLiveRuntime(input.owner, tab.id);
+    const bounds = this.getVisibleBoundsForOwner(input.owner);
     if (bounds) {
-      this.attachActiveTab(input.threadId, bounds);
+      this.attachActiveTab(input.owner, bounds);
     }
     runtime.webContents.openDevTools({ mode: "detach" });
   }
 
   // Ensures the requested tab is active/live, then returns a fresh PNG capture
   // from the native browser surface for whichever destination needs it next.
-  private async captureScreenshotPng(input: BrowserTabInput): Promise<{
+  private async captureOwnerScreenshotPng(input: BrowserOwnerTabInput): Promise<{
     name: string;
     pngBytes: Buffer;
   }> {
-    const state = this.ensureWorkspace(input.threadId);
+    const state = this.ensureOwnerWorkspace(input.owner);
     const tab = this.resolveTab(state, input.tabId);
-    this.activateTab(input.threadId, state, tab);
+    this.activateOwnerTab(input.owner, state, tab);
 
-    this.resumeThread(input.threadId);
+    this.resumeOwner(input.owner);
     const wasSuspended = tab.status === SUSPENDED_TAB_STATUS;
-    const runtime = this.ensureLiveRuntime(input.threadId, tab.id);
+    const runtime = this.ensureOwnerLiveRuntime(input.owner, tab.id);
     const webContents = runtime.webContents;
     const expectedUrl = normalizeUrlInput(tab.lastCommittedUrl ?? tab.url);
     const currentUrl = this.sessionPolicy.resolveDisplayUrl(webContents.getURL());
-    const bounds = this.getVisibleBoundsForThread(input.threadId);
+    const bounds = this.getVisibleBoundsForOwner(input.owner);
     if (bounds) {
-      this.attachActiveTab(input.threadId, bounds);
+      this.attachActiveTab(input.owner, bounds);
     }
 
     if (wasSuspended || currentUrl.length === 0 || currentUrl !== expectedUrl) {
-      await this.loadTab(input.threadId, tab.id, { runtime });
+      await this.loadOwnerTab(input.owner, tab.id, { runtime });
     } else {
-      this.queueRuntimeStateSync(input.threadId, tab.id);
+      this.queueOwnerRuntimeStateSync(input.owner, tab.id);
     }
 
     const pngBytes = (await webContents.capturePage()).toPNG();
@@ -1937,7 +2731,14 @@ export class DesktopBrowserManager {
   // Captures the current browser viewport as a PNG so the renderer can attach
   // it directly to the composer without introducing temp-file disk churn.
   async captureScreenshot(input: BrowserTabInput): Promise<BrowserCaptureScreenshotResult> {
-    const { name, pngBytes } = await this.captureScreenshotPng(input);
+    return this.captureOwnerScreenshot({ owner: threadOwner(input.threadId), tabId: input.tabId });
+  }
+
+  /** Owner-generic screenshot capture (Decision 0002). */
+  async captureOwnerScreenshot(
+    input: BrowserOwnerTabInput,
+  ): Promise<BrowserCaptureScreenshotResult> {
+    const { name, pngBytes } = await this.captureOwnerScreenshotPng(input);
 
     return {
       name,
@@ -1952,13 +2753,26 @@ export class DesktopBrowserManager {
   // can reject with "Document is not focused" while the native page view holds
   // focus, so the React toolbar button routes through here for reliability.
   copyLink(input: BrowserTabInput): void {
-    this.copyTabLink(input.threadId, input.tabId);
+    this.copyOwnerTabLink({ owner: threadOwner(input.threadId), tabId: input.tabId });
+  }
+
+  /** Owner-generic native copy-link chord (Decision 0002). */
+  copyOwnerLink(input: BrowserOwnerTabInput): void {
+    this.copyOwnerTabLink(input);
   }
 
   // Writes the current browser viewport screenshot straight to the native
   // clipboard so the renderer does not have to ferry image payloads over IPC.
   async copyScreenshotToClipboard(input: BrowserTabInput): Promise<void> {
-    const { pngBytes } = await this.captureScreenshotPng(input);
+    await this.copyOwnerScreenshotToClipboard({
+      owner: threadOwner(input.threadId),
+      tabId: input.tabId,
+    });
+  }
+
+  /** Owner-generic screenshot-to-clipboard core (Decision 0002). */
+  async copyOwnerScreenshotToClipboard(input: BrowserOwnerTabInput): Promise<void> {
+    const { pngBytes } = await this.captureOwnerScreenshotPng(input);
     const image = nativeImage.createFromBuffer(pngBytes);
     if (image.isEmpty()) {
       throw new Error("Couldn't copy a browser screenshot to the clipboard.");
@@ -1966,68 +2780,77 @@ export class DesktopBrowserManager {
     clipboard.writeImage(image);
   }
 
-  private activateThread(threadId: ThreadId, bounds: BrowserPanelBounds): void {
-    const previousThreadId = this.activeThreadId;
-    if (this.activeThreadId && this.activeThreadId !== threadId) {
-      this.scheduleThreadSuspend(this.activeThreadId);
+  private activateOwner(owner: BrowserWorkspaceOwner, bounds: BrowserPanelBounds): void {
+    const previousOwner = this.activeOwner;
+    if (previousOwner && !browserOwnersEqual(previousOwner, owner)) {
+      this.scheduleOwnerSuspend(previousOwner);
     }
 
-    this.activeThreadId = threadId;
+    this.activeOwner = owner;
     this.activeBounds = bounds;
-    this.activeBoundsThreadId = threadId;
-    if (previousThreadId && previousThreadId !== threadId) {
-      this.updatePopupWindowsForThread(previousThreadId);
+    this.activeBoundsOwner = owner;
+    if (previousOwner && !browserOwnersEqual(previousOwner, owner)) {
+      this.updatePopupWindowsForOwner(previousOwner);
     }
-    this.resumeThread(threadId);
-    this.attachActiveTab(threadId, bounds);
-    this.updatePopupWindowsForThread(threadId);
+    this.resumeOwner(owner);
+    this.attachActiveTab(owner, bounds);
+    this.updatePopupWindowsForOwner(owner);
   }
 
   // Renderer panels create their own <webview>; keep active-thread bookkeeping current while
   // waiting for attachWebview so startup does not create a duplicate native WebContentsView.
-  private activateThreadForPendingRenderer(threadId: ThreadId, bounds: BrowserPanelBounds): void {
-    const previousThreadId = this.activeThreadId;
-    if (previousThreadId && previousThreadId !== threadId) {
-      this.scheduleThreadSuspend(previousThreadId);
-      this.updatePopupWindowsForThread(previousThreadId);
+  private activateOwnerForPendingRenderer(
+    owner: BrowserWorkspaceOwner,
+    bounds: BrowserPanelBounds,
+  ): void {
+    const previousOwner = this.activeOwner;
+    if (previousOwner && !browserOwnersEqual(previousOwner, owner)) {
+      this.scheduleOwnerSuspend(previousOwner);
+      this.updatePopupWindowsForOwner(previousOwner);
     }
-    this.activeThreadId = threadId;
+    this.activeOwner = owner;
     this.activeBounds = bounds;
-    this.activeBoundsThreadId = threadId;
-    this.clearSuspendTimer(threadId);
-    this.updatePopupWindowsForThread(threadId);
+    this.activeBoundsOwner = owner;
+    this.clearSuspendTimer(owner);
+    this.updatePopupWindowsForOwner(owner);
   }
 
-  private setActiveBounds(threadId: ThreadId, bounds: BrowserPanelBounds | null): void {
+  private setActiveBounds(owner: BrowserWorkspaceOwner, bounds: BrowserPanelBounds | null): void {
     if (!bounds) {
-      this.clearActiveBoundsForThread(threadId);
+      this.clearActiveBoundsForOwner(owner);
       return;
     }
     this.activeBounds = bounds;
-    this.activeBoundsThreadId = threadId;
+    this.activeBoundsOwner = owner;
   }
 
-  private clearActiveBoundsForThread(threadId: ThreadId): void {
-    if (this.activeBoundsThreadId !== threadId) {
+  private clearActiveBoundsForOwner(owner: BrowserWorkspaceOwner): void {
+    if (this.activeBoundsOwner === null || !browserOwnersEqual(this.activeBoundsOwner, owner)) {
       return;
     }
     this.activeBounds = null;
-    this.activeBoundsThreadId = null;
+    this.activeBoundsOwner = null;
   }
 
-  private getVisibleBoundsForThread(threadId: ThreadId): BrowserPanelBounds | null {
-    return this.activeBoundsThreadId === threadId ? this.activeBounds : null;
+  private getVisibleBoundsForOwner(owner: BrowserWorkspaceOwner): BrowserPanelBounds | null {
+    return this.activeBoundsOwner !== null && browserOwnersEqual(this.activeBoundsOwner, owner)
+      ? this.activeBounds
+      : null;
   }
 
-  private resumeThread(threadId: ThreadId): void {
-    const state = this.ensureWorkspace(threadId);
+  private isActiveOwner(owner: BrowserWorkspaceOwner): boolean {
+    return this.activeOwner !== null && browserOwnersEqual(this.activeOwner, owner);
+  }
+
+  private resumeOwner(owner: BrowserWorkspaceOwner): void {
+    const state = this.ensureOwnerWorkspace(owner);
     if (!state.open) {
       return;
     }
 
-    this.clearSuspendTimer(threadId);
+    this.clearSuspendTimer(owner);
     const activeTab = this.getActiveTab(state);
-    let didChange = this.suspendInactiveTabs(threadId, activeTab?.id ?? null);
+    let didChange = this.suspendInactiveTabs(owner, activeTab?.id ?? null);
 
     // Only resume the visible tab. Waking every tab can fan out into several
     // Chromium renderer processes and background page activity at once.
@@ -2035,18 +2858,18 @@ export class DesktopBrowserManager {
       if (tab.id !== activeTab?.id) {
         continue;
       }
-      const runtimeKey = buildRuntimeKey(threadId, tab.id);
+      const runtimeKey = browserOwnerRuntimeKey(owner, tab.id);
       if (this.rendererOnlyRuntimeKeys.has(runtimeKey)) {
         const rendererRuntime = this.runtimes.get(runtimeKey);
         if (!rendererRuntime || rendererRuntime.ownsWebContents) {
-          if (rendererRuntime?.ownsWebContents) this.destroyRuntime(threadId, tab.id);
+          if (rendererRuntime?.ownsWebContents) this.destroyOwnerRuntime(owner, tab.id);
           continue;
         }
       }
       const wasSuspended = tab.status === SUSPENDED_TAB_STATUS;
-      const runtime = this.ensureLiveRuntime(threadId, tab.id);
+      const runtime = this.ensureOwnerLiveRuntime(owner, tab.id);
       if (wasSuspended && !this.automationRuntimeKeys.has(runtimeKey)) {
-        void this.loadTab(threadId, tab.id, { force: true, runtime });
+        void this.loadOwnerTab(owner, tab.id, { force: true, runtime });
       } else {
         didChange =
           syncTabStateFromRuntime(state, tab, runtime.webContents, (url) =>
@@ -2057,8 +2880,8 @@ export class DesktopBrowserManager {
 
     didChange = syncThreadLastError(state) || didChange;
     if (didChange) {
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
     this.enforceBackgroundAutomationRuntimeBudget();
   }
@@ -2090,7 +2913,9 @@ export class DesktopBrowserManager {
     // An OAuth popup is a live user interaction even when its opener's panel is
     // hidden. Evicting that opener would sever window.opener and break sign-in.
     const popupOwnerRuntimeKeys = new Set(
-      [...this.popupRuntimes.values()].map((popup) => buildRuntimeKey(popup.threadId, popup.tabId)),
+      [...this.popupRuntimes.values()].map((popup) =>
+        browserOwnerRuntimeKey(popup.owner, popup.tabId),
+      ),
     );
     const backgroundRuntimes = [...this.runtimes.values()].filter(
       (runtime) =>
@@ -2110,26 +2935,27 @@ export class DesktopBrowserManager {
           (this.runtimeLastActiveAtByKey.get(left.key) ?? 0) -
           (this.runtimeLastActiveAtByKey.get(right.key) ?? 0),
       );
-    const changedThreadIds = new Set<ThreadId>();
 
+
+    const changedOwners: BrowserWorkspaceOwner[] = [];
     for (const runtime of evictionCandidates) {
       if (excess <= 0) break;
-      const state = this.states.get(runtime.threadId);
+      const state = this.states.get(browserOwnerWorkspaceKey(runtime.owner));
       const tab = state ? this.getTab(state, runtime.tabId) : null;
-      this.destroyRuntime(runtime.threadId, runtime.tabId);
+      this.destroyOwnerRuntime(runtime.owner, runtime.tabId);
       if (state && tab) {
         const didChange = suspendTabState(tab);
         if (syncThreadLastError(state) || didChange) {
-          changedThreadIds.add(runtime.threadId);
+          changedOwners.push(runtime.owner);
         }
       }
       excess -= 1;
       this.perfCounters.inactiveTabBudgetEvictions += 1;
     }
 
-    for (const threadId of changedThreadIds) {
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+    for (const owner of changedOwners) {
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
 
     if (excess <= 0) return;
@@ -2149,8 +2975,8 @@ export class DesktopBrowserManager {
     this.backgroundAutomationEvictionTimer.unref();
   }
 
-  private suspendInactiveTabs(threadId: ThreadId, activeTabId: string | null): boolean {
-    const state = this.states.get(threadId);
+  private suspendInactiveTabs(owner: BrowserWorkspaceOwner, activeTabId: string | null): boolean {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
     if (!state) {
       return false;
     }
@@ -2158,10 +2984,10 @@ export class DesktopBrowserManager {
     let didChange = false;
     const inactiveRuntimeTabIds = state.tabs
       .filter((tab) => tab.id !== activeTabId)
-      .filter((tab) => this.runtimes.has(buildRuntimeKey(threadId, tab.id)))
+      .filter((tab) => this.runtimes.has(browserOwnerRuntimeKey(owner, tab.id)))
       .toSorted((left, right) => {
-        const leftKey = buildRuntimeKey(threadId, left.id);
-        const rightKey = buildRuntimeKey(threadId, right.id);
+        const leftKey = browserOwnerRuntimeKey(owner, left.id);
+        const rightKey = browserOwnerRuntimeKey(owner, right.id);
         return (
           (this.runtimeLastActiveAtByKey.get(rightKey) ?? 0) -
           (this.runtimeLastActiveAtByKey.get(leftKey) ?? 0)
@@ -2175,19 +3001,19 @@ export class DesktopBrowserManager {
 
     for (const tab of state.tabs) {
       if (tab.id === activeTabId) {
-        this.clearTabSuspendTimer(threadId, tab.id);
+        this.clearTabSuspendTimer(owner, tab.id);
         continue;
       }
 
-      const runtime = this.runtimes.get(buildRuntimeKey(threadId, tab.id));
+      const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, tab.id));
       if (runtime) {
         if (warmRuntimeTabIds.has(tab.id)) {
-          this.scheduleInactiveTabSuspend(threadId, tab.id);
+          this.scheduleInactiveTabSuspend(owner, tab.id);
           continue;
         }
 
         this.perfCounters.inactiveTabBudgetEvictions += 1;
-        this.destroyRuntime(threadId, tab.id);
+        this.destroyOwnerRuntime(owner, tab.id);
         didChange = suspendTabState(tab) || didChange;
         continue;
       }
@@ -2198,24 +3024,24 @@ export class DesktopBrowserManager {
     return didChange;
   }
 
-  private scheduleThreadSuspend(threadId: ThreadId): void {
-    const state = this.states.get(threadId);
-    if (!state?.open || this.activeThreadId === threadId) {
+  private scheduleOwnerSuspend(owner: BrowserWorkspaceOwner): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
+    if (!state?.open || this.isActiveOwner(owner)) {
       return;
     }
 
-    this.clearSuspendTimer(threadId);
+    this.clearSuspendTimer(owner);
     const timer = setTimeout(() => {
-      this.suspendThread(threadId);
-      this.suspendTimers.delete(threadId);
+      this.suspendOwner(owner);
+      this.suspendTimers.delete(browserOwnerWorkspaceKey(owner));
     }, BROWSER_THREAD_SUSPEND_DELAY_MS);
     timer.unref();
-    this.suspendTimers.set(threadId, timer);
+    this.suspendTimers.set(browserOwnerWorkspaceKey(owner), timer);
   }
 
-  private suspendThread(threadId: ThreadId): void {
-    const state = this.states.get(threadId);
-    if (!state || this.activeThreadId === threadId) {
+  private suspendOwner(owner: BrowserWorkspaceOwner): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
+    if (!state || this.isActiveOwner(owner)) {
       return;
     }
 
@@ -2223,60 +3049,60 @@ export class DesktopBrowserManager {
     for (const tab of state.tabs) {
       if (
         tab.id === state.activeTabId &&
-        this.automationRuntimeKeys.has(buildRuntimeKey(threadId, tab.id))
+        this.automationRuntimeKeys.has(browserOwnerRuntimeKey(owner, tab.id))
       ) {
         continue;
       }
-      this.destroyRuntime(threadId, tab.id);
+      this.destroyOwnerRuntime(owner, tab.id);
       didChange = suspendTabState(tab) || didChange;
     }
 
     didChange = syncThreadLastError(state) || didChange;
     if (didChange) {
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
     this.enforceBackgroundAutomationRuntimeBudget();
   }
 
-  private clearSuspendTimer(threadId: ThreadId): void {
-    const existing = this.suspendTimers.get(threadId);
+  private clearSuspendTimer(owner: BrowserWorkspaceOwner): void {
+    const existing = this.suspendTimers.get(browserOwnerWorkspaceKey(owner));
     if (!existing) {
       return;
     }
     clearTimeout(existing);
-    this.suspendTimers.delete(threadId);
+    this.suspendTimers.delete(browserOwnerWorkspaceKey(owner));
   }
 
-  private scheduleInactiveTabSuspend(threadId: ThreadId, tabId: string): void {
-    const key = buildRuntimeKey(threadId, tabId);
+  private scheduleInactiveTabSuspend(owner: BrowserWorkspaceOwner, tabId: string): void {
+    const key = browserOwnerRuntimeKey(owner, tabId);
     if (this.tabSuspendTimers.has(key)) {
       return;
     }
 
     this.perfCounters.inactiveTabSuspendScheduled += 1;
-    const delayMs = this.resolveInactiveTabSuspendDelay(threadId);
+    const delayMs = this.resolveInactiveTabSuspendDelay(owner);
     const timer = setTimeout(() => {
       this.tabSuspendTimers.delete(key);
-      const state = this.states.get(threadId);
+      const state = this.states.get(browserOwnerWorkspaceKey(owner));
       const tab = state ? this.getTab(state, tabId) : null;
       if (!state || !tab) {
         return;
       }
 
-      this.destroyRuntime(threadId, tabId);
+      this.destroyOwnerRuntime(owner, tabId);
       const didChange = suspendTabState(tab) || syncThreadLastError(state);
       if (didChange) {
-        this.markThreadStateChanged(threadId);
-        this.emitState(threadId);
+        this.markOwnerStateChanged(owner);
+        this.emitOwnerState(owner);
       }
     }, delayMs);
     timer.unref();
     this.tabSuspendTimers.set(key, timer);
   }
 
-  private clearTabSuspendTimer(threadId: ThreadId, tabId: string): void {
-    const key = buildRuntimeKey(threadId, tabId);
+  private clearTabSuspendTimer(owner: BrowserWorkspaceOwner, tabId: string): void {
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const existing = this.tabSuspendTimers.get(key);
     if (!existing) {
       return;
@@ -2288,38 +3114,38 @@ export class DesktopBrowserManager {
   }
 
   private attachActiveTab(
-    threadId: ThreadId,
+    owner: BrowserWorkspaceOwner,
     bounds: BrowserPanelBounds,
     options: { forceLoad?: boolean } = {},
   ): void {
-    const state = this.ensureWorkspace(threadId);
+    const state = this.ensureOwnerWorkspace(owner);
     const activeTab = this.getActiveTab(state);
     if (!activeTab) {
       return;
     }
 
-    this.suspendInactiveTabs(threadId, activeTab.id);
-    const runtimeKey = buildRuntimeKey(threadId, activeTab.id);
+    this.suspendInactiveTabs(owner, activeTab.id);
+    const runtimeKey = browserOwnerRuntimeKey(owner, activeTab.id);
     if (this.rendererOnlyRuntimeKeys.has(runtimeKey)) {
       const rendererRuntime = this.runtimes.get(runtimeKey);
       if (!rendererRuntime || rendererRuntime.ownsWebContents) {
-        if (rendererRuntime?.ownsWebContents) this.destroyRuntime(threadId, activeTab.id);
-        this.activateThreadForPendingRenderer(threadId, bounds);
+        if (rendererRuntime?.ownsWebContents) this.destroyOwnerRuntime(owner, activeTab.id);
+        this.activateOwnerForPendingRenderer(owner, bounds);
         return;
       }
     }
     const wasSuspended = activeTab.status === SUSPENDED_TAB_STATUS;
-    const runtime = this.ensureLiveRuntime(threadId, activeTab.id);
+    const runtime = this.ensureOwnerLiveRuntime(owner, activeTab.id);
     this.attachRuntime(runtime, bounds);
     const shouldLoadProjectedUrl =
       options.forceLoad || (wasSuspended && !this.automationRuntimeKeys.has(runtimeKey));
     if (shouldLoadProjectedUrl) {
-      void this.loadTab(threadId, activeTab.id, {
+      void this.loadOwnerTab(owner, activeTab.id, {
         force: true,
         runtime,
       });
     } else {
-      this.syncRuntimeState(threadId, activeTab.id);
+      this.syncOwnerRuntimeState(owner, activeTab.id);
     }
   }
 
@@ -2339,14 +3165,14 @@ export class DesktopBrowserManager {
       }
       this.attachedRuntimeKey = runtime.key;
       this.attachedBoundsSignature = nextBoundsSignature;
-      this.updatePopupWindowsForThread(runtime.threadId);
+      this.updatePopupWindowsForOwner(runtime.owner);
       this.enforceBackgroundAutomationRuntimeBudget();
       return;
     }
     if (!runtime.view) {
       this.attachedRuntimeKey = runtime.key;
       this.attachedBoundsSignature = nextBoundsSignature;
-      this.updatePopupWindowsForThread(runtime.threadId);
+      this.updatePopupWindowsForOwner(runtime.owner);
       this.enforceBackgroundAutomationRuntimeBudget();
       return;
     }
@@ -2358,7 +3184,7 @@ export class DesktopBrowserManager {
       }
       runtime.view.setBounds(bounds);
       this.attachedBoundsSignature = nextBoundsSignature;
-      this.updatePopupWindowsForThread(runtime.threadId);
+      this.updatePopupWindowsForOwner(runtime.owner);
       return;
     }
 
@@ -2368,7 +3194,7 @@ export class DesktopBrowserManager {
     runtime.view.setBounds(bounds);
     this.attachedRuntimeKey = runtime.key;
     this.attachedBoundsSignature = nextBoundsSignature;
-    this.updatePopupWindowsForThread(runtime.threadId);
+    this.updatePopupWindowsForOwner(runtime.owner);
     this.enforceBackgroundAutomationRuntimeBudget();
   }
 
@@ -2420,13 +3246,13 @@ export class DesktopBrowserManager {
     }
   }
 
-  private ensureLiveRuntime(threadId: ThreadId, tabId: string): LiveTabRuntime {
-    const key = buildRuntimeKey(threadId, tabId);
-    this.clearTabSuspendTimer(threadId, tabId);
+  private ensureOwnerLiveRuntime(owner: BrowserWorkspaceOwner, tabId: string): LiveTabRuntime {
+    const key = browserOwnerRuntimeKey(owner, tabId);
+    this.clearTabSuspendTimer(owner, tabId);
     const existing = this.runtimes.get(key);
     if (existing) {
       if (existing.webContents.isDestroyed()) {
-        this.destroyRuntime(threadId, tabId);
+        this.destroyOwnerRuntime(owner, tabId);
       } else {
         return existing;
       }
@@ -2436,9 +3262,9 @@ export class DesktopBrowserManager {
       throw new Error("This tab requires its renderer-owned browser webview.");
     }
 
-    const runtime = this.createLiveRuntime(threadId, tabId);
+    const runtime = this.createOwnerLiveRuntime(owner, tabId);
     this.runtimes.set(key, runtime);
-    const state = this.ensureWorkspace(threadId);
+    const state = this.ensureOwnerWorkspace(owner);
     const tab = this.getTab(state, tabId);
     if (tab) {
       const didChange = tab.status !== "live" || tab.lastError !== null;
@@ -2446,14 +3272,14 @@ export class DesktopBrowserManager {
       tab.lastError = null;
       syncThreadLastError(state);
       if (didChange) {
-        this.markThreadStateChanged(threadId);
+        this.markOwnerStateChanged(owner);
       }
     }
     return runtime;
   }
 
-  private claimAutomationTab(threadId: ThreadId, tab: BrowserTabState): boolean {
-    const key = buildRuntimeKey(threadId, tab.id);
+  private claimOwnerAutomationTab(owner: BrowserWorkspaceOwner, tab: BrowserTabState): boolean {
+    const key = browserOwnerRuntimeKey(owner, tab.id);
     this.automationRuntimeKeys.add(key);
     this.rendererOnlyRuntimeKeys.delete(key);
     let didChange = false;
@@ -2464,7 +3290,7 @@ export class DesktopBrowserManager {
 
     const runtime = this.runtimes.get(key);
     if (runtime && !runtime.ownsWebContents) {
-      this.destroyRuntime(threadId, tab.id, {
+      this.destroyOwnerRuntime(owner, tab.id, {
         preserveAutomationDownloadTracking: true,
         annotationReason: "replaced",
       });
@@ -2473,7 +3299,7 @@ export class DesktopBrowserManager {
     return didChange;
   }
 
-  private createLiveRuntime(threadId: ThreadId, tabId: string): LiveTabRuntime {
+  private createOwnerLiveRuntime(owner: BrowserWorkspaceOwner, tabId: string): LiveTabRuntime {
     const view = new WebContentsView({
       webPreferences: {
         partition: BROWSER_SESSION_PARTITION,
@@ -2486,8 +3312,8 @@ export class DesktopBrowserManager {
       },
     });
     const runtime: LiveTabRuntime = {
-      key: buildRuntimeKey(threadId, tabId),
-      threadId,
+      key: browserOwnerRuntimeKey(owner, tabId),
+      owner,
       tabId,
       webContents: view.webContents,
       view,
@@ -2505,7 +3331,7 @@ export class DesktopBrowserManager {
   }
 
   private configureRuntimeWebContents(runtime: LiveTabRuntime): void {
-    const { threadId, tabId, webContents } = runtime;
+    const { owner, tabId, webContents } = runtime;
 
     // Belt-and-suspenders alongside the session-level UA: also covers an adopted renderer
     // <webview> for any navigation after it attaches.
@@ -2524,7 +3350,7 @@ export class DesktopBrowserManager {
         return;
       }
       if (
-        this.consumeExpectedAutomationInput(threadId, tabId, {
+        this.consumeOwnerExpectedAutomationInput(owner, tabId, {
           kind: "key",
           key: input.key,
           alt: input.alt === true,
@@ -2535,7 +3361,7 @@ export class DesktopBrowserManager {
       ) {
         return;
       }
-      this.markHumanControl(threadId);
+      this.markOwnerHumanControl(owner);
       const matches = isBrowserCopyLinkChord(
         {
           meta: input.meta,
@@ -2550,7 +3376,7 @@ export class DesktopBrowserManager {
         return;
       }
       event.preventDefault();
-      this.copyTabLink(threadId, tabId);
+      this.copyOwnerTabLink({ owner, tabId });
     };
     webContents.on("before-input-event", beforeInputEvent);
     runtime.listenerDisposers.push(() => {
@@ -2564,7 +3390,7 @@ export class DesktopBrowserManager {
         input.type === "contextMenu"
       ) {
         if (
-          this.consumeExpectedAutomationInput(threadId, tabId, {
+          this.consumeOwnerExpectedAutomationInput(owner, tabId, {
             kind: "mouse",
             type: input.type,
             x: input.x,
@@ -2574,7 +3400,7 @@ export class DesktopBrowserManager {
         ) {
           return;
         }
-        this.markHumanControl(threadId);
+        this.markOwnerHumanControl(owner);
       }
     };
     webContents.on("before-mouse-event", beforeMouseEvent);
@@ -2584,7 +3410,7 @@ export class DesktopBrowserManager {
 
     const pageTitleUpdated = (event: Electron.Event) => {
       event.preventDefault();
-      this.queueRuntimeStateSync(threadId, tabId);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
     };
     webContents.on("page-title-updated", pageTitleUpdated);
     runtime.listenerDisposers.push(() => {
@@ -2592,7 +3418,7 @@ export class DesktopBrowserManager {
     });
 
     const pageFaviconUpdated = (_event: Electron.Event, faviconUrls: string[]) => {
-      this.queueRuntimeStateSync(threadId, tabId, faviconUrls);
+      this.queueOwnerRuntimeStateSync(owner, tabId, faviconUrls);
     };
     webContents.on("page-favicon-updated", pageFaviconUpdated);
     runtime.listenerDisposers.push(() => {
@@ -2600,7 +3426,7 @@ export class DesktopBrowserManager {
     });
 
     const didStartLoading = () => {
-      this.queueRuntimeStateSync(threadId, tabId);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
     };
     webContents.on("did-start-loading", didStartLoading);
     runtime.listenerDisposers.push(() => {
@@ -2608,8 +3434,8 @@ export class DesktopBrowserManager {
     });
 
     const didStopLoading = () => {
-      this.queueRuntimeStateSync(threadId, tabId);
-      this.annotations.recoverNavigation(threadId, tabId, webContents.id);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
+      this.recoverOwnerAnnotationNavigation(toAnnotationOwner(owner), tabId, webContents.id);
     };
     webContents.on("did-stop-loading", didStopLoading);
     runtime.listenerDisposers.push(() => {
@@ -2617,7 +3443,7 @@ export class DesktopBrowserManager {
     });
 
     const didNavigate = () => {
-      this.queueRuntimeStateSync(threadId, tabId);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
     };
     webContents.on("did-navigate", didNavigate);
     runtime.listenerDisposers.push(() => {
@@ -2631,7 +3457,7 @@ export class DesktopBrowserManager {
       isMainFrame: boolean,
     ) => {
       if (isMainFrame && !_isInPlace) {
-        this.annotations.handleNavigation(threadId, tabId, webContents.id);
+        this.handleOwnerAnnotationNavigation(toAnnotationOwner(owner), tabId, webContents.id);
       }
     };
     webContents.on("did-start-navigation", didStartNavigation);
@@ -2640,8 +3466,8 @@ export class DesktopBrowserManager {
     });
 
     const didNavigateInPage = () => {
-      this.queueRuntimeStateSync(threadId, tabId);
-      this.annotations.handleInPageNavigation(threadId, tabId, webContents.id);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
+      this.handleOwnerAnnotationInPageNavigation(toAnnotationOwner(owner), tabId, webContents.id);
     };
     webContents.on("did-navigate-in-page", didNavigateInPage);
     runtime.listenerDisposers.push(() => {
@@ -2658,10 +3484,10 @@ export class DesktopBrowserManager {
       if (!isMainFrame) {
         return;
       }
-      this.annotations.recoverNavigation(threadId, tabId, webContents.id);
+      this.recoverOwnerAnnotationNavigation(toAnnotationOwner(owner), tabId, webContents.id);
       if (errorCode === BROWSER_ERROR_ABORTED) return;
 
-      const state = this.states.get(threadId);
+      const state = this.states.get(browserOwnerWorkspaceKey(owner));
       const tab = state ? this.getTab(state, tabId) : null;
       if (!state || !tab) {
         return;
@@ -2672,8 +3498,8 @@ export class DesktopBrowserManager {
       tab.isLoading = false;
       tab.lastError = mapBrowserLoadError(errorCode);
       syncThreadLastError(state);
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     };
     webContents.on("did-fail-load", didFailLoad);
     runtime.listenerDisposers.push(() => {
@@ -2690,20 +3516,20 @@ export class DesktopBrowserManager {
         return;
       }
       runtimeLossHandled = true;
-      const state = this.states.get(threadId);
+      const state = this.states.get(browserOwnerWorkspaceKey(owner));
       const tab = state ? this.getTab(state, tabId) : null;
-      this.destroyRuntime(threadId, tabId);
+      this.destroyOwnerRuntime(owner, tabId);
       if (state && tab) {
         tab.status = "suspended";
         tab.isLoading = false;
         tab.lastError = "This tab stopped unexpectedly.";
         syncThreadLastError(state);
-        this.markThreadStateChanged(threadId);
-        this.emitState(threadId);
+        this.markOwnerStateChanged(owner);
+        this.emitOwnerState(owner);
       }
-      const bounds = this.getVisibleBoundsForThread(threadId);
-      if (this.activeThreadId === threadId && bounds) {
-        this.attachActiveTab(threadId, bounds);
+      const bounds = this.getVisibleBoundsForOwner(owner);
+      if (this.isActiveOwner(owner) && bounds) {
+        this.attachActiveTab(owner, bounds);
       }
     };
     webContents.on("render-process-gone", handleRuntimeLoss);
@@ -2714,18 +3540,18 @@ export class DesktopBrowserManager {
     });
   }
 
-  private async loadTab(
-    threadId: ThreadId,
+  private async loadOwnerTab(
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     options: { force?: boolean; runtime?: LiveTabRuntime } = {},
   ): Promise<void> {
-    const state = this.ensureWorkspace(threadId);
+    const state = this.ensureOwnerWorkspace(owner);
     const tab = this.getTab(state, tabId);
     if (!tab) {
       return;
     }
 
-    const runtime = options.runtime ?? this.ensureLiveRuntime(threadId, tabId);
+    const runtime = options.runtime ?? this.ensureOwnerLiveRuntime(owner, tabId);
     const webContents = runtime.webContents;
     const nextUrl = normalizeUrlInput(
       options.force === true ? tab.url : (tab.lastCommittedUrl ?? tab.url),
@@ -2734,7 +3560,7 @@ export class DesktopBrowserManager {
     const shouldLoad = options.force === true || currentUrl !== nextUrl || currentUrl.length === 0;
 
     if (!shouldLoad) {
-      this.queueRuntimeStateSync(threadId, tabId);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
       return;
     }
 
@@ -2743,31 +3569,35 @@ export class DesktopBrowserManager {
     tab.isLoading = true;
     tab.lastError = null;
     syncThreadLastError(state);
-    this.markThreadStateChanged(threadId);
-    this.emitState(threadId);
+    this.markOwnerStateChanged(owner);
+    this.emitOwnerState(owner);
 
     try {
       await webContents.loadURL(this.sessionPolicy.resolveRuntimeUrl(nextUrl));
-      this.queueRuntimeStateSync(threadId, tabId);
+      this.queueOwnerRuntimeStateSync(owner, tabId);
     } catch (error) {
       if (isAbortedNavigationError(error)) {
-        this.queueRuntimeStateSync(threadId, tabId);
+        this.queueOwnerRuntimeStateSync(owner, tabId);
         return;
       }
 
       tab.isLoading = false;
       tab.lastError = "Couldn't open this page.";
       syncThreadLastError(state);
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
   }
 
-  private syncRuntimeState(threadId: ThreadId, tabId: string, faviconUrls?: string[]): void {
+  private syncOwnerRuntimeState(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    faviconUrls?: string[],
+  ): void {
     this.perfCounters.syncRuntimeStateCalls += 1;
-    const state = this.states.get(threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
     const tab = state ? this.getTab(state, tabId) : null;
-    const runtime = this.runtimes.get(buildRuntimeKey(threadId, tabId));
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(owner, tabId));
     if (!state || !tab || !runtime) {
       return;
     }
@@ -2781,16 +3611,20 @@ export class DesktopBrowserManager {
     );
     const nextDidChange = syncThreadLastError(state) || didChange;
     if (nextDidChange) {
-      this.markThreadStateChanged(threadId);
-      this.emitState(threadId);
+      this.markOwnerStateChanged(owner);
+      this.emitOwnerState(owner);
     }
   }
 
-  private queueRuntimeStateSync(threadId: ThreadId, tabId: string, faviconUrls?: string[]): void {
-    const key = buildRuntimeKey(threadId, tabId);
+  private queueOwnerRuntimeStateSync(
+    owner: BrowserWorkspaceOwner,
+    tabId: string,
+    faviconUrls?: string[],
+  ): void {
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const existing = this.pendingRuntimeSyncs.get(key);
     const nextPendingSync: PendingRuntimeSync = {
-      threadId,
+      owner,
       tabId,
     };
     const nextFaviconUrls = faviconUrls ?? existing?.faviconUrls;
@@ -2814,30 +3648,30 @@ export class DesktopBrowserManager {
       const pendingSyncs = [...this.pendingRuntimeSyncs.values()];
       this.pendingRuntimeSyncs.clear();
       for (const pendingSync of pendingSyncs) {
-        this.syncRuntimeState(pendingSync.threadId, pendingSync.tabId, pendingSync.faviconUrls);
+        this.syncOwnerRuntimeState(pendingSync.owner, pendingSync.tabId, pendingSync.faviconUrls);
       }
     });
   }
 
-  private destroyThreadRuntimes(threadId: ThreadId): void {
-    const state = this.states.get(threadId);
+  private destroyOwnerRuntimes(owner: BrowserWorkspaceOwner): void {
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
     if (!state) {
       return;
     }
 
     for (const tab of state.tabs) {
-      this.destroyRuntime(threadId, tab.id);
+      this.destroyOwnerRuntime(owner, tab.id);
     }
   }
 
   private destroyAllRuntimes(): void {
     for (const runtime of this.runtimes.values()) {
-      this.destroyRuntime(runtime.threadId, runtime.tabId);
+      this.destroyOwnerRuntime(runtime.owner, runtime.tabId);
     }
   }
 
-  private destroyRuntime(
-    threadId: ThreadId,
+  private destroyOwnerRuntime(
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     options: {
       readonly preserveRendererDebugger?: boolean;
@@ -2845,13 +3679,13 @@ export class DesktopBrowserManager {
       readonly annotationReason?: "detached" | "destroyed" | "replaced";
     } = {},
   ): void {
-    const key = buildRuntimeKey(threadId, tabId);
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const preserveAutomationDownloadTracking =
       options.preserveAutomationDownloadTracking === true &&
       (this.automationDownloadListenersByRuntimeKey.has(key) ||
         this.automationSideEffectProvenanceByRuntimeKey.has(key));
-    this.clearPendingWindowOpenTask(threadId, tabId);
-    this.clearTabSuspendTimer(threadId, tabId);
+    this.clearPendingWindowOpenTask(owner, tabId);
+    this.clearTabSuspendTimer(owner, tabId);
     this.pendingRuntimeSyncs.delete(key);
     this.runtimeLastActiveAtByKey.delete(key);
     this.automationRuntimeProtectedUntilByKey.delete(key);
@@ -2866,8 +3700,8 @@ export class DesktopBrowserManager {
     if (!runtime) {
       return;
     }
-    this.annotations.handleRuntimeDetached(
-      threadId,
+    this.handleOwnerAnnotationRuntimeDetached(
+      toAnnotationOwner(owner),
       tabId,
       runtime.webContents.id,
       options.annotationReason ?? (runtime.webContents.isDestroyed() ? "destroyed" : "detached"),
@@ -2935,50 +3769,58 @@ export class DesktopBrowserManager {
 
   private toAnnotationRuntime(runtime: LiveTabRuntime | null): BrowserAnnotationRuntime | null {
     if (!runtime || runtime.webContents.isDestroyed()) return null;
+    if (runtime.owner.kind === "thread") {
+      return {
+        threadId: runtime.owner.threadId,
+        tabId: runtime.tabId,
+        webContents: runtime.webContents,
+      };
+    }
     return {
-      threadId: runtime.threadId,
+      projectId: runtime.owner.projectId,
       tabId: runtime.tabId,
       webContents: runtime.webContents,
     };
   }
 
-  private getOrCreateState(threadId: ThreadId): ThreadBrowserState {
-    const existing = this.states.get(threadId);
+
+  private getOrCreateOwnerState(owner: BrowserWorkspaceOwner): OwnerWorkspaceState {
+    const key = browserOwnerWorkspaceKey(owner);
+    const existing = this.states.get(key);
     if (existing) {
       return existing;
     }
 
-    const initial = defaultThreadBrowserState(threadId);
-    this.states.set(threadId, initial);
-    this.threadVersionById.set(threadId, 0);
+    const initial = defaultOwnerWorkspaceState();
+    this.states.set(key, initial);
+    this.ownerVersionByKey.set(key, 0);
     return initial;
   }
 
-  private markThreadStateChanged(threadId: ThreadId): void {
-    const nextVersion = (this.threadVersionById.get(threadId) ?? 0) + 1;
-    this.threadVersionById.set(threadId, nextVersion);
-    const state = this.states.get(threadId);
+  private markOwnerStateChanged(owner: BrowserWorkspaceOwner): void {
+    const key = browserOwnerWorkspaceKey(owner);
+    const nextVersion = (this.ownerVersionByKey.get(key) ?? 0) + 1;
+    this.ownerVersionByKey.set(key, nextVersion);
+    const state = this.states.get(key);
     if (state) {
       state.version = nextVersion;
     }
   }
 
-  private markHumanControl(threadId: ThreadId): void {
-    const state = this.states.get(threadId);
+  private markOwnerHumanControl(owner: BrowserWorkspaceOwner): void {
+    const key = browserOwnerWorkspaceKey(owner);
+    const state = this.states.get(key);
     const activeTab = state ? this.getActiveTab(state) : null;
     if (activeTab) {
-      this.runtimeLastActiveAtByKey.set(buildRuntimeKey(threadId, activeTab.id), Date.now());
+      this.runtimeLastActiveAtByKey.set(browserOwnerRuntimeKey(owner, activeTab.id), Date.now());
     }
-    this.humanControlEpochByThreadId.set(
-      threadId,
-      (this.humanControlEpochByThreadId.get(threadId) ?? 0) + 1,
-    );
-    for (const [key, provenance] of this.automationSideEffectProvenanceByRuntimeKey) {
-      if (provenance.threadId === threadId) {
-        this.automationSideEffectProvenanceByRuntimeKey.delete(key);
+    this.humanControlEpochByOwnerKey.set(key, (this.humanControlEpochByOwnerKey.get(key) ?? 0) + 1);
+    for (const [runtimeKey, provenance] of this.automationSideEffectProvenanceByRuntimeKey) {
+      if (browserOwnersEqual(provenance.owner, owner)) {
+        this.automationSideEffectProvenanceByRuntimeKey.delete(runtimeKey);
       }
     }
-    for (const listener of this.humanControlListenersByThreadId.get(threadId) ?? []) {
+    for (const listener of this.humanControlListenersByOwnerKey.get(key) ?? []) {
       try {
         listener();
       } catch {
@@ -2987,12 +3829,12 @@ export class DesktopBrowserManager {
     }
   }
 
-  private expectAutomationInput(
-    threadId: ThreadId,
+  private expectOwnerAutomationInput(
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     signal: BrowserAutomationExpectedInput,
   ): () => void {
-    const key = buildRuntimeKey(threadId, tabId);
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const now = Date.now();
     const pending: PendingBrowserAutomationInput = {
       signal,
@@ -3028,12 +3870,14 @@ export class DesktopBrowserManager {
     };
   }
 
-  private isAutomationGestureActive(threadId: ThreadId, tabId: string): boolean {
-    return (this.automationGestureDepthByRuntimeKey.get(buildRuntimeKey(threadId, tabId)) ?? 0) > 0;
+  private isOwnerAutomationGestureActive(owner: BrowserWorkspaceOwner, tabId: string): boolean {
+    return (
+      (this.automationGestureDepthByRuntimeKey.get(browserOwnerRuntimeKey(owner, tabId)) ?? 0) > 0
+    );
   }
 
   private emitAutomationWindowOpen(event: BrowserAutomationWindowOpenEvent): void {
-    const key = buildRuntimeKey(event.threadId, event.sourceTabId);
+    const key = browserOwnerRuntimeKey(event.owner, event.sourceTabId);
     for (const listener of this.automationWindowOpenListenersByRuntimeKey.get(key) ?? []) {
       try {
         listener(event);
@@ -3044,8 +3888,8 @@ export class DesktopBrowserManager {
   }
 
   private emitAutomationDownload(event: BrowserAutomationDownloadEvent): void {
-    const key = buildRuntimeKey(event.threadId, event.sourceTabId);
-    const humanControlEpoch = this.getAutomationHumanControlEpoch(event.threadId);
+    const key = browserOwnerRuntimeKey(event.owner, event.sourceTabId);
+    const humanControlEpoch = this.getOwnerAutomationHumanControlEpoch(event.owner);
     for (const lease of this.automationDownloadListenersByRuntimeKey.get(key) ?? []) {
       if (lease.humanControlEpoch !== humanControlEpoch) continue;
       try {
@@ -3057,12 +3901,12 @@ export class DesktopBrowserManager {
     }
   }
 
-  private consumeExpectedAutomationInput(
-    threadId: ThreadId,
+  private consumeOwnerExpectedAutomationInput(
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     signal: BrowserAutomationExpectedInput,
   ): boolean {
-    const key = buildRuntimeKey(threadId, tabId);
+    const key = browserOwnerRuntimeKey(owner, tabId);
     const now = Date.now();
     const pending = (this.expectedAutomationInputsByRuntimeKey.get(key) ?? []).filter(
       (entry) => entry.expiresAt > now,
@@ -3081,23 +3925,56 @@ export class DesktopBrowserManager {
     return true;
   }
 
-  private snapshotThreadState(
-    threadId: ThreadId,
-    state = this.getOrCreateState(threadId),
-  ): ThreadBrowserState {
+  private snapshotOwnerState(
+    owner: BrowserWorkspaceOwner,
+    state = this.getOrCreateOwnerState(owner),
+  ): OwnerWorkspaceState {
+    const key = browserOwnerWorkspaceKey(owner);
     const version = state.version;
-    const cached = this.snapshotCacheByThreadId.get(threadId);
+    const cached = this.snapshotCacheByOwnerKey.get(key);
     if (cached && cached.version === version) {
       return cached.snapshot;
     }
 
-    const snapshot = cloneThreadState(state);
+    const snapshot = cloneOwnerState(state);
     this.perfCounters.stateCloneCount += 1;
-    this.snapshotCacheByThreadId.set(threadId, {
+    this.snapshotCacheByOwnerKey.set(key, {
       version,
       snapshot,
     });
     return snapshot;
+  }
+
+  /**
+   * Public Thread projection with the legacy identity contract: repeated reads
+   * of an unchanged version return the same object (renderer caches rely on
+   * reference equality for change detection).
+   */
+  private threadStateProjection(owner: { kind: "thread"; threadId: ThreadId }): ThreadBrowserState {
+    const key = browserOwnerWorkspaceKey(owner);
+    const snapshot = this.snapshotOwnerState(owner);
+    const cached = this.threadProjectionCacheByKey.get(key);
+    if (cached && cached.version === snapshot.version) {
+      return cached.projection;
+    }
+    const projection = toThreadBrowserState(owner, snapshot);
+    this.threadProjectionCacheByKey.set(key, { version: snapshot.version, projection });
+    return projection;
+  }
+
+  /** Public Project projection with the same identity contract. */
+  private projectStateProjection(
+    owner: { kind: "project"; projectId: ProjectId },
+  ): ProjectBrowserState {
+    const key = browserOwnerWorkspaceKey(owner);
+    const snapshot = this.snapshotOwnerState(owner);
+    const cached = this.projectProjectionCacheByKey.get(key);
+    if (cached && cached.version === snapshot.version) {
+      return cached.projection;
+    }
+    const projection = toProjectBrowserState(owner, snapshot);
+    this.projectProjectionCacheByKey.set(key, { version: snapshot.version, projection });
+    return projection;
   }
 
   private getTrackedProcessIds(): number[] {
@@ -3122,12 +3999,12 @@ export class DesktopBrowserManager {
     return count;
   }
 
-  private resolveInactiveTabSuspendDelay(threadId: ThreadId): number {
-    const threadRuntimeCount = [...this.runtimes.values()].filter(
-      (runtime) => runtime.threadId === threadId,
+  private resolveInactiveTabSuspendDelay(owner: BrowserWorkspaceOwner): number {
+    const ownerRuntimeCount = [...this.runtimes.values()].filter((runtime) =>
+      browserOwnersEqual(runtime.owner, owner),
     ).length;
     if (
-      threadRuntimeCount > BROWSER_MAX_WARM_INACTIVE_RUNTIMES_PER_THREAD + 1 ||
+      ownerRuntimeCount > BROWSER_MAX_WARM_INACTIVE_RUNTIMES_PER_THREAD + 1 ||
       this.runtimes.size > 4
     ) {
       return BROWSER_INACTIVE_TAB_SUSPEND_DELAY_PRESSURED_MS;
@@ -3136,9 +4013,12 @@ export class DesktopBrowserManager {
     return BROWSER_INACTIVE_TAB_SUSPEND_DELAY_MS;
   }
 
-  private ensureWorkspace(threadId: ThreadId, initialUrl?: string): ThreadBrowserState {
+  private ensureOwnerWorkspace(
+    owner: BrowserWorkspaceOwner,
+    initialUrl?: string | undefined,
+  ): OwnerWorkspaceState {
     this.sessionPolicy.ensureConfigured();
-    const state = this.getOrCreateState(threadId);
+    const state = this.getOrCreateOwnerState(owner);
     if (state.tabs.length === 0) {
       const initialTab = createBrowserTab(normalizeUrlInput(initialUrl));
       state.tabs = [initialTab];
@@ -3152,7 +4032,7 @@ export class DesktopBrowserManager {
     return state;
   }
 
-  private resolveTab(state: ThreadBrowserState, tabId?: string): BrowserTabState {
+  private resolveTab(state: WorkspaceTabErrorView, tabId?: string): BrowserTabState {
     const resolvedTabId = tabId ?? state.activeTabId;
     const existing =
       (resolvedTabId ? state.tabs.find((tab) => tab.id === resolvedTabId) : undefined) ??
@@ -3167,67 +4047,91 @@ export class DesktopBrowserManager {
     return fallback;
   }
 
-  private activateTab(threadId: ThreadId, state: ThreadBrowserState, tab: BrowserTabState): void {
+  private activateOwnerTab(
+    owner: BrowserWorkspaceOwner,
+    state: OwnerWorkspaceState,
+    tab: BrowserTabState,
+  ): void {
     if (state.activeTabId === tab.id) {
       return;
     }
 
     state.activeTabId = tab.id;
     syncThreadLastError(state);
-    this.markThreadStateChanged(threadId);
-    this.emitState(threadId);
+    this.markOwnerStateChanged(owner);
+    this.emitOwnerState(owner);
   }
 
-  private getActiveTab(state: ThreadBrowserState): BrowserTabState | null {
+  private getActiveTab(state: WorkspaceTabErrorView): BrowserTabState | null {
     if (!state.activeTabId) {
       return state.tabs[0] ?? null;
     }
     return state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0] ?? null;
   }
 
-  private getTab(state: ThreadBrowserState, tabId: string): BrowserTabState | null {
+  private getTab(state: WorkspaceTabErrorView, tabId: string): BrowserTabState | null {
     return state.tabs.find((tab) => tab.id === tabId) ?? null;
   }
 
   // Resolves the most accurate URL for a tab, preferring the live page over cached state and
   // ignoring blank placeholders so the copy-link chord never yields "about:blank".
-  private resolveCopyableTabUrl(
-    threadId: ThreadId,
+  private resolveCopyableOwnerTabUrl(
+    owner: BrowserWorkspaceOwner,
     tabId: string,
     runtime: LiveTabRuntime | undefined,
   ): string | null {
-    const state = this.states.get(threadId);
+    const state = this.states.get(browserOwnerWorkspaceKey(owner));
     const tab = state ? this.getTab(state, tabId) : null;
     const liveUrl =
       runtime && !runtime.webContents.isDestroyed() ? runtime.webContents.getURL() : null;
     return resolveCopyableBrowserTabUrl(tab, liveUrl);
   }
 
-  private copyTabLink(threadId: ThreadId, tabId: string): void {
-    const runtime = this.runtimes.get(buildRuntimeKey(threadId, tabId));
-    const url = this.resolveCopyableTabUrl(threadId, tabId, runtime);
+  private copyOwnerTabLink(input: BrowserOwnerTabInput): void {
+    const runtime = this.runtimes.get(browserOwnerRuntimeKey(input.owner, input.tabId));
+    const url = this.resolveCopyableOwnerTabUrl(input.owner, input.tabId, runtime);
     if (!url) {
       return;
     }
     clipboard.writeText(url);
-    const event: BrowserCopyLinkEvent = { threadId, url };
-    for (const listener of this.copyLinkListeners) {
+    this.emitCopyLink(input.owner, url);
+  }
+
+  private emitCopyLink(owner: BrowserWorkspaceOwner, url: string): void {
+    if (owner.kind === "thread") {
+      const event: BrowserCopyLinkEvent = { threadId: owner.threadId, url };
+      for (const listener of this.copyLinkListeners) {
+        listener(event);
+      }
+      return;
+    }
+    const event: ProjectBrowserCopyLinkEvent = { projectId: owner.projectId, url };
+    for (const listener of this.projectCopyLinkListeners) {
       listener(event);
     }
   }
 
-  private emitState(threadId: ThreadId): void {
+  private emitOwnerState(owner: BrowserWorkspaceOwner): void {
     this.perfCounters.stateEmitCalls += 1;
-    const state = this.getOrCreateState(threadId);
+    const key = browserOwnerWorkspaceKey(owner);
+    const state = this.getOrCreateOwnerState(owner);
     const nextVersion = state.version;
-    if (this.lastEmittedVersionByThreadId.get(threadId) === nextVersion) {
+    if (this.lastEmittedVersionByOwnerKey.get(key) === nextVersion) {
       this.perfCounters.stateEmitSkips += 1;
       return;
     }
-    this.lastEmittedVersionByThreadId.set(threadId, nextVersion);
-    const snapshot = this.snapshotThreadState(threadId, state);
-    for (const listener of this.listeners) {
-      listener(snapshot);
+    this.lastEmittedVersionByOwnerKey.set(key, nextVersion);
+    const snapshot = this.snapshotOwnerState(owner, state);
+    if (owner.kind === "thread") {
+      const projected = toThreadBrowserState(owner, snapshot);
+      for (const listener of this.listeners) {
+        listener(projected);
+      }
+      return;
+    }
+    const projected = toProjectBrowserState(owner, snapshot);
+    for (const listener of this.projectListeners) {
+      listener(projected);
     }
   }
 }
@@ -3262,7 +4166,7 @@ function suspendTabState(tab: BrowserTabState): boolean {
 }
 
 function syncTabStateFromRuntime(
-  state: ThreadBrowserState,
+  state: WorkspaceTabErrorView,
   tab: BrowserTabState,
   webContents: WebContents,
   resolveDisplayUrl: (url: string) => string,
@@ -3324,7 +4228,7 @@ function canWebContentsGoForward(webContents: WebContents): boolean {
   return webContents.navigationHistory?.canGoForward() ?? webContents.canGoForward();
 }
 
-function syncThreadLastError(state: ThreadBrowserState): boolean {
+function syncThreadLastError(state: WorkspaceTabErrorView): boolean {
   const activeTab =
     (state.activeTabId ? state.tabs.find((tab) => tab.id === state.activeTabId) : undefined) ??
     state.tabs[0];

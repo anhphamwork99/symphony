@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { ProcessEnvRecord, TrimmedNonEmptyString } from "./baseSchemas";
+import { ProcessEnvRecord, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
 
 export const DEFAULT_TERMINAL_ID = "default";
 
@@ -180,3 +180,147 @@ export const TerminalEvent = Schema.Union([
   TerminalActivityEvent,
 ]);
 export type TerminalEvent = typeof TerminalEvent.Type;
+
+// ── Project-owned terminal contracts ─────────────────────────────
+//
+// The Right-sidebar terminal workspace belongs to a Project (Decision 0002):
+// the same process and history serve every Main conversation in that Project,
+// and the terminal survives conversation and Project navigation. These
+// schemas carry the owning `ProjectId` directly — never a `ProjectId` cast to
+// a `ThreadId` or an inferred active conversation. The Thread-keyed schemas
+// above remain the legacy v1 surface until every consumer migrates.
+
+export const TerminalProjectInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type TerminalProjectInput = Schema.Codec.Encoded<typeof TerminalProjectInput>;
+
+const TerminalProjectSessionInput = Schema.Struct({
+  ...TerminalProjectInput.fields,
+  terminalId: TerminalIdWithDefaultSchema,
+});
+
+export const TerminalProjectOpenInput = Schema.Struct({
+  ...TerminalProjectSessionInput.fields,
+  cwd: TrimmedNonEmptyStringSchema,
+  cols: Schema.optional(TerminalColsSchema),
+  rows: Schema.optional(TerminalRowsSchema),
+  env: Schema.optional(TerminalEnvSchema),
+  streamOutput: Schema.optional(Schema.Boolean),
+});
+export type TerminalProjectOpenInput = Schema.Codec.Encoded<typeof TerminalProjectOpenInput>;
+
+export const TerminalProjectWriteInput = Schema.Struct({
+  ...TerminalProjectSessionInput.fields,
+  data: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(65_536)),
+});
+export type TerminalProjectWriteInput = Schema.Codec.Encoded<typeof TerminalProjectWriteInput>;
+
+export const TerminalProjectAckOutputInput = Schema.Struct({
+  ...TerminalProjectSessionInput.fields,
+  bytes: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(8_388_608)),
+});
+export type TerminalProjectAckOutputInput =
+  Schema.Codec.Encoded<typeof TerminalProjectAckOutputInput>;
+
+export const TerminalProjectResizeInput = Schema.Struct({
+  ...TerminalProjectSessionInput.fields,
+  cols: TerminalColsSchema,
+  rows: TerminalRowsSchema,
+});
+export type TerminalProjectResizeInput =
+  Schema.Codec.Encoded<typeof TerminalProjectResizeInput>;
+
+export const TerminalProjectClearInput = TerminalProjectSessionInput;
+export type TerminalProjectClearInput = Schema.Codec.Encoded<typeof TerminalProjectClearInput>;
+
+export const TerminalProjectRestartInput = Schema.Struct({
+  ...TerminalProjectSessionInput.fields,
+  cwd: TrimmedNonEmptyStringSchema,
+  cols: TerminalColsSchema,
+  rows: TerminalRowsSchema,
+  env: Schema.optional(TerminalEnvSchema),
+});
+export type TerminalProjectRestartInput =
+  Schema.Codec.Encoded<typeof TerminalProjectRestartInput>;
+
+export const TerminalProjectCloseInput = Schema.Struct({
+  ...TerminalProjectInput.fields,
+  terminalId: Schema.optional(TerminalIdSchema),
+  deleteHistory: Schema.optional(Schema.Boolean),
+});
+export type TerminalProjectCloseInput = Schema.Codec.Encoded<typeof TerminalProjectCloseInput>;
+
+export const TerminalProjectSessionSnapshot = Schema.Struct({
+  projectId: ProjectId,
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+  cwd: Schema.String.check(Schema.isNonEmpty()),
+  status: TerminalSessionStatus,
+  pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
+  history: Schema.String,
+  replayPreamble: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
+  exitCode: Schema.NullOr(Schema.Int),
+  exitSignal: Schema.NullOr(Schema.Int),
+  updatedAt: Schema.String,
+});
+export type TerminalProjectSessionSnapshot = typeof TerminalProjectSessionSnapshot.Type;
+
+const TerminalProjectEventBaseSchema = Schema.Struct({
+  projectId: ProjectId,
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+  createdAt: Schema.String,
+});
+
+export const TerminalProjectEvent = Schema.Union([
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("started"),
+    snapshot: TerminalProjectSessionSnapshot,
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("output"),
+    data: Schema.String,
+    byteLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("exited"),
+    exitCode: Schema.NullOr(Schema.Int),
+    exitSignal: Schema.NullOr(Schema.Int),
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("error"),
+    message: Schema.String.check(Schema.isNonEmpty()),
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("cleared"),
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("restarted"),
+    snapshot: TerminalProjectSessionSnapshot,
+  }),
+  Schema.Struct({
+    ...TerminalProjectEventBaseSchema.fields,
+    type: Schema.Literal("activity"),
+    hasRunningSubprocess: Schema.Boolean,
+    cliKind: Schema.NullOr(
+      Schema.Union([
+        Schema.Literal("codex"),
+        Schema.Literal("claude"),
+        Schema.Literal("antigravity"),
+      ]),
+    ),
+    agentState: Schema.NullOr(
+      Schema.Union([
+        Schema.Literal("running"),
+        Schema.Literal("attention"),
+        Schema.Literal("review"),
+      ]),
+    ),
+  }),
+]);
+export type TerminalProjectEvent = typeof TerminalProjectEvent.Type;

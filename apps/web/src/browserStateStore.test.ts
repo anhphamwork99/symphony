@@ -19,8 +19,11 @@ describe("browserStateStore selectors", () => {
     const selector = selectThreadBrowserHistory(THREAD_ID);
     const store = {
       threadStatesByThreadId: {},
+      projectStatesByProjectId: {},
       recentHistoryByThreadId: {},
+      recentHistoryByProjectId: {},
       upsertThreadState: () => undefined,
+      upsertProjectState: () => undefined,
       removeThreadState: () => undefined,
     };
 

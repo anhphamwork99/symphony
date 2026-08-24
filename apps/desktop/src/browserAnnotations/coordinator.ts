@@ -2,15 +2,22 @@ import * as Crypto from "node:crypto";
 
 import type { WebContents } from "electron";
 import type {
+  BrowserAnnotation,
   BrowserAnnotationCancelInput,
   BrowserAnnotationCancelReason,
   BrowserAnnotationEvent,
+  BrowserAnnotationProjectCancelInput,
+  BrowserAnnotationProjectEvent,
+  BrowserAnnotationProjectSession,
+  BrowserAnnotationProjectStartInput,
+  BrowserAnnotationProjectSyncMarkersInput,
   BrowserAnnotationSession,
   BrowserAnnotationStartInput,
   BrowserAnnotationSyncMarkersInput,
   BrowserAnnotationDocument,
   BrowserAnnotationSource,
   BrowserAnnotationTheme,
+  ProjectId,
   ThreadId,
 } from "@synara/contracts";
 import {
@@ -27,19 +34,57 @@ import {
 } from "./protocol";
 
 export interface BrowserAnnotationRuntime {
-  readonly threadId: ThreadId;
+  /**
+   * Provenance conversation for the legacy Thread-keyed surface. Present only
+   * when the owning workspace is a Thread: a Project-owned runtime carries
+   * `projectId` instead — there is no synthetic Thread alias (Decision 0002).
+   */
+  readonly threadId?: ThreadId;
+  /** Owning Project when this runtime belongs to a Project workspace. */
+  readonly projectId?: ProjectId;
   readonly tabId: string;
   readonly webContents: WebContents;
+}
+
+/**
+ * Internal workspace owner of one annotation surface (Decision 0002): the
+ * Right-sidebar browser/annotation workspace belongs to the real ProjectId.
+ * `thread` is the legacy v1 owner kept for the unchanged Thread-keyed
+ * surface; the two key spaces are disjoint and never merged.
+ */
+export type BrowserAnnotationWorkspaceOwner =
+  | { readonly kind: "thread"; readonly threadId: ThreadId }
+  | { readonly kind: "project"; readonly projectId: ProjectId };
+
+/** Deterministic, collision-free key for one owner plus its tab. */
+export function browserAnnotationOwnerKey(
+  owner: BrowserAnnotationWorkspaceOwner,
+  tabId: string,
+): string {
+  return owner.kind === "thread"
+    ? `t:${owner.threadId}:${tabId}`
+    : `p:${owner.projectId}:${tabId}`;
+}
+
+/** Extract the owning ProjectId, or null for a legacy Thread-owned surface. */
+export function browserAnnotationOwnerProjectId(
+  owner: BrowserAnnotationWorkspaceOwner,
+): ProjectId | null {
+  return owner.kind === "project" ? owner.projectId : null;
 }
 
 interface BrowserAnnotationCoordinatorOptions {
   readonly resolveVisibleRuntime: (
     input: BrowserAnnotationStartInput | BrowserAnnotationCancelInput,
   ) => BrowserAnnotationRuntime;
+  /** Project-owned runtime resolution (v2); absent means no Project surface. */
+  readonly resolveProjectVisibleRuntime?: (
+    input: BrowserAnnotationProjectStartInput | BrowserAnnotationProjectCancelInput,
+  ) => BrowserAnnotationRuntime | null;
   readonly resolveRuntimeByWebContentsId: (
     webContentsId: number,
   ) => BrowserAnnotationRuntime | null;
-  readonly markHumanControl: (threadId: ThreadId) => void;
+  readonly markHumanControl: (owner: BrowserAnnotationWorkspaceOwner) => void;
 }
 
 interface ReadyDocument {
@@ -65,15 +110,19 @@ interface MarkerProjection {
 }
 
 interface BrowserAnnotationAffinity {
-  readonly threadId: ThreadId;
+  readonly threadId: ThreadId | null;
+  readonly projectId: ProjectId | null;
   readonly tabId: string;
   readonly liveUrl: string;
 }
 
 type BrowserAnnotationEventListener = (event: BrowserAnnotationEvent) => void;
+type BrowserAnnotationProjectEventListener = (
+  event: BrowserAnnotationProjectEvent,
+) => void;
 
 function runtimeKey(threadId: ThreadId, tabId: string): string {
-  return `${threadId}:${tabId}`;
+  return `t:${threadId}:${tabId}`;
 }
 
 function canonicalWebUrl(value: string): string | null {
@@ -95,8 +144,14 @@ export class BrowserAnnotationCoordinator {
   private readonly projectionsByRuntimeKey = new Map<string, MarkerProjection>();
   private readonly invalidatedDocumentRuntimeKeys = new Set<string>();
   private readonly listeners = new Set<BrowserAnnotationEventListener>();
+  private readonly projectListeners = new Set<BrowserAnnotationProjectEventListener>();
   private readonly committedAnnotationIds = new Set<string>();
   private readonly affinityByAnnotationId = new Map<string, BrowserAnnotationAffinity>();
+  /** Durable Project-workspace projection stubs keyed by `p:<projectId>:<tabId>`. */
+  private readonly seededProjectMarkersByRuntimeKey = new Map<
+    string,
+    { readonly markers: ReadonlyArray<{ id: string; ordinal: number; documentKey: string }> }
+  >();
 
   constructor(private readonly options: BrowserAnnotationCoordinatorOptions) {}
 
@@ -144,7 +199,7 @@ export class BrowserAnnotationCoordinator {
 
     // Starting the picker is an explicit human takeover. This interrupts any
     // in-flight agent command before the guest becomes interactive.
-    this.options.markHumanControl(input.threadId);
+    this.options.markHumanControl({ kind: "thread", threadId: input.threadId });
     const session: ActiveSession = {
       sessionId: Crypto.randomUUID(),
       runtime,
@@ -164,7 +219,7 @@ export class BrowserAnnotationCoordinator {
     this.emit({
       kind: "started",
       sessionId: session.sessionId,
-      threadId: session.runtime.threadId,
+      threadId: this.threadProvenance(session.runtime),
       tabId: session.runtime.tabId,
       document: session.document,
       source: session.source,
@@ -215,7 +270,7 @@ export class BrowserAnnotationCoordinator {
     if (!runtime || runtime.webContents !== sender || sender.isDestroyed()) return;
     const message = parseAnnotationGuestMessage(rawMessage);
     if (!message) return;
-    const key = runtimeKey(runtime.threadId, runtime.tabId);
+    const key = this.ownerRuntimeKey(runtime);
 
     if (message.kind === "ready") {
       const liveUrl = canonicalWebUrl(sender.getURL());
@@ -254,14 +309,7 @@ export class BrowserAnnotationCoordinator {
         previousDocument.document.token !== document.token ||
         previousDocument.liveUrl !== liveUrl
       ) {
-        this.emit({
-          kind: "document-changed",
-          sessionId: null,
-          threadId: runtime.threadId,
-          tabId: runtime.tabId,
-          document,
-          source: message.source,
-        });
+        this.emitDocumentChanged(runtime, document, message.source);
       }
       const projection = this.projectionsByRuntimeKey.get(key);
       if (projection) this.sendProjection(runtime, projection);
@@ -284,16 +332,7 @@ export class BrowserAnnotationCoordinator {
         this.markersForDocument(documentState, projection).map((marker) => marker.id),
       );
       if (message.projectedMarkerIds.some((id) => !allowedIds.has(id))) return;
-      this.emit({
-        kind: "markers-synced",
-        sessionId: null,
-        threadId: runtime.threadId,
-        tabId: runtime.tabId,
-        document: documentState.document,
-        source: documentState.source,
-        version: projection.version,
-        projectedMarkerIds: message.projectedMarkerIds,
-      });
+      this.emitMarkersSynced(runtime, documentState, projection, message.projectedMarkerIds);
       return;
     }
 
@@ -319,26 +358,189 @@ export class BrowserAnnotationCoordinator {
       return;
     }
     this.rememberCommittedAnnotation(message.annotation.id);
-    this.rememberAnnotationAffinity(
-      message.annotation.id,
-      runtime.threadId,
-      runtime.tabId,
-      session.liveUrl,
+    this.rememberAnnotationAffinity(message.annotation.id, runtime, session.liveUrl);
+    this.emitCommitted(runtime, session, message.annotation);
+  }
+
+  startForProject(
+    input: BrowserAnnotationProjectStartInput,
+  ): BrowserAnnotationProjectSession {
+    const theme = parseBrowserAnnotationTheme(input.theme);
+    if (!theme) {
+      throw new Error("Invalid browser annotation theme.");
+    }
+    const runtime = this.resolveProjectRuntime(input);
+    const key = browserAnnotationOwnerKey(
+      { kind: "project", projectId: input.projectId },
+      input.tabId,
     );
-    this.emit({
-      kind: "committed",
+    const documentState = this.documentsByRuntimeKey.get(key);
+    if (
+      !documentState ||
+      this.invalidatedDocumentRuntimeKeys.has(key) ||
+      documentState.webContentsId !== runtime.webContents.id ||
+      runtime.webContents.isDestroyed()
+    ) {
+      throw new Error("The browser page is not ready for annotation.");
+    }
+    const liveUrl = canonicalWebUrl(runtime.webContents.getURL());
+    if (
+      !liveUrl ||
+      liveUrl !== documentState.liveUrl ||
+      sanitizeBrowserAnnotationUrl(liveUrl) !== documentState.source.url
+    ) {
+      throw new Error("The browser page changed before annotation could start.");
+    }
+
+    const existing = this.sessionsByRuntimeKey.get(key);
+    if (
+      existing &&
+      existing.runtime.webContents.id === runtime.webContents.id &&
+      existing.document.token === documentState.document.token
+    ) {
+      return this.toPublicProjectSession(existing);
+    }
+    if (existing) {
+      this.finishSession(existing, "replaced", true);
+    }
+
+    this.options.markHumanControl({ kind: "project", projectId: input.projectId });
+    const session: ActiveSession = {
+      sessionId: Crypto.randomUUID(),
+      runtime,
+      liveUrl,
+      document: documentState.document,
+      source: documentState.source,
+      theme,
+    };
+    this.sessionsByRuntimeKey.set(key, session);
+    runtime.webContents.send(BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL, {
+      version: BROWSER_ANNOTATION_PROTOCOL_VERSION,
+      kind: "start",
+      documentToken: session.document.token,
       sessionId: session.sessionId,
-      threadId: runtime.threadId,
-      tabId: runtime.tabId,
-      document: session.document,
-      source: message.annotation.source,
-      annotation: message.annotation,
+      theme: session.theme,
     });
+    this.emitProject({
+      kind: "started",
+      sessionId: session.sessionId,
+      projectId: input.projectId,
+      tabId: session.runtime.tabId,
+      document: session.document,
+      source: session.source,
+    });
+    return this.toPublicProjectSession(session);
+  }
+
+  private resolveProjectRuntime(
+    input: BrowserAnnotationProjectStartInput | BrowserAnnotationProjectCancelInput,
+  ): BrowserAnnotationRuntime {
+    const runtime = this.options.resolveProjectVisibleRuntime?.(input);
+    if (!runtime) {
+      throw new Error("The requested browser tab is not available in this project.");
+    }
+    return runtime;
+  }
+
+  cancelForProject(input: BrowserAnnotationProjectCancelInput): void {
+    const runtime = this.resolveProjectRuntime(input);
+    if (runtime.projectId === undefined) {
+      return;
+    }
+    const key = browserAnnotationOwnerKey(
+      { kind: "project", projectId: input.projectId },
+      input.tabId,
+    );
+    const session = this.sessionsByRuntimeKey.get(key);
+    if (!session) return;
+    if (runtime.webContents.id !== session.runtime.webContents.id) return;
+    this.finishSession(session, "user", true);
+  }
+
+  syncMarkersForProject(input: BrowserAnnotationProjectSyncMarkersInput): void {
+    const parsedMarkers = parseBrowserAnnotationMarkers(input.markers);
+    if (!Number.isSafeInteger(input.version) || input.version < 0 || parsedMarkers === null) {
+      throw new Error("Invalid browser annotation marker projection.");
+    }
+    const key = browserAnnotationOwnerKey(
+      { kind: "project", projectId: input.projectId },
+      input.tabId,
+    );
+    const previous = this.projectionsByRuntimeKey.get(key);
+    if (previous && input.version < previous.version) return;
+    if (previous && input.version === previous.version) return;
+    const projection: MarkerProjection = {
+      version: input.version,
+      markers: parsedMarkers.map((marker) => {
+        marker.source = { ...marker.source };
+        return marker;
+      }),
+    };
+    this.projectionsByRuntimeKey.set(key, projection);
+    const runtime = this.options.resolveRuntimeByWebContentsId(
+      this.documentsByRuntimeKey.get(key)?.webContentsId ?? -1,
+    );
+    if (
+      runtime &&
+      runtime.projectId === input.projectId &&
+      runtime.tabId === input.tabId
+    ) {
+      this.sendProjection(runtime, projection);
+    }
+  }
+
+  resolveProjectAnnotationNavigationTarget(input: {
+    projectId: ProjectId;
+    tabId?: string;
+    annotationId: string;
+  }): { readonly tabId: string; readonly liveUrl: string } | null {
+    const affinity = this.affinityByAnnotationId.get(input.annotationId);
+    if (
+      !affinity ||
+      affinity.projectId !== input.projectId ||
+      (input.tabId !== undefined && affinity.tabId !== input.tabId)
+    ) {
+      return null;
+    }
+    return { tabId: affinity.tabId, liveUrl: affinity.liveUrl };
+  }
+
+  subscribeProjectEvents(listener: (event: BrowserAnnotationProjectEvent) => void): () => void {
+    this.projectListeners.add(listener);
+    return () => {
+      this.projectListeners.delete(listener);
+    };
   }
 
   isInteractive(threadId: ThreadId): boolean {
     for (const session of this.sessionsByRuntimeKey.values()) {
       if (session.runtime.threadId === threadId) return true;
+    }
+    return false;
+  }
+
+  /** Whether any session is interactive for the given owner (owner-keyed). */
+  hasInteractiveSession(owner: BrowserAnnotationWorkspaceOwner): boolean {
+    for (const session of this.sessionsByRuntimeKey.values()) {
+      if (
+        (owner.kind === "thread" && session.runtime.threadId === owner.threadId) ||
+        (owner.kind === "project" &&
+          session.runtime.projectId !== undefined &&
+          session.runtime.projectId === owner.projectId)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Project-owned variant of {@link isInteractive} (Decision 0002). */
+  isInteractiveByOwner(owner: BrowserAnnotationWorkspaceOwner): boolean {
+    if (owner.kind === "thread") {
+      return this.isInteractive(owner.threadId);
+    }
+    for (const session of this.sessionsByRuntimeKey.values()) {
+      if (session.runtime.projectId === owner.projectId) return true;
     }
     return false;
   }
@@ -360,7 +562,15 @@ export class BrowserAnnotationCoordinator {
   }
 
   handleNavigation(threadId: ThreadId, tabId: string, webContentsId: number): void {
-    const key = runtimeKey(threadId, tabId);
+    this.handleOwnerNavigation({ kind: "thread", threadId }, tabId, webContentsId);
+  }
+
+  handleOwnerNavigation(
+    owner: BrowserAnnotationWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    const key = browserAnnotationOwnerKey(owner, tabId);
     const documentState = this.documentsByRuntimeKey.get(key);
     if (documentState?.webContentsId !== webContentsId) return;
     const session = this.sessionsByRuntimeKey.get(key);
@@ -371,7 +581,15 @@ export class BrowserAnnotationCoordinator {
   }
 
   recoverNavigation(threadId: ThreadId, tabId: string, webContentsId: number): void {
-    const key = runtimeKey(threadId, tabId);
+    return this.recoverOwnerNavigation({ kind: "thread", threadId }, tabId, webContentsId);
+  }
+
+  recoverOwnerNavigation(
+    owner: BrowserAnnotationWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    const key = browserAnnotationOwnerKey(owner, tabId);
     if (!this.invalidatedDocumentRuntimeKeys.has(key)) return;
     const documentState = this.documentsByRuntimeKey.get(key);
     const runtime = this.options.resolveRuntimeByWebContentsId(webContentsId);
@@ -391,7 +609,15 @@ export class BrowserAnnotationCoordinator {
   }
 
   handleInPageNavigation(threadId: ThreadId, tabId: string, webContentsId: number): void {
-    const key = runtimeKey(threadId, tabId);
+    this.handleOwnerInPageNavigation({ kind: "thread", threadId }, tabId, webContentsId);
+  }
+
+  handleOwnerInPageNavigation(
+    owner: BrowserAnnotationWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+  ): void {
+    const key = browserAnnotationOwnerKey(owner, tabId);
     const documentState = this.documentsByRuntimeKey.get(key);
     if (documentState?.webContentsId !== webContentsId) return;
     const session = this.sessionsByRuntimeKey.get(key);
@@ -413,7 +639,16 @@ export class BrowserAnnotationCoordinator {
     webContentsId: number,
     reason: Extract<BrowserAnnotationCancelReason, "detached" | "destroyed" | "replaced">,
   ): void {
-    const key = runtimeKey(threadId, tabId);
+    this.handleOwnerRuntimeDetached({ kind: "thread", threadId }, tabId, webContentsId, reason);
+  }
+
+  handleOwnerRuntimeDetached(
+    owner: BrowserAnnotationWorkspaceOwner,
+    tabId: string,
+    webContentsId: number,
+    reason: Extract<BrowserAnnotationCancelReason, "detached" | "destroyed" | "replaced">,
+  ): void {
+    const key = browserAnnotationOwnerKey(owner, tabId);
     const session = this.sessionsByRuntimeKey.get(key);
     if (session?.runtime.webContents.id === webContentsId) {
       this.finishSession(session, reason, false);
@@ -425,8 +660,71 @@ export class BrowserAnnotationCoordinator {
   }
 
   clearProjection(threadId: ThreadId, tabId: string): void {
-    const key = runtimeKey(threadId, tabId);
+    this.clearOwnerProjection({ kind: "thread", threadId }, tabId);
+  }
+
+  clearOwnerProjection(owner: BrowserAnnotationWorkspaceOwner, tabId: string): void {
+    const key = browserAnnotationOwnerKey(owner, tabId);
     this.projectionsByRuntimeKey.delete(key);
+  }
+
+  // ── Durable Project workspace marker projection (Decision 0004) ────
+  //
+  // A published `browser-annotations` slice carries durable projection stubs
+  // (id/tabId/ordinal/documentKey) — never live markers. Seeding them records
+  // that the annotations exist for those tabs WITHOUT fabricating a marker,
+  // session, document, or runtime: no projection is pushed until a real
+  // renderer-driven sync arrives for a live document.
+
+  seedProjectWorkspaceMarkers(input: {
+    readonly projectId: ProjectId;
+    readonly markers: ReadonlyArray<{
+      readonly id: string;
+      readonly tabId: string;
+      readonly ordinal: number;
+      readonly documentKey: string;
+    }>;
+  }): void {
+    const owner: BrowserAnnotationWorkspaceOwner = {
+      kind: "project",
+      projectId: input.projectId,
+    };
+    const byTab = new Map<string, Array<(typeof input.markers)[number]>>();
+    for (const marker of input.markers) {
+      const list = byTab.get(marker.tabId) ?? [];
+      list.push(marker);
+      byTab.set(marker.tabId, list);
+    }
+    for (const [tabId, markers] of byTab) {
+      this.seededProjectMarkersByRuntimeKey.set(browserAnnotationOwnerKey(owner, tabId), {
+        markers: markers
+          .toSorted((left, right) => left.ordinal - right.ordinal)
+          .map(({ id, ordinal, documentKey }) => ({ id, ordinal, documentKey })),
+      });
+    }
+  }
+
+  /** The durable projection stubs seeded for one Project tab, if any. */
+  projectWorkspaceSeededMarkers(input: {
+    readonly projectId: ProjectId;
+    readonly tabId: string;
+  }):
+    ReadonlyArray<{ readonly id: string; readonly ordinal: number; readonly documentKey: string }> {
+    return (
+      this.seededProjectMarkersByRuntimeKey.get(
+        browserAnnotationOwnerKey({ kind: "project", projectId: input.projectId }, input.tabId),
+      )?.markers ?? []
+    );
+  }
+
+  /** Clears every seeded durable marker for one Project (deletion only). */
+  clearProjectWorkspaceSeededMarkers(projectId: ProjectId): void {
+    const prefix = `p:${String(projectId)}:`;
+    for (const key of this.seededProjectMarkersByRuntimeKey.keys()) {
+      if (key.startsWith(prefix)) {
+        this.seededProjectMarkersByRuntimeKey.delete(key);
+      }
+    }
   }
 
   dispose(): void {
@@ -438,8 +736,10 @@ export class BrowserAnnotationCoordinator {
     }
     this.documentsByRuntimeKey.clear();
     this.projectionsByRuntimeKey.clear();
+    this.seededProjectMarkersByRuntimeKey.clear();
     this.invalidatedDocumentRuntimeKeys.clear();
     this.listeners.clear();
+    this.projectListeners.clear();
     this.committedAnnotationIds.clear();
     this.affinityByAnnotationId.clear();
   }
@@ -449,7 +749,7 @@ export class BrowserAnnotationCoordinator {
     reason: BrowserAnnotationCancelReason,
     notifyGuest: boolean,
   ): void {
-    const key = runtimeKey(session.runtime.threadId, session.runtime.tabId);
+    const key = this.ownerRuntimeKey(session.runtime);
     if (this.sessionsByRuntimeKey.get(key) !== session) return;
     this.sessionsByRuntimeKey.delete(key);
     if (notifyGuest && !session.runtime.webContents.isDestroyed()) {
@@ -460,11 +760,23 @@ export class BrowserAnnotationCoordinator {
         sessionId: session.sessionId,
       });
     }
+    if (session.runtime.projectId !== undefined) {
+      this.emitProject({
+        kind: "cancelled",
+        sessionId: session.sessionId,
+        reason,
+        projectId: session.runtime.projectId,
+        tabId: session.runtime.tabId,
+        document: session.document,
+        source: session.source,
+      });
+      return;
+    }
     this.emit({
       kind: "cancelled",
       sessionId: session.sessionId,
       reason,
-      threadId: session.runtime.threadId,
+      threadId: this.threadProvenance(session.runtime),
       tabId: session.runtime.tabId,
       document: session.document,
       source: session.source,
@@ -473,7 +785,7 @@ export class BrowserAnnotationCoordinator {
 
   private sendProjection(runtime: BrowserAnnotationRuntime, projection: MarkerProjection): void {
     const documentState = this.documentsByRuntimeKey.get(
-      runtimeKey(runtime.threadId, runtime.tabId),
+      this.ownerRuntimeKey(runtime),
     );
     if (
       !documentState ||
@@ -484,12 +796,7 @@ export class BrowserAnnotationCoordinator {
     }
     const markers = this.markersForDocument(documentState, projection);
     for (const marker of markers) {
-      this.rememberAnnotationAffinity(
-        marker.id,
-        runtime.threadId,
-        runtime.tabId,
-        documentState.liveUrl,
-      );
+      this.rememberAnnotationAffinity(marker.id, runtime, documentState.liveUrl);
     }
     runtime.webContents.send(BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL, {
       version: BROWSER_ANNOTATION_PROTOCOL_VERSION,
@@ -513,7 +820,7 @@ export class BrowserAnnotationCoordinator {
   private toPublicSession(session: ActiveSession): BrowserAnnotationSession {
     return {
       sessionId: session.sessionId,
-      threadId: session.runtime.threadId,
+      threadId: this.threadProvenance(session.runtime),
       tabId: session.runtime.tabId,
       document: session.document,
       source: session.source,
@@ -529,15 +836,150 @@ export class BrowserAnnotationCoordinator {
 
   private rememberAnnotationAffinity(
     annotationId: string,
-    threadId: ThreadId,
-    tabId: string,
+    runtime: BrowserAnnotationRuntime,
     liveUrl: string,
   ): void {
     this.affinityByAnnotationId.delete(annotationId);
-    this.affinityByAnnotationId.set(annotationId, { threadId, tabId, liveUrl });
+    this.affinityByAnnotationId.set(annotationId, {
+      threadId: runtime.projectId === undefined ? this.threadProvenance(runtime) : null,
+      projectId: runtime.projectId ?? null,
+      tabId: runtime.tabId,
+      liveUrl,
+    });
     if (this.affinityByAnnotationId.size <= 1_024) return;
     const oldest = this.affinityByAnnotationId.keys().next().value;
     if (oldest) this.affinityByAnnotationId.delete(oldest);
+  }
+
+  /** Key under which one runtime's documents/sessions/projections live. */
+  private ownerRuntimeKey(runtime: BrowserAnnotationRuntime): string {
+    return runtime.projectId === undefined
+      ? runtimeKey(this.threadProvenance(runtime), runtime.tabId)
+      : browserAnnotationOwnerKey({ kind: "project", projectId: runtime.projectId }, runtime.tabId);
+  }
+
+  /**
+   * Legacy-surface provenance: the real ThreadId of a Thread-owned runtime.
+   * Every caller has already branched on `projectId === undefined`; this only
+   * narrows the optional field for the type system. A Project-owned runtime
+   * never reaches the Thread-keyed surface.
+   */
+  private threadProvenance(runtime: BrowserAnnotationRuntime): ThreadId {
+    if (runtime.threadId === undefined) {
+      throw new Error("A project-owned runtime cannot use the thread annotation surface.");
+    }
+    return runtime.threadId;
+  }
+
+  private emitDocumentChanged(
+    runtime: BrowserAnnotationRuntime,
+    document: BrowserAnnotationDocument,
+    source: BrowserAnnotationSource,
+  ): void {
+    if (runtime.projectId !== undefined) {
+      this.emitProject({
+        kind: "document-changed",
+        sessionId: null,
+        projectId: runtime.projectId,
+        tabId: runtime.tabId,
+        document,
+        source,
+      });
+      return;
+    }
+    this.emit({
+      kind: "document-changed",
+      sessionId: null,
+      threadId: this.threadProvenance(runtime),
+      tabId: runtime.tabId,
+      document,
+      source,
+    });
+  }
+
+  private emitMarkersSynced(
+    runtime: BrowserAnnotationRuntime,
+    documentState: ReadyDocument,
+    projection: MarkerProjection,
+    projectedMarkerIds: ReadonlyArray<string>,
+  ): void {
+    if (runtime.projectId !== undefined) {
+      this.emitProject({
+        kind: "markers-synced",
+        sessionId: null,
+        projectId: runtime.projectId,
+        tabId: runtime.tabId,
+        document: documentState.document,
+        source: documentState.source,
+        version: projection.version,
+        projectedMarkerIds: [...projectedMarkerIds],
+      });
+      return;
+    }
+    this.emit({
+      kind: "markers-synced",
+      sessionId: null,
+      threadId: this.threadProvenance(runtime),
+      tabId: runtime.tabId,
+      document: documentState.document,
+      source: documentState.source,
+      version: projection.version,
+      projectedMarkerIds: [...projectedMarkerIds],
+    });
+  }
+
+  private emitCommitted(
+    runtime: BrowserAnnotationRuntime,
+    session: ActiveSession,
+    annotation: BrowserAnnotation,
+  ): void {
+    if (runtime.projectId !== undefined) {
+      this.emitProject({
+        kind: "committed",
+        sessionId: session.sessionId,
+        projectId: runtime.projectId,
+        tabId: runtime.tabId,
+        document: session.document,
+        source: annotation.source,
+        annotation,
+      });
+      return;
+    }
+    this.emit({
+      kind: "committed",
+      sessionId: session.sessionId,
+      threadId: this.threadProvenance(runtime),
+      tabId: runtime.tabId,
+      document: session.document,
+      source: annotation.source,
+      annotation,
+    });
+  }
+
+  private toPublicProjectSession(session: ActiveSession): BrowserAnnotationProjectSession {
+    if (session.runtime.projectId === undefined) {
+      throw new Error("The annotation session does not belong to a project workspace.");
+    }
+    return {
+      sessionId: session.sessionId,
+      projectId: session.runtime.projectId,
+      tabId: session.runtime.tabId,
+      document: session.document,
+      source: session.source,
+    };
+  }
+
+  private emitProject(event: BrowserAnnotationProjectEvent): void {
+    // Same snapshot-spread delivery contract as emit(): a listener may
+    // unsubscribe mid-dispatch and the delivery set must stay stable.
+    // oxlint-disable-next-line unicorn/no-useless-spread
+    for (const listener of [...this.projectListeners]) {
+      try {
+        listener(event);
+      } catch {
+        // A renderer listener must never disrupt guest/runtime cleanup.
+      }
+    }
   }
 
   private emit(event: BrowserAnnotationEvent): void {

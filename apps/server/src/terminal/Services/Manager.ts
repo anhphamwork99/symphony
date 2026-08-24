@@ -7,11 +7,21 @@
  * @module TerminalManager
  */
 import {
+  ProjectId,
   TerminalAckOutputInput,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
+  TerminalProjectAckOutputInput,
+  TerminalProjectClearInput,
+  TerminalProjectCloseInput,
+  TerminalProjectEvent,
+  TerminalProjectOpenInput,
+  TerminalProjectResizeInput,
+  TerminalProjectRestartInput,
+  TerminalProjectSessionSnapshot,
+  TerminalProjectWriteInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
@@ -29,8 +39,43 @@ export class TerminalError extends Schema.TaggedErrorClass<TerminalError>()("Ter
   cause: Schema.optional(Schema.Defect),
 }) {}
 
+/**
+ * The owner of a terminal session: either one real conversation (`thread`) or
+ * one real Project workspace (`project`). A Project terminal is keyed by its
+ * actual `ProjectId` — never a `ProjectId` cast to a `ThreadId`, a prefixed
+ * pseudo-Thread, or whichever conversation happens to be selected.
+ */
+export type TerminalSessionOwner =
+  | { readonly kind: "thread"; readonly threadId: string }
+  | { readonly kind: "project"; readonly projectId: string };
+
+/**
+ * Truthful settlement outcome for one Project-owned terminal during Project
+ * deletion settlement. Only "settled" proves the process tree stopped;
+ * "uncertain" means stop signals were sent but no exit proof arrived in the
+ * grace window; "failed" means teardown itself errored. An outcome other
+ * than "settled" must never be reported as settled.
+ */
+export type TerminalProjectSettlementOutcome = "settled" | "uncertain" | "failed";
+
+/**
+ * Project terminal admission-fence phase (WP4 deletion fencing).
+ * `deleting` = settlement sequence in flight; `deleted` = `project.deleted`
+ * committed and the fence is retained for the server's lifetime.
+ */
+export type TerminalProjectFencePhase = "deleting" | "deleted";
+
+/** Per-terminal settlement record returned by `settleProjectTerminals`. */
+export interface TerminalProjectSettlementResult {
+  readonly projectId: ProjectId;
+  readonly terminalId: string;
+  readonly outcome: TerminalProjectSettlementOutcome;
+  readonly detail: string | null;
+}
+
 export interface TerminalSessionState {
-  threadId: string;
+  /** Discriminated owner; see {@link TerminalSessionOwner}. */
+  owner: TerminalSessionOwner;
   terminalId: string;
   cwd: string;
   status: TerminalSessionStatus;
@@ -102,9 +147,13 @@ export interface ShellCandidate {
   args?: string[];
 }
 
-export interface TerminalStartInput extends TerminalOpenInput {
-  cols: number;
-  rows: number;
+/** Owner-agnostic spawn dimensions/ENV payload used by startSession. */
+export interface TerminalStartPayload {
+  readonly cwd: string;
+  readonly cols: number;
+  readonly rows: number;
+  readonly env?: Record<string, string> | undefined;
+  readonly streamOutput?: boolean | undefined;
 }
 
 export interface TerminalCloseOpenedAtOrBeforeInput {
@@ -169,6 +218,106 @@ export interface TerminalManagerShape {
   readonly closeSessionsOpenedAtOrBefore: (
     input: TerminalCloseOpenedAtOrBeforeInput,
   ) => Effect.Effect<void, TerminalError>;
+
+  // ── Project-owned terminal lifecycle (Decision 0002) ────────────────
+  // The same session machinery, keyed by the real ProjectId. Project
+  // terminals are shared by every Main conversation in the Project and
+  // survive conversation switches, Project navigation, and Thread
+  // archive/delete (which clean only thread-owned sessions).
+
+  /** Open or attach to a Project-owned terminal session. */
+  readonly openProject: (
+    input: TerminalProjectOpenInput,
+  ) => Effect.Effect<TerminalProjectSessionSnapshot, TerminalError>;
+
+  /** Write input bytes to a Project-owned terminal session. */
+  readonly writeProject: (
+    input: TerminalProjectWriteInput,
+  ) => Effect.Effect<void, TerminalError>;
+
+  /** Acknowledge Project terminal output after the renderer parser consumes it. */
+  readonly ackOutputProject: (
+    input: TerminalProjectAckOutputInput,
+  ) => Effect.Effect<void, TerminalError>;
+
+  /** Resize the PTY backing a Project-owned terminal session. */
+  readonly resizeProject: (
+    input: TerminalProjectResizeInput,
+  ) => Effect.Effect<void, TerminalError>;
+
+  /** Clear a Project-owned terminal's output history. */
+  readonly clearProject: (
+    input: TerminalProjectClearInput,
+  ) => Effect.Effect<void, TerminalError>;
+
+  /** Restart a Project-owned terminal session in place. */
+  readonly restartProject: (
+    input: TerminalProjectRestartInput,
+  ) => Effect.Effect<TerminalProjectSessionSnapshot, TerminalError>;
+
+  /**
+   * Close Project-owned terminal session(s). When `terminalId` is omitted,
+   * closes every session owned by the Project.
+   */
+  readonly closeProject: (
+    input: TerminalProjectCloseInput,
+  ) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * List every Project-owned terminal session snapshot (preflight surface
+   * for deletion warnings about active terminal work).
+   */
+  readonly listProjectTerminals: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<ReadonlyArray<TerminalProjectSessionSnapshot>, TerminalError>;
+
+  /**
+   * Settle every Project-owned terminal with a truthful per-terminal
+   * outcome ("settled" requires observed process exit; "uncertain" means
+   * stop signals were sent without exit proof; "failed" means teardown
+   * errored). Removes settled sessions and their history ONLY when every
+   * outcome is "settled"; any uncertain/failed outcome retains ALL sessions
+   * and history for a truthful retry. Idempotent.
+   */
+  readonly settleProjectTerminals: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<ReadonlyArray<TerminalProjectSettlementResult>, TerminalError>;
+
+  /**
+   * Begin the Project's deletion admission fence BEFORE settlement runs, so
+   * concurrent `terminal.project.open` calls are rejected while the deletion
+   * is deciding. Does not hold any terminal owner lock.
+   */
+  readonly beginProjectDeletionFence: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * Promote the fence to the retained `deleted` state after `project.deleted`
+   * and the workspace delete COMMIT. The fence is never released afterwards.
+   */
+  readonly commitProjectDeletionFence: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<void, TerminalError>;
+
+  /**
+   * Release the fence when the deletion did NOT commit (unproven settlement
+   * rejection or transaction rollback) so Project terminals stay usable.
+   * A committed (`deleted`) fence is never released.
+   */
+  readonly releaseProjectDeletionFence: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<void, TerminalError>;
+
+  /** Current admission-fence phase for a Project, or null when unfenced. */
+  readonly projectDeletionFenceState: (input: {
+    readonly projectId: ProjectId;
+  }) => Effect.Effect<TerminalProjectFencePhase | null, TerminalError>;
+
+  /** Subscribe to Project-owned terminal runtime events. */
+  readonly subscribeProject: (
+    listener: (event: TerminalProjectEvent) => void,
+  ) => Effect.Effect<() => void>;
 
   /**
    * Subscribe to terminal runtime events.

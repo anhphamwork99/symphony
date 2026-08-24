@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 
-import { DEVICE_WS_METHODS, ThreadId } from "@synara/contracts";
+import { DEVICE_WS_METHODS, ProjectId, ThreadId } from "@synara/contracts";
 
 import { DeviceManager } from "./DeviceManager.ts";
+import { DeviceBackendError } from "./DeviceBackend.ts";
 import { FakeDeviceBackend } from "./FakeDeviceBackend.ts";
 import { makeWsDeviceHandlers } from "./wsDeviceHandlers.ts";
 
@@ -21,10 +22,12 @@ describe("device WebSocket handlers", () => {
   it("handles every request method in the RPC group", async () => {
     const { handlers } = await setup();
 
-    // The stream method is wired in wsRpc where the admission guard lives; the
-    // other nineteen must all be present or the handler map is not exhaustive.
+    // The stream methods are wired in wsRpc where the admission guard lives;
+    // the rest must all be present or the handler map is not exhaustive.
     const expected = Object.values(DEVICE_WS_METHODS).filter(
-      (method) => method !== DEVICE_WS_METHODS.subscribeEvents,
+      (method) =>
+        method !== DEVICE_WS_METHODS.subscribeEvents &&
+        method !== DEVICE_WS_METHODS.subscribeProjectEvents,
     );
     expect(Object.keys(handlers).toSorted()).toEqual(expected.toSorted());
   });
@@ -121,5 +124,95 @@ describe("device WebSocket handlers without a backend", () => {
 
     expect(state.availability.kind).toBe("unsupported-platform");
     expect(state.devices).toEqual([]);
+  });
+
+  it("refuses project attach/detach but answers project getState with a truthful unsupported snapshot", async () => {
+    const handlers = makeWsDeviceHandlers(undefined);
+    const projectId = ProjectId.makeUnsafe("project-a");
+
+    // getState answers with a real snapshot naming the owning Project and the
+    // unsupported platform — the pane renders its blocked state rather than
+    // translating an error, and the Project identity round-trips untouched.
+    const state = await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.getProjectState]({ projectId }),
+    );
+    expect(state.projectId).toBe(projectId);
+    expect(state.availability.kind).toBe("unsupported-platform");
+    expect(state.devices).toEqual([]);
+    expect(state.attachedDeviceUdid).toBeNull();
+
+    const attachExit = await Effect.runPromiseExit(
+      handlers[DEVICE_WS_METHODS.attachProject]({ projectId, udid: DEVICE }),
+    );
+    expect(Exit.isFailure(attachExit)).toBe(true);
+    if (Exit.isFailure(attachExit)) {
+      expect(JSON.stringify(attachExit.cause)).toContain("requires macOS");
+    }
+  });
+});
+
+describe("device WebSocket project handlers", () => {
+  it("attaches a Project and reports the resulting Project-owned state", async () => {
+    const { handlers } = await setup();
+    const projectId = ProjectId.makeUnsafe("project-a");
+
+    const state = await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.attachProject]({ projectId, udid: DEVICE }),
+    );
+
+    expect(state.projectId).toBe(projectId);
+    expect(state.attachedDeviceUdid).toBe(DEVICE);
+    expect(state.availability).toEqual({ kind: "available" });
+  });
+
+  it("detaches a Project and reports the cleared state", async () => {
+    const { handlers } = await setup();
+    const projectId = ProjectId.makeUnsafe("project-b");
+
+    await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.attachProject]({ projectId, udid: DEVICE }),
+    );
+    const state = await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.detachProject]({ projectId }),
+    );
+
+    expect(state.projectId).toBe(projectId);
+    expect(state.attachedDeviceUdid).toBeNull();
+  });
+
+  it("turns a backend failure into an RPC error carrying its message", async () => {
+    const { backend, handlers } = await setup();
+    backend.failNext("boot", new DeviceBackendError("no such simulator"));
+
+    const exit = await Effect.runPromiseExit(
+      handlers[DEVICE_WS_METHODS.boot]({ udid: "FAKE-9999" }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (!Exit.isFailure(exit)) return;
+    expect(JSON.stringify(exit.cause)).toContain("no such simulator");
+  });
+
+  it("keeps Projects isolated through the handler surface", async () => {
+    const { handlers } = await setup();
+    const projectIdA = ProjectId.makeUnsafe("project-a");
+    const projectIdB = ProjectId.makeUnsafe("project-b");
+
+    await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.attachProject]({ projectId: projectIdA, udid: DEVICE }),
+    );
+    await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.attachProject]({ projectId: projectIdB, udid: DEVICE }),
+    );
+    await Effect.runPromise(handlers[DEVICE_WS_METHODS.detachProject]({ projectId: projectIdB }));
+
+    const a = await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.getProjectState]({ projectId: projectIdA }),
+    );
+    const b = await Effect.runPromise(
+      handlers[DEVICE_WS_METHODS.getProjectState]({ projectId: projectIdB }),
+    );
+    expect(a.attachedDeviceUdid).toBe(DEVICE);
+    expect(b.attachedDeviceUdid).toBeNull();
   });
 });

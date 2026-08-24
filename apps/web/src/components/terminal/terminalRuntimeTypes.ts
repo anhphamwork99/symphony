@@ -2,6 +2,8 @@
 // Purpose: Shared types and stable identity helpers for persistent terminal runtimes.
 // Layer: Terminal runtime infrastructure
 
+import type { ProjectId } from "@synara/contracts";
+import type { DockTerminalScopeId } from "~/lib/dockTerminalScope";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -28,7 +30,15 @@ export function buildTerminalRuntimeKey(threadId: string, terminalId: string): s
 
 export interface TerminalRuntimeConfig {
   runtimeKey: string;
-  threadId: string;
+  threadId: string | DockTerminalScopeId;
+  /**
+   * Owning Project for the Right-sidebar dock terminal workspace (Decision
+   * 0002). When set, every server call routes through the Project-owned
+   * `terminal.project.*` surface; `threadId` remains the LOCAL store/runtime
+   * scope key only and is never sent as an owner. Null = legacy Thread-keyed
+   * surface (bottom drawer).
+   */
+  projectId?: ProjectId | null;
   terminalId: string;
   terminalLabel: string;
   terminalCliKind?: TerminalCliKind | null;
@@ -53,6 +63,7 @@ export type TerminalRuntimeStatus = "connecting" | "replaying" | "ready" | "exit
 export interface TerminalRuntimeEntry {
   runtimeKey: string;
   threadId: string;
+  projectId: ProjectId | null;
   terminalId: string;
   terminalLabel: string;
   terminalCliKind: TerminalCliKind | null;

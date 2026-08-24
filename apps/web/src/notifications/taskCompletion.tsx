@@ -12,7 +12,7 @@ import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import { useDiffRouteSearch } from "../hooks/useDiffRouteSearch";
 import { selectSplitView, useSplitViewStore } from "../splitViewStore";
-import { selectRightDockState, useRightDockStore } from "../rightDockStore";
+import { useActiveProjectRightDockState } from "../hooks/useActiveProjectRightDock";
 import { useStore } from "../store";
 import { createAllThreadsSelector } from "../storeSelectors";
 import { useTerminalStateStore } from "../terminalStateStore";
@@ -161,9 +161,7 @@ export function TaskCompletionNotifications() {
   const splitView = useSplitViewStore(
     useMemo(() => selectSplitView(routeSearch.splitViewId ?? null), [routeSearch.splitViewId]),
   );
-  const rightDockState = useRightDockStore(
-    useMemo(() => selectRightDockState(activeThreadId), [activeThreadId]),
-  );
+  const { dockState: rightDockState } = useActiveProjectRightDockState(activeThreadId);
   const [allThreadsSelector] = useState(() => createAllThreadsSelector());
   const threads = useStore(allThreadsSelector);
   const threadsHydrated = useStore((store) => store.threadsHydrated);

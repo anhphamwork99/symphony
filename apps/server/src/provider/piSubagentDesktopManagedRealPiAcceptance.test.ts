@@ -50,6 +50,9 @@ const REPO_ROOT = resolve(__dirname, "../../../..");
 const ALFIE_REPO_DIR = process.env.ALFIE_REPO_DIR ?? "";
 const CANARY_MARKER = "wp-c-ticket-02-desktop-managed-canary";
 const HOSTILE_SELECTED_MODEL_ID = "wp-c-hostile-unavailable-selected-model";
+const HOSTILE_PROTOCOL_SECRET = "sk-hostile-99";
+const HOSTILE_PROTOCOL_PATH = "/private/hostile";
+const INNOCENT_STACK_LOCATION = "PiAdapter.ts:3596:99";
 const createdRoots: string[] = [];
 
 /**
@@ -59,6 +62,8 @@ const createdRoots: string[] = [];
  * hostile negotiated protocol VERSION must not reach the operator surface in
  * any contextual form: prose ("protocol 99"), JSON field values, or
  * offered/supported version enumerations. These patterns pin that intent.
+ * Stack locations and other harmless diagnostics can contain the same digits;
+ * complete hostile secret and path values remain forbidden independently.
  */
 const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
   /protocol\s*version\s*[:=#]?\s*99\b/i,
@@ -78,6 +83,14 @@ function assertNoHostileProtocolVersion(detail: string): void {
       `detail must not match hostile protocol-version pattern ${String(pattern)}`,
     ).not.toMatch(pattern);
   }
+}
+
+function assertInnocentStackNumberIsAllowed(): void {
+  const diagnostic = `Error: bounded bootstrap failure\n    at ${INNOCENT_STACK_LOCATION}`;
+  expect(diagnostic).toContain("99");
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_SECRET);
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_PATH);
+  assertNoHostileProtocolVersion(diagnostic);
 }
 
 interface TreeSnapshot {
@@ -1189,6 +1202,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
     );
     const hostileVerified = await verifyPiSubagentArtifact(unsupportedArtifactDir);
     expect(hostileVerified.valid).toBe(true);
+    assertInnocentStackNumberIsAllowed();
 
     const harness = await makeDesktopHarness(unsupportedArtifactDir);
     try {
@@ -1213,8 +1227,8 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
       for (const forbidden of [
         PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
         "Hostile extension demands",
-        "sk-hostile-99",
-        "/private/hostile",
+        HOSTILE_PROTOCOL_SECRET,
+        HOSTILE_PROTOCOL_PATH,
         unsupportedArtifactDir,
         stagedFixture.sourceArtifactDir,
         harness.desktop?.userAgentDir ?? "",
