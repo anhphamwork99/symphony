@@ -124,8 +124,6 @@ export default function DevicePanel(props: {
   const upsertProjectState = useDeviceStateStore((store) => store.upsertProjectState);
   // Project-owned state wins when present (Decision 0002); the two are never merged.
   const threadState = projectDeviceState ?? legacyThreadState;
-  const upsertOwnedState =
-    projectId !== null && projectDeviceState !== undefined ? upsertProjectState : upsertThreadState;
   const [busy, setBusy] = useState(false);
   const [shutdownConfirm, setShutdownConfirm] = useState(false);
   const [landscape, setLandscape] = useState(false);

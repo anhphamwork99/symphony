@@ -26,6 +26,8 @@ import {
   type ProjectId,
   type TerminalProjectEvent,
   type TerminalProjectSessionSnapshot,
+  type WsPushChannel,
+  type WsPushData,
 } from "@synara/contracts";
 
 import { readWsTransport, type WsRequestTransport } from "./wsNativeApi";
@@ -152,10 +154,10 @@ interface EventHub<TEvent> {
   attachTransport: (transport: WsRequestTransport) => void;
 }
 
-function createEventHub<TEvent>(
-  channel: string,
-): EventHub<TEvent> & { listenersSize: () => number } {
-  const listeners = new Set<(event: TEvent) => void>();
+function createEventHub<const Channel extends WsPushChannel>(
+  channel: Channel,
+): EventHub<WsPushData<Channel>> & { listenersSize: () => number } {
+  const listeners = new Set<(event: WsPushData<Channel>) => void>();
   let unsubscribeTransport: Unsubscribe | null = null;
   return {
     subscribe(listener) {
@@ -171,7 +173,7 @@ function createEventHub<TEvent>(
       unsubscribeTransport = transport.subscribe(channel, (message) => {
         for (const listener of listeners) {
           try {
-            listener(message.data as TEvent);
+            listener(message.data as WsPushData<Channel>);
           } catch {
             // One listener must never block delivery to the rest.
           }
@@ -182,10 +184,8 @@ function createEventHub<TEvent>(
   };
 }
 
-const terminalProjectEventHub = createEventHub<TerminalProjectEvent>(
-  WS_CHANNELS.terminalProjectEvent,
-);
-const deviceProjectEventHub = createEventHub<DeviceProjectEvent>(DEVICE_PROJECT_WS_CHANNELS.event);
+const terminalProjectEventHub = createEventHub(WS_CHANNELS.terminalProjectEvent);
+const deviceProjectEventHub = createEventHub(DEVICE_PROJECT_WS_CHANNELS.event);
 
 function subscribeTerminalProjectEvents(
   transport: WsRequestTransport,

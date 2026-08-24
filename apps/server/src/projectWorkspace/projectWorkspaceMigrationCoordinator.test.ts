@@ -10,11 +10,10 @@
 import type { LegacyProjectWorkspaceThreadSlicesInput } from "@synara/shared/projectWorkspaceMigration";
 import { ProjectId, ThreadId } from "@synara/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Scope } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { ProjectWorkspaceStoreLive } from "./Layers/ProjectWorkspaceStore.ts";
 import { ProjectWorkspaceStore } from "./Services/ProjectWorkspaceStore.ts";
 import {
   makeProjectWorkspaceMigrationCoordinatorLayer,
@@ -25,7 +24,6 @@ import {
 // Every test seeds rows into one shared memory database, so each test uses
 // its own Project ids to stay independent (same convention as the store test).
 const projectA = ProjectId.makeUnsafe("proj-a");
-const projectB = ProjectId.makeUnsafe("proj-b");
 const projectEligible = ProjectId.makeUnsafe("proj-eligible");
 const projectDefaults = ProjectId.makeUnsafe("proj-defaults");
 const projectRetry = ProjectId.makeUnsafe("proj-retry");
@@ -34,16 +32,16 @@ const projectPrecedence = ProjectId.makeUnsafe("proj-precedence");
 const projectIndependentA = ProjectId.makeUnsafe("proj-indep-a");
 const projectIndependentB = ProjectId.makeUnsafe("proj-indep-b");
 const projectDeleted = ProjectId.makeUnsafe("proj-deleted");
-const projectAfterDeleted = ProjectId.makeUnsafe("proj-after-deleted");
 const projectIsoSnapshotA = ProjectId.makeUnsafe("proj-iso-snap-a");
 const projectIsoSnapshotB = ProjectId.makeUnsafe("proj-iso-snap-b");
 
 const clock = { now: () => "2026-08-24T00:00:00.000Z" };
 
 const coordinatorLayer = (hooks?: ProjectWorkspacePublicationHooks) =>
-  makeProjectWorkspaceMigrationCoordinatorLayer({ clock, hooks }).pipe(
-    Layer.provideMerge(SqlitePersistenceMemory),
-  );
+  makeProjectWorkspaceMigrationCoordinatorLayer({
+    clock,
+    ...(hooks === undefined ? {} : { hooks }),
+  }).pipe(Layer.provideMerge(SqlitePersistenceMemory));
 
 const layer = it.layer(coordinatorLayer());
 
@@ -113,7 +111,13 @@ const slicesFor = (threadIds: ReadonlyArray<string>) =>
 /** Runs `body` against a fresh coordinator built with the given hooks. */
 const withCoordinator = <A>(
   hooks: ProjectWorkspacePublicationHooks | undefined,
-  body: (coordinator: typeof ProjectWorkspaceMigrationCoordinator.Service) => Effect.Effect<A>,
+  body: (
+    coordinator: typeof ProjectWorkspaceMigrationCoordinator.Service,
+  ) => Effect.Effect<
+    A,
+    unknown,
+    SqlClient.SqlClient | ProjectWorkspaceStore | Scope.Scope | ProjectWorkspaceMigrationCoordinator
+  >,
 ) =>
   Effect.gen(function* () {
     const coordinator = yield* ProjectWorkspaceMigrationCoordinator;
@@ -138,7 +142,7 @@ layer("projectWorkspaceMigrationCoordinator", (it) => {
         assert.strictEqual(results.length, 1);
         assert.deepStrictEqual(results[0]!.outcome, {
           kind: "published",
-          winnerThreadId: "t-a",
+          winnerThreadId: ThreadId.makeUnsafe("t-a"),
         });
 
         const store = yield* ProjectWorkspaceStore;
@@ -168,7 +172,7 @@ layer("projectWorkspaceMigrationCoordinator", (it) => {
 
       assert.deepStrictEqual(results[0]!.outcome, {
         kind: "published",
-        winnerThreadId: "t-arc-a",
+        winnerThreadId: ThreadId.makeUnsafe("t-arc-a"),
       });
     }),
   );
@@ -225,8 +229,8 @@ layer("projectWorkspaceMigrationCoordinator", (it) => {
             projectIds: [projectIsoSnapshotA, projectIsoSnapshotB],
           });
         }).pipe(
-          Effect.onExit(() =>
-            sql`ALTER TABLE projection_threads_iso_fault RENAME TO projection_threads`,
+          Effect.onExit(
+            () => sql`ALTER TABLE projection_threads_iso_fault RENAME TO projection_threads`,
           ),
         );
 
@@ -286,109 +290,105 @@ layer("projectWorkspaceMigrationCoordinator", (it) => {
     }),
   );
 
-  it.effect(
-    "injected failure before publication leaves nothing published; retry converges",
-    () =>
-      withCoordinator(
-        {
-          beforePublication: (() => {
-            let attempts = 0;
-            return () =>
-              Effect.suspend(() => {
-                attempts += 1;
-                return attempts === 1
-                  ? Effect.fail(new Error("injected mid-write failure"))
-                  : Effect.void;
-              });
-          })(),
-        },
-        (coordinator) =>
-          Effect.gen(function* () {
-            yield* seedProject(projectRetry);
-            yield* seedThread(projectRetry, "t-retry", "2026-02-01T00:00:00.000Z");
-
-            const first = yield* coordinator.migrateAllProjects({
-              legacySlicesByThreadId: slicesFor(["t-retry"]),
-              projectIds: [projectRetry],
+  it.effect("injected failure before publication leaves nothing published; retry converges", () =>
+    withCoordinator(
+      {
+        beforePublication: (() => {
+          let attempts = 0;
+          return () =>
+            Effect.suspend(() => {
+              attempts += 1;
+              return attempts === 1
+                ? Effect.fail(new Error("injected mid-write failure"))
+                : Effect.void;
             });
-            assert.strictEqual(first.length, 1);
-            assert.deepStrictEqual(first[0]!.outcome, {
-              kind: "failed",
-              reason: "injected mid-write failure",
-            });
+        })(),
+      },
+      (coordinator) =>
+        Effect.gen(function* () {
+          yield* seedProject(projectRetry);
+          yield* seedThread(projectRetry, "t-retry", "2026-02-01T00:00:00.000Z");
 
-            // Failure before the marker leaves NOTHING durable: no slices,
-            // no marker, and the read stays non-canonical.
-            const sql = yield* SqlClient.SqlClient;
-            const sliceCount = yield* sql<{ readonly count: number }>`
+          const first = yield* coordinator.migrateAllProjects({
+            legacySlicesByThreadId: slicesFor(["t-retry"]),
+            projectIds: [projectRetry],
+          });
+          assert.strictEqual(first.length, 1);
+          assert.deepStrictEqual(first[0]!.outcome, {
+            kind: "failed",
+            reason: "injected mid-write failure",
+          });
+
+          // Failure before the marker leaves NOTHING durable: no slices,
+          // no marker, and the read stays non-canonical.
+          const sql = yield* SqlClient.SqlClient;
+          const sliceCount = yield* sql<{ readonly count: number }>`
               SELECT COUNT(*) AS count FROM project_workspace_slices WHERE project_id = ${projectRetry}
             `;
-            assert.strictEqual(sliceCount[0]?.count, 0);
-            const markerCount = yield* sql<{ readonly count: number }>`
+          assert.strictEqual(sliceCount[0]?.count, 0);
+          const markerCount = yield* sql<{ readonly count: number }>`
               SELECT COUNT(*) AS count
               FROM project_workspace_publications WHERE project_id = ${projectRetry}
             `;
-            assert.strictEqual(markerCount[0]?.count, 0);
+          assert.strictEqual(markerCount[0]?.count, 0);
 
-            const store = yield* ProjectWorkspaceStore;
-            const unpublished = yield* store.readProjectWorkspace({ projectId: projectRetry });
-            assert.deepStrictEqual(unpublished, { kind: "unpublished", reason: "marker-absent" });
+          const store = yield* ProjectWorkspaceStore;
+          const unpublished = yield* store.readProjectWorkspace({ projectId: projectRetry });
+          assert.deepStrictEqual(unpublished, { kind: "unpublished", reason: "marker-absent" });
 
-            // Retry converges to the same deterministic target.
-            const second = yield* coordinator.migrateAllProjects({
-              legacySlicesByThreadId: slicesFor(["t-retry"]),
-              projectIds: [projectRetry],
-            });
-            assert.strictEqual(second[0]!.outcome.kind, "published");
+          // Retry converges to the same deterministic target.
+          const second = yield* coordinator.migrateAllProjects({
+            legacySlicesByThreadId: slicesFor(["t-retry"]),
+            projectIds: [projectRetry],
+          });
+          assert.strictEqual(second[0]!.outcome.kind, "published");
 
-            const read = yield* store.readProjectWorkspace({ projectId: projectRetry });
-            assert.strictEqual(read.kind, "published-current");
-            if (read.kind !== "published-current") throw new Error("expected published-current");
-            assert.strictEqual(read.marker.provenance?.sourceThreadId, "t-retry");
-          }),
-      ),
+          const read = yield* store.readProjectWorkspace({ projectId: projectRetry });
+          assert.strictEqual(read.kind, "published-current");
+          if (read.kind !== "published-current") throw new Error("expected published-current");
+          assert.strictEqual(read.marker.provenance?.sourceThreadId, "t-retry");
+        }),
+    ),
   );
 
-  it.effect(
-    "processes Projects independently: one Project's failure never blocks another",
-    () =>
-      withCoordinator(
-        {
-          // Fail only for the second Project; the first must still publish.
-          beforePublication: (snapshot) =>
-            snapshot.projectId === projectIndependentB
-              ? Effect.fail(new Error("project-b failure"))
-              : Effect.void,
-        },
-        (coordinator) =>
-          Effect.gen(function* () {
-            yield* seedProject(projectIndependentA);
-            yield* seedProject(projectIndependentB);
-            yield* seedThread(projectIndependentA, "t-indep-a", "2026-02-01T00:00:00.000Z");
-            yield* seedThread(projectIndependentB, "t-indep-b", "2026-02-01T00:00:00.000Z");
+  it.effect("processes Projects independently: one Project's failure never blocks another", () =>
+    withCoordinator(
+      {
+        // Fail only for the second Project; the first must still publish.
+        beforePublication: (snapshot) =>
+          snapshot.projectId === projectIndependentB
+            ? Effect.fail(new Error("project-b failure"))
+            : Effect.void,
+      },
+      (coordinator) =>
+        Effect.gen(function* () {
+          yield* seedProject(projectIndependentA);
+          yield* seedProject(projectIndependentB);
+          yield* seedThread(projectIndependentA, "t-indep-a", "2026-02-01T00:00:00.000Z");
+          yield* seedThread(projectIndependentB, "t-indep-b", "2026-02-01T00:00:00.000Z");
 
-            const results = yield* coordinator.migrateAllProjects({
-              legacySlicesByThreadId: new Map([
-                ...slicesFor(["t-indep-a"]),
-                ...slicesFor(["t-indep-b"]),
-              ]),
-              projectIds: [projectIndependentA, projectIndependentB],
-            });
+          const results = yield* coordinator.migrateAllProjects({
+            legacySlicesByThreadId: new Map([
+              ...slicesFor(["t-indep-a"]),
+              ...slicesFor(["t-indep-b"]),
+            ]),
+            projectIds: [projectIndependentA, projectIndependentB],
+          });
 
-            const byProject = new Map(results.map((row) => [row.projectId, row.outcome]));
-            assert.strictEqual(byProject.get(projectIndependentA)?.kind, "published");
-            assert.deepStrictEqual(byProject.get(projectIndependentB), {
-              kind: "failed",
-              reason: "project-b failure",
-            });
+          const byProject = new Map(results.map((row) => [row.projectId, row.outcome]));
+          assert.strictEqual(byProject.get(projectIndependentA)?.kind, "published");
+          assert.deepStrictEqual(byProject.get(projectIndependentB), {
+            kind: "failed",
+            reason: "project-b failure",
+          });
 
-            const store = yield* ProjectWorkspaceStore;
-            const readA = yield* store.readProjectWorkspace({ projectId: projectIndependentA });
-            assert.strictEqual(readA.kind, "published-current");
-            const readB = yield* store.readProjectWorkspace({ projectId: projectIndependentB });
-            assert.strictEqual(readB.kind, "unpublished");
-          }),
-      ),
+          const store = yield* ProjectWorkspaceStore;
+          const readA = yield* store.readProjectWorkspace({ projectId: projectIndependentA });
+          assert.strictEqual(readA.kind, "published-current");
+          const readB = yield* store.readProjectWorkspace({ projectId: projectIndependentB });
+          assert.strictEqual(readB.kind, "unpublished");
+        }),
+    ),
   );
 
   it.effect("keeps every conversation row unchanged through migration", () =>

@@ -486,7 +486,13 @@ export function SingleChatSurface(props: {
       },
       prefetchFile: prefetchOpenerFile,
     }),
-    [openPane, prefetchOpenerFile, props.threadId, requestImmediateDockHydration, workspaceRoot],
+    [
+      dockOwnerProjectId,
+      openPane,
+      prefetchOpenerFile,
+      requestImmediateDockHydration,
+      workspaceRoot,
+    ],
   );
   // Editor surface: the center file pane is already the file viewer, so file
   // references select into it instead of opening a dock pane.
@@ -586,6 +592,7 @@ export function SingleChatSurface(props: {
     props.threadId,
     requestImmediateDockHydration,
     setDockOpen,
+    dockOwnerProjectId,
   ]);
 
   useBrowserPanelDesktopBridge({
@@ -685,6 +692,7 @@ export function SingleChatSurface(props: {
     sidechatPaneRetentionVersion,
     threadSummaries,
     threadsHydrated,
+    dockOwnerProjectId,
   ]);
   const editorProjectOptions = projects.flatMap((project) =>
     project.kind === "project" ? [{ id: project.id, name: project.name }] : [],

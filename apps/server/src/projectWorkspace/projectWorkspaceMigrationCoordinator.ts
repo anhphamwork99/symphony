@@ -100,6 +100,21 @@ export class ProjectWorkspaceMigrationCoordinator extends ServiceMap.Service<
   ProjectWorkspaceMigrationCoordinatorShape
 >()("synara/projectWorkspace/ProjectWorkspaceMigrationCoordinator") {}
 
+/** A stable diagnostic string for any per-Project failure cause. */
+const describeFailure = (cause: unknown): string => {
+  if (cause instanceof Error && cause.message) {
+    return cause.message;
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  try {
+    return JSON.stringify(cause) ?? String(cause);
+  } catch {
+    return String(cause);
+  }
+};
+
 export const makeProjectWorkspaceMigrationCoordinator = (options?: {
   readonly clock?: ProjectWorkspaceClock;
   readonly hooks?: ProjectWorkspacePublicationHooks;
@@ -137,21 +152,6 @@ export const makeProjectWorkspaceMigrationCoordinator = (options?: {
         WHERE project_id = ${projectId}
         ORDER BY thread_id ASC
       `;
-
-    /** A stable diagnostic string for any per-Project failure cause. */
-    const describeFailure = (cause: unknown): string => {
-      if (cause instanceof Error && cause.message) {
-        return cause.message;
-      }
-      if (typeof cause === "string") {
-        return cause;
-      }
-      try {
-        return JSON.stringify(cause) ?? String(cause);
-      } catch {
-        return String(cause);
-      }
-    };
 
     const migrateProject = (
       snapshot: ProjectWorkspaceProjectSnapshot,

@@ -359,10 +359,11 @@ it.effect("decodes project terminal push events on their own channel", () =>
         },
       },
     });
-    assert.strictEqual(parsed.type, "push");
-    if (parsed.type === "push") {
-      assert.strictEqual(parsed.channel, WS_CHANNELS.terminalProjectEvent);
+    if (!("type" in parsed) || parsed.type !== "push") {
+      assert.fail("expected websocket response to decode as a push envelope");
     }
+    assert.strictEqual(parsed.type, "push");
+    assert.strictEqual(parsed.channel, WS_CHANNELS.terminalProjectEvent);
   }),
 );
 

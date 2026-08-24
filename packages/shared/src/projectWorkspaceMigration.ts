@@ -112,8 +112,7 @@ function decodeOr<S extends Schema.Top>(schema: S, input: unknown): Schema.Schem
 
 // ── Normalized durable instants (Decision 0002 C.2) ──────────────────
 
-const ISO_INSTANT_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 /**
  * Parse a durable timestamp into a normalized epoch-milliseconds instant.
@@ -516,7 +515,7 @@ function convertTerminalPresentation(
     activeTerminalId: slice.activeTerminalId,
     // v1 labels were optional; the canonical v2 default for absent labels is
     // the empty record (never borrowed from another Thread).
-    terminalLabelsById: { ...(slice.terminalLabelsById ?? {}) },
+    terminalLabelsById: { ...slice.terminalLabelsById },
   };
 }
 
@@ -654,9 +653,7 @@ function buildMigrationTarget(
       // never a data condition. Fail closed instead of fabricating a key.
       const kind = kinds[index];
       if (kind === undefined) {
-        throw new Error(
-          `projectWorkspaceMigration: staged slice ${index} has no canonical kind`,
-        );
+        throw new Error(`projectWorkspaceMigration: staged slice ${index} has no canonical kind`);
       }
       return {
         key: projectWorkspaceStagingSliceKey(projectId, kind),

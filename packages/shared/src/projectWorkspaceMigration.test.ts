@@ -508,8 +508,10 @@ describe("selectLegacyProjectWorkspaceWinner", () => {
       thread({ id: "t-c", updatedAt: "2026-01-05T00:00:00.000Z" }),
     ];
     const forward = selectLegacyProjectWorkspaceWinner(threads, PROJECT_ID).winnerThreadId;
-    const reversed = selectLegacyProjectWorkspaceWinner([...threads].reverse(), PROJECT_ID)
-      .winnerThreadId;
+    const reversed = selectLegacyProjectWorkspaceWinner(
+      threads.toReversed(),
+      PROJECT_ID,
+    ).winnerThreadId;
     expect(forward).toBe("t-c");
     expect(reversed).toBe("t-c");
   });
@@ -556,9 +558,7 @@ describe("selectLegacyProjectWorkspaceWinner", () => {
         },
       },
     });
-    expect(
-      selectLegacyProjectWorkspaceWinner([defaultOnly], PROJECT_ID).winnerThreadId,
-    ).toBeNull();
+    expect(selectLegacyProjectWorkspaceWinner([defaultOnly], PROJECT_ID).winnerThreadId).toBeNull();
   });
 });
 
@@ -781,7 +781,6 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
 
   // Remediation (4): retained diagnostic proof.
   it("preserves the winner's legacy browser lastError on the migrated browser pane", () => {
-    const winnerId = ThreadId.makeUnsafe("t-winner");
     const plan = planProjectWorkspaceMigration({
       projectId: PROJECT_ID,
       threads: [
@@ -826,7 +825,6 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
   });
 
   it("drops no pane and invents none when the browser error has no browser pane", () => {
-    const winnerId = ThreadId.makeUnsafe("t-winner");
     const plan = planProjectWorkspaceMigration({
       projectId: PROJECT_ID,
       threads: [
@@ -871,7 +869,6 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
 
   it("does not borrow a loser's browser error into the winner's pane", () => {
     const winnerId = ThreadId.makeUnsafe("t-winner");
-    const loserId = ThreadId.makeUnsafe("t-loser");
     const plan = planProjectWorkspaceMigration({
       projectId: PROJECT_ID,
       threads: [
@@ -961,7 +958,7 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
     const first = planProjectWorkspaceMigration(input);
     const second = planProjectWorkspaceMigration({
       ...input,
-      threads: [...input.threads].reverse(),
+      threads: input.threads.toReversed(),
     });
     expect(second).toEqual(first);
   });
@@ -983,9 +980,7 @@ function freshStagedSlices(): unknown[] {
 function otherProjectStagedSlices(): unknown[] {
   const plan = planProjectWorkspaceMigration({
     projectId: OTHER_PROJECT_ID,
-    threads: [
-      thread({ id: "t-other", projectId: OTHER_PROJECT_ID }),
-    ],
+    threads: [thread({ id: "t-other", projectId: OTHER_PROJECT_ID })],
   });
   if (plan.outcome === "keep-published") {
     throw new Error("fixture requires an unpublished snapshot");

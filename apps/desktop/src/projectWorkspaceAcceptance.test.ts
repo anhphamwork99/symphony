@@ -25,13 +25,12 @@ import type { BrowserAnnotationProjectEvent, BrowserAnnotationTheme } from "@syn
 import { sanitizeBrowserAnnotationUrl } from "@synara/shared/browserAnnotations";
 import type { WebContents } from "electron";
 import { createHash } from "node:crypto";
-import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { browserSession, rendererWebContentsById, rendererWebContentsFromId } = vi.hoisted(() => {
+const { browserSession, rendererWebContentsFromId } = vi.hoisted(() => {
   const rendererWebContentsById = new Map<number, unknown>();
   return {
     browserSession: {
@@ -63,7 +62,10 @@ function emptyElectronConstructor(): void {}
 
 import { DesktopBrowserManager } from "./browserManager";
 import { BrowserAnnotationCoordinator } from "./browserAnnotations/coordinator";
-import { BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL, PROJECT_BROWSER_IPC_CHANNELS as PROJECT_BROWSER } from "./ipcChannels";
+import {
+  BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL,
+  PROJECT_BROWSER_IPC_CHANNELS as PROJECT_BROWSER,
+} from "./ipcChannels";
 import {
   DesktopProjectWorkspaceMigration,
   resolveDesktopProjectWorkspacePath,
@@ -98,7 +100,9 @@ afterEach(() => {
 
 /** Reverse-lookup the preload binding key for a channel value. */
 function channelKeyOf(channel: string): string {
-  const entries: Array<[string, unknown]> = Object.entries(PROJECT_BROWSER as Record<string, unknown>);
+  const entries: Array<[string, unknown]> = Object.entries(
+    PROJECT_BROWSER as Record<string, unknown>,
+  );
   for (const [key, value] of entries) {
     if (value === channel) return key;
     if (typeof value === "object" && value !== null) {
@@ -261,13 +265,11 @@ describe("WP8 desktop acceptance — scenarios 2/3/5 + obligations 9,13 + marker
     // And the Thread-keyed browser channels really exist (the disjointness
     // proof is against a real surface, not a missing one).
     const threadChannels = Object.values(
-      (
-        await import("./ipcChannels").then(
-          (module) =>
-            (module as unknown as { DESKTOP_IPC_CHANNELS: { browser: Record<string, unknown> } })
-              .DESKTOP_IPC_CHANNELS.browser,
-        )
-      ) as Record<string, unknown>,
+      (await import("./ipcChannels").then(
+        (module) =>
+          (module as unknown as { DESKTOP_IPC_CHANNELS: { browser: Record<string, unknown> } })
+            .DESKTOP_IPC_CHANNELS.browser,
+      )) as Record<string, unknown>,
     ).flatMap((value) =>
       typeof value === "string" ? [value] : Object.values(value as Record<string, string>),
     );

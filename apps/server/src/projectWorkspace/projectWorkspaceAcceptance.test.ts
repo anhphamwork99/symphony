@@ -21,12 +21,7 @@
 //   carries a thread identity, and a Thread-keyed call using Project-id TEXT
 //   creates a DISJOINT thread-keyed session (no aliasing).
 
-import {
-  CommandId,
-  ProjectId,
-  ThreadId,
-  type TerminalProjectEvent,
-} from "@synara/contracts";
+import { CommandId, ProjectId, ThreadId, type TerminalProjectEvent } from "@synara/contracts";
 import { PROJECT_WORKSPACE_CAPABILITY } from "@synara/contracts";
 import { WS_SERVER_CAPABILITIES } from "@synara/contracts";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -58,7 +53,12 @@ import {
   type TerminalManagerShape,
 } from "../terminal/Services/Manager.ts";
 import { TerminalManagerRuntime } from "../terminal/Layers/Manager.ts";
-import type { PtyAdapterShape, PtyExitEvent, PtyProcess, PtySpawnInput } from "../terminal/Services/PTY.ts";
+import type {
+  PtyAdapterShape,
+  PtyExitEvent,
+  PtyProcess,
+  PtySpawnInput,
+} from "../terminal/Services/PTY.ts";
 
 // ── Fake PTY adapter (same contract as the WP4 suite; real runtime) ──
 
@@ -192,109 +192,104 @@ const makeRealTerminalManagerLayer = () => {
       : new TerminalError({
           message: `${where}: ${cause instanceof Error ? cause.message : String(cause)}`,
         });
-  const layer = Layer.succeed(
-    TerminalManager,
-    {
-      open: (input) =>
-        Effect.tryPromise({ try: () => runtime.open(input), catch: toTerminalError("open") }),
-      write: (input) =>
-        Effect.tryPromise({ try: () => runtime.write(input), catch: toTerminalError("write") }),
-      ackOutput: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.ackOutput(input),
-          catch: toTerminalError("ackOutput"),
-        }),
-      resize: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.resize(input),
-          catch: toTerminalError("resize"),
-        }),
-      clear: (input) =>
-        Effect.tryPromise({ try: () => runtime.clear(input), catch: toTerminalError("clear") }),
-      restart: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.restart(input),
-          catch: toTerminalError("restart"),
-        }),
-      close: (input) =>
-        Effect.tryPromise({ try: () => runtime.close(input), catch: toTerminalError("close") }),
-      closeSessionsOpenedAtOrBefore: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.closeSessionsOpenedAtOrBefore(input),
-          catch: toTerminalError("closeSessionsOpenedAtOrBefore"),
-        }),
-      openProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.openProject(input),
-          catch: toTerminalError("openProject"),
-        }),
-      writeProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.writeProject(input),
-          catch: toTerminalError("writeProject"),
-        }),
-      ackOutputProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.ackOutputProject(input),
-          catch: toTerminalError("ackOutputProject"),
-        }),
-      resizeProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.resizeProject(input),
-          catch: toTerminalError("resizeProject"),
-        }),
-      clearProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.clearProject(input),
-          catch: toTerminalError("clearProject"),
-        }),
-      restartProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.restartProject(input),
-          catch: toTerminalError("restartProject"),
-        }),
-      closeProject: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.closeProject(input),
-          catch: toTerminalError("closeProject"),
-        }),
-      listProjectTerminals: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.listProjectTerminals(input.projectId),
-          catch: toTerminalError("listProjectTerminals"),
-        }),
-      settleProjectTerminals: (input) =>
-        Effect.tryPromise({
-          try: () => runtime.settleProjectTerminals(input.projectId),
-          catch: toTerminalError("settleProjectTerminals"),
-        }),
-      beginProjectDeletionFence: (input) =>
-        Effect.sync(() => runtime.beginProjectDeletionFence(input.projectId)),
-      commitProjectDeletionFence: (input) =>
-        Effect.sync(() => runtime.commitProjectDeletionFence(input.projectId)),
-      releaseProjectDeletionFence: (input) =>
-        Effect.sync(() => runtime.releaseProjectDeletionFence(input.projectId)),
-      projectDeletionFenceState: (input) =>
-        Effect.sync(() => runtime.projectDeletionFenceState(input.projectId)),
-      subscribe: (listener) =>
-        Effect.sync(() => {
-          const unsubscribe = runtime.on("event", listener);
-          return () => unsubscribe();
-        }),
-      subscribeProject: (listener) =>
-        Effect.sync(() => {
-          const unsubscribe = runtime.on("projectEvent", listener);
-          return () => unsubscribe();
-        }),
-      dispose: Effect.promise(() => runtime.dispose()),
-    } satisfies TerminalManagerShape,
-  );
+  const layer = Layer.succeed(TerminalManager, {
+    open: (input) =>
+      Effect.tryPromise({ try: () => runtime.open(input), catch: toTerminalError("open") }),
+    write: (input) =>
+      Effect.tryPromise({ try: () => runtime.write(input), catch: toTerminalError("write") }),
+    ackOutput: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.ackOutput(input),
+        catch: toTerminalError("ackOutput"),
+      }),
+    resize: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.resize(input),
+        catch: toTerminalError("resize"),
+      }),
+    clear: (input) =>
+      Effect.tryPromise({ try: () => runtime.clear(input), catch: toTerminalError("clear") }),
+    restart: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.restart(input),
+        catch: toTerminalError("restart"),
+      }),
+    close: (input) =>
+      Effect.tryPromise({ try: () => runtime.close(input), catch: toTerminalError("close") }),
+    closeSessionsOpenedAtOrBefore: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.closeSessionsOpenedAtOrBefore(input),
+        catch: toTerminalError("closeSessionsOpenedAtOrBefore"),
+      }),
+    openProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.openProject(input),
+        catch: toTerminalError("openProject"),
+      }),
+    writeProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.writeProject(input),
+        catch: toTerminalError("writeProject"),
+      }),
+    ackOutputProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.ackOutputProject(input),
+        catch: toTerminalError("ackOutputProject"),
+      }),
+    resizeProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.resizeProject(input),
+        catch: toTerminalError("resizeProject"),
+      }),
+    clearProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.clearProject(input),
+        catch: toTerminalError("clearProject"),
+      }),
+    restartProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.restartProject(input),
+        catch: toTerminalError("restartProject"),
+      }),
+    closeProject: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.closeProject(input),
+        catch: toTerminalError("closeProject"),
+      }),
+    listProjectTerminals: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.listProjectTerminals(input.projectId),
+        catch: toTerminalError("listProjectTerminals"),
+      }),
+    settleProjectTerminals: (input) =>
+      Effect.tryPromise({
+        try: () => runtime.settleProjectTerminals(input.projectId),
+        catch: toTerminalError("settleProjectTerminals"),
+      }),
+    beginProjectDeletionFence: (input) =>
+      Effect.sync(() => runtime.beginProjectDeletionFence(input.projectId)),
+    commitProjectDeletionFence: (input) =>
+      Effect.sync(() => runtime.commitProjectDeletionFence(input.projectId)),
+    releaseProjectDeletionFence: (input) =>
+      Effect.sync(() => runtime.releaseProjectDeletionFence(input.projectId)),
+    projectDeletionFenceState: (input) =>
+      Effect.sync(() => runtime.projectDeletionFenceState(input.projectId)),
+    subscribe: (listener) =>
+      Effect.sync(() => {
+        runtime.on("event", listener);
+        return () => runtime.off("event", listener);
+      }),
+    subscribeProject: (listener) =>
+      Effect.sync(() => {
+        runtime.on("projectEvent", listener);
+        return () => runtime.off("projectEvent", listener);
+      }),
+    dispose: Effect.sync(() => runtime.dispose()),
+  } satisfies TerminalManagerShape);
   return { layer, ptyAdapter, runtime };
 };
 
-async function createAcceptanceSystem(options?: {
-  hooks?: ProjectWorkspacePublicationHooks;
-}) {
+async function createAcceptanceSystem(options?: { hooks?: ProjectWorkspacePublicationHooks }) {
   const terminal = makeRealTerminalManagerLayer();
   const layer = Layer.mergeAll(
     OrchestrationEngineLive.pipe(
@@ -312,10 +307,7 @@ async function createAcceptanceSystem(options?: {
       ...(options?.hooks ? { hooks: options.hooks } : {}),
     }).pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
-  ).pipe(
-    Layer.provideMerge(TestServerConfigLayer),
-    Layer.provideMerge(NodeServices.layer),
-  );
+  ).pipe(Layer.provideMerge(TestServerConfigLayer), Layer.provideMerge(NodeServices.layer));
   const rt = ManagedRuntime.make(layer);
   const engine = await rt.runPromise(Effect.service(OrchestrationEngineService));
   const store = await rt.runPromise(Effect.service(ProjectWorkspaceStore));
@@ -326,9 +318,7 @@ async function createAcceptanceSystem(options?: {
     coordinator,
     ptyAdapter: terminal.ptyAdapter,
     terminalRuntime: terminal.runtime,
-    run: rt.runPromise.bind(rt) as <A, E, R>(
-      effect: Effect.Effect<A, E, R>,
-    ) => Promise<A>,
+    run: rt.runPromise.bind(rt) as <A, E, R>(effect: Effect.Effect<A, E, R>) => Promise<A>,
     dispose: () => rt.dispose(),
   };
 }
@@ -450,9 +440,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
       await createThread(system, "acc-project", "acc-thread-a2");
 
       // Conversation A1 opens the Project terminal (the only owner key sent).
-      const runtime0 = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime0 = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       const first = await runtime0.openProject(openInput("acc-project"));
       expect(first.projectId).toBe(ProjectId.makeUnsafe("acc-project"));
       expect("threadId" in first).toBe(false);
@@ -463,7 +452,13 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
       await waitFor(() => process.writes.length >= 0);
 
       // Conversation switches happen (A1 → A2): pure navigation in the Project.
-      await system.run(system.engine.dispatch({ type: "thread.archive", commandId: CommandId.makeUnsafe("noop-a"), threadId: threadA }));
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.makeUnsafe("noop-a"),
+          threadId: threadA,
+        }),
+      );
 
       // The SAME terminal reconnects: one PTY, accumulated history, same pid.
       const reconnected = await runtime0.openProject(openInput("acc-project"));
@@ -502,9 +497,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
       await createProject(system, "acc-iso-a");
       await createProject(system, "acc-iso-b");
 
-      const runtime = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       const a = await runtime.openProject(openInput("acc-iso-a"));
       const b = await runtime.openProject(openInput("acc-iso-b"));
       expect(a.pid).not.toBe(b.pid);
@@ -542,9 +536,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
     const system = await createAcceptanceSystem();
     try {
       await createProject(system, "acc-close");
-      const runtime = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       await runtime.openProject(openInput("acc-close"));
       const process = system.ptyAdapter.processes[0];
       expect(process).toBeDefined();
@@ -579,9 +572,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
           provenance: null,
         }),
       );
-      const runtime = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       await runtime.openProject(openInput("acc-archive"));
       const process = system.ptyAdapter.processes[0];
       expect(process).toBeDefined();
@@ -624,9 +616,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
     try {
       await createProject(system, "acc-delete");
       const deleteThreadId = await createThread(system, "acc-delete", "acc-delete-thread");
-      const runtime = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       await runtime.openProject(openInput("acc-delete"));
       const process = system.ptyAdapter.processes[0];
       expect(process).toBeDefined();
@@ -657,9 +648,9 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
           threadId: deleteThreadId,
         }),
       );
-      expect(
-        await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete")),
-      ).toHaveLength(1);
+      expect(await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete"))).toHaveLength(
+        1,
+      );
 
       // Unproven settlement (kill lands, exit proof never arrives).
       process.exitOnKill = false;
@@ -678,9 +669,9 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
         system.store.readProjectWorkspace({ projectId: ProjectId.makeUnsafe("acc-delete") }),
       );
       expect(retained.kind).toBe("published-current");
-      expect(
-        await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete")),
-      ).toHaveLength(1);
+      expect(await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete"))).toHaveLength(
+        1,
+      );
       const deletedEvents = await system.run(
         Effect.gen(function* () {
           const client = yield* SqlClient.SqlClient;
@@ -707,9 +698,9 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
         system.store.readProjectWorkspace({ projectId: ProjectId.makeUnsafe("acc-delete") }),
       );
       expect(gone).toMatchObject({ kind: "unpublished", reason: "marker-absent" });
-      expect(
-        await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete")),
-      ).toHaveLength(0);
+      expect(await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-delete"))).toHaveLength(
+        0,
+      );
       // The admission fence is retained as deleted: no reopen after deletion.
       expect(runtime.projectDeletionFenceState(ProjectId.makeUnsafe("acc-delete"))).toBe("deleted");
     } finally {
@@ -882,9 +873,8 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
   it("negative: a Thread-keyed terminal call using Project-id TEXT creates a DISJOINT thread-keyed session — no Project-as-Thread alias", async () => {
     const system = await createAcceptanceSystem();
     try {
-      const runtime = (
-        system as unknown as { terminalRuntime: TerminalManagerRuntime }
-      ).terminalRuntime;
+      const runtime = (system as unknown as { terminalRuntime: TerminalManagerRuntime })
+        .terminalRuntime;
       const projectOpen = await runtime.openProject(openInput("acc-alias"));
       // The SAME id text, used on the thread-keyed surface, must NOT reach the
       // Project session: keys are disjoint by owner kind.
@@ -899,9 +889,7 @@ describe("WP8 server acceptance — scenarios 2/3/4/6/7 + obligations 4–6,8,11
       expect(system.ptyAdapter.spawnInputs).toHaveLength(2);
       // And closing the thread-keyed session never settles the Project's.
       await runtime.close({ threadId: ThreadId.makeUnsafe("acc-alias") });
-      expect(
-        await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-alias")),
-      ).toHaveLength(1);
+      expect(await runtime.listProjectTerminals(ProjectId.makeUnsafe("acc-alias"))).toHaveLength(1);
     } finally {
       await system.dispose();
     }

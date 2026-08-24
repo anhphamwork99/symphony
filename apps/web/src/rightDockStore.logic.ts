@@ -100,10 +100,7 @@ export function sanitizePreferredDockWidthPx(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     return null;
   }
-  if (
-    value < PROJECT_WORKSPACE_DOCK_MIN_WIDTH_PX ||
-    value > PROJECT_WORKSPACE_DOCK_MAX_WIDTH_PX
-  ) {
+  if (value < PROJECT_WORKSPACE_DOCK_MIN_WIDTH_PX || value > PROJECT_WORKSPACE_DOCK_MAX_WIDTH_PX) {
     return null;
   }
   return value;
@@ -303,18 +300,29 @@ export function openPaneInState(
       const nextPanes = patch
         ? state.panes.map((pane) => (pane.id === existing.id ? { ...pane, ...patch } : pane))
         : state.panes;
-      return { open: true, panes: nextPanes, activePaneId: existing.id };
+      return {
+        open: true,
+        preferredWidthPx: state.preferredWidthPx,
+        panes: nextPanes,
+        activePaneId: existing.id,
+      };
     }
   } else {
     const existing = findMatchingMultiInstancePane(state, input);
     if (existing) {
-      return { open: true, panes: state.panes, activePaneId: existing.id };
+      return {
+        open: true,
+        preferredWidthPx: state.preferredWidthPx,
+        panes: state.panes,
+        activePaneId: existing.id,
+      };
     }
   }
 
   const pane = createPane(input);
   return {
     open: true,
+    preferredWidthPx: state.preferredWidthPx,
     panes: [...state.panes, pane],
     activePaneId: pane.id,
   };
@@ -355,6 +363,7 @@ export function closePaneInState(
     // An open dock with no panes is the launcher state. Closing the final tab
     // returns to that launcher instead of collapsing the entire dock.
     open: state.open,
+    preferredWidthPx: state.preferredWidthPx,
     panes: nextPanes,
     activePaneId: nextActiveId,
   };

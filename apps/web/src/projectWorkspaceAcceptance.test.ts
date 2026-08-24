@@ -53,7 +53,10 @@ import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStat
 import { createThreadProjectIdSelector } from "./storeSelectors";
 import type { AppState } from "./storeState";
 import type { ThreadShell } from "./types";
-import { closeTerminalSession, openTerminalSession } from "./components/terminal/terminalProjectRouting";
+import {
+  closeTerminalSession,
+  openTerminalSession,
+} from "./components/terminal/terminalProjectRouting";
 import {
   activateProjectWorkspace,
   resetProjectWorkspaceActivationForTests,
@@ -64,7 +67,7 @@ import {
   type ProjectWorkspaceWebStorage,
 } from "./projectWorkspaceWebMigration";
 import { readProjectDeviceApi, readProjectTerminalApi } from "./projectWorkspaceApi";
-import { readWsTransport, type WsRequestTransport } from "./wsNativeApi";
+import { type WsRequestTransport } from "./wsNativeApi";
 import * as wsNativeApi from "./wsNativeApi";
 import * as nativeApiModule from "./nativeApi";
 
@@ -75,6 +78,17 @@ const projectB = ProjectId.makeUnsafe("acc-project-b");
 const threadA1 = ThreadId.makeUnsafe("acc-thread-a1");
 const threadA2 = ThreadId.makeUnsafe("acc-thread-a2");
 const threadB1 = ThreadId.makeUnsafe("acc-thread-b1");
+
+const threadsFor = (projectId: ProjectId, threadId: string) => [
+  {
+    threadId: threadId as never,
+    projectId,
+    updatedAt: "2026-08-20T10:00:00.000Z",
+    deletedAt: null,
+    archivedAt: null,
+    slices: {},
+  },
+];
 
 function shell(threadId: ThreadId, projectId: ProjectId): ThreadShell {
   return {
@@ -222,15 +236,16 @@ describe("scenario 1 — same-Project conversation switch preserves the whole wo
     expect(writes).toEqual([]);
     expect(useRightDockStore.getState().dockStateByProjectId[projectA]).toBe(dockBefore);
     expect(useTerminalStateStore.getState().terminalStateByThreadId[scopeA]).toBe(terminalBefore);
-    expect(selectProjectBrowserState(projectA)(useBrowserStateStore.getState())).toBe(browserBefore);
+    expect(selectProjectBrowserState(projectA)(useBrowserStateStore.getState())).toBe(
+      browserBefore,
+    );
     expect(selectProjectDeviceState(projectA)(useDeviceStateStore.getState())).toBe(deviceBefore);
     // The workspace contents are non-default and intact.
     expect(dockBefore?.open ?? fromA2.dockState.open).toBe(true);
     expect(fromA2.dockState.preferredWidthPx).toBe(520);
-    expect(selectThreadTerminalState(
-      useTerminalStateStore.getState().terminalStateByThreadId,
-      scopeA,
-    )).toBeDefined();
+    expect(
+      selectThreadTerminalState(useTerminalStateStore.getState().terminalStateByThreadId, scopeA),
+    ).toBeDefined();
   });
 });
 
@@ -280,17 +295,13 @@ describe("scenario 8 — temporary width clamp never overwrites the preferred wi
     const clamped = clampRightDockShrinkWidth(560, 700);
     expect(clamped).toBeLessThan(560);
     // …without writing the preference.
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectA]?.preferredWidthPx,
-    ).toBe(560);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectA]?.preferredWidthPx).toBe(560);
     // The window widens again: the dock returns to the remembered preference.
     const reopened = clampRightDockOpenWidth(560, 1400, RIGHT_DOCK_NORMAL_MIN_WIDTH);
     expect(reopened).toBe(560);
     // A sub-floor render clamp is rejected outright by the store action.
     useRightDockStore.getState().setPreferredWidth(projectA, 64);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectA]?.preferredWidthPx,
-    ).toBe(560);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectA]?.preferredWidthPx).toBe(560);
   });
 });
 
@@ -460,7 +471,10 @@ describe("obligation 10 — negative: no synthetic Project-as-Thread ownership",
       "utf8",
     );
     const projectSurfaceStart = browserSource.indexOf("if (projectId !== null) {");
-    const legacySurfaceStart = browserSource.indexOf("  if (!api) return null;", projectSurfaceStart);
+    const legacySurfaceStart = browserSource.indexOf(
+      "  if (!api) return null;",
+      projectSurfaceStart,
+    );
     expect(projectSurfaceStart).toBeGreaterThanOrEqual(0);
     expect(legacySurfaceStart).toBeGreaterThan(projectSurfaceStart);
     const projectSurfaceSource = browserSource.slice(projectSurfaceStart, legacySurfaceStart);
@@ -548,17 +562,6 @@ describe("web marker boundary — mixed or incomplete staging never activates ca
       }),
     );
   }
-
-  const threadsFor = (projectId: ProjectId, threadId: string) => [
-    {
-      threadId: threadId as never,
-      projectId,
-      updatedAt: "2026-08-20T10:00:00.000Z",
-      deletedAt: null,
-      archivedAt: null,
-      slices: {},
-    },
-  ];
 
   it("publishing Project A never activates anything for Project B, and a mixed staged set under B is refused", () => {
     const storage = makeStorage();

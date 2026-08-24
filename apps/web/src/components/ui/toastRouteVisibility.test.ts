@@ -84,6 +84,7 @@ describe("resolveVisibleToastThreadIds", () => {
         rightDockRendered: true,
         rightDockState: {
           open: true,
+          preferredWidthPx: null,
           activePaneId: "sidechat-pane",
           panes: [
             {
@@ -97,6 +98,7 @@ describe("resolveVisibleToastThreadIds", () => {
               pullRequestRepository: null,
               pullRequestNumber: null,
               pullRequestInitialTab: null,
+              restorationDiagnostic: null,
             },
           ],
         },
@@ -112,6 +114,7 @@ describe("resolveVisibleToastThreadIds", () => {
         rightDockRendered: true,
         rightDockState: {
           open: false,
+          preferredWidthPx: null,
           activePaneId: "sidechat-pane",
           panes: [
             {
@@ -125,6 +128,7 @@ describe("resolveVisibleToastThreadIds", () => {
               pullRequestRepository: null,
               pullRequestNumber: null,
               pullRequestInitialTab: null,
+              restorationDiagnostic: null,
             },
           ],
         },
@@ -140,6 +144,7 @@ describe("resolveVisibleToastThreadIds", () => {
         rightDockRendered: false,
         rightDockState: {
           open: true,
+          preferredWidthPx: null,
           activePaneId: "sidechat-pane",
           panes: [
             {
@@ -153,6 +158,7 @@ describe("resolveVisibleToastThreadIds", () => {
               pullRequestRepository: null,
               pullRequestNumber: null,
               pullRequestInitialTab: null,
+              restorationDiagnostic: null,
             },
           ],
         },
@@ -168,6 +174,7 @@ describe("resolveVisibleToastThreadIds", () => {
         rightDockRendered: true,
         rightDockState: {
           open: true,
+          preferredWidthPx: null,
           activePaneId: "sidechat-pane",
           panes: [
             {
@@ -181,6 +188,7 @@ describe("resolveVisibleToastThreadIds", () => {
               pullRequestRepository: null,
               pullRequestNumber: null,
               pullRequestInitialTab: null,
+              restorationDiagnostic: null,
             },
           ],
         },

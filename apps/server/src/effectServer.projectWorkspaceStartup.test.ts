@@ -52,7 +52,7 @@ layer("runProjectWorkspaceMigrationOnStartup", (it) => {
       // no v1 workspace slices; those live in web/desktop storage).
       const first = yield* runProjectWorkspaceMigrationOnStartup({ coordinator });
 
-      assert.deepStrictEqual([...first.published].sort(), [projectOne, projectTwo]);
+      assert.deepStrictEqual([...first.published].toSorted(), [projectOne, projectTwo]);
       assert.deepStrictEqual(first.kept, []);
       assert.deepStrictEqual(first.failed, []);
 
@@ -69,7 +69,7 @@ layer("runProjectWorkspaceMigrationOnStartup", (it) => {
       // Idempotent rerun: nothing republished, everything kept.
       const second = yield* runProjectWorkspaceMigrationOnStartup({ coordinator });
       assert.deepStrictEqual(second.published, []);
-      assert.deepStrictEqual([...second.kept].sort(), [projectOne, projectTwo]);
+      assert.deepStrictEqual([...second.kept].toSorted(), [projectOne, projectTwo]);
       assert.deepStrictEqual(second.failed, []);
     }),
   );

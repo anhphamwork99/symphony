@@ -349,8 +349,7 @@ describe("activateProjectWorkspace — store application", () => {
     expect(dockState?.panes[0]?.kind).toBe("browser");
 
     const scope = resolveDockTerminalScope({ projectId })!;
-    const terminalState =
-      useTerminalStateStore.getState().terminalStateByThreadId[scope];
+    const terminalState = useTerminalStateStore.getState().terminalStateByThreadId[scope];
     expect(terminalState?.terminalHeight).toBe(400);
     expect(terminalState?.terminalLabelsById.t1).toBe("Build");
   });
@@ -407,9 +406,7 @@ describe("activateProjectWorkspace — store application", () => {
 
     const result = activateProjectWorkspace({
       projectId,
-      threads: [
-        { ...threadInput({ threadId: "thread-stale", projectId }), updatedAt: null },
-      ],
+      threads: [{ ...threadInput({ threadId: "thread-stale", projectId }), updatedAt: null }],
       storage,
       nowIso: "2026-08-24T00:00:00.000Z",
       capabilityPresent: true,
@@ -426,8 +423,6 @@ describe("activateProjectWorkspace — store application", () => {
 
 describe("resolveDockTerminalScope — same-Project continuity", () => {
   it("resolves one stable scope per Project across different conversations", () => {
-    const threadA = ThreadId.makeUnsafe("thread-a");
-    const threadB = ThreadId.makeUnsafe("thread-b");
     expect(resolveDockTerminalScope({ projectId })).toBe(resolveDockTerminalScope({ projectId }));
     expect(resolveDockTerminalScope({ projectId })).not.toBe(
       resolveDockTerminalScope({ projectId: otherProjectId }),
@@ -445,27 +440,21 @@ describe("rightDockStore — Project ownership invariants", () => {
   it("keeps the workspace across a same-Project conversation switch (no reset, no copy)", () => {
     const openPane = useRightDockStore.getState().openPane;
     openPane(projectId, { kind: "browser" });
-    const before =
-      useRightDockStore.getState().dockStateByProjectId[projectId] ?? null;
+    const before = useRightDockStore.getState().dockStateByProjectId[projectId] ?? null;
 
     // Switching conversations in the same Project writes nothing under any key.
     const storeBefore = useRightDockStore.getState().dockStateByProjectId;
     useRightDockStore.setState({ dockStateByProjectId: { ...storeBefore } });
-    const after =
-      useRightDockStore.getState().dockStateByProjectId[projectId] ?? null;
+    const after = useRightDockStore.getState().dockStateByProjectId[projectId] ?? null;
 
     expect(after).toBe(before);
-    expect(Object.keys(useRightDockStore.getState().dockStateByProjectId)).toEqual([
-      projectId,
-    ]);
+    expect(Object.keys(useRightDockStore.getState().dockStateByProjectId)).toEqual([projectId]);
   });
 
   it("isolates Projects: writing one never touches another", () => {
     const openPane = useRightDockStore.getState().openPane;
     openPane(projectId, { kind: "browser" });
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[otherProjectId],
-    ).toBeUndefined();
+    expect(useRightDockStore.getState().dockStateByProjectId[otherProjectId]).toBeUndefined();
   });
 
   it("retains the sidechat's real nested ThreadId as pane content", () => {
@@ -480,21 +469,20 @@ describe("rightDockStore — Project ownership invariants", () => {
   it("persists only user-intended preferred widths within workspace bounds", () => {
     const setPreferredWidth = useRightDockStore.getState().setPreferredWidth;
     setPreferredWidth(projectId, 480);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(480);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      480,
+    );
     // A temporary clamp value outside the dock bounds never persists.
     setPreferredWidth(projectId, 2);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(480);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      480,
+    );
   });
 
   it("keeps an unavailable pane with its restoration diagnostic instead of dropping it", () => {
     const openPane = useRightDockStore.getState().openPane;
     openPane(projectId, { kind: "browser" });
-    const dockStateBefore =
-      useRightDockStore.getState().dockStateByProjectId[projectId];
+    const dockStateBefore = useRightDockStore.getState().dockStateByProjectId[projectId];
     const paneId = dockStateBefore?.panes[0]?.id as string;
 
     const updatePane = useRightDockStore.getState().updatePane;

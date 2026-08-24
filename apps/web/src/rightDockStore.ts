@@ -36,18 +36,18 @@ const RIGHT_DOCK_STORAGE_KEY = "synara:right-dock-state:v2";
 interface RightDockStore {
   dockStateByProjectId: Record<string, RightDockProjectState | undefined>;
   openPane: (
-    projectId: ProjectId,
+    projectId: ProjectId | null,
     input: Omit<OpenPaneInput, "paneId"> & { paneId?: string },
   ) => void;
   toggleSingletonPane: (
-    projectId: ProjectId,
+    projectId: ProjectId | null,
     input: Omit<OpenPaneInput, "paneId"> & { paneId?: string },
   ) => void;
-  closePane: (projectId: ProjectId, paneId: string) => void;
-  setActivePane: (projectId: ProjectId, paneId: string) => void;
-  setDockOpen: (projectId: ProjectId, open: boolean) => void;
+  closePane: (projectId: ProjectId | null, paneId: string) => void;
+  setActivePane: (projectId: ProjectId | null, paneId: string) => void;
+  setDockOpen: (projectId: ProjectId | null, open: boolean) => void;
   updatePane: (
-    projectId: ProjectId,
+    projectId: ProjectId | null,
     paneId: string,
     patch: Partial<
       Pick<
@@ -69,12 +69,12 @@ interface RightDockStore {
    * drag) reach this action; the render-only viewport clamp never does, so a
    * narrow window can never overwrite the remembered preference (scenario 8).
    */
-  setPreferredWidth: (projectId: ProjectId, widthPx: number) => void;
+  setPreferredWidth: (projectId: ProjectId | null, widthPx: number) => void;
   /**
    * Apply a published v2 migration slice for one Project (idempotent; only the
    * migration activator calls this after the publication marker is durable).
    */
-  applyPublishedDockSlice: (projectId: ProjectId, slice: RightDockProjectState) => void;
+  applyPublishedDockSlice: (projectId: ProjectId | null, slice: RightDockProjectState) => void;
 }
 
 // Frozen shared snapshot: it is handed back from `selectRightDockState` for any
@@ -86,9 +86,12 @@ Object.freeze(DEFAULT_RIGHT_DOCK_STATE.panes);
 
 function commit(
   set: (fn: (store: RightDockStore) => Partial<RightDockStore>) => void,
-  projectId: ProjectId,
+  projectId: ProjectId | null,
   transform: (state: RightDockProjectState) => RightDockProjectState,
 ): void {
+  if (projectId === null) {
+    return;
+  }
   set((store) => {
     const previous = store.dockStateByProjectId[projectId] ?? DEFAULT_RIGHT_DOCK_STATE;
     const next = transform(previous);
@@ -132,13 +135,17 @@ export const useRightDockStore = create<RightDockStore>()(
           }
           return { ...state, preferredWidthPx };
         }),
-      applyPublishedDockSlice: (projectId, slice) =>
+      applyPublishedDockSlice: (projectId, slice) => {
+        if (projectId === null) {
+          return;
+        }
         set((store) => ({
           dockStateByProjectId: {
             ...store.dockStateByProjectId,
             [projectId]: slice,
           },
-        })),
+        }));
+      },
     }),
     {
       name: RIGHT_DOCK_STORAGE_KEY,

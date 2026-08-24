@@ -19,10 +19,7 @@ import {
 import { Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import {
-  toPersistenceSqlError,
-  toPersistenceSqlOrDecodeError,
-} from "../../persistence/Errors.ts";
+import { toPersistenceSqlError, toPersistenceSqlOrDecodeError } from "../../persistence/Errors.ts";
 import {
   ProjectWorkspaceStagingInvalidError,
   ProjectWorkspaceStore,
@@ -92,7 +89,7 @@ const publishedInvalid = (detail: string): ProjectWorkspaceReadResult => ({
 export interface ProjectWorkspaceStoreTestHooks {
   readonly afterSlicesBeforeMarker?: (input: {
     readonly projectId: ProjectId;
-  }) => Effect.Effect<void>;
+  }) => Effect.Effect<void, ProjectWorkspaceStagingInvalidError>;
 }
 
 /**
@@ -104,10 +101,10 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
   Layer.effect(
     ProjectWorkspaceStore,
     Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+      const sql = yield* SqlClient.SqlClient;
 
-    const readSliceRows = (projectId: ProjectId) =>
-      sql<SliceRow>`
+      const readSliceRows = (projectId: ProjectId) =>
+        sql<SliceRow>`
         SELECT
           project_id AS "projectId",
           slice_kind AS "sliceKind",
@@ -119,8 +116,8 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
         ORDER BY slice_kind ASC
       `;
 
-    const readPublicationRow = (projectId: ProjectId) =>
-      sql<PublicationRow>`
+      const readPublicationRow = (projectId: ProjectId) =>
+        sql<PublicationRow>`
         SELECT
           project_id AS "projectId",
           schema_version AS "schemaVersion",
@@ -132,116 +129,119 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
         LIMIT 1
       `;
 
-    const readPublishedTarget: ProjectWorkspaceStoreShape["readPublishedTarget"] = ({
-      projectId,
-    }) =>
-      Effect.gen(function* () {
-        const publicationRows = yield* readPublicationRow(projectId).pipe(
-          Effect.mapError(
-            toPersistenceSqlError("ProjectWorkspaceStore.readPublishedTarget:query"),
-          ),
-        );
-        const sliceRows = yield* readSliceRows(projectId).pipe(
-          Effect.mapError(
-            toPersistenceSqlError("ProjectWorkspaceStore.readPublishedTarget:query"),
-          ),
-        );
-        return {
-          publicationMarker:
-            publicationRows.length === 0 ? null : publicationRowToMarker(publicationRows[0]!),
-          stagedSlices: sliceRows.map((row) => {
+      const readPublishedTarget: ProjectWorkspaceStoreShape["readPublishedTarget"] = ({
+        projectId,
+      }) =>
+        Effect.gen(function* () {
+          const publicationRows = yield* readPublicationRow(projectId).pipe(
+            Effect.mapError(
+              toPersistenceSqlError("ProjectWorkspaceStore.readPublishedTarget:query"),
+            ),
+          );
+          const sliceRows = yield* readSliceRows(projectId).pipe(
+            Effect.mapError(
+              toPersistenceSqlError("ProjectWorkspaceStore.readPublishedTarget:query"),
+            ),
+          );
+          return {
+            publicationMarker:
+              publicationRows.length === 0 ? null : publicationRowToMarker(publicationRows[0]!),
+            stagedSlices: sliceRows.map((row) => {
+              try {
+                return JSON.parse(row.payloadJson) as unknown;
+              } catch {
+                return null;
+              }
+            }),
+          };
+        });
+
+      const readProjectWorkspace: ProjectWorkspaceStoreShape["readProjectWorkspace"] = ({
+        projectId,
+      }) =>
+        Effect.gen(function* () {
+          const publicationRows = yield* readPublicationRow(projectId);
+          const sliceRows = yield* readSliceRows(projectId);
+
+          // Publication-inspection semantics live in ONE place: the shared pure
+          // policy. The store supplies only the raw persisted rows; the typed
+          // `unpublished` verdict (marker-absent/invalid/stale-version/
+          // other-project/staging-incomplete/staging-mixed-project) comes from
+          // the same function the migration planner itself consumes.
+          const rawStagedSlices: Array<unknown> = [];
+          for (const row of sliceRows) {
+            let payload: unknown;
             try {
-              return JSON.parse(row.payloadJson) as unknown;
+              payload = JSON.parse(row.payloadJson) as unknown;
             } catch {
-              return null;
+              return publishedInvalid(
+                `staged slice ${row.sliceKind} for project ${row.projectId} is not valid JSON`,
+              );
             }
-          }),
-        };
-      });
-
-    const readProjectWorkspace: ProjectWorkspaceStoreShape["readProjectWorkspace"] = ({
-      projectId,
-    }) =>
-      Effect.gen(function* () {
-        const publicationRows = yield* readPublicationRow(projectId);
-        const sliceRows = yield* readSliceRows(projectId);
-
-        // Publication-inspection semantics live in ONE place: the shared pure
-        // policy. The store supplies only the raw persisted rows; the typed
-        // `unpublished` verdict (marker-absent/invalid/stale-version/
-        // other-project/staging-incomplete/staging-mixed-project) comes from
-        // the same function the migration planner itself consumes.
-        const rawStagedSlices: Array<unknown> = [];
-        for (const row of sliceRows) {
-          let payload: unknown;
-          try {
-            payload = JSON.parse(row.payloadJson) as unknown;
-          } catch {
-            return publishedInvalid(
-              `staged slice ${row.sliceKind} for project ${row.projectId} is not valid JSON`,
-            );
+            rawStagedSlices.push(payload);
           }
-          rawStagedSlices.push(payload);
-        }
 
-        const rawMarker =
-          publicationRows.length === 0 ? null : publicationRowToMarker(publicationRows[0]!);
-        const status = inspectProjectWorkspacePublishedTarget(
-          { publicationMarker: rawMarker, stagedSlices: rawStagedSlices },
-          projectId,
+          const rawMarker =
+            publicationRows.length === 0 ? null : publicationRowToMarker(publicationRows[0]!);
+          const status = inspectProjectWorkspacePublishedTarget(
+            { publicationMarker: rawMarker, stagedSlices: rawStagedSlices },
+            projectId,
+          );
+          if (status.status !== "published-current") {
+            return unpublished(status.reason);
+          }
+
+          const stagedSlices: Array<ProjectWorkspaceSlice> = [];
+          for (const raw of rawStagedSlices) {
+            const slice = decodeOr(ProjectWorkspaceSlice, raw);
+            if (slice === null) {
+              // inspectProjectWorkspacePublishedTarget guarantees the set is
+              // complete and decodable here; this branch only guards a contract
+              // drift between the two decode sites.
+              return publishedInvalid(
+                `staged slice for project ${projectId} failed schema validation`,
+              );
+            }
+            stagedSlices.push(slice);
+          }
+
+          const marker = decodeOr(ProjectWorkspacePublicationMarker, rawMarker)!;
+
+          return {
+            kind: "published-current",
+            slices: stagedSlices,
+            marker,
+          } satisfies ProjectWorkspaceReadResult;
+        }).pipe(
+          Effect.mapError(
+            toPersistenceSqlError("ProjectWorkspaceStore.readProjectWorkspace:query"),
+          ),
         );
-        if (status.status !== "published-current") {
-          return unpublished(status.reason);
-        }
 
-        const stagedSlices: Array<ProjectWorkspaceSlice> = [];
-        for (const raw of rawStagedSlices) {
-          const slice = decodeOr(ProjectWorkspaceSlice, raw);
-          if (slice === null) {
-            // inspectProjectWorkspacePublishedTarget guarantees the set is
-            // complete and decodable here; this branch only guards a contract
-            // drift between the two decode sites.
-            return publishedInvalid(
-              `staged slice for project ${projectId} failed schema validation`,
-            );
+      const stageAndPublish: ProjectWorkspaceStoreShape["stageAndPublish"] = (input) =>
+        Effect.gen(function* () {
+          // Validate the complete boundary payload BEFORE any write: exactly one
+          // current-version slice of every kind, all owned by this Project.
+          if (!isProjectWorkspaceStagingComplete(input.slices, input.projectId)) {
+            return yield* new ProjectWorkspaceStagingInvalidError({
+              projectId: input.projectId,
+              detail:
+                "the staged payload is not exactly one complete current-version slice set owned by this Project",
+            });
           }
-          stagedSlices.push(slice);
-        }
 
-        const marker = decodeOr(ProjectWorkspacePublicationMarker, rawMarker)!;
+          const sourceSchemaVersion =
+            input.provenance === null ? null : input.provenance.sourceSchemaVersion;
+          const sourceThreadId = input.provenance === null ? null : input.provenance.sourceThreadId;
 
-        return {
-          kind: "published-current",
-          slices: stagedSlices,
-          marker,
-        } satisfies ProjectWorkspaceReadResult;
-      });
-
-    const stageAndPublish: ProjectWorkspaceStoreShape["stageAndPublish"] = (input) =>
-      Effect.gen(function* () {
-        // Validate the complete boundary payload BEFORE any write: exactly one
-        // current-version slice of every kind, all owned by this Project.
-        if (!isProjectWorkspaceStagingComplete(input.slices, input.projectId)) {
-          return yield* new ProjectWorkspaceStagingInvalidError({
-            projectId: input.projectId,
-            detail:
-              "the staged payload is not exactly one complete current-version slice set owned by this Project",
-          });
-        }
-
-        const sourceSchemaVersion =
-          input.provenance === null ? null : input.provenance.sourceSchemaVersion;
-        const sourceThreadId =
-          input.provenance === null ? null : input.provenance.sourceThreadId;
-
-        // ONE transaction: all five slice upserts, then the marker LAST
-        // (Decision 0002 F.2/F.4). A failure between them rolls the whole
-        // transaction back — the target stays unpublished and retryable.
-        yield* sql.withTransaction(
-          Effect.gen(function* () {
-            const now = input.publishedAt;
-            for (const slice of input.slices) {
-              yield* sql`
+          // ONE transaction: all five slice upserts, then the marker LAST
+          // (Decision 0002 F.2/F.4). A failure between them rolls the whole
+          // transaction back — the target stays unpublished and retryable.
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const now = input.publishedAt;
+              for (const slice of input.slices) {
+                yield* sql`
                 INSERT INTO project_workspace_slices (
                   project_id,
                   slice_kind,
@@ -261,13 +261,13 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
                   schema_version = excluded.schema_version,
                   updated_at = excluded.updated_at
               `;
-            }
+              }
 
-            const midTransaction =
-              hooks?.afterSlicesBeforeMarker?.({ projectId: input.projectId }) ?? Effect.void;
-            yield* midTransaction;
+              const midTransaction =
+                hooks?.afterSlicesBeforeMarker?.({ projectId: input.projectId }) ?? Effect.void;
+              yield* midTransaction;
 
-            yield* sql`
+              yield* sql`
               INSERT INTO project_workspace_publications (
                 project_id,
                 schema_version,
@@ -288,50 +288,51 @@ export const makeProjectWorkspaceStoreLayer = (hooks?: ProjectWorkspaceStoreTest
                 source_schema_version = excluded.source_schema_version,
                 source_thread_id = excluded.source_thread_id
             `;
-          }),
-        );
-      }).pipe(
-        Effect.mapError((cause): ProjectWorkspaceStoreError =>
-          cause instanceof ProjectWorkspaceStagingInvalidError
-            ? cause
-            : toPersistenceSqlOrDecodeError(
-                "ProjectWorkspaceStore.stageAndPublish:query",
-                "ProjectWorkspaceStore.stageAndPublish:decode",
-              )(cause),
-        ),
-      );
-
-    const deleteProjectWorkspace: ProjectWorkspaceStoreShape["deleteProjectWorkspace"] = ({
-      projectId,
-    }) =>
-      Effect.gen(function* () {
-        // Deliberately NO withTransaction here: the orchestration engine invokes
-        // this inside the SAME transaction that appends `project.deleted` and
-        // projects it, so these deletes join that transaction and roll back with
-        // it if the commit fails. Standalone callers get per-statement atomicity,
-        // which is acceptable for an idempotent postcondition cleanup.
-        yield* sql`DELETE FROM project_workspace_slices WHERE project_id = ${projectId}`;
-        yield* sql`DELETE FROM project_workspace_publications WHERE project_id = ${projectId}`;
-      }).pipe(
-        Effect.mapError(
-          toPersistenceSqlError("ProjectWorkspaceStore.deleteProjectWorkspace:query"),
-        ),
-      );
-
-    return {
-      readProjectWorkspace: (input) =>
-        readProjectWorkspace(input).pipe(
+            }),
+          );
+        }).pipe(
           Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectWorkspaceStore.readProjectWorkspace:query",
-              "ProjectWorkspaceStore.readProjectWorkspace:decode",
+            (cause): ProjectWorkspaceStoreError | ProjectWorkspaceStagingInvalidError =>
+              cause instanceof ProjectWorkspaceStagingInvalidError
+                ? cause
+                : toPersistenceSqlOrDecodeError(
+                    "ProjectWorkspaceStore.stageAndPublish:query",
+                    "ProjectWorkspaceStore.stageAndPublish:decode",
+                  )(cause),
+          ),
+        );
+
+      const deleteProjectWorkspace: ProjectWorkspaceStoreShape["deleteProjectWorkspace"] = ({
+        projectId,
+      }) =>
+        Effect.gen(function* () {
+          // Deliberately NO withTransaction here: the orchestration engine invokes
+          // this inside the SAME transaction that appends `project.deleted` and
+          // projects it, so these deletes join that transaction and roll back with
+          // it if the commit fails. Standalone callers get per-statement atomicity,
+          // which is acceptable for an idempotent postcondition cleanup.
+          yield* sql`DELETE FROM project_workspace_slices WHERE project_id = ${projectId}`;
+          yield* sql`DELETE FROM project_workspace_publications WHERE project_id = ${projectId}`;
+        }).pipe(
+          Effect.mapError(
+            toPersistenceSqlError("ProjectWorkspaceStore.deleteProjectWorkspace:query"),
+          ),
+        );
+
+      return {
+        readProjectWorkspace: (input) =>
+          readProjectWorkspace(input).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectWorkspaceStore.readProjectWorkspace:query",
+                "ProjectWorkspaceStore.readProjectWorkspace:decode",
+              ),
             ),
           ),
-        ),
-      readPublishedTarget,
-      stageAndPublish,
-      deleteProjectWorkspace,
-    } satisfies ProjectWorkspaceStoreShape;
+        readPublishedTarget,
+        stageAndPublish,
+        deleteProjectWorkspace,
+      } satisfies ProjectWorkspaceStoreShape;
     }),
   );
 

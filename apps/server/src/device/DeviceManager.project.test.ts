@@ -139,7 +139,7 @@ describe("DeviceManager project-owned device workspace", () => {
   });
 
   it("retains a restore error truthfully instead of resetting to a blank default", async () => {
-    const { backend, manager } = await setup();
+    const { manager } = await setup();
 
     await manager.attachProject(PROJECT_A, DEVICE);
     await settleProjectAttach(manager, PROJECT_A);
@@ -154,9 +154,7 @@ describe("DeviceManager project-owned device workspace", () => {
     await manager.recordProjectError(PROJECT_A, "helper could not be built");
     const errored = await manager.getProjectState(PROJECT_A);
     expect(errored.lastError).toBe("helper could not be built");
-    expect((await manager.getProjectState(PROJECT_A)).lastError).toBe(
-      "helper could not be built",
-    );
+    expect((await manager.getProjectState(PROJECT_A)).lastError).toBe("helper could not be built");
 
     // A successful attach clears the error and restores the descriptor.
     await manager.boot(DEVICE);

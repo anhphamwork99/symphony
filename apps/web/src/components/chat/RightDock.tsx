@@ -418,8 +418,7 @@ export function RightDock(props: RightDockProps) {
     const preferredWidth = activePaneKind ? RIGHT_DOCK_PREFERRED_WIDTH[activePaneKind] : undefined;
     const shellWidthPx = shell.getBoundingClientRect().width;
     const remembered = props.preferredWidthPx ?? null;
-    const openWidth =
-      remembered ?? preferredWidth ?? Math.round(shellWidthPx / 2);
+    const openWidth = remembered ?? preferredWidth ?? Math.round(shellWidthPx / 2);
     if (openWidth > 0) {
       const dockWidth =
         mainMinWidth === undefined
@@ -438,7 +437,7 @@ export function RightDock(props: RightDockProps) {
         props.onPreferredWidthChange(Math.round(dockWidth));
       }
     }
-  }, [props.state.open, props.preferredWidthPx, props.onPreferredWidthChange, minWidth, activePaneKind, mainMinWidth]);
+  }, [props, minWidth, activePaneKind, mainMinWidth]);
   const renderedPanes = props.state.panes.filter(
     (pane) => pane.id === activePane?.id || keepMountedPaneIds.has(pane.id),
   );
@@ -494,20 +493,13 @@ export function RightDock(props: RightDockProps) {
         ? {
             onResize: (width) => {
               if (Number.isFinite(width) && width > 0) {
-                props.onPreferredWidthChange(Math.round(width));
+                props.onPreferredWidthChange?.(Math.round(width));
               }
             },
           }
         : {}),
     };
-  }, [
-    bounds,
-    props.mainTransitionTargetRef,
-    props.onPreferredWidthChange,
-    resolveDockSessionBounds,
-    props.minWidth,
-    props.shouldAcceptWidth,
-  ]);
+  }, [bounds, resolveDockSessionBounds, props]);
 
   return (
     <SidebarProvider

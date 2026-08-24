@@ -15,7 +15,10 @@ import {
   ProjectWorkspaceStagingInvalidError,
   ProjectWorkspaceStore,
 } from "../Services/ProjectWorkspaceStore.ts";
-import { makeProjectWorkspaceStoreLayer, ProjectWorkspaceStoreLive } from "./ProjectWorkspaceStore.ts";
+import {
+  makeProjectWorkspaceStoreLayer,
+  ProjectWorkspaceStoreLive,
+} from "./ProjectWorkspaceStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 
 const layer = it.layer(ProjectWorkspaceStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)));
@@ -34,10 +37,7 @@ const projectCorrupt = ProjectId.makeUnsafe("project-corrupt");
 const PUBLISHED_AT = "2026-08-24T00:00:00.000Z";
 
 /** A complete, valid five-slice payload for one Project. */
-function completeSlices(
-  projectId: ProjectId,
-  overrides: { readonly dockOpen?: boolean } = {},
-) {
+function completeSlices(projectId: ProjectId, overrides: { readonly dockOpen?: boolean } = {}) {
   return [
     {
       slice: "right-dock" as const,
@@ -130,14 +130,15 @@ layer("ProjectWorkspaceStore", (it) => {
         },
       });
 
-      const markerRows = yield* sql<{ readonly schemaVersion: number; readonly sourceThreadId: string | null }>`
+      const markerRows = yield* sql<{
+        readonly schemaVersion: number;
+        readonly sourceThreadId: string | null;
+      }>`
         SELECT schema_version AS "schemaVersion", source_thread_id AS "sourceThreadId"
         FROM project_workspace_publications
         WHERE project_id = ${projectStage}
       `;
-      assert.deepStrictEqual(markerRows, [
-        { schemaVersion: 2, sourceThreadId: "thread-winner" },
-      ]);
+      assert.deepStrictEqual(markerRows, [{ schemaVersion: 2, sourceThreadId: "thread-winner" }]);
 
       const kinds = yield* sql<{ readonly sliceKind: string }>`
         SELECT slice_kind AS "sliceKind"
@@ -220,7 +221,7 @@ layer("ProjectWorkspaceStore", (it) => {
       const store = yield* ProjectWorkspaceStore;
       const fourSlices = completeSlices(projectTorn)
         .slice(0, 4)
-        .map((slice) => ({ ...slice, projectId: projectTorn }));
+        .map((slice) => Object.assign({}, slice, { projectId: projectTorn }));
       const failure = yield* Effect.flip(
         store.stageAndPublish({
           projectId: projectTorn,
@@ -247,7 +248,7 @@ layer("ProjectWorkspaceStore", (it) => {
     Effect.gen(function* () {
       const store = yield* ProjectWorkspaceStore;
       const mixed = completeSlices(projectMixed).map((slice) =>
-        slice.slice === "device" ? { ...slice, projectId: projectA } : slice,
+        slice.slice === "device" ? Object.assign({}, slice, { projectId: projectA }) : slice,
       );
       const failure = yield* Effect.flip(
         store.stageAndPublish({

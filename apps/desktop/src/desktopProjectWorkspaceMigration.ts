@@ -228,7 +228,8 @@ export class DesktopProjectWorkspaceMigration {
       }
 
       const stagedSlices = PROJECT_WORKSPACE_MIGRATION_SLICE_KINDS.map(
-        (kind) => this.document.staged[`synara:project-workspace:v2:stage:${input.projectId}:${kind}`],
+        (kind) =>
+          this.document.staged[`synara:project-workspace:v2:stage:${input.projectId}:${kind}`],
       );
       if (!isProjectWorkspaceStagingComplete(stagedSlices, input.projectId)) {
         throw new Error("Desktop Project workspace staging verification failed.");
@@ -289,10 +290,7 @@ export function collectDesktopProjectWorkspaceProjectIds(
       projectIds.add(key);
     }
   }
-  for (const key of [
-    ...Object.keys(document.staged),
-    ...Object.keys(document.published),
-  ]) {
+  for (const key of [...Object.keys(document.staged), ...Object.keys(document.published)]) {
     if (!key.startsWith(PROJECT_WORKSPACE_RECORD_KEY_PREFIX)) continue;
     const segments = key.slice(PROJECT_WORKSPACE_RECORD_KEY_PREFIX.length).split(":");
     // stage:<projectId>:<kind> | published:<projectId>
@@ -301,7 +299,7 @@ export function collectDesktopProjectWorkspaceProjectIds(
       projectIds.add(id);
     }
   }
-  return [...projectIds].sort().map((id) => id as ProjectId);
+  return [...projectIds].toSorted().map((id) => id as ProjectId);
 }
 
 export interface DesktopProjectWorkspaceStartupOutcome {
@@ -329,9 +327,10 @@ export function runDesktopProjectWorkspaceStartupMigration(input: {
 }): DesktopProjectWorkspaceStartupOutcome {
   const filePath = resolveDesktopProjectWorkspacePath(input.userDataPath);
   try {
-    const migration = new DesktopProjectWorkspaceMigration(filePath, {
-      ...(input.now === undefined ? {} : { now: input.now }),
-    });
+    const migration = new DesktopProjectWorkspaceMigration(
+      filePath,
+      input.now === undefined ? {} : { now: input.now },
+    );
     const projectIds = collectDesktopProjectWorkspaceProjectIds(migration.getDocument());
     const results: DesktopProjectWorkspaceMigrationResult[] = [];
     for (const projectId of projectIds) {
@@ -355,9 +354,7 @@ export function runDesktopProjectWorkspaceStartupMigration(input: {
     return {
       results: [],
       diagnostic:
-        error instanceof Error
-          ? error.message
-          : "Desktop Project workspace store is unavailable.",
+        error instanceof Error ? error.message : "Desktop Project workspace store is unavailable.",
     };
   }
 }

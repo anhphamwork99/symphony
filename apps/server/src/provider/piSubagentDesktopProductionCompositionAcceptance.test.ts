@@ -212,7 +212,10 @@ function rewriteParentDecoy(parentAgentDir: string): string {
   return decoyDir;
 }
 
-function deriveBackendEnv(layout: ReleaseLayout, poisonedAgentDir: string): {
+function deriveBackendEnv(
+  layout: ReleaseLayout,
+  poisonedAgentDir: string,
+): {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly backendEnv: NodeJS.ProcessEnv;
 } {
@@ -358,7 +361,11 @@ async function createThread(
   return threadId;
 }
 
-async function startTurn(harness: RealPiWsHarness, threadId: ThreadId, suffix: string): Promise<void> {
+async function startTurn(
+  harness: RealPiWsHarness,
+  threadId: ThreadId,
+  suffix: string,
+): Promise<void> {
   await harness.client.dispatchCommand({
     type: "thread.turn.start",
     commandId: CommandId.makeUnsafe(`cmd-t04-wp2-turn-${suffix}`),
@@ -662,9 +669,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
 
       const admission = await waitFor(
         () =>
-          harness.observedAdmissions().find(
-            (event) => String(event.threadId) === String(threadId),
-          ),
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
         (event) => event.result.status !== "rejected",
         90_000,
         "one real managed Agent admission",
@@ -755,7 +760,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         const hydratedBackgroundCard = await waitFor(
           async () => {
             const detail = await freshClient.getThreadDetailSnapshot(String(threadId));
-            return detail.thread.piSubagentExecutions.find(
+            return detail?.thread.piSubagentExecutions?.find(
               (card) => card.executionId === executionId,
             );
           },
@@ -794,7 +799,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         const terminalCard = await waitFor(
           async () => {
             const detail = await freshClient.getThreadDetailSnapshot(String(threadId));
-            return detail.thread.piSubagentExecutions.find(
+            return detail?.thread.piSubagentExecutions?.find(
               (card) => card.executionId === executionId,
             );
           },
@@ -885,14 +890,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         label: "digest-mismatch",
         category: "digest_mismatch",
         mutate: (artifactDir) => {
-          const entry = join(
-            artifactDir,
-            "agent",
-            "extensions",
-            "pi-subagents",
-            "src",
-            "index.ts",
-          );
+          const entry = join(artifactDir, "agent", "extensions", "pi-subagents", "src", "index.ts");
           writeFileSync(entry, `${readFileSync(entry, "utf8")}\n// corrupt byte\n`, "utf8");
         },
       },
