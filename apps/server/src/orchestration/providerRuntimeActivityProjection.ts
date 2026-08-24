@@ -687,6 +687,29 @@ export function projectProviderRuntimeActivities(
       ];
     }
 
+    // Aggregate provider background-work lifecycle. The row mirrors the whole-
+    // provider state only — never per-job identity — and never claims the turn
+    // terminal; `turn.completed` keeps that role.
+    case "turn.background-activity.changed": {
+      const state = event.payload.state;
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "turn.background-activity.changed",
+          summary: `Background activity: ${state}`,
+          payload: toActivityPayload({
+            state,
+            source: event.payload.source,
+            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+          }),
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "user-input.requested":
     case "user-input.resolved": {
       return [

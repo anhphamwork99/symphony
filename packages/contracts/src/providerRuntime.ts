@@ -171,6 +171,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "turn.completed",
   "turn.aborted",
   "turn.tasks.updated",
+  "turn.background-activity.changed",
   "turn.proposed.delta",
   "turn.proposed.completed",
   "turn.diff.updated",
@@ -225,6 +226,7 @@ const TurnStartedType = Schema.Literal("turn.started");
 const TurnCompletedType = Schema.Literal("turn.completed");
 const TurnAbortedType = Schema.Literal("turn.aborted");
 const TurnTasksUpdatedType = Schema.Literal("turn.tasks.updated");
+const TurnBackgroundActivityChangedType = Schema.Literal("turn.background-activity.changed");
 const TurnProposedDeltaType = Schema.Literal("turn.proposed.delta");
 const TurnProposedCompletedType = Schema.Literal("turn.proposed.completed");
 const TurnDiffUpdatedType = Schema.Literal("turn.diff.updated");
@@ -402,6 +404,25 @@ const TurnTasksUpdatedPayload = Schema.Struct({
   tasks: Schema.Array(RuntimeTaskListItem),
 });
 export type TurnTasksUpdatedPayload = typeof TurnTasksUpdatedPayload.Type;
+
+// Aggregate provider background-work lifecycle, NOT per-job detail: the payload
+// carries only the whole-provider state, the signal source, and an optional
+// human-safe one-liner. Job ids, counts, and names are rejected on purpose —
+// per-job truth stays on task.* / item.* events and `turn.completed` stays the
+// only terminal. `onExcessProperty: "error"` enforces the aggregate-only shape
+// instead of silently stripping an invented per-job field.
+const RuntimeBackgroundActivityState = Schema.Literals(["active", "idle", "finalizing"]);
+export type RuntimeBackgroundActivityState = typeof RuntimeBackgroundActivityState.Type;
+
+const RuntimeBackgroundActivitySource = Schema.Literals(["provider_stop"]);
+export type RuntimeBackgroundActivitySource = typeof RuntimeBackgroundActivitySource.Type;
+
+const TurnBackgroundActivityChangedPayload = Schema.Struct({
+  state: RuntimeBackgroundActivityState,
+  source: RuntimeBackgroundActivitySource,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type TurnBackgroundActivityChangedPayload = typeof TurnBackgroundActivityChangedPayload.Type;
 
 const TurnProposedDeltaPayload = Schema.Struct({
   delta: Schema.String,
@@ -876,6 +897,14 @@ const ProviderRuntimeTurnTasksUpdatedEvent = Schema.Struct({
 });
 export type ProviderRuntimeTurnTasksUpdatedEvent = typeof ProviderRuntimeTurnTasksUpdatedEvent.Type;
 
+const ProviderRuntimeTurnBackgroundActivityChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: TurnBackgroundActivityChangedType,
+  payload: TurnBackgroundActivityChangedPayload,
+});
+export type ProviderRuntimeTurnBackgroundActivityChangedEvent =
+  typeof ProviderRuntimeTurnBackgroundActivityChangedEvent.Type;
+
 const ProviderRuntimeTurnProposedDeltaEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: TurnProposedDeltaType,
@@ -1139,6 +1168,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeTurnCompletedEvent,
   ProviderRuntimeTurnAbortedEvent,
   ProviderRuntimeTurnTasksUpdatedEvent,
+  ProviderRuntimeTurnBackgroundActivityChangedEvent,
   ProviderRuntimeTurnProposedDeltaEvent,
   ProviderRuntimeTurnProposedCompletedEvent,
   ProviderRuntimeTurnDiffUpdatedEvent,

@@ -640,6 +640,79 @@ describe("provider runtime activity projection", () => {
     ).toEqual(["claude-fable-5"]);
   });
 
+  it("projects aggregate background-activity changes as state-only rows", () => {
+    const [withDetail] = projectProviderRuntimeActivities(
+      runtimeEvent({
+        type: "turn.background-activity.changed",
+        eventId: "bg-activity-with-detail",
+        turnId: TURN_ID,
+        payload: {
+          state: "active",
+          source: "provider_stop",
+          detail: "x".repeat(500),
+        },
+      }),
+    );
+    expect(withDetail).toMatchObject({
+      id: EventId.makeUnsafe("bg-activity-with-detail"),
+      tone: "info",
+      kind: "turn.background-activity.changed",
+      summary: "Background activity: active",
+      turnId: TURN_ID,
+      payload: {
+        state: "active",
+        source: "provider_stop",
+        detail: expect.any(String) as unknown,
+      },
+    });
+    const detail = (withDetail?.payload as { detail?: string }).detail;
+    expect(detail!.length).toBeLessThanOrEqual(180);
+    // The activity must survive the schema of the command that carries it.
+    expect(() => decodeActivityAppendCommand(withDetail!)).not.toThrow();
+
+    // `detail` omitted when the provider sends none — never an explicit undefined.
+    const [minimal] = projectProviderRuntimeActivities(
+      runtimeEvent({
+        type: "turn.background-activity.changed",
+        eventId: "bg-activity-minimal",
+        turnId: TURN_ID,
+        payload: { state: "idle", source: "provider_stop" },
+      }),
+    );
+    expect(minimal).toMatchObject({
+      kind: "turn.background-activity.changed",
+      summary: "Background activity: idle",
+      payload: { state: "idle", source: "provider_stop" },
+    });
+    expect(Object.keys(minimal?.payload as Record<string, unknown>)).not.toContain("detail");
+    expect(() => decodeActivityAppendCommand(minimal!)).not.toThrow();
+
+    // A blank runtime turn id stays null, same as every other projected row.
+    const [noTurn] = projectProviderRuntimeActivities(
+      runtimeEvent({
+        type: "turn.background-activity.changed",
+        eventId: "bg-activity-no-turn",
+        payload: { state: "finalizing", source: "provider_stop" },
+      }),
+    );
+    expect(noTurn?.turnId).toBeNull();
+    expect((noTurn?.payload as Record<string, unknown>).state).toBe("finalizing");
+
+    // Aggregate rows never update-in-place: each change is its own append.
+    expect(
+      providerActivityUpdateDedupeKey(
+        runtimeEvent({
+          type: "turn.background-activity.changed",
+          eventId: "bg-activity-dedupe",
+          turnId: TURN_ID,
+          payload: { state: "active", source: "provider_stop" },
+        }),
+        THREAD_ID,
+        withDetail!,
+      ),
+    ).toBeUndefined();
+  });
+
   it("projects unmapped passthrough events instead of dropping them", () => {
     const oversizedDiagnostic = "x".repeat(64_000);
     const [activity] = projectProviderRuntimeActivities(

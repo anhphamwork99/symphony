@@ -11,6 +11,125 @@ describe("ProviderRuntimeEvent", () => {
     expect(eventType).toBe("turn.steered");
   });
 
+  it("includes turn.background-activity.changed in the exported event type", () => {
+    const eventType: ProviderRuntimeEventType = "turn.background-activity.changed";
+    expect(eventType).toBe("turn.background-activity.changed");
+  });
+
+  it("decodes aggregate turn.background-activity.changed payloads", () => {
+    const withDetail = decodeRuntimeEvent({
+      type: "turn.background-activity.changed",
+      eventId: "event-bg-activity-1",
+      provider: "antigravity",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        state: "active",
+        source: "provider_stop",
+        detail: "Provider stop reported live background work",
+      },
+    });
+    expect(withDetail.type).toBe("turn.background-activity.changed");
+    if (withDetail.type !== "turn.background-activity.changed") {
+      throw new Error("expected turn.background-activity.changed");
+    }
+    expect(withDetail.payload.state).toBe("active");
+    expect(withDetail.payload.source).toBe("provider_stop");
+    expect(withDetail.payload.detail).toBe("Provider stop reported live background work");
+
+    // `detail` is optional: the minimal aggregate payload decodes on its own.
+    const minimal = decodeRuntimeEvent({
+      type: "turn.background-activity.changed",
+      eventId: "event-bg-activity-2",
+      provider: "antigravity",
+      createdAt: "2026-02-28T00:00:00.100Z",
+      threadId: "thread-1",
+      payload: { state: "idle", source: "provider_stop" },
+    });
+    if (minimal.type !== "turn.background-activity.changed") {
+      throw new Error("expected turn.background-activity.changed");
+    }
+    expect(minimal.payload.state).toBe("idle");
+    expect("detail" in minimal.payload).toBe(false);
+
+    const finalizing = decodeRuntimeEvent({
+      type: "turn.background-activity.changed",
+      eventId: "event-bg-activity-3",
+      provider: "antigravity",
+      createdAt: "2026-02-28T00:00:00.200Z",
+      threadId: "thread-1",
+      payload: { state: "finalizing", source: "provider_stop" },
+    });
+    if (finalizing.type !== "turn.background-activity.changed") {
+      throw new Error("expected turn.background-activity.changed");
+    }
+    expect(finalizing.payload.state).toBe("finalizing");
+  });
+
+  it("rejects malformed turn.background-activity.changed payloads", () => {
+    const baseEvent = {
+      type: "turn.background-activity.changed",
+      provider: "antigravity",
+      createdAt: "2026-02-28T00:00:01.000Z",
+      threadId: "thread-1",
+    } as const;
+
+    // Malformed aggregate states (per-job or turn states are not background states).
+    for (const state of ["running", "completed", "ACTIVE", "fully_idle", ""]) {
+      expect(() =>
+        decodeRuntimeEvent({
+          ...baseEvent,
+          eventId: `event-bg-activity-bad-state-${state || "blank"}`,
+          payload: { state, source: "provider_stop" },
+        }),
+      ).toThrow();
+    }
+
+    // Invented sources are not the provider stop aggregate signal.
+    for (const source of ["claude_sdk", "task_updated", "provider-stop", ""]) {
+      expect(() =>
+        decodeRuntimeEvent({
+          ...baseEvent,
+          eventId: `event-bg-activity-bad-source-${source || "blank"}`,
+          payload: { state: "active", source },
+        }),
+      ).toThrow();
+    }
+
+    // Blank detail is not a human-safe one-liner.
+    expect(() =>
+      decodeRuntimeEvent({
+        ...baseEvent,
+        eventId: "event-bg-activity-blank-detail",
+        payload: { state: "active", source: "provider_stop", detail: "   " },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invented per-job fields on turn.background-activity.changed", () => {
+    // Aggregate-only contract: job ids, counts, and names must fail decode,
+    // not be silently stripped, so no per-job truth can ride this event.
+    for (const [key, value] of [
+      ["taskId", "task-42"],
+      ["jobId", "job-7"],
+      ["activeCount", 3],
+      ["taskName", "refactor sidebar"],
+      ["tasks", [{ task: "refactor sidebar", status: "inProgress" }]],
+    ] as const) {
+      expect(() =>
+        decodeRuntimeEvent({
+          type: "turn.background-activity.changed",
+          eventId: `event-bg-activity-excess-${key}`,
+          provider: "antigravity",
+          createdAt: "2026-02-28T00:00:02.000Z",
+          threadId: "thread-1",
+          payload: { state: "active", source: "provider_stop", [key]: value },
+        }),
+      ).toThrow();
+    }
+  });
+
   it("decodes turn.tasks.updated for task-list rendering", () => {
     const parsed = decodeRuntimeEvent({
       type: "turn.tasks.updated",
