@@ -3475,9 +3475,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                 state: outputRecovered ? "completed" : "failed",
                 stopReason: outputRecovered ? "model_stop" : "error",
                 claimant: "process-error",
-                ...(!outputRecovered
-                  ? { errorMessage: processErrorMessage }
-                  : {}),
+                ...(!outputRecovered ? { errorMessage: processErrorMessage } : {}),
                 raw: raw("process-error-settlement", {
                   threadId: input.threadId,
                   turnId,
