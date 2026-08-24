@@ -37,7 +37,25 @@ import {
   type AgentGatewaySessionLease,
 } from "../../agentGateway/sessionLease.ts";
 import type { McpAuthorityBinding } from "../../agentGateway/mcpSessionAuthority.ts";
-import { type AntigravityTerminalRecoveryMode, ServerConfig } from "../../config.ts";
+import {
+  MAX_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+  MAX_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+  MAX_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  MAX_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+  MIN_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+  MIN_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+  MIN_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  MIN_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+  type AntigravityTerminalRecoveryMode,
+  ServerConfig,
+} from "../../config.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
   ProviderAdapterRequestError,
@@ -76,6 +94,9 @@ const HELPER_OUTPUT_MAX_CHARS = 128 * 1024;
 const WINDOWS_PROMPT_MAX_CHARS = 24_000;
 const DEFAULT_TERMINAL_RECOVERY_GRACE_MS = 15_000;
 const QUARANTINE_REAP_INTERVAL_MS = 1_000;
+export const SYNARA_ANTIGRAVITY_STOP_IDLE_ENV = "SYNARA_ANTIGRAVITY_STOP_IDLE";
+export const SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS_ENV =
+  "SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS";
 
 type TranscriptStep = {
   readonly step_index?: number;
@@ -128,6 +149,7 @@ type TerminalClaimant =
   | "watchdog"
   | "process-error"
   | "stop-hook"
+  | "stop-idle"
   | "interrupt"
   | "session-stop";
 
@@ -166,6 +188,16 @@ type RecoveryState =
       readonly closeObserved: boolean;
       readonly teardownOutcome: Promise<RecoveryTeardownOutcome>;
     };
+
+/** Stop-idle lifecycle state; presence alone suppresses legacy recovery. */
+type StopIdleState = {
+  phase: "background-active" | "close-wait";
+  observations: number;
+  idleConfirmed: boolean;
+  capReached: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+  emitted: { active: boolean; idle: boolean; finalizing: boolean };
+};
 
 type QuarantineRecord = {
   readonly ownership: RecoveryOwnership;
@@ -227,6 +259,7 @@ type AntigravitySessionContext = {
   /** Guards against double turn.completed (process close + interrupt/stop). */
   turnTerminalEmitted: boolean;
   recovery: RecoveryState;
+  stopIdle?: StopIdleState;
   quarantine?: QuarantineRecord;
   preparationCleanupFence?: PreparationCleanupFence;
   pollInFlight?: Promise<void>;
@@ -335,6 +368,43 @@ function parseTranscriptStep(value: unknown): TranscriptStep | undefined {
   return value as TranscriptStep;
 }
 
+/** Sanitized Stop observation fields the capture hook persists. */
+type StopIdleObservation = {
+  readonly fullyIdle: boolean;
+  readonly continued?: boolean;
+  readonly continuationLimit?: number;
+  readonly executionNum?: number;
+  readonly terminationReason?: string;
+};
+
+// Only a boolean fullyIdle selects the stop-idle lifecycle; anything else is
+// the legacy fail-open Stop path with unchanged settlement behavior.
+function parseStopIdleObservation(payload: Record<string, unknown>): StopIdleObservation | undefined {
+  const fullyIdle = payload.fullyIdle;
+  if (typeof fullyIdle !== "boolean") return undefined;
+  const continued = typeof payload.continued === "boolean" ? payload.continued : undefined;
+  const continuationLimit =
+    typeof payload.continuationLimit === "number" &&
+    Number.isInteger(payload.continuationLimit) &&
+    payload.continuationLimit >= 0
+      ? payload.continuationLimit
+      : undefined;
+  const executionNum =
+    typeof payload.executionNum === "number" &&
+    Number.isInteger(payload.executionNum) &&
+    payload.executionNum >= 0
+      ? payload.executionNum
+      : undefined;
+  const terminationReason = trim(payload.terminationReason)?.slice(0, 200);
+  return {
+    fullyIdle,
+    ...(continued !== undefined ? { continued } : {}),
+    ...(continuationLimit !== undefined ? { continuationLimit } : {}),
+    ...(executionNum !== undefined ? { executionNum } : {}),
+    ...(terminationReason !== undefined ? { terminationReason } : {}),
+  };
+}
+
 function resumeConversationId(value: unknown): string | undefined {
   if (typeof value === "string") return trim(value);
   if (!value || typeof value !== "object") return undefined;
@@ -411,6 +481,9 @@ process.stdin.on("end", () => {
     return;
   }
   let capturedPayload = payload.trim();
+  // Neutral for every hook except pre-tool's permission decision and the
+  // stop-idle continuation below.
+  let hookOutput = "{}";
   if (event === "pre-tool" || event === "post-tool") {
     try {
       const input = JSON.parse(capturedPayload);
@@ -431,17 +504,67 @@ process.stdin.on("end", () => {
     } catch {
       capturedPayload = "{}";
     }
+  } else if (event === "stop") {
+    // Stop carries the aggregate background-idle contract (fullyIdle). Only
+    // sanitized bounded fields are persisted; the continuation decision is
+    // bounded by the server-provided budget so a runaway loop cannot spin.
+    // Missing/malformed fullyIdle stays legacy fail-open: record what is
+    // recognizable and answer "{}" so the agent may exit.
+    try {
+      const input = JSON.parse(capturedPayload);
+      const sanitized = {};
+      for (const key of ["conversationId", "transcriptPath", "modelName"]) {
+        if (typeof input[key] === "string" && input[key].trim()) sanitized[key] = input[key];
+      }
+      if (Number.isInteger(input.executionNum) && input.executionNum >= 0) {
+        sanitized.executionNum = input.executionNum;
+      }
+      if (typeof input.terminationReason === "string" && input.terminationReason.trim()) {
+        sanitized.terminationReason = input.terminationReason.trim().slice(0, 200);
+      }
+      if (typeof input.error === "string" && input.error.trim()) {
+        sanitized.error = input.error.trim().slice(0, 500);
+      }
+      if (typeof input.fullyIdle === "boolean") {
+        sanitized.fullyIdle = input.fullyIdle;
+        if (process.env.SYNARA_ANTIGRAVITY_STOP_IDLE === "1") {
+          const parsedLimit = Number(process.env.SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS);
+          const continuationLimit =
+            Number.isInteger(parsedLimit) && parsedLimit >= 0 ? parsedLimit : 0;
+          if (input.fullyIdle) {
+            sanitized.continued = false;
+          } else {
+            // Continuations granted so far = prior non-idle Stop records this
+            // same event file already holds (one agy -p process per turn).
+            let priorNonIdleStops = 0;
+            try {
+              const recorded = fs.readFileSync(target, "utf8");
+              for (const line of recorded.split("\\n")) {
+                if (!line.startsWith("stop\\t")) continue;
+                try {
+                  const prior = JSON.parse(line.slice(5));
+                  if (prior && prior.fullyIdle === false) priorNonIdleStops += 1;
+                } catch { /* ignore malformed record */ }
+              }
+            } catch { /* first record: nothing counted yet */ }
+            const continued = priorNonIdleStops < continuationLimit;
+            sanitized.continued = continued;
+            sanitized.continuationLimit = continuationLimit;
+            if (continued) hookOutput = '{"decision":"continue"}';
+          }
+        }
+      }
+      capturedPayload = JSON.stringify(sanitized);
+    } catch {
+      capturedPayload = "{}";
+    }
   }
   fs.appendFileSync(target, event + "\\t" + capturedPayload + "\\n");
   if (event === "pre-tool") {
     const decision = process.env.SYNARA_ANTIGRAVITY_HOOK_DECISION === "allow" ? "allow" : "ask";
-    process.stdout.write(JSON.stringify({ decision }) + "\\n");
-  } else {
-    // Stop and other non-tool hooks: empty object allows the agent to exit.
-    // Do not emit decision:"stop" — it is not a recognized stop decision and
-    // can hang the print process after the reply is already visible (#465).
-    process.stdout.write("{}\\n");
+    hookOutput = JSON.stringify({ decision });
   }
+  process.stdout.write(hookOutput + "\\n");
 });
 `;
 }
@@ -600,11 +723,16 @@ export function buildAntigravityTurnProcessEnvironment(input: {
   readonly gatewayConnection?: Pick<AgentGatewayMcpConnection, "url">;
   readonly gatewayBootstrapToken?: string;
   readonly baseEnv?: NodeJS.ProcessEnv;
+  /** Present only when the Stop-idle lifecycle is enabled for this turn. */
+  readonly stopIdle?: { readonly maxContinuations: number };
 }): NodeJS.ProcessEnv {
   const hasGatewayBootstrap =
     input.gatewayConnection !== undefined && input.gatewayBootstrapToken !== undefined;
   const gatewayKeys = hasGatewayBootstrap
     ? [SYNARA_AGENT_GATEWAY_URL_ENV, SYNARA_AGENT_GATEWAY_BOOTSTRAP_TOKEN_ENV]
+    : [];
+  const stopIdleKeys = input.stopIdle
+    ? [SYNARA_ANTIGRAVITY_STOP_IDLE_ENV, SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS_ENV]
     : [];
   const gatewayEnvironment = hasGatewayBootstrap
     ? {
@@ -618,11 +746,20 @@ export function buildAntigravityTurnProcessEnvironment(input: {
     inheritedSynaraKeys: [
       "SYNARA_ANTIGRAVITY_EVENTS",
       "SYNARA_ANTIGRAVITY_HOOK_DECISION",
+      ...stopIdleKeys,
       ...gatewayKeys,
     ],
     overrides: {
       SYNARA_ANTIGRAVITY_EVENTS: input.eventFile,
       SYNARA_ANTIGRAVITY_HOOK_DECISION: "allow",
+      ...(input.stopIdle
+        ? {
+            [SYNARA_ANTIGRAVITY_STOP_IDLE_ENV]: "1",
+            [SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS_ENV]: String(
+              input.stopIdle.maxContinuations,
+            ),
+          }
+        : {}),
       ...gatewayEnvironment,
     },
   });
@@ -800,6 +937,12 @@ export interface AntigravityAdapterDependencies {
   readonly now?: () => number;
   readonly terminalRecoveryMode?: AntigravityTerminalRecoveryMode;
   readonly terminalRecoveryGraceMs?: number;
+  readonly stopIdleLifecycle?: boolean;
+  readonly stopIdleMaxContinuations?: number;
+  readonly stopIdleBackgroundDeadlineMs?: number;
+  readonly stopIdleCloseWaitMs?: number;
+  readonly stopIdleStableEofQuietMs?: number;
+  readonly stopIdleFinalDrainMs?: number;
   readonly onRecoveryDiagnostic?: (name: string, fields: Readonly<Record<string, unknown>>) => void;
 }
 
@@ -822,6 +965,47 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       configuredRecoveryGraceMs <= 2_147_483_647
         ? configuredRecoveryGraceMs
         : DEFAULT_TERMINAL_RECOVERY_GRACE_MS;
+    const boundedStopIdleInt = (
+      value: number | undefined,
+      fallback: number,
+      minimum: number,
+      maximum: number,
+    ): number =>
+      value !== undefined && Number.isInteger(value) && value >= minimum && value <= maximum
+        ? value
+        : fallback;
+    const stopIdleLifecycle =
+      dependencies.stopIdleLifecycle ?? serverConfig.antigravityStopIdleLifecycle ?? false;
+    const stopIdleMaxContinuations = boundedStopIdleInt(
+      dependencies.stopIdleMaxContinuations ?? serverConfig.antigravityStopIdleMaxContinuations,
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+      MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+      MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+    );
+    const stopIdleBackgroundDeadlineMs = boundedStopIdleInt(
+      dependencies.stopIdleBackgroundDeadlineMs ?? serverConfig.antigravityStopIdleBackgroundDeadlineMs,
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+      MIN_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+      MAX_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+    );
+    const stopIdleCloseWaitMs = boundedStopIdleInt(
+      dependencies.stopIdleCloseWaitMs ?? serverConfig.antigravityStopIdleCloseWaitMs,
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+      MIN_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+      MAX_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+    );
+    const stopIdleStableEofQuietMs = boundedStopIdleInt(
+      dependencies.stopIdleStableEofQuietMs ?? serverConfig.antigravityStopIdleStableEofQuietMs,
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+      MIN_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+      MAX_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+    );
+    const stopIdleFinalDrainMs = boundedStopIdleInt(
+      dependencies.stopIdleFinalDrainMs ?? serverConfig.antigravityStopIdleFinalDrainMs,
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+      MIN_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+      MAX_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+    );
     const agentGatewayCredentials = Option.getOrUndefined(
       yield* Effect.serviceOption(AgentGatewayCredentials),
     );
@@ -918,6 +1102,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
 
     const clearTurnScheduling = (context: AntigravitySessionContext): void => {
       clearRecoveryTimer(context.recovery);
+      const stopIdle = context.stopIdle;
+      if (stopIdle?.timer !== undefined) clearTimeout(stopIdle.timer);
+      delete context.stopIdle;
       if (context.pollTimer !== undefined) {
         clearInterval(context.pollTimer);
         delete context.pollTimer;
@@ -964,6 +1151,10 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
 
     const scheduleCandidate = (context: AntigravitySessionContext, stepIndex: number): void => {
       if (terminalRecoveryMode === "off") return;
+      if (context.stopIdle !== undefined) {
+        setIneligible(context, "stop-idle-active", false);
+        return;
+      }
       const ownership = captureOwnership(context);
       if (!ownership || context.pendingTools.length > 0 || context.turnTerminalEmitted) {
         setIneligible(context, "candidate-preconditions-lost", false);
@@ -1268,6 +1459,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       }
       context.turnTerminalEmitted = true;
       delete context.terminalTeardown;
+      const settledStopIdle = context.stopIdle;
+      if (settledStopIdle?.timer !== undefined) clearTimeout(settledStopIdle.timer);
+      delete context.stopIdle;
       delete context.activeProcess;
       delete context.activeRunDir;
       delete context.activeTurnId;
@@ -1567,6 +1761,27 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         }
         // Agent finished: if the print process lingers, tear it down so the
         // close handler (or interrupt fallback) can settle the turn (#465).
+        // With the stop-idle lifecycle enabled, a boolean fullyIdle hands the
+        // terminal to the stop-idle path instead: background work keeps the
+        // single `agy -p` process alive until the hook reports idle or a
+        // bounded timer forces the proven teardown path.
+        if (
+          eventName === "stop" &&
+          stopIdleLifecycle &&
+          context.activeProcess &&
+          !context.turnTerminalEmitted
+        ) {
+          const stopObservation = parseStopIdleObservation(payload);
+          if (stopObservation !== undefined) {
+            noteActivity(context, { invalidate: true, reason: "stop-hook" });
+            if (context.recovery.phase === "teardown" || context.terminalClaimant !== undefined)
+              continue;
+            const stopOwnership = captureOwnership(context);
+            if (!stopOwnership) continue;
+            observeStopIdle(context, stopOwnership, stopObservation);
+            continue;
+          }
+        }
         if (eventName === "stop" && context.activeProcess && !context.turnTerminalEmitted) {
           noteActivity(context, { invalidate: true, reason: "stop-hook" });
           if (context.recovery.phase === "teardown" || context.terminalClaimant !== undefined)
@@ -2043,9 +2258,402 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       await cleanupSettledTurnResources(context, cleanupFence, "stop-hook-cleanup");
     };
 
+    // ---- Stop `fullyIdle` aggregate background lifecycle --------------------
+
+    const emitStopIdleActivity = (
+      context: AntigravitySessionContext,
+      state: "active" | "idle" | "finalizing",
+      detail?: string,
+    ): void => {
+      const stopIdle = context.stopIdle;
+      if (!stopIdle || stopIdle.emitted[state]) return;
+      stopIdle.emitted[state] = true;
+      offer({
+        ...base(context),
+        type: "turn.background-activity.changed",
+        payload: {
+          state,
+          source: "provider_stop",
+          ...(detail ? { detail: detail.slice(0, 180) } : {}),
+        },
+      } satisfies ProviderRuntimeEvent);
+    };
+
+    const clearStopIdleTimer = (context: AntigravitySessionContext): void => {
+      const stopIdle = context.stopIdle;
+      if (stopIdle?.timer !== undefined) {
+        clearTimeout(stopIdle.timer);
+        delete stopIdle.timer;
+      }
+    };
+
+    const armStopIdleTimer = (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+      kind: "background-deadline" | "close-wait",
+    ): void => {
+      const stopIdle = context.stopIdle;
+      if (!stopIdle) return;
+      clearStopIdleTimer(context);
+      const timer = setTimeout(() => {
+        if (context.stopIdle !== stopIdle) return;
+        delete stopIdle.timer;
+        const settlement = settleStopIdleTimeout(context, ownership, kind);
+        void settlement.finally(() => {
+          if (context.terminalSettlement === settlement) delete context.terminalSettlement;
+        });
+      }, kind === "background-deadline" ? stopIdleBackgroundDeadlineMs : stopIdleCloseWaitMs);
+      stopIdle.timer = timer;
+    };
+
+    const observeStopIdle = (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+      observation: StopIdleObservation,
+    ): void => {
+      if (!ownsRecovery(context, ownership)) return;
+      if (context.turnTerminalEmitted || context.terminalClaimant !== undefined) return;
+      if (!observation.fullyIdle) {
+        const state: StopIdleState = context.stopIdle ?? {
+          phase: "background-active",
+          observations: 0,
+          idleConfirmed: false,
+          capReached: false,
+          emitted: { active: false, idle: false, finalizing: false },
+        };
+        context.stopIdle = state;
+        state.observations += 1;
+        if (observation.continued === false) state.capReached = true;
+        // The Stop contract owns this turn's terminal from here on: legacy
+        // completion candidates and the watchdog must stay out regardless of
+        // pendingTools.
+        setIneligible(context, "stop-idle-observed", false);
+        diagnose(
+          "antigravity.background_continue",
+          recoveryFields(context, {
+            settlementSource: "provider_stop",
+            observationCount: state.observations,
+            continued: observation.continued ?? null,
+            continuationLimit: observation.continuationLimit ?? null,
+            ...(observation.executionNum !== undefined
+              ? { executionNum: observation.executionNum }
+              : {}),
+            ...(observation.terminationReason !== undefined
+              ? { terminationReason: observation.terminationReason }
+              : {}),
+          }),
+        );
+        if (state.phase === "close-wait") return;
+        emitStopIdleActivity(context, "active", observation.terminationReason);
+        if (state.timer === undefined) armStopIdleTimer(context, ownership, "background-deadline");
+        return;
+      }
+      diagnose(
+        "antigravity.background_idle_observed",
+        recoveryFields(context, {
+          settlementSource: "provider_stop",
+          ...(observation.executionNum !== undefined
+            ? { executionNum: observation.executionNum }
+            : {}),
+        }),
+      );
+      const existing = context.stopIdle;
+      if (existing) {
+        if (existing.phase === "close-wait") return;
+        existing.phase = "close-wait";
+        existing.idleConfirmed = true;
+        if (existing.emitted.active) emitStopIdleActivity(context, "idle");
+        armStopIdleTimer(context, ownership, "close-wait");
+        return;
+      }
+      context.stopIdle = {
+        phase: "close-wait",
+        observations: 0,
+        idleConfirmed: true,
+        capReached: false,
+        emitted: { active: false, idle: false, finalizing: false },
+      };
+      setIneligible(context, "stop-idle-observed", false);
+      armStopIdleTimer(context, ownership, "close-wait");
+    };
+
+    const stopIdleDrainMarker = (context: AntigravitySessionContext): string =>
+      `${context.processedHookBytes}:${context.processedTranscriptBytes}:${context.recovery.activityRevision}`;
+
+    const drainStopIdleStableEof = async (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+    ): Promise<void> => {
+      const startedAt = nowMs();
+      let quietSince = nowMs();
+      let marker = stopIdleDrainMarker(context);
+      for (;;) {
+        await pollActiveTurn(context).catch(() => undefined);
+        if (!ownsRecovery(context, ownership)) return;
+        const next = stopIdleDrainMarker(context);
+        if (next !== marker) {
+          marker = next;
+          quietSince = nowMs();
+        }
+        if (nowMs() - quietSince >= stopIdleStableEofQuietMs) return;
+        if (nowMs() - startedAt >= stopIdleFinalDrainMs) return;
+        await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+    };
+
+    const closeDanglingStopIdleTools = (context: AntigravitySessionContext): void => {
+      for (const pending of context.pendingTools.splice(0)) {
+        offer({
+          ...base(context, { itemId: pending.itemId }),
+          type: "item.completed",
+          payload: {
+            itemType: pending.itemType,
+            status: "failed",
+            title: pending.name,
+            detail: "Background tool never reported a result before the Antigravity process closed.",
+            data: { toolCallId: pending.itemId, toolName: pending.name },
+          },
+          raw: raw("stop-idle-tool-closeout", { name: pending.name }),
+        } satisfies ProviderRuntimeEvent);
+      }
+    };
+
+    const finalizeStopIdleTurn = async (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+      input: {
+        readonly outcome: "natural-close" | "close-wait-timeout" | "background-deadline";
+        readonly closeCode?: number | null;
+        readonly stderr?: string;
+        readonly teardownOutcome?: RecoveryTeardownOutcome;
+      },
+    ): Promise<void> => {
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      const stopIdle = context.stopIdle;
+      const idleConfirmed = stopIdle?.idleConfirmed ?? false;
+      closeDanglingStopIdleTools(context);
+      const stopIdleSettle = (
+        settle: Parameters<typeof settleActiveTurn>[1],
+      ): void => {
+        if (context.quarantine !== undefined) {
+          // The quarantine record already owns resource cleanup and its reaper;
+          // never install a second cleanup fence beside it.
+          settleActiveTurn(context, settle);
+          return;
+        }
+        const cleanupFence = installExitedCleanupFence(
+          context,
+          ownership,
+          "antigravity.stop_idle_cleanup_unconfirmed",
+        );
+        if (!cleanupFence) return;
+        settleActiveTurn(context, settle);
+        void cleanupSettledTurnResources(context, cleanupFence, "stop-idle-cleanup");
+      };
+      const metadata = recoveryFields(context, {
+        settlementSource: "stop-idle",
+        stopIdleOutcome: input.outcome,
+        idleConfirmed,
+        ...(stopIdle?.capReached ? { continuationCapReached: true } : {}),
+        ...(stopIdle?.observations !== undefined && stopIdle.observations > 0
+          ? { observationCount: stopIdle.observations }
+          : {}),
+        ...(input.closeCode !== undefined ? { exitCode: input.closeCode } : {}),
+        ...(input.teardownOutcome
+          ? {
+              teardownStage: input.teardownOutcome.kind === "proven" ? "graceful" : "stop-idle",
+              captureComplete:
+                input.teardownOutcome.kind === "unproven" &&
+                input.teardownOutcome.cause instanceof ProviderProcessExitUnprovenError
+                  ? input.teardownOutcome.cause.captureComplete
+                  : input.teardownOutcome.kind === "proven",
+              remainingDescendantCount:
+                input.teardownOutcome.kind === "unproven" &&
+                input.teardownOutcome.cause instanceof ProviderProcessExitUnprovenError
+                  ? (input.teardownOutcome.cause.remainingDescendantPids?.length ?? null)
+                  : 0,
+            }
+          : {}),
+      });
+      if (input.outcome === "background-deadline") {
+        stopIdleSettle({
+          state: "failed",
+          stopReason: "error",
+          errorMessage:
+            "Antigravity background work exceeded its deadline and the turn was torn down (background_deadline_exceeded).",
+          claimant: "stop-idle",
+          raw: raw("stop-idle-deadline", metadata),
+        });
+        return;
+      }
+      if (!idleConfirmed) {
+        diagnose("antigravity.background_idle_unconfirmed", metadata);
+        stopIdleSettle({
+          state: "failed",
+          stopReason: "error",
+          errorMessage:
+            "Antigravity closed before confirming background work was idle (background_idle_unconfirmed).",
+          claimant: "stop-idle",
+          raw: raw("stop-idle-idle-unconfirmed", metadata),
+        });
+        return;
+      }
+      if (input.outcome === "natural-close" && input.closeCode !== null && input.closeCode !== 0) {
+        offer({
+          ...base(context, { includeTurn: false }),
+          type: "runtime.warning",
+          payload: {
+            message:
+              input.stderr?.trim() ||
+              `Antigravity CLI exited with code ${input.closeCode} after background work went idle.`,
+          },
+          raw: raw("stop-idle-nonzero-exit", { code: input.closeCode }),
+        } satisfies ProviderRuntimeEvent);
+      }
+      stopIdleSettle({
+        state: "completed",
+        stopReason: "model_stop",
+        claimant: "stop-idle",
+        raw: raw(
+          input.outcome === "close-wait-timeout" ? "stop-idle-close-wait-timeout" : "stop-idle-close",
+          metadata,
+        ),
+      });
+    };
+
+    const settleStopIdleClose = async (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+      input: {
+        readonly code: number | null;
+        readonly signal: NodeJS.Signals | null;
+        readonly stdout?: string;
+        readonly stderr?: string;
+      },
+    ): Promise<void> => {
+      if (context.turnTerminalEmitted) return;
+      if (!claimTerminal(context, "stop-idle")) return;
+      clearStopIdleTimer(context);
+      await Effect.runPromise(cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId));
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      emitStopIdleActivity(context, "finalizing");
+      await drainStopIdleStableEof(context, ownership);
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      if (!context.sawAssistant && input.stdout) {
+        emitTextItem(
+          context,
+          { step_index: Number.MAX_SAFE_INTEGER, type: "PRINT_OUTPUT", content: input.stdout },
+          "assistant_message",
+          "assistant_text",
+        );
+      }
+      await finalizeStopIdleTurn(context, ownership, {
+        outcome: "natural-close",
+        closeCode: input.code,
+        ...(input.stderr ? { stderr: input.stderr } : {}),
+      });
+    };
+
+    const settleStopIdleTimeout = async (
+      context: AntigravitySessionContext,
+      ownership: RecoveryOwnership,
+      kind: "background-deadline" | "close-wait",
+    ): Promise<void> => {
+      if (context.turnTerminalEmitted || !ownsRecovery(context, ownership)) return;
+      if (!claimTerminal(context, "stop-idle")) return;
+      const stopIdle = context.stopIdle;
+      clearStopIdleTimer(context);
+      diagnose(
+        kind === "background-deadline"
+          ? "antigravity.background_deadline_exceeded"
+          : "antigravity.background_close_wait_timeout",
+        recoveryFields(context, {
+          settlementSource: kind,
+          observationCount: stopIdle?.observations ?? 0,
+          idleConfirmed: stopIdle?.idleConfirmed ?? false,
+        }),
+      );
+      await Effect.runPromise(cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId));
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      const outcome = await invokeTeardown(ownership.child).then<
+        RecoveryTeardownOutcome,
+        RecoveryTeardownOutcome
+      >(
+        (result) => ({ kind: "proven", result }),
+        (cause) => ({ kind: "unproven", cause }),
+      );
+      if (outcome.kind === "unproven") {
+        const quarantineMetadata = recoveryFields(context, {
+          teardownStage: kind,
+          settlementSource: "stop-idle",
+          captureComplete:
+            outcome.cause instanceof ProviderProcessExitUnprovenError
+              ? outcome.cause.captureComplete
+              : false,
+          remainingDescendantCount:
+            outcome.cause instanceof ProviderProcessExitUnprovenError
+              ? (outcome.cause.remainingDescendantPids?.length ?? null)
+              : null,
+        });
+        const record: QuarantineRecord = {
+          ownership,
+          runDir: ownership.runDir,
+          ...(ownership.gatewaySessionLease !== undefined
+            ? { gatewaySessionLease: ownership.gatewaySessionLease }
+            : {}),
+          stopRequested: context.stopRequested,
+          reapInFlight: false,
+          cleanupUnconfirmedDiagnostic: "antigravity.background_teardown_unconfirmed",
+          cleanupUnconfirmedReported: true,
+        };
+        context.quarantine = record;
+        diagnose("antigravity.background_teardown_unconfirmed", quarantineMetadata);
+        diagnose("antigravity.quarantine_entered", quarantineMetadata);
+        if (!record.stopRequested) scheduleQuarantineReap(context, record);
+      }
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      emitStopIdleActivity(context, "finalizing");
+      await drainStopIdleStableEof(context, ownership);
+      if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
+      await finalizeStopIdleTurn(context, ownership, {
+        outcome: kind === "background-deadline" ? "background-deadline" : "close-wait-timeout",
+        teardownOutcome: outcome,
+      });
+      // An unproven teardown leaves the quarantine record owning cleanup; the
+      // terminal above resets the session to ready, so the error admission
+      // fence is re-asserted after settlement, mirroring the watchdog path.
+      if (outcome.kind === "unproven" && sessions.get(ownership.threadId) === context) {
+        context.session = {
+          ...context.session,
+          status: "error",
+          lastError:
+            "Antigravity background teardown is unconfirmed; new turns are blocked until cleanup succeeds.",
+          updatedAt: new Date().toISOString(),
+        };
+        offer({
+          ...base(context, { includeTurn: false }),
+          type: "session.state.changed",
+          payload: { state: "error", reason: context.session.lastError },
+          raw: raw("stop-idle-teardown-quarantine", {
+            threadId: ownership.threadId,
+            turnId: ownership.turnId,
+            ...(ownership.lifecycleGeneration !== undefined
+              ? { lifecycleGeneration: ownership.lifecycleGeneration }
+              : {}),
+            settlementSource: "stop-idle",
+            teardownStage: kind,
+          }),
+        } satisfies ProviderRuntimeEvent);
+      }
+    };
+
     maybeRecoverTerminalAnswer = async (context) => {
       const recovery = context.recovery;
       if (recovery.phase !== "grace") return;
+      if (context.stopIdle !== undefined) {
+        setIneligible(context, "stop-idle-active");
+        return;
+      }
       const ownership = captureOwnership(context);
       if (
         !ownership ||
@@ -2601,6 +3209,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         context.interrupted = false;
         context.turnTerminalEmitted = false;
         delete context.terminalClaimant;
+        const priorStopIdle = context.stopIdle;
+        if (priorStopIdle?.timer !== undefined) clearTimeout(priorStopIdle.timer);
+        delete context.stopIdle;
         clearRecoveryTimer(context.recovery);
         context.recovery = {
           phase: "ineligible",
@@ -2644,6 +3255,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             cwd: context.session.cwd ?? serverConfig.cwd,
             env: buildAntigravityTurnProcessEnvironment({
               eventFile,
+              ...(stopIdleLifecycle ? { stopIdle: { maxContinuations: stopIdleMaxContinuations } } : {}),
               ...(gatewaySessionLease && gatewayBootstrapToken
                 ? {
                     gatewayConnection: gatewaySessionLease.connection,
@@ -2738,6 +3350,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           if (context.pollTimer === timer) delete context.pollTimer;
           if (!ownsTurn()) return;
           if (!claimTerminal(context, "process-error")) return;
+          clearStopIdleTimer(context);
+          delete context.stopIdle;
           noteActivity(context, { invalidate: true, reason: "process-error" });
           queueMicrotask(() => {
             void (async () => {
@@ -2904,9 +3518,30 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             if (
               context.terminalClaimant === "process-error" ||
               context.terminalClaimant === "stop-hook" ||
+              context.terminalClaimant === "stop-idle" ||
               context.terminalClaimant === "interrupt" ||
               context.terminalClaimant === "session-stop"
             ) {
+              return;
+            }
+            if (
+              context.stopIdle !== undefined &&
+              !context.turnTerminalEmitted &&
+              context.terminalClaimant === undefined
+            ) {
+              const stopIdleOwnership = captureOwnership(context);
+              if (stopIdleOwnership) {
+                const settlement = settleStopIdleClose(context, stopIdleOwnership, {
+                  code,
+                  signal,
+                  ...(stdout.trim() ? { stdout: stdout.trim() } : {}),
+                  ...(stderr.trim() ? { stderr: stderr.trim() } : {}),
+                });
+                context.terminalSettlement = settlement;
+                void settlement.finally(() => {
+                  if (context.terminalSettlement === settlement) delete context.terminalSettlement;
+                });
+              }
               return;
             }
             if (
@@ -3060,7 +3695,11 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
               context.interrupted = true;
               const hadProcess = context.activeProcess !== undefined;
               const ownership = captureOwnership(context);
-              claimTerminal(context, "interrupt");
+              if (claimTerminal(context, "interrupt")) {
+                const interruptStopIdle = context.stopIdle;
+                if (interruptStopIdle?.timer !== undefined) clearTimeout(interruptStopIdle.timer);
+                delete context.stopIdle;
+              }
               if (hadProcess) {
                 // Prefer process close for settlement so stdout/hooks still drain.
                 // If teardown cannot prove exit, force-settle so Cancel never no-ops (#465).

@@ -22,6 +22,12 @@ import {
   normalizeHttpsPublicOrigin,
   preparePrivateServerPaths,
   remoteAccessPolicyError,
+  resolveAntigravityStopIdleBackgroundDeadlineMs,
+  resolveAntigravityStopIdleCloseWaitMs,
+  resolveAntigravityStopIdleFinalDrainMs,
+  resolveAntigravityStopIdleLifecycle,
+  resolveAntigravityStopIdleMaxContinuations,
+  resolveAntigravityStopIdleStableEofQuietMs,
   resolveCanonicalWorkspaceRoots,
   resolvePiSubagentForegroundWaitMs,
   resolvePiSubagentHeartbeatIntervalMs,
@@ -196,6 +202,25 @@ const CliEnvConfig = Config.all({
   antigravityTerminalRecoveryGraceMs: Config.string(
     "SYNARA_ANTIGRAVITY_TERMINAL_RECOVERY_GRACE_MS",
   ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleLifecycle: Config.string("SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  antigravityStopIdleMaxContinuations: Config.string(
+    "SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleBackgroundDeadlineMs: Config.string(
+    "SYNARA_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleCloseWaitMs: Config.string(
+    "SYNARA_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleStableEofQuietMs: Config.string(
+    "SYNARA_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleFinalDrainMs: Config.string(
+    "SYNARA_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
 });
 
 const ServerConfigLive = (input: CliInput) =>
@@ -311,6 +336,26 @@ const ServerConfigLive = (input: CliInput) =>
           { invalidRecoveryMode, invalidRecoveryGrace },
         );
       }
+      // Stop-idle lifecycle knobs follow the pi-subagent resolver contract:
+      // nullish/valid input resolves, anything invalid falls back to the safe
+      // default without clamping.
+      const antigravityStopIdleLifecycle = resolveAntigravityStopIdleLifecycle(
+        env.antigravityStopIdleLifecycle,
+      );
+      const antigravityStopIdleMaxContinuations = resolveAntigravityStopIdleMaxContinuations(
+        env.antigravityStopIdleMaxContinuations,
+      );
+      const antigravityStopIdleBackgroundDeadlineMs =
+        resolveAntigravityStopIdleBackgroundDeadlineMs(env.antigravityStopIdleBackgroundDeadlineMs);
+      const antigravityStopIdleCloseWaitMs = resolveAntigravityStopIdleCloseWaitMs(
+        env.antigravityStopIdleCloseWaitMs,
+      );
+      const antigravityStopIdleStableEofQuietMs = resolveAntigravityStopIdleStableEofQuietMs(
+        env.antigravityStopIdleStableEofQuietMs,
+      );
+      const antigravityStopIdleFinalDrainMs = resolveAntigravityStopIdleFinalDrainMs(
+        env.antigravityStopIdleFinalDrainMs,
+      );
       const staticDir = devUrl ? undefined : yield* cliConfig.resolveStaticDir;
       // Omitting Node's host listens on an unspecified address, which exposes
       // the server beyond the local machine on common platforms. Keep every
@@ -354,6 +399,12 @@ const ServerConfigLive = (input: CliInput) =>
         logWebSocketEvents,
         antigravityTerminalRecoveryMode,
         antigravityTerminalRecoveryGraceMs,
+        antigravityStopIdleLifecycle,
+        antigravityStopIdleMaxContinuations,
+        antigravityStopIdleBackgroundDeadlineMs,
+        antigravityStopIdleCloseWaitMs,
+        antigravityStopIdleStableEofQuietMs,
+        antigravityStopIdleFinalDrainMs,
         piSubagentForegroundWaitMs: resolvePiSubagentForegroundWaitMs(
           process.env.SYNARA_PI_SUBAGENT_FOREGROUND_WAIT_MS,
         ),

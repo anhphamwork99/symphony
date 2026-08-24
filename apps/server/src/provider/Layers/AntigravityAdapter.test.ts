@@ -13,6 +13,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerConfig } from "../../config";
 import {
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+  MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  resolveAntigravityStopIdleBackgroundDeadlineMs,
+  resolveAntigravityStopIdleCloseWaitMs,
+  resolveAntigravityStopIdleFinalDrainMs,
+  resolveAntigravityStopIdleLifecycle,
+  resolveAntigravityStopIdleMaxContinuations,
+  resolveAntigravityStopIdleStableEofQuietMs,
+} from "../../config";
+import {
   AgentGatewayCredentials,
   type AgentGatewayCredentialsShape,
 } from "../../agentGateway/Services/AgentGatewayCredentials";
@@ -1243,6 +1259,13 @@ describe("Antigravity terminal-answer recovery", () => {
       readonly graceMs?: number;
       readonly trackLease?: boolean;
       readonly teardown?: AntigravityAdapterDependencies["teardownProcessTree"];
+      readonly stopIdle?: {
+        readonly maxContinuations?: number;
+        readonly backgroundDeadlineMs?: number;
+        readonly closeWaitMs?: number;
+        readonly stableEofQuietMs?: number;
+        readonly finalDrainMs?: number;
+      };
     },
     run: (harness: RecoveryHarness) => Promise<void>,
   ): Promise<void> {
@@ -1360,6 +1383,26 @@ describe("Antigravity terminal-answer recovery", () => {
               terminalRecoveryGraceMs: input.graceMs ?? 100,
               now: () => Date.now(),
               onRecoveryDiagnostic: (name, fields) => diagnostics.push({ name, fields }),
+              ...(input.stopIdle
+                ? {
+                    stopIdleLifecycle: true,
+                    ...(input.stopIdle.maxContinuations !== undefined
+                      ? { stopIdleMaxContinuations: input.stopIdle.maxContinuations }
+                      : {}),
+                    ...(input.stopIdle.backgroundDeadlineMs !== undefined
+                      ? { stopIdleBackgroundDeadlineMs: input.stopIdle.backgroundDeadlineMs }
+                      : {}),
+                    ...(input.stopIdle.closeWaitMs !== undefined
+                      ? { stopIdleCloseWaitMs: input.stopIdle.closeWaitMs }
+                      : {}),
+                    ...(input.stopIdle.stableEofQuietMs !== undefined
+                      ? { stopIdleStableEofQuietMs: input.stopIdle.stableEofQuietMs }
+                      : {}),
+                    ...(input.stopIdle.finalDrainMs !== undefined
+                      ? { stopIdleFinalDrainMs: input.stopIdle.finalDrainMs }
+                      : {}),
+                  }
+                : {}),
             }).pipe(
               // A lease is acquired only when startSession receives an MCP
               // authority binding, so the shared harness can provide these
@@ -3176,6 +3219,749 @@ describe("Antigravity terminal-answer recovery", () => {
         harness.child.emit("close", 0, null);
         await flushTimers();
       }
+    });
+  });
+});
+
+describe("Antigravity Stop fullyIdle lifecycle configuration", () => {
+  it("exports the expected defaults", () => {
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE).toBe(false);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS).toBe(64);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS).toBe(600_000);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS).toBe(5000);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS).toBe(500);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS).toBe(5000);
+  });
+
+  it.each([
+    ["true", true],
+    ["1", true],
+    ["on", true],
+    ["TRUE", true],
+    [true, true],
+    ["false", false],
+    ["0", false],
+    ["off", false],
+    [false, false],
+  ] as const)("resolves lifecycle input %s to %s", (input, expected) => {
+    expect(resolveAntigravityStopIdleLifecycle(input)).toBe(expected);
+  });
+
+  it.each([["yes"], [""], [" "], [123], [{}], [null], [undefined]] as const)(
+    "falls back lifecycle input %p to the default",
+    (input) => {
+      expect(resolveAntigravityStopIdleLifecycle(input)).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      resolve: resolveAntigravityStopIdleMaxContinuations,
+      fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+      min: MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+      max: MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+      label: "max continuations",
+    },
+    {
+      resolve: resolveAntigravityStopIdleBackgroundDeadlineMs,
+      fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+      min: 1000,
+      max: 2_147_483_647,
+      label: "background deadline",
+    },
+    {
+      resolve: resolveAntigravityStopIdleCloseWaitMs,
+      fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+      min: 100,
+      max: 600_000,
+      label: "close wait",
+    },
+    {
+      resolve: resolveAntigravityStopIdleStableEofQuietMs,
+      fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+      min: 50,
+      max: 60_000,
+      label: "stable EOF quiet",
+    },
+    {
+      resolve: resolveAntigravityStopIdleFinalDrainMs,
+      fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+      min: 100,
+      max: 60_000,
+      label: "final drain",
+    },
+  ])("resolves and falls back safely for $label", ({ resolve, fallback, min, max }) => {
+    expect(resolve(undefined)).toBe(fallback);
+    expect(resolve(null)).toBe(fallback);
+    expect(resolve("abc")).toBe(fallback);
+    expect(resolve("100ms")).toBe(fallback);
+    expect(resolve(1.5)).toBe(fallback);
+    expect(resolve(true)).toBe(fallback);
+    expect(resolve({})).toBe(fallback);
+    expect(resolve(Infinity)).toBe(fallback);
+    expect(resolve(NaN)).toBe(fallback);
+    expect(resolve("  ")).toBe(fallback);
+    // Never clamped: out-of-range input silently reverts to the default.
+    expect(resolve(min - 1)).toBe(fallback);
+    expect(resolve(String(min - 1))).toBe(fallback);
+    expect(resolve(max + 1)).toBe(fallback);
+    expect(resolve(String(max + 1))).toBe(fallback);
+    // Valid numeric and trimmed string inputs resolve exactly.
+    expect(resolve(min)).toBe(min);
+    expect(resolve(String(min))).toBe(min);
+    expect(resolve(max)).toBe(max);
+    expect(resolve(String(max))).toBe(max);
+    expect(resolve(`  ${min}  `)).toBe(min);
+    expect(resolve(`+${min}`)).toBe(min);
+  });
+
+  it("passes the stop-idle continuation budget to the Antigravity child environment", () => {
+    const withStopIdle = buildAntigravityTurnProcessEnvironment({
+      eventFile: "/tmp/events.ndjson",
+      stopIdle: { maxContinuations: 7 },
+    });
+    expect(withStopIdle.SYNARA_ANTIGRAVITY_STOP_IDLE).toBe("1");
+    expect(withStopIdle.SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS).toBe("7");
+    const withoutStopIdle = buildAntigravityTurnProcessEnvironment({
+      eventFile: "/tmp/events.ndjson",
+    });
+    expect(withoutStopIdle.SYNARA_ANTIGRAVITY_STOP_IDLE).toBeUndefined();
+    expect(withoutStopIdle.SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS).toBeUndefined();
+  });
+});
+
+describe("Antigravity Stop fullyIdle capture hook", () => {
+  const runStopHook = (
+    scriptPath: string,
+    eventPath: string,
+    input: unknown,
+    env: NodeJS.ProcessEnv,
+  ) =>
+    spawnSync(process.execPath, [scriptPath, "stop"], {
+      env: { ...process.env, ...env, SYNARA_ANTIGRAVITY_EVENTS: eventPath },
+      input: JSON.stringify(input),
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+
+  it("continues while fullyIdle is false under the bounded cap, then caps out with continued=false", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "synara-agy-stop-idle-hook-"));
+    const scriptPath = path.join(directory, "capture.cjs");
+    const eventPath = path.join(directory, "events.ndjson");
+    try {
+      await fs.writeFile(scriptPath, hookScriptSource(), { mode: 0o700 });
+      const env = {
+        SYNARA_ANTIGRAVITY_STOP_IDLE: "1",
+        SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS: "2",
+      };
+      const first = runStopHook(scriptPath, eventPath, {
+        fullyIdle: false,
+        executionNum: 0,
+        terminationReason: "model_stop",
+        error: "",
+        workspacePaths: ["/workspace/project"],
+        artifactDirectoryPath: "/artifacts",
+      }, env);
+      expect(first.status).toBe(0);
+      expect(first.stdout.trim()).toBe('{"decision":"continue"}');
+      const second = runStopHook(scriptPath, eventPath, {
+        fullyIdle: false,
+        executionNum: 1,
+      }, env);
+      expect(second.stdout.trim()).toBe('{"decision":"continue"}');
+      const capped = runStopHook(scriptPath, eventPath, {
+        fullyIdle: false,
+        executionNum: 2,
+      }, env);
+      expect(capped.stdout.trim()).toBe("{}");
+      const idle = runStopHook(scriptPath, eventPath, {
+        fullyIdle: true,
+        executionNum: 3,
+      }, env);
+      expect(idle.stdout.trim()).toBe("{}");
+      const missing = runStopHook(scriptPath, eventPath, { executionNum: 4 }, env);
+      expect(missing.stdout.trim()).toBe("{}");
+      const malformed = runStopHook(scriptPath, eventPath, { fullyIdle: "yes" }, env);
+      expect(malformed.stdout.trim()).toBe("{}");
+
+      const contents = await fs.readFile(eventPath, "utf8");
+      const records = contents
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line.slice(5)) as Record<string, unknown>);
+      expect(records.map((record) => record.fullyIdle)).toEqual([false, false, false, true, undefined, undefined]);
+      expect(records[0]).toMatchObject({ continued: true, continuationLimit: 2, executionNum: 0, terminationReason: "model_stop" });
+      expect(records[1]).toMatchObject({ continued: true });
+      expect(records[2]).toMatchObject({ continued: false, continuationLimit: 2 });
+      expect(records[3]).toMatchObject({ continued: false });
+      // Sanitization: unknown fields are dropped, error text is bounded.
+      expect(JSON.stringify(records[0])).not.toContain("workspacePaths");
+      expect(JSON.stringify(records[0])).not.toContain("artifactDirectoryPath");
+      const oversized = runStopHook(scriptPath, eventPath, {
+        fullyIdle: false,
+        executionNum: 5,
+        error: "x".repeat(10_000),
+      }, env);
+      expect(oversized.stdout.trim()).toBe("{}");
+      const allLines = (await fs.readFile(eventPath, "utf8")).split("\n").filter(Boolean);
+      const lastRecord = JSON.parse(allLines[allLines.length - 1]!.slice(5)) as Record<string, unknown>;
+      expect(String(lastRecord.error).length).toBeLessThanOrEqual(500);
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stays legacy fail-open when the stop-idle env is absent", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "synara-agy-stop-idle-off-"));
+    const scriptPath = path.join(directory, "capture.cjs");
+    const eventPath = path.join(directory, "events.ndjson");
+    try {
+      await fs.writeFile(scriptPath, hookScriptSource(), { mode: 0o700 });
+      const result = runStopHook(scriptPath, eventPath, { fullyIdle: false, executionNum: 0 }, {});
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("{}");
+      expect(result.stdout).not.toContain('"decision":"continue"');
+      const contents = await fs.readFile(eventPath, "utf8");
+      const record = JSON.parse(contents.trim().slice(5)) as Record<string, unknown>;
+      expect(record.fullyIdle).toBe(false);
+      expect(record.continued).toBeUndefined();
+      expect(record.continuationLimit).toBeUndefined();
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Antigravity Stop fullyIdle background lifecycle", () => {
+  type StopIdleHarness = {
+    readonly adapter: AntigravityAdapterShape;
+    readonly child: ChildProcess & { stdout: PassThrough; stderr: PassThrough };
+    readonly diagnostics: Array<{ name: string; fields: Readonly<Record<string, unknown>> }>;
+    readonly events: Array<unknown>;
+    readonly eventFile: string;
+    readonly transcriptPath: string;
+    readonly threadId: ThreadId;
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  async function flushTimers(milliseconds = 0): Promise<void> {
+    await vi.advanceTimersByTimeAsync(milliseconds);
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  async function waitFor(predicate: () => boolean, message: string, attempts = 400): Promise<void> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (predicate()) return;
+      await flushTimers(5);
+    }
+    throw new Error(message);
+  }
+
+  async function drainFor(milliseconds: number): Promise<void> {
+    let remaining = milliseconds;
+    while (remaining > 0) {
+      const step = Math.min(remaining, 50);
+      await vi.advanceTimersByTimeAsync(step);
+      await Promise.resolve();
+      await Promise.resolve();
+      remaining -= step;
+    }
+  }
+
+  async function runHarness(
+    input: {
+      readonly graceMs?: number;
+      readonly teardown?: AntigravityAdapterDependencies["teardownProcessTree"];
+      readonly stopIdle?: {
+        readonly maxContinuations?: number;
+        readonly backgroundDeadlineMs?: number;
+        readonly closeWaitMs?: number;
+        readonly stableEofQuietMs?: number;
+        readonly finalDrainMs?: number;
+      };
+    },
+    run: (harness: StopIdleHarness) => Promise<void>,
+  ): Promise<void> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "synara-antigravity-stop-idle-"));
+    const transcriptPath = path.join(root, "transcript.jsonl");
+    await fs.writeFile(transcriptPath, "");
+    let eventFile = "";
+    let child!: StopIdleHarness["child"];
+    const diagnostics: StopIdleHarness["diagnostics"] = [];
+    const events: StopIdleHarness["events"] = [];
+    const spawnProcess = ((
+      _command: string,
+      _args: readonly string[],
+      options: { readonly env?: NodeJS.ProcessEnv },
+    ) => {
+      eventFile = options.env?.SYNARA_ANTIGRAVITY_EVENTS ?? "";
+      const spawned = new EventEmitter() as StopIdleHarness["child"];
+      Object.assign(spawned, {
+        pid: 42001,
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        killed: false,
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: () => true,
+      });
+      child = spawned;
+      return spawned;
+    }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>;
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* AntigravityAdapter;
+          yield* adapter.streamEvents.pipe(
+            Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+            Effect.forkChild,
+          );
+          const threadId = ThreadId.makeUnsafe(`thread-stop-idle-${crypto.randomUUID()}`);
+          yield* adapter.startSession({
+            provider: "antigravity",
+            threadId,
+            runtimeMode: "full-access",
+            cwd: root,
+            providerOptions: { antigravity: { binaryPath: "/fake/agy" } },
+            lifecycleGeneration: "generation-stop-idle",
+          });
+          yield* adapter.sendTurn({ threadId, input: "synthetic-input", attachments: [] });
+          yield* Effect.promise(() =>
+            run({
+              adapter,
+              child,
+              diagnostics,
+              events,
+              eventFile,
+              transcriptPath,
+              threadId,
+            }),
+          );
+          if (yield* adapter.hasSession(threadId)) yield* adapter.stopSession(threadId);
+        }).pipe(
+          Effect.provide(
+            makeAntigravityAdapterLive({
+              ensurePlugin: async () => undefined,
+              spawnProcess,
+              teardownProcessTree:
+                input.teardown ?? (async () => ({ escalated: false, signalErrors: [] })),
+              terminalRecoveryMode: "enforce",
+              terminalRecoveryGraceMs: input.graceMs ?? 100,
+              now: () => Date.now(),
+              onRecoveryDiagnostic: (name, fields) => diagnostics.push({ name, fields }),
+              ...(input.stopIdle
+                ? {
+                    stopIdleLifecycle: true,
+                    ...(input.stopIdle.maxContinuations !== undefined
+                      ? { stopIdleMaxContinuations: input.stopIdle.maxContinuations }
+                      : {}),
+                    ...(input.stopIdle.backgroundDeadlineMs !== undefined
+                      ? { stopIdleBackgroundDeadlineMs: input.stopIdle.backgroundDeadlineMs }
+                      : {}),
+                    ...(input.stopIdle.closeWaitMs !== undefined
+                      ? { stopIdleCloseWaitMs: input.stopIdle.closeWaitMs }
+                      : {}),
+                    ...(input.stopIdle.stableEofQuietMs !== undefined
+                      ? { stopIdleStableEofQuietMs: input.stopIdle.stableEofQuietMs }
+                      : {}),
+                    ...(input.stopIdle.finalDrainMs !== undefined
+                      ? { stopIdleFinalDrainMs: input.stopIdle.finalDrainMs }
+                      : {}),
+                  }
+                : {}),
+            }).pipe(
+              Layer.provideMerge(
+                ServerConfig.layerTest(root, { prefix: "antigravity-stop-idle-config-" }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
+
+  async function attachTranscript(harness: StopIdleHarness): Promise<void> {
+    await fs.appendFile(
+      harness.eventFile,
+      `pre-invocation\t${JSON.stringify({ transcriptPath: harness.transcriptPath })}\n`,
+    );
+    await flushTimers(75);
+    await fs.appendFile(
+      harness.transcriptPath,
+      `${JSON.stringify({ step_index: 0, type: "USER_INPUT" })}\n`,
+    );
+    await flushTimers(75);
+  }
+
+  async function appendPlannerStep(
+    harness: StopIdleHarness,
+    stepIndex: number,
+    content: string,
+  ): Promise<void> {
+    await fs.appendFile(
+      harness.transcriptPath,
+      `${JSON.stringify({ step_index: stepIndex, type: "PLANNER_RESPONSE", content, tool_calls: [] })}\n`,
+    );
+    await flushTimers(75);
+  }
+
+  async function appendStopRecord(
+    harness: StopIdleHarness,
+    payload: Record<string, unknown>,
+    milliseconds = 75,
+  ): Promise<void> {
+    await fs.appendFile(harness.eventFile, `stop\t${JSON.stringify(payload)}\n`);
+    await flushTimers(milliseconds);
+  }
+
+  type TypedEvent = {
+    readonly type: string;
+    readonly payload?: unknown;
+    readonly turnId?: unknown;
+  };
+
+  const eventsOf = (harness: StopIdleHarness): TypedEvent[] =>
+    harness.events as TypedEvent[];
+
+  const activityStates = (harness: StopIdleHarness): string[] =>
+    eventsOf(harness)
+      .filter((event) => event.type === "turn.background-activity.changed")
+      .map((event) => (event.payload as { state: string }).state);
+
+  const turnTerminals = (harness: StopIdleHarness): TypedEvent[] =>
+    eventsOf(harness).filter((event) => event.type === "turn.completed");
+
+  const defaultStopIdle = {
+    maxContinuations: 8,
+    backgroundDeadlineMs: 60_000,
+    closeWaitMs: 60_000,
+    stableEofQuietMs: 100,
+    finalDrainMs: 1000,
+  } as const;
+
+  it("keeps the turn alive on false+continued with one active edge and no recovery", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ stopIdle: defaultStopIdle, teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "LAUNCHED");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 0,
+        terminationReason: "model_stop",
+      });
+      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 1,
+      });
+      await drainFor(3000);
+      expect(activityStates(harness).filter((state) => state === "active")).toHaveLength(1);
+      expect(turnTerminals(harness)).toHaveLength(0);
+      expect(teardown).not.toHaveBeenCalled();
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.missing_terminal_recovery_started",
+        ),
+      ).toBe(false);
+      expect(
+        harness.diagnostics
+          .filter(({ name }) => name === "antigravity.background_continue")
+          .map(({ fields }) => fields.observationCount),
+      ).toEqual([1, 2]);
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("running");
+      expect(session?.activeTurnId).toBeDefined();
+    });
+  });
+
+  it("settles false-true-natural-close with idle/finalizing edges, drained output, and one terminal last", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ stopIdle: defaultStopIdle, teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "LAUNCHED");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 0,
+      });
+      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 1 });
+      await waitFor(() => activityStates(harness).includes("idle"), "idle edge was not emitted");
+      expect(teardown).not.toHaveBeenCalled();
+
+      harness.child.emit("close", 0, null);
+      await flushTimers(10);
+      // A transcript line lands inside the stable-EOF quiet window and must be
+      // emitted before the single terminal.
+      await fs.appendFile(
+        harness.transcriptPath,
+        `${JSON.stringify({ step_index: 2, type: "PLANNER_RESPONSE", content: "background finished", tool_calls: [] })}\n`,
+      );
+      await drainFor(1500);
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "natural-close terminal was not emitted",
+      );
+
+      const events = eventsOf(harness);
+      const states = activityStates(harness);
+      expect(states).toEqual(["active", "idle", "finalizing"]);
+      expect(turnTerminals(harness)).toHaveLength(1);
+      const terminalIndex = events.findIndex((event) => event.type === "turn.completed");
+      const finalizingIndex = events.findIndex(
+        (event) => event.type === "turn.background-activity.changed" &&
+          (event.payload as { state: string }).state === "finalizing",
+      );
+      const drainedIndex = events.findIndex(
+        (event) =>
+          event.type === "item.completed" &&
+          (event.payload as { data?: { toolName?: string } }).data?.toolName === undefined &&
+          JSON.stringify(event.payload).includes("background finished"),
+      );
+      expect(finalizingIndex).toBeGreaterThan(-1);
+      expect(drainedIndex).toBeGreaterThan(finalizingIndex);
+      expect(terminalIndex).toBeGreaterThan(drainedIndex);
+      expect(turnTerminals(harness)[0]?.payload).toEqual({
+        state: "completed",
+        stopReason: "model_stop",
+      });
+      expect(teardown).not.toHaveBeenCalled();
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("ready");
+      let runDirRemoved = false;
+      fs.stat(path.dirname(harness.eventFile)).catch(() => {
+        runDirRemoved = true;
+      });
+      await waitFor(
+        () => runDirRemoved,
+        "natural-close run directory was not cleaned up",
+      );
+    });
+  });
+
+  it("fails with background_idle_unconfirmed when the child closes before idle is confirmed", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ stopIdle: defaultStopIdle, teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "LAUNCHED");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: false,
+        continuationLimit: 8,
+        executionNum: 7,
+      });
+      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      harness.child.emit("close", 0, null);
+      await drainFor(1500);
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "idle-unconfirmed terminal was not emitted",
+      );
+      const terminals = turnTerminals(harness);
+      expect(terminals[0]?.payload).toMatchObject({ state: "failed", stopReason: "error" });
+      expect(JSON.stringify(terminals[0])).toContain("background_idle_unconfirmed");
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.background_idle_unconfirmed"),
+      ).toBe(true);
+      // Drained output is retained before the terminal.
+      const events = eventsOf(harness);
+      const terminalIndex = events.findIndex((event) => event.type === "turn.completed");
+      expect(JSON.stringify(events.slice(0, terminalIndex))).toContain("LAUNCHED");
+    });
+  });
+
+  it("uses proven teardown on close-wait timeout and completes the turn", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({
+      stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
+      teardown,
+    }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "answer");
+      await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
+      await waitFor(
+        () => harness.diagnostics.some(({ name }) => name === "antigravity.background_idle_observed"),
+        "idle observation diagnostic was not emitted",
+      );
+      await drainFor(400);
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "close-wait terminal was not emitted",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      expect(turnTerminals(harness)[0]?.payload).toEqual({
+        state: "completed",
+        stopReason: "model_stop",
+      });
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.background_close_wait_timeout",
+        ),
+      ).toBe(true);
+      expect(activityStates(harness)).toEqual(["finalizing"]);
+      harness.child.emit("close", 0, null);
+      await flushTimers();
+      expect(turnTerminals(harness)).toHaveLength(1);
+      expect(teardown).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("quarantines an unproven close-wait teardown through the existing machinery", async () => {
+    const teardown = vi.fn(async () => {
+      throw new ProviderProcessExitUnprovenError({
+        rootPid: 42001,
+        rootExited: false,
+        remainingDescendantPids: [42009],
+        captureComplete: true,
+      });
+    });
+    await runHarness({
+      stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
+      teardown,
+    }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "answer");
+      await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
+      await drainFor(400);
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "unproven close-wait terminal was not emitted",
+      );
+      expect(turnTerminals(harness)[0]?.payload).toEqual({
+        state: "completed",
+        stopReason: "model_stop",
+      });
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.background_teardown_unconfirmed"),
+      ).toBe(true);
+      expect(
+        harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+      ).toBe(true);
+      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+        (candidate) => candidate.threadId === harness.threadId,
+      );
+      expect(session?.status).toBe("error");
+    });
+  });
+
+  it("fails through teardown and drain when the hard background deadline expires", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({
+      stopIdle: { ...defaultStopIdle, backgroundDeadlineMs: 1000 },
+      teardown,
+    }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "LAUNCHED");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 0,
+      });
+      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await drainFor(1500);
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "deadline terminal was not emitted",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      expect(turnTerminals(harness)[0]?.payload).toMatchObject({ state: "failed", stopReason: "error" });
+      expect(JSON.stringify(turnTerminals(harness)[0])).toContain("background_deadline_exceeded");
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.background_deadline_exceeded",
+        ),
+      ).toBe(true);
+      await drainFor(5000);
+      expect(turnTerminals(harness)).toHaveLength(1);
+      expect(teardown).toHaveBeenCalledTimes(1);
+      harness.child.emit("close", 0, null);
+      await flushTimers();
+      expect(turnTerminals(harness)).toHaveLength(1);
+    });
+  });
+
+  it("settles exactly one interrupted terminal when interrupting during background-active", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ stopIdle: defaultStopIdle, teardown }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "LAUNCHED");
+      await appendStopRecord(harness, {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 0,
+      });
+      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId));
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "interrupt terminal was not emitted",
+      );
+      expect(turnTerminals(harness)[0]?.payload).toEqual({
+        state: "interrupted",
+        stopReason: "interrupted",
+      });
+      await drainFor(5000);
+      expect(turnTerminals(harness)).toHaveLength(1);
+      expect(
+        harness.diagnostics.some(
+          ({ name }) => name === "antigravity.background_deadline_exceeded",
+        ),
+      ).toBe(false);
+      harness.child.emit("close", 130, "SIGINT");
+      await flushTimers();
+      expect(turnTerminals(harness)).toHaveLength(1);
+    });
+  });
+
+  it("keeps the legacy stop settle path when the feature flag is off", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ teardown, graceMs: 500 }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "answer");
+      await appendStopRecord(harness, { fullyIdle: true, executionNum: 0 });
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "legacy Stop did not settle",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      expect(turnTerminals(harness)[0]?.payload).toEqual({
+        state: "completed",
+        stopReason: "model_stop",
+      });
+      expect(activityStates(harness)).toEqual([]);
+    });
+  });
+
+  it("treats a stop record without fullyIdle as legacy fail-open even when the flag is on", async () => {
+    const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
+    await runHarness({ stopIdle: defaultStopIdle, teardown, graceMs: 500 }, async (harness) => {
+      await attachTranscript(harness);
+      await appendPlannerStep(harness, 1, "answer");
+      await appendStopRecord(harness, { executionNum: 0, terminationReason: "model_stop" });
+      await waitFor(
+        () => turnTerminals(harness).length === 1,
+        "legacy fail-open Stop did not settle",
+      );
+      expect(teardown).toHaveBeenCalledTimes(1);
+      expect(activityStates(harness)).toEqual([]);
     });
   });
 });

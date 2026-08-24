@@ -716,6 +716,122 @@ export function resolvePiSubagentCancelRetryLimit(
 export type RuntimeMode = "web" | "desktop";
 export type AntigravityTerminalRecoveryMode = "off" | "shadow" | "enforce";
 
+// Antigravity Stop `fullyIdle` aggregate background lifecycle. Invalid or
+// out-of-range input falls back to the default — never clamped (same resolver
+// contract as the pi-subagent knobs).
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE = false;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 64;
+export const MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 0;
+export const MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 1024;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS = 600_000;
+export const MIN_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS = 1000;
+export const MAX_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS = 2_147_483_647;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS = 5000;
+export const MIN_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS = 100;
+export const MAX_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS = 600_000;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS = 500;
+export const MIN_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS = 50;
+export const MAX_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS = 60_000;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS = 5000;
+export const MIN_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS = 100;
+export const MAX_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS = 60_000;
+
+const ANTIGRAVITY_STOP_IDLE_INTEGER = /^[+-]?\d+$/u;
+
+type BoundedStopIdleIntInput = {
+  readonly rawInput: unknown;
+  readonly fallback: number;
+  readonly minimum: number;
+  readonly maximum: number;
+};
+
+function resolveBoundedAntigravityStopIdleInt(input: BoundedStopIdleIntInput): number {
+  const { rawInput, fallback, minimum, maximum } = input;
+  if (rawInput !== undefined && rawInput !== null) {
+    const asNumber =
+      typeof rawInput === "number"
+        ? rawInput
+        : typeof rawInput === "string" && ANTIGRAVITY_STOP_IDLE_INTEGER.test(rawInput.trim())
+          ? Number(rawInput.trim())
+          : Number.NaN;
+    if (Number.isInteger(asNumber) && asNumber >= minimum && asNumber <= maximum) {
+      return asNumber;
+    }
+  }
+  return fallback;
+}
+
+export function resolveAntigravityStopIdleLifecycle(
+  rawInput?: string | boolean | null | undefined | unknown,
+): boolean {
+  if (rawInput === undefined || rawInput === null) {
+    return DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE;
+  }
+  if (typeof rawInput === "boolean") return rawInput;
+  if (typeof rawInput === "string") {
+    const normalized = rawInput.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "on") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "off" || !normalized)
+      return false;
+  }
+  return DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE;
+}
+
+export function resolveAntigravityStopIdleMaxContinuations(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  return resolveBoundedAntigravityStopIdleInt({
+    rawInput,
+    fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+    minimum: MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+    maximum: MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
+  });
+}
+
+export function resolveAntigravityStopIdleBackgroundDeadlineMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  return resolveBoundedAntigravityStopIdleInt({
+    rawInput,
+    fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+    minimum: MIN_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+    maximum: MAX_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
+  });
+}
+
+export function resolveAntigravityStopIdleCloseWaitMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  return resolveBoundedAntigravityStopIdleInt({
+    rawInput,
+    fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+    minimum: MIN_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+    maximum: MAX_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
+  });
+}
+
+export function resolveAntigravityStopIdleStableEofQuietMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  return resolveBoundedAntigravityStopIdleInt({
+    rawInput,
+    fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+    minimum: MIN_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+    maximum: MAX_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
+  });
+}
+
+export function resolveAntigravityStopIdleFinalDrainMs(
+  rawInput?: string | number | null | undefined | unknown,
+): number {
+  return resolveBoundedAntigravityStopIdleInt({
+    rawInput,
+    fallback: DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+    minimum: MIN_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+    maximum: MAX_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  });
+}
+
 export function normalizeHttpsPublicOrigin(publicUrl: URL): URL | null {
   if (
     publicUrl.protocol !== "https:" ||
@@ -800,6 +916,18 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly antigravityTerminalRecoveryMode?: AntigravityTerminalRecoveryMode;
   readonly antigravityTerminalRecoveryGraceMs?: number;
+  /** Antigravity Stop `fullyIdle` aggregate background lifecycle (default off). */
+  readonly antigravityStopIdleLifecycle?: boolean;
+  /** Bounded Stop continuation budget the capture hook enforces. */
+  readonly antigravityStopIdleMaxContinuations?: number;
+  /** Hard wall-time budget for one background-active Antigravity turn. */
+  readonly antigravityStopIdleBackgroundDeadlineMs?: number;
+  /** Bounded wait for natural child close after Stop reports fully idle. */
+  readonly antigravityStopIdleCloseWaitMs?: number;
+  /** Quiet window proving hook+transcript EOF during the pre-terminal drain. */
+  readonly antigravityStopIdleStableEofQuietMs?: number;
+  /** Total budget for the pre-terminal stable-EOF drain. */
+  readonly antigravityStopIdleFinalDrainMs?: number;
   readonly piSubagentForegroundWaitMs?: number;
   readonly piSubagentProgressRateHz?: number;
   readonly piSubagentHeartbeatIntervalMs?: number;
