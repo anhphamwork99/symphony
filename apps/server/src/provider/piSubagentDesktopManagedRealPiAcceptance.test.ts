@@ -50,7 +50,44 @@ const REPO_ROOT = resolve(__dirname, "../../../..");
 const ALFIE_REPO_DIR = process.env.ALFIE_REPO_DIR ?? "";
 const CANARY_MARKER = "wp-c-ticket-02-desktop-managed-canary";
 const HOSTILE_SELECTED_MODEL_ID = "wp-c-hostile-unavailable-selected-model";
+const HOSTILE_PROTOCOL_SECRET = "sk-hostile-99";
+const HOSTILE_PROTOCOL_PATH = "/private/hostile";
+const INNOCENT_STACK_LOCATION = "PiAdapter.ts:3596:99";
 const createdRoots: string[] = [];
+
+/**
+ * A bare protocol-version substring is not sensitive by itself: stack
+ * locations and other harmless diagnostics can contain the same digits. The
+ * redaction contract is the hostile version in its structured/prose protocol
+ * contexts, plus the complete secret and path values.
+ */
+const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
+  /protocol\s*version\s*[:=#]?\s*99\b/i,
+  /protocolVersion["'\s:=]+99\b/i,
+  /supportedProtocolVersions[^0-9]{0,64}\b99\b/i,
+  /\bversion["'\s:=]+99\b/i,
+  /\boffered\b[^0-9]{0,64}\b99\b/i,
+  /\bsupported\b[^0-9]{0,64}\b99\b/i,
+  /\b99\s*\/\s*[0-9]+\b/,
+  /\b[0-9]+\s*\/\s*99\b/,
+];
+
+function assertNoHostileProtocolVersion(detail: string): void {
+  for (const pattern of HOSTILE_PROTOCOL_VERSION_PATTERNS) {
+    expect(
+      detail,
+      `detail must not match hostile protocol-version pattern ${String(pattern)}`,
+    ).not.toMatch(pattern);
+  }
+}
+
+function assertInnocentStackNumberIsAllowed(): void {
+  const diagnostic = `Error: bounded bootstrap failure\n    at ${INNOCENT_STACK_LOCATION}`;
+  expect(diagnostic).toContain("99");
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_SECRET);
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_PATH);
+  assertNoHostileProtocolVersion(diagnostic);
+}
 
 interface TreeSnapshot {
   readonly bytes: number;
@@ -1161,6 +1198,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
     );
     const hostileVerified = await verifyPiSubagentArtifact(unsupportedArtifactDir);
     expect(hostileVerified.valid).toBe(true);
+    assertInnocentStackNumberIsAllowed();
 
     const harness = await makeDesktopHarness(unsupportedArtifactDir);
     try {
@@ -1181,12 +1219,12 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         "Managed Pi subagent harness bootstrap failed (unsupported_version:pi_subagent_unsupported_version)",
       );
       expect(detail.length).toBeLessThanOrEqual(512);
+      assertNoHostileProtocolVersion(detail);
       for (const forbidden of [
         PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
         "Hostile extension demands",
-        "sk-hostile-99",
-        "/private/hostile",
-        "99",
+        HOSTILE_PROTOCOL_SECRET,
+        HOSTILE_PROTOCOL_PATH,
         unsupportedArtifactDir,
         stagedFixture.sourceArtifactDir,
         harness.desktop?.userAgentDir ?? "",
@@ -1212,6 +1250,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
       expect(threadDetail.thread.session?.lastError).toContain(
         "(unsupported_version:pi_subagent_unsupported_version)",
       );
+      assertNoHostileProtocolVersion(threadDetail.thread.session?.lastError ?? "");
       expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
       expect(harness.observedSessions().size).toBe(0);
       expect(harness.observedCapabilities().size).toBe(0);

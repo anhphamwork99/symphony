@@ -64,6 +64,9 @@ const POISONED_ARTIFACT_VALUE = "/poison/inherited/pi-subagent-artifact";
 const HOSTILE_MODEL_ID = "t04-wp2-hostile-unavailable-model";
 const LEGIT_AUTH_SENTINEL = "t04-wp2-auth-preserved";
 const LEGIT_MODELS_SENTINEL = "t04-wp2-models-preserved";
+const HOSTILE_PROTOCOL_SECRET = "sk-hostile-99";
+const HOSTILE_PROTOCOL_PATH = "/private/hostile";
+const INNOCENT_STACK_LOCATION = "PiAdapter.ts:3596:99";
 const TURN_PROMPT = "Delegate this packaged desktop acceptance task to one researcher subagent.";
 const createdRoots: string[] = [];
 
@@ -484,12 +487,45 @@ function assertNoSensitiveTokens(
     TURN_PROMPT,
     "prompt",
     "cause",
-    "sk-hostile",
-    "/private/hostile",
+    HOSTILE_PROTOCOL_PATH,
     ...extraForbidden,
   ]) {
     if (forbidden.length > 0) expect(detail).not.toContain(forbidden);
   }
+}
+
+/**
+ * A bare protocol-version substring is not sensitive by itself: stack
+ * locations and other harmless diagnostics can contain the same digits. The
+ * redaction contract is the hostile version in its structured/prose protocol
+ * contexts, plus the complete secret and path values.
+ */
+const HOSTILE_PROTOCOL_VERSION_PATTERNS: readonly RegExp[] = [
+  /protocol\s*version\s*[:=#]?\s*99\b/i,
+  /protocolVersion["'\s:=]+99\b/i,
+  /supportedProtocolVersions[^0-9]{0,64}\b99\b/i,
+  /\bversion["'\s:=]+99\b/i,
+  /\boffered\b[^0-9]{0,64}\b99\b/i,
+  /\bsupported\b[^0-9]{0,64}\b99\b/i,
+  /\b99\s*\/\s*[0-9]+\b/,
+  /\b[0-9]+\s*\/\s*99\b/,
+];
+
+function assertNoHostileProtocolVersion(detail: string): void {
+  for (const pattern of HOSTILE_PROTOCOL_VERSION_PATTERNS) {
+    expect(
+      detail,
+      `detail must not match hostile protocol-version pattern ${String(pattern)}`,
+    ).not.toMatch(pattern);
+  }
+}
+
+function assertInnocentStackNumberIsAllowed(): void {
+  const diagnostic = `Error: bounded bootstrap failure\n    at ${INNOCENT_STACK_LOCATION}`;
+  expect(diagnostic).toContain("99");
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_SECRET);
+  expect(diagnostic).not.toContain(HOSTILE_PROTOCOL_PATH);
+  assertNoHostileProtocolVersion(diagnostic);
 }
 
 async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
@@ -539,6 +575,7 @@ async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
       ...(fixtureBaseUrl === undefined ? [] : [fixtureBaseUrl]),
     ];
     assertRedactedDetail(detail, layout, userAgentDir, extraForbidden);
+    assertNoHostileProtocolVersion(detail);
 
     const threadDetail = await harness.waitForThreadDetail(String(threadId));
     expect(threadDetail.thread.session).toMatchObject({
@@ -559,6 +596,7 @@ async function runFailureLeg(expectation: FailureExpectation): Promise<void> {
       expect(sessionLastError).toContain(expectation.category);
     }
     assertNoSensitiveTokens(sessionLastError, layout, userAgentDir, extraForbidden);
+    assertNoHostileProtocolVersion(sessionLastError);
     expect(threadDetail.thread.piSubagentExecutions).toHaveLength(0);
     expect(harness.observedSessions().size).toBe(0);
     expect(harness.observedCapabilities().size).toBe(0);
@@ -913,7 +951,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
       {
         label: "unsupported-protocol",
         category: "unsupported_version:pi_subagent_unsupported_version",
-        forbidden: ["99", "Hostile extension demands"],
+        forbidden: ["Hostile extension demands", HOSTILE_PROTOCOL_SECRET],
         mutate: (artifactDir) =>
           patchHandshakeArtifact(
             artifactDir,
@@ -923,7 +961,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         protocolVersion: 99,
         supportedProtocolVersions: [99],
         extensionVersion: EXTENSION_VERSION,
-        detail: "Hostile extension demands 99 sk-hostile /private/hostile",
+        detail: "Hostile extension demands protocol version 99 with secret/path material sk-hostile-99 /private/hostile",
       };`,
           ),
       },
@@ -946,6 +984,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
       },
     ];
 
+    assertInnocentStackNumberIsAllowed();
     for (const failure of failures) {
       await runFailureLeg(failure);
     }
