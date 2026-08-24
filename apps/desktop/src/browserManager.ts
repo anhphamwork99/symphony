@@ -262,6 +262,11 @@ export interface BrowserAutomationDownloadEvent {
 export interface DesktopBrowserManagerOptions {
   beforeInputEvent?: (event: Electron.Event, input: Electron.Input) => boolean;
   annotationPreloadPath?: string;
+  /**
+   * Notified when a Project's workspace is deleted (Decision 0004): the
+   * activation boundary clears only that Project's bookkeeping in response.
+   */
+  onProjectWorkspaceDeactivated?: (projectId: ProjectId) => void;
 }
 
 function createBrowserTab(url = ABOUT_BLANK_URL): BrowserTabState {
@@ -601,6 +606,8 @@ export class DesktopBrowserManager {
   private readonly copyLinkListeners = new Set<BrowserCopyLinkListener>();
   private readonly projectCopyLinkListeners = new Set<ProjectBrowserCopyLinkListener>();
   private readonly annotations: BrowserAnnotationCoordinator;
+  /** Projects whose workspace publication this manager already applied (Decision 0004). */
+  private readonly activatedProjectWorkspaceKeys = new Set<string>();
   // OAuth/sign-in popups opened by pages via `window.open`. Tracked so they can be sized over
   // the panel and torn down cleanly without leaking native windows.
   private readonly popupRuntimes = new Map<BrowserWindow, OAuthPopupRuntime>();
@@ -2027,13 +2034,134 @@ export class DesktopBrowserManager {
     this.copyOwnerLink({ owner: projectOwner(input.projectId), tabId: input.tabId });
   }
 
+  // ── Project workspace activation application (Decision 0004) ────────
+  //
+  // Applies the Desktop-owned slices of one freshly read, freshly validated
+  // publication: browser tabs/active tab/open state plus the durable
+  // annotation marker projection. The ENTIRE bundle is validated before any
+  // mutation, so a rejected bundle leaves zero observable manager state, and
+  // success is remembered per manager lifetime — a later activation request
+  // for the same Project never reapplies over newer live mutations.
+
+  /** Has this Project's workspace been hydrated already in this lifetime? */
+  isProjectWorkspaceActivated(projectId: ProjectId): boolean {
+    return this.activatedProjectWorkspaceKeys.has(browserOwnerWorkspaceKey(projectOwner(projectId)));
+  }
+
+  applyProjectWorkspaceActivation(input: {
+    readonly projectId: ProjectId;
+    readonly browser: {
+      readonly open: boolean;
+      readonly activeTabId: string | null;
+      readonly tabs: ReadonlyArray<{
+        readonly id: string;
+        readonly url: string;
+        readonly title: string;
+      }>;
+    };
+    readonly annotations: ReadonlyArray<{
+      readonly id: string;
+      readonly tabId: string;
+      readonly ordinal: number;
+      readonly documentKey: string;
+    }>;
+  }): void {
+    const owner = projectOwner(input.projectId);
+    const key = browserOwnerWorkspaceKey(owner);
+    if (this.activatedProjectWorkspaceKeys.has(key)) {
+      // Already applied in this manager lifetime: never reapplied over newer
+      // live mutations (Decision 0004 item 4).
+      return;
+    }
+
+    // ── Validate the entire bundle before any mutation. ──
+    const tabIds = new Set<string>();
+    for (const tab of input.browser.tabs) {
+      if (
+        typeof tab.id !== "string" ||
+        tab.id.length === 0 ||
+        typeof tab.url !== "string" ||
+        typeof tab.title !== "string"
+      ) {
+        throw new Error("Project workspace browser publication has a malformed tab.");
+      }
+      if (tabIds.has(tab.id)) {
+        throw new Error("Project workspace browser publication has duplicate tab ids.");
+      }
+      tabIds.add(tab.id);
+    }
+    if (
+      input.browser.activeTabId !== null &&
+      !tabIds.has(input.browser.activeTabId)
+    ) {
+      throw new Error(
+        "Project workspace browser publication names an active tab that does not exist.",
+      );
+    }
+    const annotationIds = new Set<string>();
+    for (const marker of input.annotations) {
+      if (
+        typeof marker.id !== "string" ||
+        marker.id.length === 0 ||
+        !Number.isSafeInteger(marker.ordinal) ||
+        marker.ordinal <= 0 ||
+        typeof marker.documentKey !== "string" ||
+        marker.documentKey.length === 0
+      ) {
+        throw new Error(
+          "Project workspace annotation publication has a malformed marker.",
+        );
+      }
+      // The annotation projection may reference only valid tabs.
+      if (!tabIds.has(marker.tabId)) {
+        throw new Error(
+          "Project workspace annotation publication references a tab the browser slice does not restore.",
+        );
+      }
+      if (annotationIds.has(marker.id)) {
+        throw new Error(
+          "Project workspace annotation publication has duplicate marker ids.",
+        );
+      }
+      annotationIds.add(marker.id);
+    }
+
+    // ── Apply atomically: metadata only, no fabricated native runtime. ──
+    // Restored tabs are suspended renderer-surface metadata; normal runtime
+    // restoration owns the transition to a live native surface.
+    const state: OwnerWorkspaceState = {
+      version: (this.ownerVersionByKey.get(key) ?? 0) + 1,
+      open: input.browser.open,
+      activeTabId: input.browser.activeTabId,
+      tabs: input.browser.tabs.map((tab) => ({
+        ...createBrowserTab(tab.url),
+        id: tab.id,
+        title: tab.title,
+      })),
+      lastError: null,
+    };
+    this.states.set(key, state);
+    this.ownerVersionByKey.set(key, state.version);
+    this.snapshotCacheByOwnerKey.delete(key);
+    this.threadProjectionCacheByKey.delete(key);
+    this.projectProjectionCacheByKey.delete(key);
+    this.lastEmittedVersionByOwnerKey.delete(key);
+    this.annotations.seedProjectWorkspaceMarkers({
+      projectId: input.projectId,
+      markers: [...input.annotations],
+    });
+    // The hydrated workspace counts as activated only once everything —
+    // including the annotation seed — has been applied.
+    this.activatedProjectWorkspaceKeys.add(key);
+    this.emitOwnerState(owner);
+  }
+
   subscribeProjectState(listener: BrowserProjectStateListener): () => void {
     this.projectListeners.add(listener);
     return () => {
       this.projectListeners.delete(listener);
     };
   }
-
   subscribeProjectCopyLink(listener: (event: ProjectBrowserCopyLinkEvent) => void): () => void {
     this.projectCopyLinkListeners.add(listener);
     return () => {
@@ -2062,6 +2190,10 @@ export class DesktopBrowserManager {
     this.clearSuspendTimer(owner);
     this.closePopupWindowsForOwner(owner);
     this.destroyOwnerRuntimes(owner);
+    const existingState = this.states.get(key);
+    for (const tab of existingState?.tabs ?? []) {
+      this.clearOwnerAnnotationProjection(owner, tab.id);
+    }
     this.states.delete(key);
     this.ownerVersionByKey.delete(key);
     this.snapshotCacheByOwnerKey.delete(key);
@@ -2070,6 +2202,13 @@ export class DesktopBrowserManager {
     this.lastEmittedVersionByOwnerKey.delete(key);
     this.humanControlEpochByOwnerKey.delete(key);
     this.humanControlListenersByOwnerKey.delete(key);
+    // Deletion clears ONLY this Project's manager state and activation
+    // bookkeeping (Decision 0004 item 8): the hydrated-workspace memory and
+    // the seeded durable annotation markers go with it; every other Project —
+    // and the activation boundary itself — is notified, not torn down.
+    this.activatedProjectWorkspaceKeys.delete(key);
+    this.annotations.clearProjectWorkspaceSeededMarkers(projectId);
+    this.options.onProjectWorkspaceDeactivated?.(projectId);
   }
 
   /** Owner-generic hide core. Visibility change is never ownership termination. */

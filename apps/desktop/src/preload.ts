@@ -234,9 +234,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     close: (input) => ipcRenderer.invoke(IPC.browser.close, input),
     hide: (input) => ipcRenderer.invoke(IPC.browser.hide, input),
     getState: (input) => ipcRenderer.invoke(IPC.browser.getState, input),
-    setPanelBounds: async (input) => {
-      ipcRenderer.send(IPC.browser.setBounds, input);
-    },
+    setPanelBounds: (input) => ipcRenderer.invoke(IPC.browser.setBounds, input),
     attachWebview: (input) => ipcRenderer.invoke(IPC.browser.attachWebview, input),
     detachWebview: (input) => ipcRenderer.invoke(IPC.browser.detachWebview, input),
     copyLink: (input) => ipcRenderer.invoke(IPC.browser.requestCopyLink, input),
@@ -303,9 +301,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     close: (input) => ipcRenderer.invoke(IPC.projectBrowser.close, input),
     hide: (input) => ipcRenderer.invoke(IPC.projectBrowser.hide, input),
     getState: (input) => ipcRenderer.invoke(IPC.projectBrowser.getState, input),
-    setPanelBounds: async (input) => {
-      ipcRenderer.send(IPC.projectBrowser.setBounds, input);
-    },
+    setPanelBounds: (input) => ipcRenderer.invoke(IPC.projectBrowser.setBounds, input),
     navigate: (input) => ipcRenderer.invoke(IPC.projectBrowser.navigate, input),
     reload: (input) => ipcRenderer.invoke(IPC.projectBrowser.reload, input),
     goBack: (input) => ipcRenderer.invoke(IPC.projectBrowser.goBack, input),

@@ -147,6 +147,11 @@ export class BrowserAnnotationCoordinator {
   private readonly projectListeners = new Set<BrowserAnnotationProjectEventListener>();
   private readonly committedAnnotationIds = new Set<string>();
   private readonly affinityByAnnotationId = new Map<string, BrowserAnnotationAffinity>();
+  /** Durable Project-workspace projection stubs keyed by `p:<projectId>:<tabId>`. */
+  private readonly seededProjectMarkersByRuntimeKey = new Map<
+    string,
+    { readonly markers: ReadonlyArray<{ id: string; ordinal: number; documentKey: string }> }
+  >();
 
   constructor(private readonly options: BrowserAnnotationCoordinatorOptions) {}
 
@@ -663,6 +668,65 @@ export class BrowserAnnotationCoordinator {
     this.projectionsByRuntimeKey.delete(key);
   }
 
+  // ── Durable Project workspace marker projection (Decision 0004) ────
+  //
+  // A published `browser-annotations` slice carries durable projection stubs
+  // (id/tabId/ordinal/documentKey) — never live markers. Seeding them records
+  // that the annotations exist for those tabs WITHOUT fabricating a marker,
+  // session, document, or runtime: no projection is pushed until a real
+  // renderer-driven sync arrives for a live document.
+
+  seedProjectWorkspaceMarkers(input: {
+    readonly projectId: ProjectId;
+    readonly markers: ReadonlyArray<{
+      readonly id: string;
+      readonly tabId: string;
+      readonly ordinal: number;
+      readonly documentKey: string;
+    }>;
+  }): void {
+    const owner: BrowserAnnotationWorkspaceOwner = {
+      kind: "project",
+      projectId: input.projectId,
+    };
+    const byTab = new Map<string, Array<(typeof input.markers)[number]>>();
+    for (const marker of input.markers) {
+      const list = byTab.get(marker.tabId) ?? [];
+      list.push(marker);
+      byTab.set(marker.tabId, list);
+    }
+    for (const [tabId, markers] of byTab) {
+      this.seededProjectMarkersByRuntimeKey.set(browserAnnotationOwnerKey(owner, tabId), {
+        markers: markers
+          .toSorted((left, right) => left.ordinal - right.ordinal)
+          .map(({ id, ordinal, documentKey }) => ({ id, ordinal, documentKey })),
+      });
+    }
+  }
+
+  /** The durable projection stubs seeded for one Project tab, if any. */
+  projectWorkspaceSeededMarkers(input: {
+    readonly projectId: ProjectId;
+    readonly tabId: string;
+  }):
+    ReadonlyArray<{ readonly id: string; readonly ordinal: number; readonly documentKey: string }> {
+    return (
+      this.seededProjectMarkersByRuntimeKey.get(
+        browserAnnotationOwnerKey({ kind: "project", projectId: input.projectId }, input.tabId),
+      )?.markers ?? []
+    );
+  }
+
+  /** Clears every seeded durable marker for one Project (deletion only). */
+  clearProjectWorkspaceSeededMarkers(projectId: ProjectId): void {
+    const prefix = `p:${String(projectId)}:`;
+    for (const key of this.seededProjectMarkersByRuntimeKey.keys()) {
+      if (key.startsWith(prefix)) {
+        this.seededProjectMarkersByRuntimeKey.delete(key);
+      }
+    }
+  }
+
   dispose(): void {
     // finishSession removes entries from sessionsByRuntimeKey mid-iteration,
     // so the snapshot spread below is load-bearing, not a useless copy.
@@ -672,6 +736,7 @@ export class BrowserAnnotationCoordinator {
     }
     this.documentsByRuntimeKey.clear();
     this.projectionsByRuntimeKey.clear();
+    this.seededProjectMarkersByRuntimeKey.clear();
     this.invalidatedDocumentRuntimeKeys.clear();
     this.listeners.clear();
     this.projectListeners.clear();
