@@ -251,6 +251,7 @@ import {
   deriveActiveWorkStartedAt,
   deriveActiveTaskListState,
   deriveActiveBackgroundTasksState,
+  deriveActiveTurnBackgroundActivityState,
   findSidebarProposedPlan,
   findLatestProposedPlan,
   deriveWorkLogEntries,
@@ -506,6 +507,7 @@ import { TranscriptSelectionActionLayer } from "./chat/TranscriptSelectionAction
 import { useChatTerminalController } from "./chat/useChatTerminalController";
 import { useChatAutomationSetup } from "./chat/useChatAutomationSetup";
 import { ComposerActiveTaskListCard } from "./chat/ComposerActiveTaskListCard";
+import { ComposerBackgroundActivityStatus } from "./chat/ComposerBackgroundActivityStatus";
 import { PiSubagentExecutionCardStrip } from "./chat/PiSubagentExecutionCardStrip";
 import { PiSubagentResultTranscriptDialog } from "./chat/PiSubagentResultTranscriptDialog";
 import { ComposerSubagentStrip } from "./chat/ComposerSubagentStrip";
@@ -2864,6 +2866,15 @@ export default function ChatView({
         : deriveActiveBackgroundTasksState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, latestTurnSettled, threadActivities],
   );
+  // Aggregate provider background-work status line for the live turn. Derived
+  // directly (no hand-written memoization — React Compiler owns it) from the
+  // same three inputs as every other live-turn derivation; the derivation itself
+  // clears the state once the turn is settled or the session stops running.
+  const activeTurnBackgroundActivity = deriveActiveTurnBackgroundActivityState({
+    activities: threadActivities,
+    latestTurn: activeLatestTurn,
+    session: activeThread?.session ?? null,
+  });
   // Task tool_use_ids the provider confirmed as backgrounded via task_updated
   // patches (last patch wins, so re-foregrounded tasks drop back out).
   const backgroundedSubagentToolUseIds = useMemo(() => {
@@ -11422,6 +11433,20 @@ export default function ChatView({
                   showComposerActiveTaskListCard ||
                   showComposerWorkflowRunCard ||
                   showComposerSubagentStrip
+                }
+              />
+              {/* Aggregate provider background-work lifecycle for the live turn.
+                  Status-line-only data (see deriveActiveTurnBackgroundActivityState):
+                  it is not a transcript row, never re-sticks the transcript, and
+                  carries no per-job identity or cancel/admission controls. */}
+              <ComposerBackgroundActivityStatus
+                backgroundActivity={activeTurnBackgroundActivity}
+                attachedToPrevious={
+                  showComposerLiveChangesHeader ||
+                  showComposerActiveTaskListCard ||
+                  showComposerWorkflowRunCard ||
+                  showComposerSubagentStrip ||
+                  queuedComposerTurns.length > 0
                 }
               />
               {/* Pending approvals and AskUserQuestion prompts both render as a detached

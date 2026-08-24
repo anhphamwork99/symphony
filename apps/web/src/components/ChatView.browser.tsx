@@ -3811,6 +3811,164 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("background-activity status never re-sticks the transcript while real assistant text keeps auto-follow", async () => {
+    // Aggregate background-work lifecycle (turn.background-activity.changed) is
+    // composer status-line data, not transcript data: while the user has scrolled
+    // up, snapshot-fed active→idle→finalizing changes must render the composer
+    // status row with zero scrollToEnd re-sticks, the settled turn must clear the
+    // row, and a real streaming assistant message still re-sticks afterwards.
+    let currentSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-background-activity-follow" as MessageId,
+      targetText: "background activity follow target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: currentSnapshot,
+    });
+    let restoreScrollTo: () => void = noop;
+
+    const syncActiveThread = (
+      update: (
+        thread: OrchestrationReadModel["threads"][number],
+      ) => OrchestrationReadModel["threads"][number],
+    ) => {
+      currentSnapshot = {
+        ...currentSnapshot,
+        snapshotSequence: currentSnapshot.snapshotSequence + 1,
+        threads: currentSnapshot.threads.map((thread) =>
+          thread.id === THREAD_ID ? update(thread) : thread,
+        ),
+        updatedAt: isoAt(currentSnapshot.snapshotSequence + 2_500),
+      };
+      fixture = { ...fixture, snapshot: currentSnapshot };
+      useStore.getState().syncServerReadModel(currentSnapshot);
+    };
+
+    const backgroundActivityTurnId = TurnId.makeUnsafe("turn-background-activity-follow");
+
+    const backgroundActivity = (state: "active" | "idle" | "finalizing", offset: number) => ({
+      id: EventId.makeUnsafe(`activity-background-activity-${state}-${offset}`),
+      createdAt: isoAt(offset),
+      kind: "turn.background-activity.changed",
+      summary: `Background activity: ${state}`,
+      tone: "info" as const,
+      turnId: backgroundActivityTurnId,
+      payload: { state, source: "provider_stop" },
+    });
+
+    const findStatusRow = () =>
+      document.querySelector<HTMLElement>("[data-testid='composer-background-activity-status']");
+
+    try {
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-chat-scroll-container='true']"),
+        "Unable to find message scroll container.",
+      );
+      // Pin the transcript to the bottom, then arm the spy before scrolling away.
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      const scrollSpy = installImmediateScrollToSpy(scrollContainer);
+      restoreScrollTo = scrollSpy.restore;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+      await waitForLayout();
+      scrollSpy.calls.length = 0;
+
+      // User scrolls up: activity-only updates below must not drag them back.
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      // Live turn + session running, then the aggregate lifecycle changes.
+      syncActiveThread((thread) => ({
+        ...thread,
+        latestTurn: {
+          turnId: backgroundActivityTurnId,
+          state: "running",
+          requestedAt: isoAt(2_500),
+          startedAt: isoAt(2_501),
+          completedAt: null,
+          assistantMessageId: null,
+        },
+        session: thread.session
+          ? {
+              ...thread.session,
+              status: "running",
+              activeTurnId: backgroundActivityTurnId,
+              updatedAt: isoAt(2_501),
+            }
+          : null,
+        updatedAt: isoAt(2_501),
+      }));
+      await waitForLayout();
+      expect(scrollSpy.calls).toHaveLength(0);
+
+      for (const [state, offset] of [
+        ["active", 2_502],
+        ["idle", 2_503],
+        ["finalizing", 2_504],
+      ] as const) {
+        syncActiveThread((thread) => ({
+          ...thread,
+          activities: [...thread.activities, backgroundActivity(state, offset)],
+          updatedAt: isoAt(offset),
+        }));
+        await waitForLayout();
+        const statusRow = findStatusRow();
+        expect(statusRow, `status row missing for the ${state} state`).not.toBeNull();
+        expect(
+          statusRow!.textContent,
+          `status row label wrong for the ${state} state`,
+        ).toBe(state === "active" ? "Waiting for background tasks…" : "Finishing…");
+        expect(scrollSpy.calls, `activity-only ${state} change re-stuck the transcript`).toHaveLength(
+          0,
+        );
+      }
+
+      // Settled turn (completed + session no longer running) clears the row.
+      syncActiveThread((thread) => ({
+        ...thread,
+        latestTurn: thread.latestTurn
+          ? { ...thread.latestTurn, state: "completed" as const, completedAt: isoAt(2_510) }
+          : thread.latestTurn,
+        session: thread.session
+          ? { ...thread.session, status: "idle", activeTurnId: null, updatedAt: isoAt(2_510) }
+          : null,
+        updatedAt: isoAt(2_510),
+      }));
+      await waitForLayout();
+      expect(findStatusRow(), "settled turn kept the background-activity row").toBeNull();
+      expect(scrollSpy.calls).toHaveLength(0);
+
+      // Control: back at the bottom, a real streaming assistant message re-sticks.
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      scrollSpy.calls.length = 0;
+      const liveAssistantMessage = {
+        ...createAssistantMessage({
+          id: MessageId.makeUnsafe("msg-assistant-background-activity-follow"),
+          text: "A real live assistant tail after background-activity churn",
+          offsetSeconds: 2_511,
+        }),
+        turnId: backgroundActivityTurnId,
+        streaming: true,
+      };
+      syncActiveThread((thread) => ({
+        ...thread,
+        messages: [...thread.messages, liveAssistantMessage],
+        updatedAt: isoAt(2_511),
+      }));
+      await vi.waitFor(() => expect(scrollSpy.calls.length).toBeGreaterThan(0), {
+        timeout: 4_000,
+        interval: 16,
+      });
+    } finally {
+      restoreScrollTo();
+      await mounted.cleanup();
+    }
+  });
+
   it("dispatches the explicit resume command for an orphaned execution card (T14-AC6)", async () => {
     // Ticket 14: only the explicit user action (the resume button) produces
     // the resume command — an orphaned snapshot alone dispatches nothing.
