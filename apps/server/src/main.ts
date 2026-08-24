@@ -212,9 +212,10 @@ const CliEnvConfig = Config.all({
   antigravityStopIdleBackgroundDeadlineMs: Config.string(
     "SYNARA_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS",
   ).pipe(Config.option, Config.map(Option.getOrUndefined)),
-  antigravityStopIdleCloseWaitMs: Config.string(
-    "SYNARA_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS",
-  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
+  antigravityStopIdleCloseWaitMs: Config.string("SYNARA_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   antigravityStopIdleStableEofQuietMs: Config.string(
     "SYNARA_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS",
   ).pipe(Config.option, Config.map(Option.getOrUndefined)),

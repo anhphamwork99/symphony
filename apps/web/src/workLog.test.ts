@@ -3404,8 +3404,7 @@ function makeBackgroundActivityChangedActivity(overrides: {
     summary: `Background activity: ${overrides.state}`,
     tone: "info",
     turnId: overrides.turnId ?? "turn-1",
-    payload:
-      overrides.payload ?? { state: overrides.state, source: "provider_stop" },
+    payload: overrides.payload ?? { state: overrides.state, source: "provider_stop" },
   });
 }
 

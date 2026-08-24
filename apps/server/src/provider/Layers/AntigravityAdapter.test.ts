@@ -3354,30 +3354,50 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
         SYNARA_ANTIGRAVITY_STOP_IDLE: "1",
         SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS: "2",
       };
-      const first = runStopHook(scriptPath, eventPath, {
-        fullyIdle: false,
-        executionNum: 0,
-        terminationReason: "model_stop",
-        error: "",
-        workspacePaths: ["/workspace/project"],
-        artifactDirectoryPath: "/artifacts",
-      }, env);
+      const first = runStopHook(
+        scriptPath,
+        eventPath,
+        {
+          fullyIdle: false,
+          executionNum: 0,
+          terminationReason: "model_stop",
+          error: "",
+          workspacePaths: ["/workspace/project"],
+          artifactDirectoryPath: "/artifacts",
+        },
+        env,
+      );
       expect(first.status).toBe(0);
       expect(first.stdout.trim()).toBe('{"decision":"continue"}');
-      const second = runStopHook(scriptPath, eventPath, {
-        fullyIdle: false,
-        executionNum: 1,
-      }, env);
+      const second = runStopHook(
+        scriptPath,
+        eventPath,
+        {
+          fullyIdle: false,
+          executionNum: 1,
+        },
+        env,
+      );
       expect(second.stdout.trim()).toBe('{"decision":"continue"}');
-      const capped = runStopHook(scriptPath, eventPath, {
-        fullyIdle: false,
-        executionNum: 2,
-      }, env);
+      const capped = runStopHook(
+        scriptPath,
+        eventPath,
+        {
+          fullyIdle: false,
+          executionNum: 2,
+        },
+        env,
+      );
       expect(capped.stdout.trim()).toBe("{}");
-      const idle = runStopHook(scriptPath, eventPath, {
-        fullyIdle: true,
-        executionNum: 3,
-      }, env);
+      const idle = runStopHook(
+        scriptPath,
+        eventPath,
+        {
+          fullyIdle: true,
+          executionNum: 3,
+        },
+        env,
+      );
       expect(idle.stdout.trim()).toBe("{}");
       const missing = runStopHook(scriptPath, eventPath, { executionNum: 4 }, env);
       expect(missing.stdout.trim()).toBe("{}");
@@ -3389,22 +3409,42 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line.slice(5)) as Record<string, unknown>);
-      expect(records.map((record) => record.fullyIdle)).toEqual([false, false, false, true, undefined, undefined]);
-      expect(records[0]).toMatchObject({ continued: true, continuationLimit: 2, executionNum: 0, terminationReason: "model_stop" });
+      expect(records.map((record) => record.fullyIdle)).toEqual([
+        false,
+        false,
+        false,
+        true,
+        undefined,
+        undefined,
+      ]);
+      expect(records[0]).toMatchObject({
+        continued: true,
+        continuationLimit: 2,
+        executionNum: 0,
+        terminationReason: "model_stop",
+      });
       expect(records[1]).toMatchObject({ continued: true });
       expect(records[2]).toMatchObject({ continued: false, continuationLimit: 2 });
       expect(records[3]).toMatchObject({ continued: false });
       // Sanitization: unknown fields are dropped, error text is bounded.
       expect(JSON.stringify(records[0])).not.toContain("workspacePaths");
       expect(JSON.stringify(records[0])).not.toContain("artifactDirectoryPath");
-      const oversized = runStopHook(scriptPath, eventPath, {
-        fullyIdle: false,
-        executionNum: 5,
-        error: "x".repeat(10_000),
-      }, env);
+      const oversized = runStopHook(
+        scriptPath,
+        eventPath,
+        {
+          fullyIdle: false,
+          executionNum: 5,
+          error: "x".repeat(10_000),
+        },
+        env,
+      );
       expect(oversized.stdout.trim()).toBe("{}");
       const allLines = (await fs.readFile(eventPath, "utf8")).split("\n").filter(Boolean);
-      const lastRecord = JSON.parse(allLines[allLines.length - 1]!.slice(5)) as Record<string, unknown>;
+      const lastRecord = JSON.parse(allLines[allLines.length - 1]!.slice(5)) as Record<
+        string,
+        unknown
+      >;
       expect(String(lastRecord.error).length).toBeLessThanOrEqual(500);
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
@@ -3627,8 +3667,7 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
     readonly turnId?: unknown;
   };
 
-  const eventsOf = (harness: StopIdleHarness): TypedEvent[] =>
-    harness.events as TypedEvent[];
+  const eventsOf = (harness: StopIdleHarness): TypedEvent[] => harness.events as TypedEvent[];
 
   const activityStates = (harness: StopIdleHarness): string[] =>
     eventsOf(harness)
@@ -3658,7 +3697,10 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         executionNum: 0,
         terminationReason: "model_stop",
       });
-      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await waitFor(
+        () => activityStates(harness).includes("active"),
+        "active edge was not emitted",
+      );
       await appendStopRecord(harness, {
         fullyIdle: false,
         continued: true,
@@ -3698,7 +3740,10 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         continuationLimit: 8,
         executionNum: 0,
       });
-      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await waitFor(
+        () => activityStates(harness).includes("active"),
+        "active edge was not emitted",
+      );
       await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 1 });
       await waitFor(() => activityStates(harness).includes("idle"), "idle edge was not emitted");
       expect(teardown).not.toHaveBeenCalled();
@@ -3723,7 +3768,8 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
       expect(turnTerminals(harness)).toHaveLength(1);
       const terminalIndex = events.findIndex((event) => event.type === "turn.completed");
       const finalizingIndex = events.findIndex(
-        (event) => event.type === "turn.background-activity.changed" &&
+        (event) =>
+          event.type === "turn.background-activity.changed" &&
           (event.payload as { state: string }).state === "finalizing",
       );
       const drainedIndex = events.findIndex(
@@ -3748,10 +3794,7 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
       fs.stat(path.dirname(harness.eventFile)).catch(() => {
         runDirRemoved = true;
       });
-      await waitFor(
-        () => runDirRemoved,
-        "natural-close run directory was not cleaned up",
-      );
+      await waitFor(() => runDirRemoved, "natural-close run directory was not cleaned up");
     });
   });
 
@@ -3766,7 +3809,10 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         continuationLimit: 8,
         executionNum: 7,
       });
-      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await waitFor(
+        () => activityStates(harness).includes("active"),
+        "active edge was not emitted",
+      );
       harness.child.emit("close", 0, null);
       await drainFor(1500);
       await waitFor(
@@ -3788,38 +3834,42 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
 
   it("uses proven teardown on close-wait timeout and completes the turn", async () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
-    await runHarness({
-      stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
-      teardown,
-    }, async (harness) => {
-      await attachTranscript(harness);
-      await appendPlannerStep(harness, 1, "answer");
-      await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
-      await waitFor(
-        () => harness.diagnostics.some(({ name }) => name === "antigravity.background_idle_observed"),
-        "idle observation diagnostic was not emitted",
-      );
-      await drainFor(400);
-      await waitFor(
-        () => turnTerminals(harness).length === 1,
-        "close-wait terminal was not emitted",
-      );
-      expect(teardown).toHaveBeenCalledTimes(1);
-      expect(turnTerminals(harness)[0]?.payload).toEqual({
-        state: "completed",
-        stopReason: "model_stop",
-      });
-      expect(
-        harness.diagnostics.some(
-          ({ name }) => name === "antigravity.background_close_wait_timeout",
-        ),
-      ).toBe(true);
-      expect(activityStates(harness)).toEqual(["finalizing"]);
-      harness.child.emit("close", 0, null);
-      await flushTimers();
-      expect(turnTerminals(harness)).toHaveLength(1);
-      expect(teardown).toHaveBeenCalledTimes(1);
-    });
+    await runHarness(
+      {
+        stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
+        teardown,
+      },
+      async (harness) => {
+        await attachTranscript(harness);
+        await appendPlannerStep(harness, 1, "answer");
+        await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
+        await waitFor(
+          () =>
+            harness.diagnostics.some(({ name }) => name === "antigravity.background_idle_observed"),
+          "idle observation diagnostic was not emitted",
+        );
+        await drainFor(400);
+        await waitFor(
+          () => turnTerminals(harness).length === 1,
+          "close-wait terminal was not emitted",
+        );
+        expect(teardown).toHaveBeenCalledTimes(1);
+        expect(turnTerminals(harness)[0]?.payload).toEqual({
+          state: "completed",
+          stopReason: "model_stop",
+        });
+        expect(
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.background_close_wait_timeout",
+          ),
+        ).toBe(true);
+        expect(activityStates(harness)).toEqual(["finalizing"]);
+        harness.child.emit("close", 0, null);
+        await flushTimers();
+        expect(turnTerminals(harness)).toHaveLength(1);
+        expect(teardown).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 
   it("quarantines an unproven close-wait teardown through the existing machinery", async () => {
@@ -3831,70 +3881,84 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         captureComplete: true,
       });
     });
-    await runHarness({
-      stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
-      teardown,
-    }, async (harness) => {
-      await attachTranscript(harness);
-      await appendPlannerStep(harness, 1, "answer");
-      await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
-      await drainFor(400);
-      await waitFor(
-        () => turnTerminals(harness).length === 1,
-        "unproven close-wait terminal was not emitted",
-      );
-      expect(turnTerminals(harness)[0]?.payload).toEqual({
-        state: "completed",
-        stopReason: "model_stop",
-      });
-      expect(
-        harness.diagnostics.some(({ name }) => name === "antigravity.background_teardown_unconfirmed"),
-      ).toBe(true);
-      expect(
-        harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
-      ).toBe(true);
-      const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
-        (candidate) => candidate.threadId === harness.threadId,
-      );
-      expect(session?.status).toBe("error");
-    });
+    await runHarness(
+      {
+        stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
+        teardown,
+      },
+      async (harness) => {
+        await attachTranscript(harness);
+        await appendPlannerStep(harness, 1, "answer");
+        await appendStopRecord(harness, { fullyIdle: true, continued: false, executionNum: 0 });
+        await drainFor(400);
+        await waitFor(
+          () => turnTerminals(harness).length === 1,
+          "unproven close-wait terminal was not emitted",
+        );
+        expect(turnTerminals(harness)[0]?.payload).toEqual({
+          state: "completed",
+          stopReason: "model_stop",
+        });
+        expect(
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.background_teardown_unconfirmed",
+          ),
+        ).toBe(true);
+        expect(
+          harness.diagnostics.some(({ name }) => name === "antigravity.quarantine_entered"),
+        ).toBe(true);
+        const session = (await Effect.runPromise(harness.adapter.listSessions())).find(
+          (candidate) => candidate.threadId === harness.threadId,
+        );
+        expect(session?.status).toBe("error");
+      },
+    );
   });
 
   it("fails through teardown and drain when the hard background deadline expires", async () => {
     const teardown = vi.fn(async () => ({ escalated: false, signalErrors: [] }));
-    await runHarness({
-      stopIdle: { ...defaultStopIdle, backgroundDeadlineMs: 1000 },
-      teardown,
-    }, async (harness) => {
-      await attachTranscript(harness);
-      await appendPlannerStep(harness, 1, "LAUNCHED");
-      await appendStopRecord(harness, {
-        fullyIdle: false,
-        continued: true,
-        continuationLimit: 8,
-        executionNum: 0,
-      });
-      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
-      await drainFor(1500);
-      await waitFor(
-        () => turnTerminals(harness).length === 1,
-        "deadline terminal was not emitted",
-      );
-      expect(teardown).toHaveBeenCalledTimes(1);
-      expect(turnTerminals(harness)[0]?.payload).toMatchObject({ state: "failed", stopReason: "error" });
-      expect(JSON.stringify(turnTerminals(harness)[0])).toContain("background_deadline_exceeded");
-      expect(
-        harness.diagnostics.some(
-          ({ name }) => name === "antigravity.background_deadline_exceeded",
-        ),
-      ).toBe(true);
-      await drainFor(5000);
-      expect(turnTerminals(harness)).toHaveLength(1);
-      expect(teardown).toHaveBeenCalledTimes(1);
-      harness.child.emit("close", 0, null);
-      await flushTimers();
-      expect(turnTerminals(harness)).toHaveLength(1);
-    });
+    await runHarness(
+      {
+        stopIdle: { ...defaultStopIdle, backgroundDeadlineMs: 1000 },
+        teardown,
+      },
+      async (harness) => {
+        await attachTranscript(harness);
+        await appendPlannerStep(harness, 1, "LAUNCHED");
+        await appendStopRecord(harness, {
+          fullyIdle: false,
+          continued: true,
+          continuationLimit: 8,
+          executionNum: 0,
+        });
+        await waitFor(
+          () => activityStates(harness).includes("active"),
+          "active edge was not emitted",
+        );
+        await drainFor(1500);
+        await waitFor(
+          () => turnTerminals(harness).length === 1,
+          "deadline terminal was not emitted",
+        );
+        expect(teardown).toHaveBeenCalledTimes(1);
+        expect(turnTerminals(harness)[0]?.payload).toMatchObject({
+          state: "failed",
+          stopReason: "error",
+        });
+        expect(JSON.stringify(turnTerminals(harness)[0])).toContain("background_deadline_exceeded");
+        expect(
+          harness.diagnostics.some(
+            ({ name }) => name === "antigravity.background_deadline_exceeded",
+          ),
+        ).toBe(true);
+        await drainFor(5000);
+        expect(turnTerminals(harness)).toHaveLength(1);
+        expect(teardown).toHaveBeenCalledTimes(1);
+        harness.child.emit("close", 0, null);
+        await flushTimers();
+        expect(turnTerminals(harness)).toHaveLength(1);
+      },
+    );
   });
 
   it("settles exactly one interrupted terminal when interrupting during background-active", async () => {
@@ -3908,7 +3972,10 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         continuationLimit: 8,
         executionNum: 0,
       });
-      await waitFor(() => activityStates(harness).includes("active"), "active edge was not emitted");
+      await waitFor(
+        () => activityStates(harness).includes("active"),
+        "active edge was not emitted",
+      );
       await Effect.runPromise(harness.adapter.interruptTurn(harness.threadId));
       await waitFor(
         () => turnTerminals(harness).length === 1,
@@ -3921,9 +3988,7 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
       await drainFor(5000);
       expect(turnTerminals(harness)).toHaveLength(1);
       expect(
-        harness.diagnostics.some(
-          ({ name }) => name === "antigravity.background_deadline_exceeded",
-        ),
+        harness.diagnostics.some(({ name }) => name === "antigravity.background_deadline_exceeded"),
       ).toBe(false);
       harness.child.emit("close", 130, "SIGINT");
       await flushTimers();
@@ -3937,10 +4002,7 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
       await attachTranscript(harness);
       await appendPlannerStep(harness, 1, "answer");
       await appendStopRecord(harness, { fullyIdle: true, executionNum: 0 });
-      await waitFor(
-        () => turnTerminals(harness).length === 1,
-        "legacy Stop did not settle",
-      );
+      await waitFor(() => turnTerminals(harness).length === 1, "legacy Stop did not settle");
       expect(teardown).toHaveBeenCalledTimes(1);
       expect(turnTerminals(harness)[0]?.payload).toEqual({
         state: "completed",

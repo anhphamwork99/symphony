@@ -15,9 +15,9 @@ import { COMPOSER_STACKED_PANEL_ROW_CLASS_NAME } from "./composerStackedPanelSty
 
 describe("ComposerBackgroundActivityStatus", () => {
   it("renders nothing for a null background-activity state", () => {
-    expect(renderToStaticMarkup(<ComposerBackgroundActivityStatus backgroundActivity={null} />)).toBe(
-      "",
-    );
+    expect(
+      renderToStaticMarkup(<ComposerBackgroundActivityStatus backgroundActivity={null} />),
+    ).toBe("");
   });
 
   it("labels the active state as waiting for background tasks", () => {

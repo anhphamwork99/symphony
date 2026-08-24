@@ -85,7 +85,9 @@ export interface ActiveTurnBackgroundActivityState {
 // the server projection each declare their own constant for the kind string.
 const BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND = "turn.background-activity.changed";
 
-function toBackgroundActivityState(value: unknown): ActiveTurnBackgroundActivityState["state"] | null {
+function toBackgroundActivityState(
+  value: unknown,
+): ActiveTurnBackgroundActivityState["state"] | null {
   if (value === "active" || value === "idle" || value === "finalizing") {
     return value;
   }

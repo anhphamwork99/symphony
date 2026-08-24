@@ -301,7 +301,9 @@ describe("deriveActiveTurnBackgroundActivityState", () => {
       turnId: overrides.turnId ?? "turn-1",
       payload:
         overrides.payload ??
-        (typeof overrides.state === "string" ? { state: overrides.state } : (overrides.state ?? {})),
+        (typeof overrides.state === "string"
+          ? { state: overrides.state }
+          : (overrides.state ?? {})),
     });
 
   it("derives each aggregate state for the current turn by ordered sequence (last change wins)", () => {
@@ -401,7 +403,13 @@ describe("deriveActiveTurnBackgroundActivityState", () => {
   });
 
   it("clears when the session is no longer running", () => {
-    for (const orchestrationStatus of ["idle", "ready", "interrupted", "stopped", "error"] as const) {
+    for (const orchestrationStatus of [
+      "idle",
+      "ready",
+      "interrupted",
+      "stopped",
+      "error",
+    ] as const) {
       const activities = [
         backgroundActivity({
           id: "bg-1",

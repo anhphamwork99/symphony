@@ -3917,13 +3917,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         await waitForLayout();
         const statusRow = findStatusRow();
         expect(statusRow, `status row missing for the ${state} state`).not.toBeNull();
-        expect(
-          statusRow!.textContent,
-          `status row label wrong for the ${state} state`,
-        ).toBe(state === "active" ? "Waiting for background tasks…" : "Finishing…");
-        expect(scrollSpy.calls, `activity-only ${state} change re-stuck the transcript`).toHaveLength(
-          0,
+        expect(statusRow!.textContent, `status row label wrong for the ${state} state`).toBe(
+          state === "active" ? "Waiting for background tasks…" : "Finishing…",
         );
+        expect(
+          scrollSpy.calls,
+          `activity-only ${state} change re-stuck the transcript`,
+        ).toHaveLength(0);
       }
 
       // Settled turn (completed + session no longer running) clears the row.

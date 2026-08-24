@@ -10,7 +10,7 @@
 
 ## 1. Verdict
 
-**Qualified.** On `agy 1.1.19` print mode, the Stop hook's `fullyIdle` flag is a reliable aggregate signal for "background work still running", and the documented `"continue"` decision keeps the same process alive until background work finishes. All seven qualification gates (G1–G7) passed on a single bounded run. This qualifies the *aggregate* Stop/`fullyIdle` contract only — see §6 for what it does **not** establish.
+**Qualified.** On `agy 1.1.19` print mode, the Stop hook's `fullyIdle` flag is a reliable aggregate signal for "background work still running", and the documented `"continue"` decision keeps the same process alive until background work finishes. All seven qualification gates (G1–G7) passed on a single bounded run. This qualifies the _aggregate_ Stop/`fullyIdle` contract only — see §6 for what it does **not** establish.
 
 ## 2. Fixture and bounded command shape (no secrets)
 
@@ -34,19 +34,19 @@ Outer bound: a 1 s liveness poller (checks `agy` PID alive + existence of both s
 
 All times UTC, from `hooks.ndjson` (`ts` field) and the 1 s liveness poller. Monotonic chain for the qualifying run (PID 71476 throughout):
 
-| # | Event | Timestamp (UTC) |
-|---|---|---|
-| 1 | Liveness poller start (`alive=yes`, no sentinels) | 03:30:11.340 |
-| 2 | `PreInvocation` inv 0 | 03:30:15.987 |
-| 3 | `PreToolUse` run_command, stepIdx 3, waitMsBeforeAsync 1500 | 03:30:20.505 |
-| 4 | `PreToolUse` run_command, stepIdx 4, waitMsBeforeAsync 1500 | 03:30:22.072 |
-| 5 | Stop exec 0 — `fullyIdle=false` | 03:30:25.521 |
-| 6 | Stop exec 1 — `fullyIdle=false` | 03:30:31.191 |
-| 7 | `snt_b.done` first observed (poll window 03:30:31.2–32.2; first `b=yes` 03:30:32.184) | 03:30:32.184 |
-| 8 | Stop exec 2 … exec 8 — all `fullyIdle=false` | 03:30:34.073 → 03:30:45.046 |
-| 9 | `snt_a.done` first observed (poll window 03:30:44.7–45.7; first `a=yes` 03:30:45.718) | 03:30:45.718 |
-| 10 | **Stop exec 9 — `fullyIdle=true`** (last `alive=yes` sample 03:30:47.718) | 03:30:47.440 |
-| 11 | Process exit detected, exit code 0 | 03:30:47.807 |
+| #   | Event                                                                                 | Timestamp (UTC)             |
+| --- | ------------------------------------------------------------------------------------- | --------------------------- |
+| 1   | Liveness poller start (`alive=yes`, no sentinels)                                     | 03:30:11.340                |
+| 2   | `PreInvocation` inv 0                                                                 | 03:30:15.987                |
+| 3   | `PreToolUse` run_command, stepIdx 3, waitMsBeforeAsync 1500                           | 03:30:20.505                |
+| 4   | `PreToolUse` run_command, stepIdx 4, waitMsBeforeAsync 1500                           | 03:30:22.072                |
+| 5   | Stop exec 0 — `fullyIdle=false`                                                       | 03:30:25.521                |
+| 6   | Stop exec 1 — `fullyIdle=false`                                                       | 03:30:31.191                |
+| 7   | `snt_b.done` first observed (poll window 03:30:31.2–32.2; first `b=yes` 03:30:32.184) | 03:30:32.184                |
+| 8   | Stop exec 2 … exec 8 — all `fullyIdle=false`                                          | 03:30:34.073 → 03:30:45.046 |
+| 9   | `snt_a.done` first observed (poll window 03:30:44.7–45.7; first `a=yes` 03:30:45.718) | 03:30:45.718                |
+| 10  | **Stop exec 9 — `fullyIdle=true`** (last `alive=yes` sample 03:30:47.718)             | 03:30:47.440                |
+| 11  | Process exit detected, exit code 0                                                    | 03:30:47.807                |
 
 Gate-by-gate:
 
@@ -74,7 +74,7 @@ This is a **loadability quirk of print mode, not a Stop-contract deviation**. It
 
 ## 6. What this probe does NOT establish — no per-job native events
 
-This qualification covers **only** the aggregate Stop/`fullyIdle` contract: one boolean per Stop event describing whether *all* background work is finished, plus the `continue` decision that bridges the gap. The probe observed **no per-job / per-task native lifecycle events** — there is no evidence that `agy` 1.1.19 exposes, and this document must not be read as claiming, events for individual background tasks (start/progress/completion per job). Any per-job surfacing in Synara remains a projection concern (e.g. the WP2 aggregate `turn.background-activity.changed` projection), not a native CLI capability.
+This qualification covers **only** the aggregate Stop/`fullyIdle` contract: one boolean per Stop event describing whether _all_ background work is finished, plus the `continue` decision that bridges the gap. The probe observed **no per-job / per-task native lifecycle events** — there is no evidence that `agy` 1.1.19 exposes, and this document must not be read as claiming, events for individual background tasks (start/progress/completion per job). Any per-job surfacing in Synara remains a projection concern (e.g. the WP2 aggregate `turn.background-activity.changed` projection), not a native CLI capability.
 
 ## 7. Enablement policy
 

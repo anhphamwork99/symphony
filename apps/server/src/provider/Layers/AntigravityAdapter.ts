@@ -379,7 +379,9 @@ type StopIdleObservation = {
 
 // Only a boolean fullyIdle selects the stop-idle lifecycle; anything else is
 // the legacy fail-open Stop path with unchanged settlement behavior.
-function parseStopIdleObservation(payload: Record<string, unknown>): StopIdleObservation | undefined {
+function parseStopIdleObservation(
+  payload: Record<string, unknown>,
+): StopIdleObservation | undefined {
   const fullyIdle = payload.fullyIdle;
   if (typeof fullyIdle !== "boolean") return undefined;
   const continued = typeof payload.continued === "boolean" ? payload.continued : undefined;
@@ -983,7 +985,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
     );
     const stopIdleBackgroundDeadlineMs = boundedStopIdleInt(
-      dependencies.stopIdleBackgroundDeadlineMs ?? serverConfig.antigravityStopIdleBackgroundDeadlineMs,
+      dependencies.stopIdleBackgroundDeadlineMs ??
+        serverConfig.antigravityStopIdleBackgroundDeadlineMs,
       DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
       MIN_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
       MAX_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
@@ -2295,14 +2298,17 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       const stopIdle = context.stopIdle;
       if (!stopIdle) return;
       clearStopIdleTimer(context);
-      const timer = setTimeout(() => {
-        if (context.stopIdle !== stopIdle) return;
-        delete stopIdle.timer;
-        const settlement = settleStopIdleTimeout(context, ownership, kind);
-        void settlement.finally(() => {
-          if (context.terminalSettlement === settlement) delete context.terminalSettlement;
-        });
-      }, kind === "background-deadline" ? stopIdleBackgroundDeadlineMs : stopIdleCloseWaitMs);
+      const timer = setTimeout(
+        () => {
+          if (context.stopIdle !== stopIdle) return;
+          delete stopIdle.timer;
+          const settlement = settleStopIdleTimeout(context, ownership, kind);
+          void settlement.finally(() => {
+            if (context.terminalSettlement === settlement) delete context.terminalSettlement;
+          });
+        },
+        kind === "background-deadline" ? stopIdleBackgroundDeadlineMs : stopIdleCloseWaitMs,
+      );
       stopIdle.timer = timer;
     };
 
@@ -2410,7 +2416,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             itemType: pending.itemType,
             status: "failed",
             title: pending.name,
-            detail: "Background tool never reported a result before the Antigravity process closed.",
+            detail:
+              "Background tool never reported a result before the Antigravity process closed.",
             data: { toolCallId: pending.itemId, toolName: pending.name },
           },
           raw: raw("stop-idle-tool-closeout", { name: pending.name }),
@@ -2432,9 +2439,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       const stopIdle = context.stopIdle;
       const idleConfirmed = stopIdle?.idleConfirmed ?? false;
       closeDanglingStopIdleTools(context);
-      const stopIdleSettle = (
-        settle: Parameters<typeof settleActiveTurn>[1],
-      ): void => {
+      const stopIdleSettle = (settle: Parameters<typeof settleActiveTurn>[1]): void => {
         if (context.quarantine !== undefined) {
           // The quarantine record already owns resource cleanup and its reaper;
           // never install a second cleanup fence beside it.
@@ -2515,7 +2520,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         stopReason: "model_stop",
         claimant: "stop-idle",
         raw: raw(
-          input.outcome === "close-wait-timeout" ? "stop-idle-close-wait-timeout" : "stop-idle-close",
+          input.outcome === "close-wait-timeout"
+            ? "stop-idle-close-wait-timeout"
+            : "stop-idle-close",
           metadata,
         ),
       });
@@ -2534,7 +2541,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       if (context.turnTerminalEmitted) return;
       if (!claimTerminal(context, "stop-idle")) return;
       clearStopIdleTimer(context);
-      await Effect.runPromise(cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId));
+      await Effect.runPromise(
+        cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId),
+      );
       if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
       emitStopIdleActivity(context, "finalizing");
       await drainStopIdleStableEof(context, ownership);
@@ -2573,7 +2582,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           idleConfirmed: stopIdle?.idleConfirmed ?? false,
         }),
       );
-      await Effect.runPromise(cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId));
+      await Effect.runPromise(
+        cancelAgentGatewayTurn(ownership.gatewaySessionLease, ownership.turnId),
+      );
       if (!ownsRecovery(context, ownership) || context.turnTerminalEmitted) return;
       const outcome = await invokeTeardown(ownership.child).then<
         RecoveryTeardownOutcome,
@@ -3255,7 +3266,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
             cwd: context.session.cwd ?? serverConfig.cwd,
             env: buildAntigravityTurnProcessEnvironment({
               eventFile,
-              ...(stopIdleLifecycle ? { stopIdle: { maxContinuations: stopIdleMaxContinuations } } : {}),
+              ...(stopIdleLifecycle
+                ? { stopIdle: { maxContinuations: stopIdleMaxContinuations } }
+                : {}),
               ...(gatewaySessionLease && gatewayBootstrapToken
                 ? {
                     gatewayConnection: gatewaySessionLease.connection,

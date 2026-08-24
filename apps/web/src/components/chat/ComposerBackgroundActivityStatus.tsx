@@ -21,9 +21,7 @@ import { COMPOSER_STACKED_PANEL_ICON_CLASS_NAME } from "./composerStackedPanelSt
 const ACTIVE_LABEL = "Waiting for background tasks…";
 const IDLE_OR_FINALIZING_LABEL = "Finishing…";
 
-function backgroundActivityStatusLabel(
-  state: ActiveTurnBackgroundActivityState["state"],
-): string {
+function backgroundActivityStatusLabel(state: ActiveTurnBackgroundActivityState["state"]): string {
   // `idle` still means background work exists that has not reported completion;
   // from the user's perspective the provider is wrapping the turn up.
   return state === "active" ? ACTIVE_LABEL : IDLE_OR_FINALIZING_LABEL;
