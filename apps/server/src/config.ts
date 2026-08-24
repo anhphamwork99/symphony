@@ -719,7 +719,7 @@ export type AntigravityTerminalRecoveryMode = "off" | "shadow" | "enforce";
 // Antigravity Stop `fullyIdle` aggregate background lifecycle. Invalid or
 // out-of-range input falls back to the default — never clamped (same resolver
 // contract as the pi-subagent knobs).
-export const DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE = false;
+export const DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE = true;
 export const DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 64;
 export const MIN_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 0;
 export const MAX_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS = 1024;
@@ -771,8 +771,7 @@ export function resolveAntigravityStopIdleLifecycle(
   if (typeof rawInput === "string") {
     const normalized = rawInput.trim().toLowerCase();
     if (normalized === "true" || normalized === "1" || normalized === "on") return true;
-    if (normalized === "false" || normalized === "0" || normalized === "off" || !normalized)
-      return false;
+    if (normalized === "false" || normalized === "0" || normalized === "off") return false;
   }
   return DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE;
 }
@@ -916,7 +915,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly antigravityTerminalRecoveryMode?: AntigravityTerminalRecoveryMode;
   readonly antigravityTerminalRecoveryGraceMs?: number;
-  /** Antigravity Stop `fullyIdle` aggregate background lifecycle (default off). */
+  /** Antigravity Stop `fullyIdle` aggregate background lifecycle (default on). */
   readonly antigravityStopIdleLifecycle?: boolean;
   /** Bounded Stop continuation budget the capture hook enforces. */
   readonly antigravityStopIdleMaxContinuations?: number;

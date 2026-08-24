@@ -5,6 +5,9 @@ Status: accepted
 Final acceptance:
 `decisions/0001-accept-integrated-antigravity-background-lifecycle.md`
 
+Current enablement policy:
+`decisions/0002-owner-default-on.md`
+
 Project home:
 `/private/tmp/symphony-agy-bg-lifecycle/.planning/synara-antigravity-background-lifecycle`
 
@@ -26,8 +29,9 @@ aggregate status without inventing per-job identity.
   terminal event last.
 - Bound continuation count and background wall time. Reuse the existing proven
   process-tree teardown and quarantine behavior on failures.
-- Keep the feature flag default OFF. Missing or malformed `fullyIdle` retains
-  the legacy settlement path.
+- Enable the feature by default. Absent, empty, or malformed
+  `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` resolves to the product default
+  (`true`); explicit `false`/`0`/`off` remains the legacy rollback kill switch.
 - Expose only aggregate UI states (`active`, `idle`, `finalizing`). Do not expose
   or synthesize background job IDs, names, counts, PIDs, or progress.
 - Treat background-status updates as activity, not assistant live output; they
@@ -40,6 +44,9 @@ aggregate status without inventing per-job identity.
   `decision:"continue"`.
 - `docs/findings/ANTIGRAVITY-fullyIdle-probe.md` is authoritative for local
   `agy` 1.1.19 print-mode qualification and the enablement gate.
+- `decisions/0002-owner-default-on.md` is authoritative for the current
+  product default and explicit rollback values; Decision 0001 remains the
+  immutable historical lifecycle acceptance.
 - The integrated source and focused tests at this project candidate are
   authoritative for implementation behavior and regression evidence.
 - This file is authoritative for feature scope, non-goals, and acceptance
@@ -55,7 +62,6 @@ aggregate status without inventing per-job identity.
 - Migration to long-lived `stream-json`.
 - Durable reattachment to an inherited `agy` process after a Synara server
   restart. Full continuation is a separate project.
-- Enabling the feature by default.
 
 ## Acceptance criteria
 
@@ -94,8 +100,11 @@ aggregate status without inventing per-job identity.
 - **AC-13 Real-provider qualification:** The recorded `agy` 1.1.19 probe shows
   one PID surviving false Stops, both sentinels completing, a later true Stop,
   and process close only after true.
-- **AC-14 Rollback:** Setting `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE=0`
-  restores legacy behavior without data migration.
+- **AC-14 Rollback:** Setting `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` to
+  `false`, `0`, or `off` restores legacy behavior without data migration.
+
+The product default is ON. Absent, empty, and malformed lifecycle input all
+resolve to `true`; only the explicit `false`/`0`/`off` values disable it.
 
 ## Verification and acceptance routing
 
@@ -106,3 +115,10 @@ workspace pass of `bun run test`, `bun fmt`, `bun lint`, and `bun typecheck`.
 After verification, collect exactly one independent feature-level reviewer
 evidence package. Then invoke exactly one Project Supervisor final acceptance
 consultation using this `PROJECT.md` as the authoritative routing record.
+
+The accepted integrated candidate already completed the heavyweight workspace
+verification recorded in Decision 0001. This default-policy follow-up is
+bounded to the resolver, adapter fallback, focused adapter/config tests, and
+authoritative documentation; its verification uses targeted formatting/lint
+checks, focused server tests, and `git diff --check` without repeating the
+workspace-wide gates.

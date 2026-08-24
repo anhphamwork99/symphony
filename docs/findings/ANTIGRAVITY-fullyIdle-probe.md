@@ -78,10 +78,10 @@ This qualification covers **only** the aggregate Stop/`fullyIdle` contract: one 
 
 ## 7. Enablement policy
 
-- **Server flag remains default OFF.** The stop-idle lifecycle is opt-in; the default is `false` (`DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE`). Nothing changes for existing installs.
+- **Server flag defaults ON.** The stop-idle lifecycle is enabled by default (`DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE`). The qualified aggregate behavior and all existing continuation, deadline, close-wait, drain, terminal-ordering, and aggregate-only bounds remain unchanged.
 - **Qualified version: `agy` 1.1.19.** The qualification evidence covers 1.1.19 only. Earlier binaries are not covered — 1.1.13 is the known-wedged version that motivated the terminal-recovery project. Note the existing health check minimum (`1.0.12`) does **not** enforce ≥ 1.1.19; respecting the qualified floor is an operational rule, not a code guarantee, until a version gate lands.
-- **Opt-in (WP2 env names, `SYNARA_ANTIGRAVITY_*` prefix per the accepted config convention):**
-  - `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` — `true`/`1`/`on` enables; `false`/`0`/`off`/unset disables; invalid input falls back to the default (false), never clamped.
+- **Configuration and rollback (WP2 env names, `SYNARA_ANTIGRAVITY_*` prefix per the accepted config convention):**
+  - `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` — absent, empty, or malformed input falls back to the product default (`true`); `true`/`1`/`on` enables; explicit `false`/`0`/`off` disables the lifecycle as the rollback kill switch.
   - Related knobs (same resolver contract — nullish → default, range check, invalid → default, never clamped):
     - `SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS` (default 64, range 0–1024)
     - `SYNARA_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS` (default 600000, range 1000–2147483647)
@@ -93,7 +93,7 @@ This qualification covers **only** the aggregate Stop/`fullyIdle` contract: one 
 
 ## 8. Rollback
 
-Env-only, no persisted-state migration: unset `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` (or set it to `false`/`0`/`off`) and restart the server. Turn settlement returns to the legacy stop-hook behavior immediately; stop-idle state is turn-scoped and in-memory, so there is nothing to clean up after the flag flips. Invalid/typo'd values also fail safe to the disabled default.
+Env-only, no persisted-state migration: set `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` to `false`, `0`, or `off` and restart the server. Turn settlement returns to the legacy stop-hook behavior immediately; stop-idle state is turn-scoped and in-memory, so there is nothing to clean up after the flag flips. Unset, empty, or invalid/typo'd values resolve to the product default (`true`) and therefore do not roll back the lifecycle.
 
 ## 9. Reproducible manual recipe
 

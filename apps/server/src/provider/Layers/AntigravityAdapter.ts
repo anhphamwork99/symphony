@@ -51,6 +51,7 @@ import {
   DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS,
   DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS,
   DEFAULT_ANTIGRAVITY_STOP_IDLE_FINAL_DRAIN_MS,
+  DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE,
   DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,
   DEFAULT_ANTIGRAVITY_STOP_IDLE_STABLE_EOF_QUIET_MS,
   type AntigravityTerminalRecoveryMode,
@@ -969,7 +970,9 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
         ? value
         : fallback;
     const stopIdleLifecycle =
-      dependencies.stopIdleLifecycle ?? serverConfig.antigravityStopIdleLifecycle ?? false;
+      dependencies.stopIdleLifecycle ??
+      serverConfig.antigravityStopIdleLifecycle ??
+      DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE;
     const stopIdleMaxContinuations = boundedStopIdleInt(
       dependencies.stopIdleMaxContinuations ?? serverConfig.antigravityStopIdleMaxContinuations,
       DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS,

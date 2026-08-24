@@ -354,6 +354,7 @@ describe("Antigravity CLI integration helpers", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provide(Layer.succeed(AgentGatewayCredentials, credentials)),
               Layer.provideMerge(
@@ -801,6 +802,7 @@ describe("Antigravity CLI integration helpers", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-tool-events-" }),
@@ -933,6 +935,7 @@ describe("Antigravity turn settle on cancel (#465)", () => {
               ensurePlugin: async () => undefined,
               spawnProcess,
               teardownProcessTree: failTeardown,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-interrupt-hung-" }),
@@ -1019,6 +1022,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-late-fail-" }),
@@ -1113,6 +1117,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-silent-fail-" }),
@@ -1208,6 +1213,7 @@ describe("Antigravity turn settle on non-zero CLI exit with output", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-tool-output-" }),
@@ -1377,6 +1383,7 @@ describe("Antigravity terminal-answer recovery", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: input.stopIdle !== undefined,
               teardownProcessTree:
                 input.teardown ?? (async () => ({ escalated: false, signalErrors: [] })),
               terminalRecoveryMode: input.mode ?? "enforce",
@@ -1385,7 +1392,6 @@ describe("Antigravity terminal-answer recovery", () => {
               onRecoveryDiagnostic: (name, fields) => diagnostics.push({ name, fields }),
               ...(input.stopIdle
                 ? {
-                    stopIdleLifecycle: true,
                     ...(input.stopIdle.maxContinuations !== undefined
                       ? { stopIdleMaxContinuations: input.stopIdle.maxContinuations }
                       : {}),
@@ -2747,6 +2753,7 @@ describe("Antigravity terminal-answer recovery", () => {
                 spawned += 1;
                 throw new Error("stale admission spawned a child");
               }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-admission-" }),
@@ -2892,6 +2899,7 @@ describe("Antigravity terminal-answer recovery", () => {
               terminalRecoveryGraceMs: 25,
               now: () => Date.now(),
               onRecoveryDiagnostic: (name) => diagnostics.push(name),
+              stopIdleLifecycle: false,
               createRunDir: async () => {
                 runDir = await fs.mkdtemp(path.join(root, "turn-"));
                 return runDir;
@@ -3161,6 +3169,7 @@ describe("Antigravity terminal-answer recovery", () => {
                 throw new Error("stale preparation must not spawn");
               }) as NonNullable<AntigravityAdapterDependencies["spawnProcess"]>,
               onRecoveryDiagnostic: (name) => diagnostics.push(name),
+              stopIdleLifecycle: false,
             }).pipe(
               Layer.provideMerge(
                 ServerConfig.layerTest(root, { prefix: "antigravity-prep-stop-" }),
@@ -3225,7 +3234,7 @@ describe("Antigravity terminal-answer recovery", () => {
 
 describe("Antigravity Stop fullyIdle lifecycle configuration", () => {
   it("exports the expected defaults", () => {
-    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE).toBe(false);
+    expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_LIFECYCLE).toBe(true);
     expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS).toBe(64);
     expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_BACKGROUND_DEADLINE_MS).toBe(600_000);
     expect(DEFAULT_ANTIGRAVITY_STOP_IDLE_CLOSE_WAIT_MS).toBe(5000);
@@ -3250,7 +3259,7 @@ describe("Antigravity Stop fullyIdle lifecycle configuration", () => {
   it.each([["yes"], [""], [" "], [123], [{}], [null], [undefined]] as const)(
     "falls back lifecycle input %p to the default",
     (input) => {
-      expect(resolveAntigravityStopIdleLifecycle(input)).toBe(false);
+      expect(resolveAntigravityStopIdleLifecycle(input)).toBe(true);
     },
   );
 
@@ -3616,6 +3625,7 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
             makeAntigravityAdapterLive({
               ensurePlugin: async () => undefined,
               spawnProcess,
+              stopIdleLifecycle: input.stopIdle !== undefined,
               teardownProcessTree:
                 input.teardown ?? (async () => ({ escalated: false, signalErrors: [] })),
               terminalRecoveryMode: "enforce",
@@ -3624,7 +3634,6 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
               onRecoveryDiagnostic: (name, fields) => diagnostics.push({ name, fields }),
               ...(input.stopIdle
                 ? {
-                    stopIdleLifecycle: true,
                     ...(input.stopIdle.maxContinuations !== undefined
                       ? { stopIdleMaxContinuations: input.stopIdle.maxContinuations }
                       : {}),
