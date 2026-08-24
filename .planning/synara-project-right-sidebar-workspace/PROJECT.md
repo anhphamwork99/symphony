@@ -1,6 +1,6 @@
 # Synara Project-owned Right-sidebar workspace
 
-Status: FINAL ACCEPTED at candidate `c03a4a511` by Decision 0006.
+Status: FINAL ACCEPTED at candidate `a1cee80b5` by binding Reassessment Decision 0007.
 
 ## Goal
 
@@ -49,4 +49,5 @@ Right-dock panes, terminal presentation, browser state, and split-view state wer
 - Ownership and migration: `decisions/0002-explicit-project-ownership-and-legacy-migration.md`
 - Desktop activation: `decisions/0004-desktop-authoritative-lazy-project-workspace-activation.md`
 - Final acceptance: `decisions/0006-final-acceptance-candidate-c03a4a511.md`
+- RightDock lifecycle fix reassessment: `decisions/0007-final-acceptance-reassessment-rightdock-project-lifecycle.md`
 - One-time local cleanup decision: `decisions/0001-one-time-synara-work-cleanup.md`
