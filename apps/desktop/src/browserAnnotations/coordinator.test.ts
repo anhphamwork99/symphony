@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 
 import {
+  ProjectId,
   ThreadId,
   type BrowserAnnotationEvent,
+  type BrowserAnnotationProjectEvent,
   type BrowserAnnotationTheme,
 } from "@synara/contracts";
 import { sanitizeBrowserAnnotationUrl } from "@synara/shared/browserAnnotations";
@@ -516,5 +518,222 @@ describe("BrowserAnnotationCoordinator", () => {
     expect(
       restartedHarness.coordinator.resolveNavigationTarget(THREAD_ID, "annotation-private", TAB_ID),
     ).toEqual({ tabId: TAB_ID, liveUrl: firstLiveUrl });
+  });
+});
+
+// ── Project-owned annotation surface (Decision 0002, WP7 stage 2A) ────
+
+const PROJECT_ID = ProjectId.makeUnsafe("project-annotations");
+const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-other");
+const PROJECT_TAB_ID = "project-tab-1";
+
+function createProjectHarness(initialUrl = "https://example.test/project") {
+  let url = initialUrl;
+  const sent: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+  const webContents = {
+    id: 77,
+    isDestroyed: () => false,
+    getURL: () => url,
+    send: (channel: string, payload: Record<string, unknown>) => {
+      sent.push({ channel, payload });
+    },
+  } as unknown as WebContents;
+  const runtime = { projectId: PROJECT_ID, tabId: PROJECT_TAB_ID, webContents };
+  const events: BrowserAnnotationProjectEvent[] = [];
+  const markHumanControl = vi.fn();
+  const coordinator = new BrowserAnnotationCoordinator({
+    resolveVisibleRuntime: () => {
+      throw new Error("legacy surface must not resolve project runtimes");
+    },
+    resolveProjectVisibleRuntime: (input) =>
+      input.projectId === PROJECT_ID && input.tabId === PROJECT_TAB_ID ? runtime : null,
+    resolveRuntimeByWebContentsId: (id) => (id === webContents.id ? runtime : null),
+    markHumanControl,
+  });
+  coordinator.subscribeProjectEvents((event) => events.push(event));
+  const ready = (documentToken: string, pageTitle = "Project Page") =>
+    coordinator.handleGuestMessage(webContents, {
+      version: 1,
+      kind: "ready",
+      documentToken,
+      source: { url: sanitizeBrowserAnnotationUrl(url), pageTitle },
+    });
+  return {
+    coordinator,
+    events,
+    markHumanControl,
+    ready,
+    sent,
+    setUrl(nextUrl: string) {
+      url = nextUrl;
+    },
+    webContents,
+  };
+}
+
+describe("BrowserAnnotationCoordinator Project-owned sessions", () => {
+  it("starts and cancels a Project session and emits Project events", () => {
+    const harness = createProjectHarness();
+    harness.ready("token-1");
+
+    const session = harness.coordinator.startForProject({
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+      theme: LIGHT_ANNOTATION_THEME,
+    });
+
+    expect(session.projectId).toBe(PROJECT_ID);
+    expect(session.tabId).toBe(PROJECT_TAB_ID);
+    expect(harness.markHumanControl).toHaveBeenCalledWith({
+      kind: "project",
+      projectId: PROJECT_ID,
+    });
+    expect(harness.events.at(-1)).toMatchObject({
+      kind: "started",
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+    });
+    // The guest command channel is unchanged: the guest never learns about owners.
+    expect(harness.sent.at(-1)?.channel).toBe(BROWSER_ANNOTATION_GUEST_COMMAND_CHANNEL);
+
+    harness.coordinator.cancelForProject({ projectId: PROJECT_ID, tabId: PROJECT_TAB_ID });
+    expect(harness.events.at(-1)).toMatchObject({
+      kind: "cancelled",
+      projectId: PROJECT_ID,
+      reason: "user",
+    });
+  });
+
+  it("isolates a Project session from a Thread session on the same tab id text", () => {
+    const harness = createProjectHarness();
+    harness.ready("token-project");
+
+    const threadEvents: BrowserAnnotationEvent[] = [];
+    harness.coordinator.subscribe((event) => threadEvents.push(event));
+
+    harness.coordinator.startForProject({
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+      theme: LIGHT_ANNOTATION_THEME,
+    });
+
+    // The Thread-keyed surface (same tab id text) has no session, projection,
+    // or document: keys are disjoint (t: vs p:) and never alias.
+    expect(harness.coordinator.isInteractive(THREAD_ID)).toBe(false);
+    expect(
+      harness.coordinator.resolveNavigationTarget(THREAD_ID, "annotation-1", PROJECT_TAB_ID),
+    ).toBeNull();
+    expect(threadEvents).toHaveLength(0);
+  });
+
+  it("routes marker projections and committed annotations through Project events", () => {
+    const harness = createProjectHarness();
+    harness.ready("token-2");
+    harness.coordinator.startForProject({
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+      theme: DARK_ANNOTATION_THEME,
+    });
+
+    harness.coordinator.syncMarkersForProject({
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+      version: 1,
+      markers: [marker("https://example.test/project")],
+    });
+    expect(harness.sent.at(-1)?.payload).toMatchObject({ kind: "sync-markers" });
+
+    harness.coordinator.handleGuestMessage(harness.webContents, {
+      version: 1,
+      kind: "markers-projected",
+      documentToken: "token-2",
+      projectionVersion: 1,
+      projectedMarkerIds: ["annotation-1"],
+    });
+    expect(harness.events.at(-1)).toMatchObject({
+      kind: "markers-synced",
+      projectId: PROJECT_ID,
+      projectedMarkerIds: ["annotation-1"],
+    });
+
+    const startedSession = harness.events.find((event) => event.kind === "started");
+    harness.coordinator.handleGuestMessage(harness.webContents, {
+      version: 1,
+      kind: "committed",
+      documentToken: "token-2",
+      sessionId: startedSession?.kind === "started" ? startedSession.sessionId : "",
+      annotation: {
+        id: "annotation-1",
+        source: {
+          url: sanitizeBrowserAnnotationUrl("https://example.test/project"),
+          pageTitle: "Project Page",
+        },
+        selector: "#target",
+        tagName: "BUTTON",
+        role: "button",
+        name: "Save",
+        text: "Save",
+        fingerprint: FINGERPRINT,
+        comment: null,
+        capturedAt: new Date().toISOString(),
+      },
+    });
+    const committed = harness.events.find((event) => event.kind === "committed");
+    expect(committed).toMatchObject({ kind: "committed", projectId: PROJECT_ID });
+
+    // The committed annotation's navigation affinity is Project-scoped.
+    const target = harness.coordinator.resolveProjectAnnotationNavigationTarget({
+      projectId: PROJECT_ID,
+      annotationId: "annotation-1",
+    });
+    expect(target).toMatchObject({ tabId: PROJECT_TAB_ID });
+    // A different Project cannot navigate to it.
+    expect(
+      harness.coordinator.resolveProjectAnnotationNavigationTarget({
+        projectId: OTHER_PROJECT_ID,
+        annotationId: "annotation-1",
+      }),
+    ).toBeNull();
+  });
+
+  it("finishes the session on navigation and recovers through the Project surface", () => {
+    const harness = createProjectHarness("https://example.test/before");
+    harness.ready("token-3");
+    harness.coordinator.startForProject({
+      projectId: PROJECT_ID,
+      tabId: PROJECT_TAB_ID,
+      theme: LIGHT_ANNOTATION_THEME,
+    });
+
+    harness.coordinator.handleOwnerNavigation(
+      { kind: "project", projectId: PROJECT_ID },
+      PROJECT_TAB_ID,
+      harness.webContents.id,
+    );
+    expect(harness.events.at(-1)).toMatchObject({
+      kind: "cancelled",
+      reason: "navigation",
+      projectId: PROJECT_ID,
+    });
+
+    harness.setUrl("https://example.test/after");
+    harness.coordinator.recoverOwnerNavigation(
+      { kind: "project", projectId: PROJECT_ID },
+      PROJECT_TAB_ID,
+      harness.webContents.id,
+    );
+    expect(harness.sent.at(-1)?.payload).toMatchObject({ kind: "refresh-document" });
+  });
+
+  it("rejects Project starts when the runtime is not visible in that Project", () => {
+    const harness = createProjectHarness();
+    harness.ready("token-4");
+    expect(() =>
+      harness.coordinator.startForProject({
+        projectId: OTHER_PROJECT_ID,
+        tabId: PROJECT_TAB_ID,
+        theme: LIGHT_ANNOTATION_THEME,
+      }),
+    ).toThrow(/not available in this project/i);
   });
 });

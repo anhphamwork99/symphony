@@ -499,4 +499,162 @@ describe("canonical browser host RPC", () => {
       },
     );
   });
+
+  it("parses project_id and passes the owning Project through to the host", async () => {
+    const executeTool = vi.fn(async () => ({ available: true }));
+    await withPipeServer({ automationHost: { executeTool } }, async (socket) => {
+      await request(socket, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getInfo",
+        params: { session_id: "session-project", capability: TEST_CAPABILITY },
+      });
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "executeTool",
+          params: {
+            session_id: "session-project",
+            provider: "claude",
+            thread_id: "thread-provenance",
+            project_id: "project-1",
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({ id: 2, result: { available: true } });
+      expect(executeTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-project",
+          provider: "claude",
+          threadId: "thread-provenance",
+          projectId: "project-1",
+          name: "browser_status",
+        }),
+      );
+    });
+  });
+
+  it("rejects a malformed project_id without touching the host", async () => {
+    const executeTool = vi.fn(async () => ({ available: true }));
+    await withPipeServer({ automationHost: { executeTool } }, async (socket) => {
+      await request(socket, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getInfo",
+        params: { session_id: "session-bad-project", capability: TEST_CAPABILITY },
+      });
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "executeTool",
+          params: {
+            session_id: "session-bad-project",
+            provider: "codex",
+            thread_id: "thread-1",
+            project_id: 1234,
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({
+        error: {
+          code: -32_010,
+          data: { error: { code: "BrowserInputUnsupported" } },
+        },
+      });
+      expect(executeTool).not.toHaveBeenCalled();
+    });
+  });
+
+  it("enforces per-client project owner consistency across requests", async () => {
+    const executeTool = vi.fn(async () => ({ available: true }));
+    await withPipeServer({ automationHost: { executeTool } }, async (socket) => {
+      await request(socket, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getInfo",
+        params: { session_id: "session-owner-consistency", capability: TEST_CAPABILITY },
+      });
+      // Bind the client to project-1.
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "executeTool",
+          params: {
+            session_id: "session-owner-consistency",
+            provider: "codex",
+            thread_id: "thread-1",
+            project_id: "project-1",
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({ id: 2, result: { available: true } });
+      // Same project again is fine.
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "executeTool",
+          params: {
+            session_id: "session-owner-consistency",
+            provider: "codex",
+            thread_id: "thread-2",
+            project_id: "project-1",
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({ id: 3, result: { available: true } });
+      // A different Project on the same connection is a scope violation.
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 4,
+          method: "executeTool",
+          params: {
+            session_id: "session-owner-consistency",
+            provider: "codex",
+            thread_id: "thread-2",
+            project_id: "project-2",
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({
+        error: {
+          code: -32_010,
+          data: { error: { code: "BrowserTabScopeViolation" } },
+        },
+      });
+      // Dropping the project_id after a binding is also a violation: the
+      // connection must not fall back to the Thread workspace it was never
+      // scoped to.
+      await expect(
+        request(socket, {
+          jsonrpc: "2.0",
+          id: 5,
+          method: "executeTool",
+          params: {
+            session_id: "session-owner-consistency",
+            provider: "codex",
+            thread_id: "thread-2",
+            name: "browser_status",
+            arguments: {},
+          },
+        }),
+      ).resolves.toMatchObject({
+        error: {
+          code: -32_010,
+          data: { error: { code: "BrowserTabScopeViolation" } },
+        },
+      });
+      expect(executeTool).toHaveBeenCalledTimes(2);
+    });
+  });
+
 });

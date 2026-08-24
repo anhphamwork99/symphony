@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   BrowserAnnotationEvent,
+  BrowserAnnotationProjectEvent,
   BrowserUseOpenPanelRequest,
   DesktopBridge,
+  ProjectBrowserState,
 } from "@synara/contracts";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
@@ -57,6 +59,45 @@ function parseBrowserAnnotationEvent(payload: unknown): BrowserAnnotationEvent |
     return null;
   }
   return payload as BrowserAnnotationEvent;
+}
+
+function parseProjectBrowserAnnotationEvent(payload: unknown): BrowserAnnotationProjectEvent | null {
+  if (!payload || typeof payload !== "object") return null;
+  const event = payload as Record<string, unknown>;
+  if (
+    !["started", "cancelled", "document-changed", "markers-synced", "committed"].includes(
+      String(event.kind),
+    ) ||
+    typeof event.projectId !== "string" ||
+    event.projectId.trim().length === 0 ||
+    typeof event.tabId !== "string" ||
+    !event.document ||
+    typeof event.document !== "object" ||
+    !event.source ||
+    typeof event.source !== "object"
+  ) {
+    return null;
+  }
+  const document = event.document as Record<string, unknown>;
+  const source = event.source as Record<string, unknown>;
+  if (
+    typeof document.token !== "string" ||
+    typeof document.key !== "string" ||
+    typeof document.url !== "string" ||
+    typeof source.url !== "string" ||
+    typeof source.pageTitle !== "string"
+  ) {
+    return null;
+  }
+  return payload as BrowserAnnotationProjectEvent;
+}
+
+function parseProjectBrowserState(payload: unknown): ProjectBrowserState | null {
+  if (!payload || typeof payload !== "object") return null;
+  const state = payload as Record<string, unknown>;
+  return typeof state.projectId === "string" && state.projectId.trim().length > 0
+    ? (payload as ProjectBrowserState)
+    : null;
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -255,6 +296,45 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return () => {
         ipcRenderer.removeListener(IPC.browser.copyLink, wrappedListener);
       };
+    },
+  },
+  projectBrowser: {
+    open: (input) => ipcRenderer.invoke(IPC.projectBrowser.open, input),
+    close: (input) => ipcRenderer.invoke(IPC.projectBrowser.close, input),
+    hide: (input) => ipcRenderer.invoke(IPC.projectBrowser.hide, input),
+    getState: (input) => ipcRenderer.invoke(IPC.projectBrowser.getState, input),
+    setPanelBounds: async (input) => {
+      ipcRenderer.send(IPC.projectBrowser.setBounds, input);
+    },
+    navigate: (input) => ipcRenderer.invoke(IPC.projectBrowser.navigate, input),
+    reload: (input) => ipcRenderer.invoke(IPC.projectBrowser.reload, input),
+    goBack: (input) => ipcRenderer.invoke(IPC.projectBrowser.goBack, input),
+    goForward: (input) => ipcRenderer.invoke(IPC.projectBrowser.goForward, input),
+    newTab: (input) => ipcRenderer.invoke(IPC.projectBrowser.newTab, input),
+    closeTab: (input) => ipcRenderer.invoke(IPC.projectBrowser.closeTab, input),
+    selectTab: (input) => ipcRenderer.invoke(IPC.projectBrowser.selectTab, input),
+    openDevTools: (input) => ipcRenderer.invoke(IPC.projectBrowser.openDevTools, input),
+    annotations: {
+      start: (input) => ipcRenderer.invoke(IPC.projectBrowser.annotations.start, input),
+      cancel: (input) => ipcRenderer.invoke(IPC.projectBrowser.annotations.cancel, input),
+      syncMarkers: (input) => ipcRenderer.invoke(IPC.projectBrowser.annotations.syncMarkers, input),
+      onEvent: (listener) => {
+        const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+          const annotationEvent = parseProjectBrowserAnnotationEvent(payload);
+          if (annotationEvent) listener(annotationEvent);
+        };
+        ipcRenderer.on(IPC.projectBrowser.annotations.event, wrappedListener);
+        return () =>
+          ipcRenderer.removeListener(IPC.projectBrowser.annotations.event, wrappedListener);
+      },
+    },
+    onState: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        const state = parseProjectBrowserState(payload);
+        if (state) listener(state);
+      };
+      ipcRenderer.on(IPC.projectBrowser.state, wrappedListener);
+      return () => ipcRenderer.removeListener(IPC.projectBrowser.state, wrappedListener);
     },
   },
 } satisfies DesktopBridge);

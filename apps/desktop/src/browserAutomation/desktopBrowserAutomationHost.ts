@@ -28,6 +28,8 @@ import {
   type BrowserUploadInput,
   type BrowserWaitInput,
   type ThreadBrowserState,
+  type ProjectBrowserState,
+  type ProjectId,
   type ThreadId,
 } from "@synara/contracts";
 import {
@@ -83,6 +85,12 @@ export interface BrowserAutomationToolRequest {
   readonly sessionId: string;
   readonly provider: string;
   readonly threadId: ThreadId;
+  /**
+   * Owning Project when the request targets a Project workspace (Decision
+   * 0002). When present the workspace is keyed by the ProjectId; `threadId`
+   * stays the provenance conversation only and never selects a workspace.
+   */
+  readonly projectId?: ProjectId;
   readonly name: BrowserToolName;
   readonly arguments: unknown;
   /** Authenticated server-resolved root, intentionally outside public tool arguments. */
@@ -92,12 +100,29 @@ export interface BrowserAutomationToolRequest {
 
 export interface DesktopBrowserAutomationHostOptions {
   readonly requestOpenPanel?: (threadId: ThreadId) => void | Promise<void>;
+  /** Project-workspace reveal hook (Decision 0002); optional for tests. */
+  readonly requestOpenProjectPanel?: (projectId: ProjectId) => void | Promise<void>;
 }
 
 interface SessionAffinity {
   readonly provider: string;
+  /** Owning workspace: Project when the request carried one, Thread otherwise. */
+  readonly owner: { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId };
+  /** Provenance conversation; never a workspace key for Project owners. */
   readonly threadId: ThreadId;
   tabId: string | null;
+}
+
+type AutomationOwner = SessionAffinity["owner"];
+
+function requestOwner(request: { threadId: ThreadId; projectId?: ProjectId }): AutomationOwner {
+  return request.projectId === undefined
+    ? { kind: "thread", threadId: request.threadId }
+    : { kind: "project", projectId: request.projectId };
+}
+
+function ownerLockLabel(owner: AutomationOwner): string {
+  return owner.kind === "thread" ? `t:${owner.threadId}` : `p:${owner.projectId}`;
 }
 
 interface IdempotencyEntry {
@@ -312,12 +337,16 @@ export class DesktopBrowserAutomationHost {
   private readonly snapshotBySession = new Map<string, BrowserSnapshotHandle>();
   private readonly diagnostics = new BrowserDiagnosticsStore();
   private readonly requestOpenPanel: ((threadId: ThreadId) => void | Promise<void>) | undefined;
+  private readonly requestOpenProjectPanel:
+    | ((projectId: ProjectId) => void | Promise<void>)
+    | undefined;
 
   constructor(
     private readonly browserManager: DesktopBrowserManager,
     options: DesktopBrowserAutomationHostOptions = {},
   ) {
     this.requestOpenPanel = options.requestOpenPanel;
+    this.requestOpenProjectPanel = options.requestOpenProjectPanel;
   }
 
   async executeTool(request: BrowserAutomationToolRequest): Promise<unknown> {
@@ -330,7 +359,7 @@ export class DesktopBrowserAutomationHost {
     if (
       request.name !== "browser_status" &&
       request.name !== "browser_tabs" &&
-      this.browserManager.isAnnotationInteractive(request.threadId)
+      this.browserManager.isOwnerAnnotationInteractive(requestOwner(request))
     ) {
       throw new BrowserAutomationHostError({
         code: "BrowserInterruptedByHuman",
@@ -388,7 +417,7 @@ export class DesktopBrowserAutomationHost {
     const unsubscribeHumanControl =
       request.name === "browser_status" || request.name === "browser_tabs"
         ? undefined
-        : this.browserManager.subscribeAutomationHumanControl(request.threadId, () => {
+        : this.browserManager.subscribeOwnerAutomationHumanControl(requestOwner(request), () => {
             interruptByHuman(
               new BrowserAutomationHostError({
                 code: "BrowserInterruptedByHuman",
@@ -434,7 +463,7 @@ export class DesktopBrowserAutomationHost {
     delete intentionArguments.timeoutMs;
     const fingerprint = stableJsonStringify({
       name: request.name,
-      threadId: request.threadId,
+      owner: ownerLockLabel(requestOwner(request)),
       arguments: intentionArguments,
     });
     let operation: Promise<unknown>;
@@ -601,7 +630,16 @@ export class DesktopBrowserAutomationHost {
           effectMayHaveCommitted: false,
         });
       }
-      if (existing.threadId !== request.threadId) {
+      const owner = requestOwner(request);
+      if (
+        existing.owner.kind !== owner.kind ||
+        (owner.kind === "thread" &&
+          existing.owner.kind === "thread" &&
+          existing.owner.threadId !== owner.threadId) ||
+        (owner.kind === "project" &&
+          existing.owner.kind === "project" &&
+          existing.owner.projectId !== owner.projectId)
+      ) {
         browserHostError({
           code: "BrowserTabScopeViolation",
           retryable: false,
@@ -613,6 +651,7 @@ export class DesktopBrowserAutomationHost {
     }
     const affinity: SessionAffinity = {
       provider: request.provider,
+      owner: requestOwner(request),
       threadId: request.threadId,
       tabId: null,
     };
@@ -654,23 +693,23 @@ export class DesktopBrowserAutomationHost {
   }
 
   private withVisibilityLock<T>(
-    threadId: ThreadId,
+    owner: AutomationOwner,
     signal: AbortSignal,
     abortError: BrowserAutomationHostError,
     action: () => Promise<T>,
   ): Promise<T> {
-    return this.withLock(`visibility:${threadId}`, action, signal, abortError);
+    return this.withLock(`visibility:${ownerLockLabel(owner)}`, action, signal, abortError);
   }
 
   private async withHumanControlGuard<T>(
-    threadId: ThreadId,
+    owner: AutomationOwner,
     tabId: string,
     effectMayHaveCommitted: boolean,
     signal: AbortSignal,
     interrupt: (error: BrowserAutomationHostError) => void,
     action: () => Promise<T> | T,
   ): Promise<T> {
-    const epoch = this.browserManager.getAutomationHumanControlEpoch(threadId);
+    const epoch = this.browserManager.getOwnerAutomationHumanControlEpoch(owner);
     const humanError = new BrowserAutomationHostError({
       code: "BrowserInterruptedByHuman",
       retryable: true,
@@ -679,18 +718,18 @@ export class DesktopBrowserAutomationHost {
       tabId: tabId as BrowserTabId,
     });
     try {
-      if (this.browserManager.getAutomationHumanControlEpoch(threadId) !== epoch) {
+      if (this.browserManager.getOwnerAutomationHumanControlEpoch(owner) !== epoch) {
         interrupt(humanError);
       }
       throwIfAborted(signal);
       const result = await action();
-      if (this.browserManager.getAutomationHumanControlEpoch(threadId) !== epoch) {
+      if (this.browserManager.getOwnerAutomationHumanControlEpoch(owner) !== epoch) {
         interrupt(humanError);
       }
       throwIfAborted(signal);
       return result;
     } catch (error) {
-      if (this.browserManager.getAutomationHumanControlEpoch(threadId) !== epoch) {
+      if (this.browserManager.getOwnerAutomationHumanControlEpoch(owner) !== epoch) {
         interrupt(humanError);
       }
       if (signal.aborted) throw abortReason(signal);
@@ -699,7 +738,7 @@ export class DesktopBrowserAutomationHost {
   }
 
   private async withDownloadGuard<T>(
-    threadId: ThreadId,
+    owner: AutomationOwner,
     tabId: string,
     signal: AbortSignal,
     interrupt: (error: BrowserAutomationHostError) => void,
@@ -712,8 +751,9 @@ export class DesktopBrowserAutomationHost {
       effectMayHaveCommitted: true,
       tabId: tabId as BrowserTabId,
     });
-    const releaseTracking = this.browserManager.trackAutomationDownload({ threadId, tabId }, () =>
-      interrupt(downloadError),
+    const releaseTracking = this.browserManager.trackOwnerAutomationDownload(
+      { owner, tabId },
+      () => interrupt(downloadError),
     );
     try {
       const result = await action();
@@ -733,7 +773,7 @@ export class DesktopBrowserAutomationHost {
 
   private withDownloadGuardIfEffecting<T>(
     toolName: BrowserToolName,
-    threadId: ThreadId,
+    owner: AutomationOwner,
     tabId: string,
     signal: AbortSignal,
     interrupt: (error: BrowserAutomationHostError) => void,
@@ -742,11 +782,17 @@ export class DesktopBrowserAutomationHost {
     if (BROWSER_TOOL_DEFINITIONS_BY_NAME[toolName].annotations.readOnlyHint) {
       return Promise.resolve().then(action);
     }
-    return this.withDownloadGuard(threadId, tabId, signal, interrupt, action);
+    return this.withDownloadGuard(owner, tabId, signal, interrupt, action);
+  }
+
+  private ownerBrowserState(affinity: SessionAffinity): ThreadBrowserState | ProjectBrowserState {
+    return affinity.owner.kind === "thread"
+      ? this.browserManager.getState({ threadId: affinity.owner.threadId })
+      : this.browserManager.getProjectState({ projectId: affinity.owner.projectId });
   }
 
   private resolveTabId(affinity: SessionAffinity, requested: unknown): string {
-    const state = this.browserManager.getState({ threadId: affinity.threadId });
+    const state = this.ownerBrowserState(affinity);
     const tabId = typeof requested === "string" ? requested : (affinity.tabId ?? state.activeTabId);
     if (!tabId || !state.tabs.some((tab) => tab.id === tabId)) {
       browserHostError({
@@ -768,14 +814,14 @@ export class DesktopBrowserAutomationHost {
     restore = true,
   ): Promise<BrowserAutomationVisibleRuntime> {
     throwIfAborted(signal);
-    this.browserManager.selectAutomationTab({ threadId: affinity.threadId, tabId });
+    this.selectOwnerAutomationTab(affinity, tabId);
     throwIfAborted(signal);
-    if (reveal) this.requestPanelReveal(affinity.threadId);
+    if (reveal) this.requestPanelReveal(affinity);
     throwIfAborted(signal);
     try {
       const runtime = await raceWithSignal(
-        this.browserManager.getAutomationRuntime(
-          { threadId: affinity.threadId, tabId },
+        this.browserManager.getOwnerAutomationRuntime(
+          { owner: affinity.owner, tabId },
           { restore },
         ),
         signal,
@@ -795,16 +841,86 @@ export class DesktopBrowserAutomationHost {
     }
   }
 
-  private requestPanelReveal(threadId: ThreadId): void {
-    if (!this.requestOpenPanel) return;
+  private requestPanelReveal(affinity: SessionAffinity): void {
+    if (affinity.owner.kind === "thread" && !this.requestOpenPanel) return;
+    if (affinity.owner.kind === "project" && !this.requestOpenProjectPanel) return;
     // Revealing is opportunistic UI feedback, not a prerequisite for browser
     // execution. The renderer opens the panel only when this thread is already
-    // active; a slow/backgrounded UI must never stall the agent runtime.
+    // active; a slow/backgrounded UI must never stall the agent runtime. For a
+    // Project-owned workspace the reveal request carries the Project; the
+    // provenance Thread is irrelevant to panel targeting (Decision 0002).
+    const target = affinity.owner;
     try {
-      void Promise.resolve(this.requestOpenPanel(threadId)).catch(() => undefined);
+      const reveal =
+        target.kind === "thread"
+          ? this.requestOpenPanel?.(target.threadId)
+          : this.requestOpenProjectPanel?.(target.projectId);
+      void Promise.resolve(reveal).catch(() => undefined);
     } catch {
       // The persistent native runtime remains usable when the shell cannot reveal it.
     }
+  }
+
+  /** Owner-scoped tab selection (project workspaces select by ProjectId). */
+  private selectOwnerAutomationTab(affinity: SessionAffinity, tabId: string): void {
+    if (affinity.owner.kind === "thread") {
+      this.browserManager.selectAutomationTab({
+        threadId: affinity.owner.threadId,
+        tabId,
+      });
+      return;
+    }
+    this.browserManager.selectProjectTab({ projectId: affinity.owner.projectId, tabId });
+  }
+
+  private prepareOwnerAutomationTab(
+    affinity: SessionAffinity,
+    reuse: boolean,
+  ): ThreadBrowserState | ProjectBrowserState {
+    if (affinity.owner.kind === "thread") {
+      return this.browserManager.prepareAutomationTab({
+        threadId: affinity.owner.threadId,
+        reuse,
+      });
+    }
+    return this.browserManager.getProjectState({
+      projectId: affinity.owner.projectId,
+    }) satisfies ProjectBrowserState;
+  }
+
+  private prepareOwnerAutomationNavigation(
+    affinity: SessionAffinity,
+    tabId: string,
+    url: string,
+  ): void {
+    if (affinity.owner.kind === "thread") {
+      this.browserManager.prepareAutomationNavigation({
+        threadId: affinity.owner.threadId,
+        tabId,
+        url,
+      });
+      return;
+    }
+    this.browserManager.navigateProject({ projectId: affinity.owner.projectId, tabId, url });
+  }
+
+  private resolveOwnerAnnotationTarget(
+    affinity: SessionAffinity,
+    annotationId: string,
+    tabId: unknown,
+  ): { readonly tabId: string; readonly url: string } | null {
+    if (affinity.owner.kind === "thread") {
+      return this.browserManager.resolveAnnotationNavigationTarget({
+        threadId: affinity.owner.threadId,
+        annotationId,
+        ...(typeof tabId === "string" ? { tabId } : {}),
+      });
+    }
+    return this.browserManager.resolveProjectAnnotationNavigationTarget({
+      projectId: affinity.owner.projectId,
+      annotationId,
+      ...(typeof tabId === "string" ? { tabId } : {}),
+    });
   }
 
   private observeWindowOpen(runtime: BrowserAutomationVisibleRuntime): WindowOpenObservation {
@@ -818,8 +934,15 @@ export class DesktopBrowserAutomationHost {
       if (args[1] === "Page.windowOpen") pageAnnouncedWindowOpen = true;
     };
     runtime.webContents.debugger.on("message", onDebuggerMessage);
-    const releaseManagerTracking = this.browserManager.trackAutomationWindowOpen(
-      { threadId: runtime.threadId, tabId: runtime.tabId },
+    const owner =
+      runtime.owner ??
+      (runtime.threadId === undefined
+        ? (() => {
+            throw new Error("Browser runtime has no owner provenance.");
+          })()
+        : { kind: "thread" as const, threadId: runtime.threadId });
+    const releaseManagerTracking = this.browserManager.trackOwnerAutomationWindowOpen(
+      { owner, tabId: runtime.tabId },
       (event) => {
         if (observedEvent) return;
         observedEvent = event;
@@ -906,11 +1029,7 @@ export class DesktopBrowserAutomationHost {
 
     const annotationTarget =
       request.name === "browser_navigate" && typeof input.annotationId === "string"
-        ? this.browserManager.resolveAnnotationNavigationTarget({
-            threadId: affinity.threadId,
-            annotationId: input.annotationId,
-            ...(typeof input.tabId === "string" ? { tabId: input.tabId } : {}),
-          })
+        ? this.resolveOwnerAnnotationTarget(affinity, input.annotationId, input.tabId)
         : null;
     if (request.name === "browser_navigate" && typeof input.annotationId === "string") {
       if (!annotationTarget) {
@@ -927,9 +1046,9 @@ export class DesktopBrowserAutomationHost {
     return this.withLock(
       `tab:${affinity.threadId}:${targetTabId}`,
       () =>
-        this.withVisibilityLock(affinity.threadId, signal, abortError, async () => {
+        this.withVisibilityLock(affinity.owner, signal, abortError, async () => {
           const execution = await this.withHumanControlGuard(
-            affinity.threadId,
+            affinity.owner,
             targetTabId,
             !BROWSER_TOOL_DEFINITIONS_BY_NAME[request.name].annotations.readOnlyHint,
             signal,
@@ -969,7 +1088,7 @@ export class DesktopBrowserAutomationHost {
 
     return this.withDownloadGuardIfEffecting(
       request.name,
-      affinity.threadId,
+      affinity.owner,
       targetTabId,
       signal,
       interruptByHuman,
@@ -989,11 +1108,11 @@ export class DesktopBrowserAutomationHost {
       const resolvedUrl =
         navigateInput.annotationId === undefined
           ? navigateInput.url
-          : this.browserManager.resolveAnnotationNavigationTarget({
-              threadId: affinity.threadId,
-              tabId: targetTabId,
-              annotationId: navigateInput.annotationId,
-            })?.url;
+          : this.resolveOwnerAnnotationTarget(
+              affinity,
+              navigateInput.annotationId,
+              targetTabId,
+            )?.url;
       if (!resolvedUrl) {
         browserHostError({
           code: "BrowserNavigationBlocked",
@@ -1005,11 +1124,7 @@ export class DesktopBrowserAutomationHost {
       }
       const url = validateWebUrl(resolvedUrl);
       this.snapshotBySession.delete(request.sessionId);
-      this.browserManager.prepareAutomationNavigation({
-        threadId: affinity.threadId,
-        tabId: targetTabId,
-        url,
-      });
+      this.prepareOwnerAutomationNavigation(affinity, targetTabId, url);
       const runtime = await this.resolveAutomationRuntime(
         affinity,
         targetTabId,
@@ -1045,7 +1160,7 @@ export class DesktopBrowserAutomationHost {
     if (
       snapshot &&
       snapshot.humanControlEpoch !==
-        this.browserManager.getAutomationHumanControlEpoch(affinity.threadId)
+        this.browserManager.getOwnerAutomationHumanControlEpoch(affinity.owner)
     ) {
       this.snapshotBySession.delete(request.sessionId);
       snapshot = undefined;
@@ -1220,7 +1335,7 @@ export class DesktopBrowserAutomationHost {
             },
           }
         : result;
-    const state = this.browserManager.getState({ threadId: affinity.threadId });
+    const state = this.ownerBrowserState(affinity);
     const openedTabId = execution.openedTabId ?? state.activeTabId;
     if (
       !openedTabId ||
@@ -1249,7 +1364,7 @@ export class DesktopBrowserAutomationHost {
   }
 
   private tabs(affinity: SessionAffinity): BrowserTabsOutput {
-    const state = this.browserManager.getState({ threadId: affinity.threadId });
+    const state = this.ownerBrowserState(affinity);
     return {
       tabs: state.tabs.slice(0, 24).map((tab) => ({
         tabId: tab.id as BrowserTabId,
@@ -1276,7 +1391,7 @@ export class DesktopBrowserAutomationHost {
     throwIfAborted(signal);
     const url = input.url === undefined ? undefined : validateWebUrl(input.url);
     const show = input.show ?? true;
-    const before = this.browserManager.getState({ threadId: affinity.threadId });
+    const before = this.ownerBrowserState(affinity);
     const hiddenTabId = !show && (input.reuse ?? true) ? before.activeTabId : null;
     if (!show) {
       if (!hiddenTabId) {
@@ -1293,22 +1408,19 @@ export class DesktopBrowserAutomationHost {
     // per-tab lock and the human-control guard. Preparing browser state here
     // would reopen, select, or create a renderer before that proof succeeds.
     const prepared = show
-      ? await this.withVisibilityLock(affinity.threadId, signal, abortError, async () => {
+      ? await this.withVisibilityLock(affinity.owner, signal, abortError, async () => {
           markActionStarted();
-          return this.browserManager.prepareAutomationTab({
-            threadId: affinity.threadId,
-            reuse: input.reuse ?? true,
-          });
+          return this.prepareOwnerAutomationTab(affinity, input.reuse ?? true);
         })
       : before;
     const selected = show ? prepared.activeTabId : hiddenTabId;
     if (!selected) throw new Error("Browser open did not create a tab.");
     const disposition = before.tabs.some((tab) => tab.id === selected) ? "reused" : "created";
     return this.withLock(
-      `tab:${affinity.threadId}:${selected}`,
+      `tab:${ownerLockLabel(affinity.owner)}:${selected}`,
       () =>
         this.withHumanControlGuard(
-          affinity.threadId,
+          affinity.owner,
           selected,
           true,
           signal,
@@ -1324,7 +1436,7 @@ export class DesktopBrowserAutomationHost {
             const executeOpen = async (): Promise<BrowserOpenOutput> => {
               markActionStarted();
               if (!show) {
-                const visibleState = this.browserManager.getState({ threadId: affinity.threadId });
+                const visibleState = this.ownerBrowserState(affinity);
                 if (
                   visibleState.activeTabId !== selected ||
                   !visibleState.tabs.some((tab) => tab.id === selected)
@@ -1341,14 +1453,11 @@ export class DesktopBrowserAutomationHost {
                 // prepareAutomationTab runs before the per-tab lease is known.
                 // Reassert its selection now that the thread visibility lease
                 // protects this open from every other provider session.
-                this.browserManager.selectAutomationTab({
-                  threadId: affinity.threadId,
-                  tabId: selected,
-                });
+                this.selectOwnerAutomationTab(affinity, selected);
               }
               affinity.tabId = selected;
               if (!url) {
-                if (show) this.requestPanelReveal(affinity.threadId);
+                if (show) this.requestPanelReveal(affinity);
                 throwIfAborted(signal);
                 const tab = prepared.tabs.find((candidate) => candidate.id === selected);
                 return {
@@ -1360,16 +1469,12 @@ export class DesktopBrowserAutomationHost {
                 };
               }
               return this.withDownloadGuard(
-                affinity.threadId,
+                affinity.owner,
                 selected,
                 signal,
                 interruptByHuman,
                 async () => {
-                  this.browserManager.prepareAutomationNavigation({
-                    threadId: affinity.threadId,
-                    tabId: selected,
-                    url,
-                  });
+                  this.prepareOwnerAutomationNavigation(affinity, selected, url);
                   const runtime = await this.resolveAutomationRuntime(
                     affinity,
                     selected,
@@ -1398,7 +1503,7 @@ export class DesktopBrowserAutomationHost {
                 },
               );
             };
-            return this.withVisibilityLock(affinity.threadId, signal, abortError, executeOpen);
+            return this.withVisibilityLock(affinity.owner, signal, abortError, executeOpen);
           },
         ),
       signal,
@@ -1524,10 +1629,16 @@ export class DesktopBrowserAutomationHost {
   }
 
   private close(affinity: SessionAffinity, tabId: string): BrowserCloseOutput {
-    const state: ThreadBrowserState = this.browserManager.closeAutomationTab({
-      threadId: affinity.threadId,
-      tabId,
-    });
+    const state: ThreadBrowserState | ProjectBrowserState =
+      affinity.owner.kind === "thread"
+        ? this.browserManager.closeAutomationTab({
+            threadId: affinity.owner.threadId,
+            tabId,
+          })
+        : this.browserManager.closeProjectTab({
+            projectId: affinity.owner.projectId,
+            tabId,
+          });
     affinity.tabId = state.activeTabId;
     return {
       closedTabId: tabId as BrowserTabId,

@@ -1,4 +1,9 @@
-import { ThreadId, type BrowserElementRef, type BrowserSnapshotId } from "@synara/contracts";
+import {
+  ProjectId,
+  ThreadId,
+  type BrowserElementRef,
+  type BrowserSnapshotId,
+} from "@synara/contracts";
 import type { WebContents } from "electron";
 import { EventEmitter } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -289,8 +294,9 @@ const createWebContents = () => {
 const createManager = () => {
   const webContents = createWebContents();
   const getVisibleAutomationRuntime = vi.fn(
-    (_input: { threadId: ThreadId; tabId: string }) =>
+    (_input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string }) =>
       ({
+        owner: { kind: "thread", threadId: THREAD_ID },
         threadId: THREAD_ID,
         tabId: TAB_ID,
         webContents,
@@ -319,18 +325,40 @@ const createManager = () => {
   };
   const manager = {
     isAnnotationInteractive: vi.fn(() => false),
+    isOwnerAnnotationInteractive: vi.fn(() => false),
     getState: vi.fn(() => state),
     getAutomationHumanControlEpoch: vi.fn(() => 0),
+    getOwnerAutomationHumanControlEpoch: vi.fn(() => 0),
     subscribeAutomationHumanControl: vi.fn(
       (_threadId: ThreadId, _listener: () => void) => () => undefined,
+    ),
+    subscribeOwnerAutomationHumanControl: vi.fn(
+      (_owner: { kind: "thread"; threadId: ThreadId }, _listener: () => void) => () => undefined,
+    ),
+    getOwnerAutomationRuntime: vi.fn(
+      (
+        input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
+      ) => Promise.resolve(getVisibleAutomationRuntime(input)),
     ),
     trackAutomationWindowOpen: vi.fn(
       (_input: { threadId: ThreadId; tabId: string }, _listener: (event: unknown) => void) => () =>
         undefined,
     ),
+    trackOwnerAutomationWindowOpen: vi.fn(
+      (
+        _input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
+        _listener: (event: unknown) => void,
+      ) => () => undefined,
+    ),
     trackAutomationDownload: vi.fn(
       (_input: { threadId: ThreadId; tabId: string }, _listener: (event: unknown) => void) => () =>
         undefined,
+    ),
+    trackOwnerAutomationDownload: vi.fn(
+      (
+        _input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
+        _listener: (event: unknown) => void,
+      ) => () => undefined,
     ),
     selectAutomationTab: vi.fn(() => state),
     prepareAutomationTab: vi.fn(() => state),
@@ -345,7 +373,9 @@ const createManager = () => {
     ),
     getVisibleAutomationRuntime,
     getAutomationRuntime: vi.fn((input: { threadId: ThreadId; tabId: string }) =>
-      Promise.resolve(getVisibleAutomationRuntime(input)),
+      Promise.resolve(
+        getVisibleAutomationRuntime({ owner: { kind: "thread", threadId: input.threadId }, tabId: input.tabId }),
+      ),
     ),
     closeAutomationTab: vi.fn(() => ({ ...state, activeTabId: null, tabs: [] })),
   };
@@ -355,7 +385,7 @@ const createManager = () => {
 describe("DesktopBrowserAutomationHost", () => {
   it("blocks new DOM tools while a human annotation picker is interactive", async () => {
     const { manager, raw } = createManager();
-    raw.isAnnotationInteractive.mockReturnValue(true);
+    raw.isOwnerAnnotationInteractive.mockReturnValue(true);
     const host = new DesktopBrowserAutomationHost(manager);
 
     await expect(
@@ -939,7 +969,7 @@ describe("DesktopBrowserAutomationHost", () => {
       disposition: "reused",
     });
     expect(raw.getVisibleAutomationRuntime).toHaveBeenCalledWith({
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId: TAB_ID,
     });
     expect(raw.prepareAutomationTab).not.toHaveBeenCalled();
@@ -1342,7 +1372,7 @@ describe("DesktopBrowserAutomationHost", () => {
     const { manager, raw, webContents } = createManager();
     let reportDownload: ((event: { threadId: ThreadId; sourceTabId: string }) => void) | undefined;
     const releaseTracking = vi.fn();
-    raw.trackAutomationDownload.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationDownload.mockImplementation((_input, listener) => {
       reportDownload = listener as typeof reportDownload;
       return releaseTracking;
     });
@@ -1377,8 +1407,8 @@ describe("DesktopBrowserAutomationHost", () => {
         error.browserError.effectMayHaveCommitted === true &&
         error.browserError.tabId === TAB_ID,
     );
-    expect(raw.trackAutomationDownload).toHaveBeenCalledWith(
-      { threadId: THREAD_ID, tabId: TAB_ID },
+    expect(raw.trackOwnerAutomationDownload).toHaveBeenCalledWith(
+      { owner: { kind: "thread", threadId: THREAD_ID }, tabId: TAB_ID },
       expect.any(Function),
     );
     // The public abort is immediate, while the tab lock deliberately drains
@@ -1390,7 +1420,7 @@ describe("DesktopBrowserAutomationHost", () => {
   it("guards a downloadable browser_open response before projecting its URL", async () => {
     const { manager, raw } = createManager();
     let reportDownload: ((event: { threadId: ThreadId; sourceTabId: string }) => void) | undefined;
-    raw.trackAutomationDownload.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationDownload.mockImplementation((_input, listener) => {
       reportDownload = listener as typeof reportDownload;
       return () => {
         reportDownload = undefined;
@@ -1424,7 +1454,7 @@ describe("DesktopBrowserAutomationHost", () => {
         effectMayHaveCommitted: true,
       },
     });
-    expect(raw.trackAutomationDownload).toHaveBeenCalledBefore(raw.prepareAutomationNavigation);
+    expect(raw.trackOwnerAutomationDownload).toHaveBeenCalledBefore(raw.prepareAutomationNavigation);
   });
 
   it("does not attribute downloads to read-only observation tools", async () => {
@@ -1439,7 +1469,7 @@ describe("DesktopBrowserAutomationHost", () => {
       arguments: { includeImage: false },
     });
 
-    expect(raw.trackAutomationDownload).not.toHaveBeenCalled();
+    expect(raw.trackOwnerAutomationDownload).not.toHaveBeenCalled();
   });
 
   it("adopts a target=_blank tab created during a reconciled agent gesture", async () => {
@@ -1454,7 +1484,7 @@ describe("DesktopBrowserAutomationHost", () => {
           openedTabId: string;
         }) => void)
       | undefined;
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return () => {
         reportWindowOpen = undefined;
@@ -1531,7 +1561,7 @@ describe("DesktopBrowserAutomationHost", () => {
       reportWindowOpen = undefined;
       return undefined;
     });
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return releaseTracking;
     });
@@ -1588,7 +1618,7 @@ describe("DesktopBrowserAutomationHost", () => {
           openedTabId: null;
         }) => void)
       | undefined;
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return () => {
         reportWindowOpen = undefined;
@@ -1641,7 +1671,7 @@ describe("DesktopBrowserAutomationHost", () => {
           openedTabId: null;
         }) => void)
       | undefined;
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return () => {
         reportWindowOpen = undefined;
@@ -1691,7 +1721,7 @@ describe("DesktopBrowserAutomationHost", () => {
           openedTabId: null;
         }) => void)
       | undefined;
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return () => {
         reportWindowOpen = undefined;
@@ -1744,7 +1774,7 @@ describe("DesktopBrowserAutomationHost", () => {
           openedTabId: null;
         }) => void)
       | undefined;
-    raw.trackAutomationWindowOpen.mockImplementation((_input, listener) => {
+    raw.trackOwnerAutomationWindowOpen.mockImplementation((_input, listener) => {
       reportWindowOpen = listener as typeof reportWindowOpen;
       return () => {
         reportWindowOpen = undefined;
@@ -1885,7 +1915,7 @@ describe("DesktopBrowserAutomationHost", () => {
 
   it("reports human takeover when manual control changes during an agent action", async () => {
     const { manager, raw } = createManager();
-    raw.getAutomationHumanControlEpoch.mockReturnValueOnce(10).mockReturnValue(11);
+    raw.getOwnerAutomationHumanControlEpoch.mockReturnValueOnce(10).mockReturnValue(11);
     const host = new DesktopBrowserAutomationHost(manager, {
       requestOpenPanel: async () => undefined,
     });
@@ -1908,7 +1938,7 @@ describe("DesktopBrowserAutomationHost", () => {
   it("invalidates a stored snapshot when the user acted between agent calls", async () => {
     const { manager, raw } = createManager();
     let epoch = 0;
-    raw.getAutomationHumanControlEpoch.mockImplementation(() => epoch);
+    raw.getOwnerAutomationHumanControlEpoch.mockImplementation(() => epoch);
     const host = new DesktopBrowserAutomationHost(manager);
     const snapshot = (await host.executeTool({
       sessionId: "session-human-between-calls",
@@ -2069,8 +2099,8 @@ describe("DesktopBrowserAutomationHost", () => {
     });
     let epoch = 0;
     let takeControl!: () => void;
-    raw.getAutomationHumanControlEpoch.mockImplementation(() => epoch);
-    raw.subscribeAutomationHumanControl.mockImplementation((_threadId, listener) => {
+    raw.getOwnerAutomationHumanControlEpoch.mockImplementation(() => epoch);
+    raw.subscribeOwnerAutomationHumanControl.mockImplementation((_owner, listener) => {
       takeControl = () => {
         epoch += 1;
         listener();
@@ -2110,10 +2140,13 @@ describe("DesktopBrowserAutomationHost", () => {
 
   it("cancels a pending background runtime acquisition", async () => {
     const { manager, raw } = createManager();
-    const runtime = raw.getVisibleAutomationRuntime({ threadId: THREAD_ID, tabId: TAB_ID });
+    const runtime = raw.getVisibleAutomationRuntime({
+      owner: { kind: "thread", threadId: THREAD_ID },
+      tabId: TAB_ID,
+    });
     raw.getVisibleAutomationRuntime.mockClear();
     const acquisition = deferred<typeof runtime>();
-    raw.getAutomationRuntime.mockReturnValue(acquisition.promise);
+    raw.getOwnerAutomationRuntime.mockReturnValue(acquisition.promise);
     const host = new DesktopBrowserAutomationHost(manager);
     const controller = new AbortController();
     const operation = host.executeTool({
@@ -2126,7 +2159,7 @@ describe("DesktopBrowserAutomationHost", () => {
     });
 
     await vi.waitFor(() => {
-      expect(raw.getAutomationRuntime).toHaveBeenCalledOnce();
+      expect(raw.getOwnerAutomationRuntime).toHaveBeenCalledOnce();
     });
     controller.abort();
     await expect(operation).rejects.toMatchObject({ browserError: { code: "BrowserCancelled" } });
@@ -2289,5 +2322,156 @@ describe("snapshot target validity", () => {
         error instanceof BrowserAutomationHostError &&
         error.browserError.code === "BrowserStaleReference",
     );
+  });
+});
+
+// ── Project-aware automation routing (Decision 0002, WP7 stage 2A) ───
+
+const PROJECT_ID = ProjectId.makeUnsafe("project-automation");
+const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-automation-other");
+const PROJECT_THREAD_PROVENANCE = ThreadId.makeUnsafe("thread-provenance");
+
+describe("DesktopBrowserAutomationHost project routing", () => {
+  const createProjectManager = () => {
+    const webContents = createWebContents();
+    const projectState = {
+      projectId: PROJECT_ID,
+      version: 1,
+      open: true,
+      activeTabId: TAB_ID,
+      tabs: [
+        {
+          id: TAB_ID,
+          url: "https://project.test/",
+          title: "Project",
+          status: "live" as const,
+          isLoading: false,
+          canGoBack: false,
+          canGoForward: false,
+          faviconUrl: null,
+          lastCommittedUrl: "https://project.test/" as string | null,
+          lastError: null,
+        },
+      ],
+      lastError: null,
+    };
+    const manager = {
+      isOwnerAnnotationInteractive: vi.fn(() => false),
+      isAnnotationInteractive: vi.fn(() => false),
+      getOwnerAutomationHumanControlEpoch: vi.fn(() => 0),
+      subscribeOwnerAutomationHumanControl: vi.fn(
+        (_owner: unknown, _listener: () => void) => () => undefined,
+      ),
+      getProjectState: vi.fn(() => projectState),
+      getState: vi.fn(() => undefined),
+      selectProjectTab: vi.fn(() => projectState),
+      navigateProject: vi.fn(() => projectState),
+      getOwnerAutomationRuntime: vi.fn(() =>
+        Promise.resolve({
+          owner: { kind: "project", projectId: PROJECT_ID },
+          projectId: PROJECT_ID,
+          threadId: undefined,
+          tabId: TAB_ID,
+          webContents,
+        } satisfies BrowserAutomationVisibleRuntime),
+      ),
+      trackOwnerAutomationWindowOpen: vi.fn(() => () => undefined),
+      trackOwnerAutomationDownload: vi.fn(() => () => undefined),
+      closeProjectTab: vi.fn(() => ({ ...projectState, activeTabId: null, tabs: [] })),
+    };
+    return { manager: manager as unknown as DesktopBrowserManager, raw: manager, webContents };
+  };
+
+  it("routes a projectId request to the Project workspace and keeps threadId provenance-only", async () => {
+    const { manager, raw } = createProjectManager();
+    const host = new DesktopBrowserAutomationHost(manager);
+    const request = {
+      sessionId: "project-session-1",
+      provider: "gemini",
+      threadId: PROJECT_THREAD_PROVENANCE,
+      projectId: PROJECT_ID,
+      name: "browser_tabs" as const,
+      arguments: {},
+    };
+
+    await expect(host.executeTool(request)).resolves.toMatchObject({
+      activeTabId: TAB_ID,
+      tabs: [expect.objectContaining({ tabId: TAB_ID })],
+    });
+    expect(raw.getProjectState).toHaveBeenCalledWith({ projectId: PROJECT_ID });
+    // Provenance thread never selects a workspace: no Thread API was touched.
+    expect(raw.getState).not.toHaveBeenCalled();
+  });
+
+  it("rejects rebinding a session to a different owner", async () => {
+    const { manager } = createProjectManager();
+    const host = new DesktopBrowserAutomationHost(manager);
+    const base = {
+      sessionId: "project-session-rebind",
+      provider: "codex",
+      threadId: PROJECT_THREAD_PROVENANCE,
+      name: "browser_status" as const,
+      arguments: {},
+    };
+    await host.executeTool({ ...base, projectId: PROJECT_ID });
+    await expect(host.executeTool({ ...base, projectId: OTHER_PROJECT_ID })).rejects.toMatchObject({
+      browserError: { code: "BrowserTabScopeViolation" },
+    });
+  });
+
+  it("treats the same Project from two provenance threads as one workspace", async () => {
+    const { manager, raw } = createProjectManager();
+    const host = new DesktopBrowserAutomationHost(manager);
+    await host.executeTool({
+      sessionId: "project-shared",
+      provider: "codex",
+      threadId: PROJECT_THREAD_PROVENANCE,
+      projectId: PROJECT_ID,
+      name: "browser_tabs",
+      arguments: {},
+    });
+    await host.executeTool({
+      sessionId: "project-shared",
+      provider: "codex",
+      threadId: ThreadId.makeUnsafe("thread-other-provenance"),
+      projectId: PROJECT_ID,
+      name: "browser_tabs",
+      arguments: {},
+    });
+    expect(raw.getProjectState).toHaveBeenCalledTimes(2);
+    expect(raw.getProjectState).toHaveBeenLastCalledWith({ projectId: PROJECT_ID });
+  });
+
+  it("fails a Thread-only request against a project manager mock with a typed error", async () => {
+    const { manager } = createProjectManager();
+    const host = new DesktopBrowserAutomationHost(manager);
+    // No projectId: the owner is the Thread workspace, which this manager does
+    // not expose — the host must surface a routing failure, not silently
+    // route a Thread request into the Project workspace.
+    await expect(
+      host.executeTool({
+        sessionId: "thread-session",
+        provider: "codex",
+        threadId: PROJECT_THREAD_PROVENANCE,
+        name: "browser_tabs",
+        arguments: {},
+      }),
+    ).rejects.toMatchObject({ browserError: expect.anything() });
+  });
+
+  it("requests the project panel reveal through the project hook", async () => {
+    const { manager } = createProjectManager();
+    const openProjectPanel = vi.fn(async () => undefined);
+    const host = new DesktopBrowserAutomationHost(manager, { requestOpenProjectPanel: openProjectPanel });
+    const request = {
+      sessionId: "project-reveal",
+      provider: "gemini",
+      threadId: PROJECT_THREAD_PROVENANCE,
+      projectId: PROJECT_ID,
+      name: "browser_navigate" as const,
+      arguments: { url: "https://project.test/next" },
+    };
+    await expect(host.executeTool(request)).resolves.toMatchObject({ tabId: TAB_ID });
+    expect(openProjectPanel).toHaveBeenCalledWith(PROJECT_ID);
   });
 });

@@ -9,6 +9,10 @@ import type {
   BrowserAttachWebviewInput,
   BrowserAnnotationCancelInput,
   BrowserAnnotationEvent,
+  BrowserAnnotationProjectCancelInput,
+  BrowserAnnotationProjectEvent,
+  BrowserAnnotationProjectStartInput,
+  BrowserAnnotationProjectSyncMarkersInput,
   BrowserAnnotationStartInput,
   BrowserAnnotationSyncMarkersInput,
   BrowserCaptureScreenshotResult,
@@ -17,14 +21,21 @@ import type {
   BrowserNavigateInput,
   BrowserNewTabInput,
   BrowserOpenInput,
+  BrowserProjectInput,
+  BrowserProjectNavigateInput,
+  BrowserProjectNewTabInput,
+  BrowserProjectOpenInput,
+  BrowserProjectSetPanelBoundsInput,
+  BrowserProjectTabInput,
   BrowserSetPanelBoundsInput,
   BrowserTabInput,
   BrowserThreadInput,
+  ProjectBrowserState,
   ThreadBrowserState,
 } from "@synara/contracts";
 
 import type { DesktopBrowserManager } from "./browserManager";
-import { BROWSER_IPC_CHANNELS } from "./ipcChannels";
+import { BROWSER_IPC_CHANNELS, PROJECT_BROWSER_IPC_CHANNELS } from "./ipcChannels";
 
 // Pushes the latest browser state snapshot to the renderer shell.
 export function sendBrowserState(
@@ -48,6 +59,27 @@ export function sendBrowserAnnotationEvent(
   event: BrowserAnnotationEvent,
 ): void {
   webContents?.send(BROWSER_IPC_CHANNELS.annotations.event, event);
+}
+
+export function sendProjectBrowserState(
+  webContents: WebContents | null | undefined,
+  state: ProjectBrowserState,
+): void {
+  webContents?.send(PROJECT_BROWSER_IPC_CHANNELS.state, state);
+}
+
+export function sendProjectBrowserCopyLink(
+  webContents: WebContents | null | undefined,
+  event: { readonly projectId: ProjectBrowserState["projectId"]; readonly url: string },
+): void {
+  webContents?.send(PROJECT_BROWSER_IPC_CHANNELS.copyLink, event);
+}
+
+export function sendProjectBrowserAnnotationEvent(
+  webContents: WebContents | null | undefined,
+  event: BrowserAnnotationProjectEvent,
+): void {
+  webContents?.send(PROJECT_BROWSER_IPC_CHANNELS.annotations.event, event);
 }
 
 // Registers the desktop browser bridge in one place so main.ts stays focused on app boot.
@@ -195,4 +227,116 @@ export function registerBrowserIpcHandlers(
     if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) return;
     browserManager.handleAnnotationGuestMessage(event.sender, payload);
   });
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.open);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.open,
+    async (_event, input: BrowserProjectOpenInput) => browserManager.openProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.close);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.close,
+    async (_event, input: BrowserProjectInput) => browserManager.closeProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.hide);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.hide,
+    async (_event, input: BrowserProjectInput) => {
+      browserManager.hideProject(input);
+    },
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.getState);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.getState,
+    async (_event, input: BrowserProjectInput) => browserManager.getProjectState(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.setBounds);
+  ipcMain.removeAllListeners(PROJECT_BROWSER_IPC_CHANNELS.setBounds);
+  ipcMain.on(
+    PROJECT_BROWSER_IPC_CHANNELS.setBounds,
+    (_event, input: BrowserProjectSetPanelBoundsInput) => {
+      browserManager.setProjectPanelBounds(input);
+    },
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.navigate);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.navigate,
+    async (_event, input: BrowserProjectNavigateInput) => browserManager.navigateProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.reload);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.reload,
+    async (_event, input: BrowserProjectTabInput) => browserManager.reloadProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.goBack);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.goBack,
+    async (_event, input: BrowserProjectTabInput) => browserManager.goBackProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.goForward);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.goForward,
+    async (_event, input: BrowserProjectTabInput) => browserManager.goForwardProject(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.newTab);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.newTab,
+    async (_event, input: BrowserProjectNewTabInput) => browserManager.newProjectTab(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.closeTab);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.closeTab,
+    async (_event, input: BrowserProjectTabInput) => browserManager.closeProjectTab(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.selectTab);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.selectTab,
+    async (_event, input: BrowserProjectTabInput) => browserManager.selectProjectTab(input),
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.openDevTools);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.openDevTools,
+    async (_event, input: BrowserProjectTabInput) => {
+      browserManager.openProjectDevTools(input);
+    },
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.annotations.start);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.annotations.start,
+    async (event, input: BrowserAnnotationProjectStartInput) => {
+      requireTrustedRenderer(event.sender.id);
+      return browserManager.startProjectAnnotation(input);
+    },
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.annotations.cancel);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.annotations.cancel,
+    async (event, input: BrowserAnnotationProjectCancelInput) => {
+      requireTrustedRenderer(event.sender.id);
+      browserManager.cancelProjectAnnotation(input);
+    },
+  );
+
+  ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.annotations.syncMarkers);
+  ipcMain.handle(
+    PROJECT_BROWSER_IPC_CHANNELS.annotations.syncMarkers,
+    async (event, input: BrowserAnnotationProjectSyncMarkersInput) => {
+      requireTrustedRenderer(event.sender.id);
+      browserManager.syncProjectAnnotationMarkers(input);
+    },
+  );
 }

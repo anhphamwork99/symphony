@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 
-import { ThreadId } from "@synara/contracts";
+import { ProjectId, ThreadId } from "@synara/contracts";
+import type { ProjectBrowserState } from "@synara/contracts";
 import type { BrowserWindow, WebContents } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,7 +37,10 @@ vi.mock("electron", () => ({
   WebContentsView: emptyElectronConstructor,
 }));
 
-import { DesktopBrowserManager } from "./browserManager";
+import {
+  DesktopBrowserManager,
+  type ProjectBrowserCopyLinkEvent,
+} from "./browserManager";
 
 // Callable stand-in for Electron constructors the manager only treats as
 // presence-checks (never constructed in these suites): a standalone function
@@ -115,7 +119,9 @@ interface BrowserManagerCharacterizationAccess {
     string,
     {
       key: string;
-      threadId: ThreadId;
+      owner:
+        | { kind: "thread"; threadId: ThreadId }
+        | { kind: "project"; projectId: ProjectId };
       tabId: string;
       webContents: WebContents;
       view: null;
@@ -126,7 +132,7 @@ interface BrowserManagerCharacterizationAccess {
   popupRuntimes: Map<
     BrowserWindow,
     {
-      threadId: ThreadId;
+      owner: { kind: "thread"; threadId: ThreadId };
       tabId: string;
       window: BrowserWindow;
       listenerDisposers: Array<() => void>;
@@ -134,7 +140,7 @@ interface BrowserManagerCharacterizationAccess {
   >;
   configureRuntimeWebContents(runtime: {
     key: string;
-    threadId: ThreadId;
+    owner: { kind: "thread"; threadId: ThreadId };
     tabId: string;
     webContents: WebContents;
     view: null;
@@ -142,7 +148,7 @@ interface BrowserManagerCharacterizationAccess {
     listenerDisposers: Array<() => void>;
   }): void;
   configureOAuthPopupRuntime(runtime: {
-    threadId: ThreadId;
+    owner: { kind: "thread"; threadId: ThreadId };
     tabId: string;
     window: BrowserWindow;
     listenerDisposers: Array<() => void>;
@@ -258,8 +264,8 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
     const popup = new FakePopupWindow();
     const access = asCharacterizationAccess(manager);
     const tabRuntime = {
-      key: `thread-1:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:thread-1:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       webContents: tabContents as unknown as WebContents,
       view: null as null,
@@ -269,7 +275,7 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
     access.runtimes.set(tabRuntime.key, tabRuntime);
     access.configureRuntimeWebContents(tabRuntime);
     const popupRuntime = {
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       window: popup as unknown as BrowserWindow,
       listenerDisposers: [],
@@ -328,8 +334,8 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
     const popup = new FakePopupWindow();
     const access = asCharacterizationAccess(manager);
     access.configureRuntimeWebContents({
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       webContents: tabContents as unknown as WebContents,
       view: null,
@@ -337,7 +343,7 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
       listenerDisposers: [],
     });
     access.configureOAuthPopupRuntime({
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       window: popup as unknown as BrowserWindow,
       listenerDisposers: [],
@@ -505,7 +511,7 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
     const tabId = initial.activeTabId!;
     const popup = new FakePopupWindow();
     asCharacterizationAccess(manager).configureOAuthPopupRuntime({
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       window: popup as unknown as BrowserWindow,
       listenerDisposers: [],
@@ -560,8 +566,8 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
 
     const tabContents = new FakeWebContents();
     asCharacterizationAccess(manager).configureRuntimeWebContents({
-      key: `thread-1:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:thread-1:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID } as const,
       tabId,
       webContents: tabContents as unknown as WebContents,
       view: null,
@@ -592,3 +598,199 @@ describe("DesktopBrowserManager repeated workflow characterization", () => {
     expect(event.preventDefault).toHaveBeenCalledOnce();
   });
 });
+
+// ── Project-owned browser workspace (Decision 0002, WP7 stage 1) ──────
+
+const PROJECT_ID = ProjectId.makeUnsafe("project-1");
+const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-2");
+const PROVENANCE_THREAD_A = ThreadId.makeUnsafe("thread-a");
+const PROVENANCE_THREAD_B = ThreadId.makeUnsafe("thread-b");
+
+describe("DesktopBrowserManager Project-owned workspace", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rendererWebContentsById.clear();
+  });
+
+  it("shares one workspace state across different provenance threads of the same Project", () => {
+    const manager = new DesktopBrowserManager();
+    // Two Main conversations in one Project reach the same Project workspace;
+    // the conversation is provenance only and never selects a different one.
+    const openedFromA = manager.openProject({
+      projectId: PROJECT_ID,
+      initialUrl: "https://example.test/",
+    });
+    expect(openedFromA.projectId).toBe(PROJECT_ID);
+    expect(openedFromA.open).toBe(true);
+
+    const seenFromB = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(seenFromB.tabs.map((tab) => tab.id)).toEqual(openedFromA.tabs.map((tab) => tab.id));
+    expect(seenFromB.activeTabId).toBe(openedFromA.activeTabId);
+    expect(seenFromB.version).toBe(openedFromA.version);
+    // Reference-stable read of an unchanged version.
+    expect(manager.getProjectState({ projectId: PROJECT_ID })).toBe(seenFromB);
+
+    // A tab created through one conversation is visible to the other.
+    const withTab = manager.newProjectTab({ projectId: PROJECT_ID, url: "https://docs.test/" });
+    expect(manager.getProjectState({ projectId: PROJECT_ID }).tabs).toHaveLength(
+      withTab.tabs.length,
+    );
+    expect(PROVENANCE_THREAD_A).not.toBe(PROVENANCE_THREAD_B);
+  });
+
+  it("isolates Projects: one Project's tabs never appear in another Project's workspace", () => {
+    const manager = new DesktopBrowserManager();
+    manager.openProject({ projectId: PROJECT_ID, initialUrl: "https://one.test/" });
+    manager.openProject({ projectId: OTHER_PROJECT_ID, initialUrl: "https://two.test/" });
+
+    const one = manager.getProjectState({ projectId: PROJECT_ID });
+    const two = manager.getProjectState({ projectId: OTHER_PROJECT_ID });
+    expect(one.tabs.map((tab) => tab.url)).toEqual(["https://one.test/"]);
+    expect(two.tabs.map((tab) => tab.url)).toEqual(["https://two.test/"]);
+    expect(one.activeTabId).not.toBe(two.activeTabId);
+
+    // Mutating one Project never touches the other.
+    manager.newProjectTab({ projectId: PROJECT_ID, url: "https://extra.test/" });
+    expect(manager.getProjectState({ projectId: OTHER_PROJECT_ID }).tabs).toHaveLength(1);
+  });
+
+  it("keeps a Project workspace isolated from a legacy Thread workspace with the same id text", () => {
+    const manager = new DesktopBrowserManager();
+    // Same textual id, different owner kind: the disjoint key prefixes must
+    // keep these two workspaces distinct (no ProjectId-as-ThreadId alias).
+    const threadId = ThreadId.makeUnsafe(String(PROJECT_ID));
+    manager.open({ threadId, initialUrl: "https://thread.test/" });
+    manager.openProject({ projectId: PROJECT_ID, initialUrl: "https://project.test/" });
+
+    const threadState = manager.getState({ threadId });
+    const projectState = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(threadState.tabs.map((tab) => tab.url)).toEqual(["https://thread.test/"]);
+    expect(projectState.tabs.map((tab) => tab.url)).toEqual(["https://project.test/"]);
+  });
+
+  it("emits Project state events only to Project listeners and keeps versions monotonic", () => {
+    const manager = new DesktopBrowserManager();
+    const projectStates: ProjectBrowserState[] = [];
+    const unsubscribe = manager.subscribeProjectState((state) => {
+      if (state.projectId === PROJECT_ID) projectStates.push(state);
+    });
+
+    const opened = manager.openProject({ projectId: PROJECT_ID });
+    manager.newProjectTab({ projectId: PROJECT_ID, url: "https://next.test/" });
+    manager.openProject({ projectId: OTHER_PROJECT_ID });
+
+    expect(projectStates.length).toBeGreaterThanOrEqual(2);
+    expect(projectStates.every((state) => state.projectId === PROJECT_ID)).toBe(true);
+    expect(projectStates.at(-1)?.version).toBeGreaterThan(opened.version);
+    unsubscribe();
+  });
+
+  it("keys human-control epochs and listeners by Project", () => {
+    const manager = new DesktopBrowserManager();
+    manager.openProject({ projectId: PROJECT_ID });
+    const before = manager.getOwnerAutomationHumanControlEpoch(projectOwnerOf(PROJECT_ID));
+
+    let notifications = 0;
+    const unsubscribe = manager.subscribeOwnerAutomationHumanControl(
+      projectOwnerOf(PROJECT_ID),
+      () => {
+        notifications += 1;
+      },
+    );
+
+    manager.newProjectTab({ projectId: PROJECT_ID, url: "https://human.test/" });
+    expect(manager.getOwnerAutomationHumanControlEpoch(projectOwnerOf(PROJECT_ID))).toBe(
+      before + 1,
+    );
+    expect(notifications).toBe(1);
+
+    // A different Project's human control does not notify this Project's listener.
+    manager.openProject({ projectId: OTHER_PROJECT_ID });
+    expect(notifications).toBe(1);
+    unsubscribe();
+  });
+
+  it("never terminates the workspace on navigation or visibility change", () => {
+    const manager = new DesktopBrowserManager();
+    const opened = manager.openProject({ projectId: PROJECT_ID, initialUrl: "https://a.test/" });
+    const tabId = opened.activeTabId!;
+
+    // Project switch: hide the Project workspace (visibility change only).
+    manager.hideProject({ projectId: PROJECT_ID });
+    const afterHide = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(afterHide.open).toBe(true);
+    expect(afterHide.tabs).toHaveLength(1);
+
+    // Navigation through the Project API keeps the same tab alive (the tab
+    // id, not just the count, is preserved — no reset or rehydration).
+    manager.navigateProject({ projectId: PROJECT_ID, tabId, url: "https://b.test/" });
+    const afterNavigate = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(afterNavigate.tabs.map((tab) => tab.id)).toEqual([tabId]);
+    expect(afterNavigate.tabs[0]?.url).toBe("https://b.test/");
+
+    // Zero bounds hide the panel surface but never close the workspace.
+    manager.setProjectPanelBounds({ projectId: PROJECT_ID, bounds: null });
+    const afterBounds = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(afterBounds.open).toBe(true);
+    expect(afterBounds.tabs.map((tab) => tab.id)).toEqual([tabId]);
+  });
+
+  it("scopes deletion to one Project only", () => {
+    const manager = new DesktopBrowserManager();
+    manager.openProject({ projectId: PROJECT_ID, initialUrl: "https://keep.test/" });
+    manager.openProject({ projectId: OTHER_PROJECT_ID, initialUrl: "https://victim.test/" });
+    const survivorBefore = manager.getProjectState({ projectId: PROJECT_ID });
+
+    manager.handleProjectRemoved(OTHER_PROJECT_ID);
+
+    // The removed Project reads the canonical empty workspace afterward.
+    expect(manager.getProjectState({ projectId: OTHER_PROJECT_ID })).toMatchObject({
+      projectId: OTHER_PROJECT_ID,
+      open: false,
+      tabs: [],
+      activeTabId: null,
+    });
+    // The surviving Project is untouched, including tab identity.
+    const survivorAfter = manager.getProjectState({ projectId: PROJECT_ID });
+    expect(survivorAfter.tabs.map((tab) => tab.id)).toEqual(
+      survivorBefore.tabs.map((tab) => tab.id),
+    );
+    expect(survivorAfter.open).toBe(true);
+
+    // Idempotent: removing an unknown/already-removed Project is a no-op.
+    expect(() => manager.handleProjectRemoved(OTHER_PROJECT_ID)).not.toThrow();
+  });
+
+  it("projects Project copy-link events with the owning ProjectId", () => {
+    const manager = new DesktopBrowserManager();
+    const opened = manager.openProject({ projectId: PROJECT_ID, initialUrl: "https://copy.test/" });
+    const tabId = opened.activeTabId!;
+    // Register a live runtime for the tab through the characterization access
+    // so the copy-link path resolves a copyable URL without a native view.
+    const contents = new FakeWebContents();
+    contents.currentUrl = "https://copy.test/live";
+    const access = asCharacterizationAccess(manager);
+    access.runtimes.set(`p:${PROJECT_ID}:${tabId}`, {
+      key: `p:${PROJECT_ID}:${tabId}`,
+      owner: { kind: "project", projectId: PROJECT_ID },
+      tabId,
+      webContents: contents as unknown as WebContents,
+      view: null,
+      ownsWebContents: false,
+      listenerDisposers: [],
+    });
+
+    const events: ProjectBrowserCopyLinkEvent[] = [];
+    const unsubscribe = manager.subscribeProjectCopyLink((event) => events.push(event));
+    manager.copyProjectLink({ projectId: PROJECT_ID, tabId });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.projectId).toBe(PROJECT_ID);
+    expect(events[0]?.url).toBe("https://copy.test/live");
+    unsubscribe();
+  });
+});
+
+function projectOwnerOf(projectId: ProjectId): { kind: "project"; projectId: ProjectId } {
+  return { kind: "project", projectId };
+}

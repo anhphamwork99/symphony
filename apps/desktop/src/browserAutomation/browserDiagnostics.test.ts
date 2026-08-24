@@ -27,6 +27,7 @@ const createRuntime = () => {
   } as unknown as WebContents;
   return {
     runtime: {
+      owner: { kind: "thread", threadId: THREAD_ID },
       threadId: THREAD_ID,
       tabId: TAB_ID,
       webContents,
@@ -64,6 +65,7 @@ const createDestroyableRuntime = (options?: { readonly removeListenerError?: Err
   });
   return {
     runtime: {
+      owner: { kind: "thread", threadId: THREAD_ID },
       threadId: THREAD_ID,
       tabId: TAB_ID,
       webContents,

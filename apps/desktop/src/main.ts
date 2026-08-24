@@ -195,6 +195,9 @@ import {
   sendBrowserAnnotationEvent,
   sendBrowserCopyLink,
   sendBrowserState,
+  sendProjectBrowserAnnotationEvent,
+  sendProjectBrowserCopyLink,
+  sendProjectBrowserState,
 } from "./browserIpc";
 import {
   BrowserHostPipeServer,
@@ -396,6 +399,18 @@ browserManager.subscribeCopyLink((event) => {
 
 browserManager.subscribeAnnotationEvents((event) => {
   sendBrowserAnnotationEvent(mainWindow?.webContents, event);
+});
+
+browserManager.subscribeProjectState((state) => {
+  sendProjectBrowserState(mainWindow?.webContents, state);
+});
+
+browserManager.subscribeProjectCopyLink((event) => {
+  sendProjectBrowserCopyLink(mainWindow?.webContents, event);
+});
+
+browserManager.subscribeProjectAnnotationEvents((event) => {
+  sendProjectBrowserAnnotationEvent(mainWindow?.webContents, event);
 });
 
 function startBrowserPerformanceLogging(): void {

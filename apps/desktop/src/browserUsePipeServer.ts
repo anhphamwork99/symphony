@@ -8,7 +8,8 @@ import * as Net from "node:net";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import type { BrowserToolName, ThreadId } from "@synara/contracts";
+import { ThreadId as ThreadIdValue } from "@synara/contracts";
+import type { BrowserToolName, ProjectId, ThreadId } from "@synara/contracts";
 
 import {
   DesktopBrowserAutomationHost,
@@ -52,6 +53,8 @@ interface PipeClient {
   inFlightRequests: number;
   sessionId: string | null;
   threadId: ThreadId | null;
+  /** Bound owning ProjectId (WP5 project_id): null until first bound. */
+  projectId: ProjectId | null;
   outputBackpressured: boolean;
   readonly abortControllers: Map<RpcId, AbortController>;
 }
@@ -75,6 +78,18 @@ function asObject(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+/**
+ * Parses the WP5 `project_id` frame field: absent means no Project owner,
+ * a non-empty string is the owning ProjectId, anything else is malformed.
+ */
+function asProjectId(value: unknown): ProjectId | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new BrowserAutomationHostError({ code: "BrowserInputUnsupported" });
+  }
+  return value as ProjectId;
 }
 
 function asWorkspaceRoot(value: unknown): string | undefined {
@@ -301,6 +316,7 @@ export class BrowserHostPipeServer {
       inFlightRequests: 0,
       sessionId: null,
       threadId: null,
+      projectId: null,
       outputBackpressured: false,
       abortControllers: new Map(),
     };
@@ -443,12 +459,17 @@ export class BrowserHostPipeServer {
     const sessionId = asString(request?.session_id);
     const provider = asString(request?.provider);
     const threadId = asString(request?.thread_id);
+    const projectId = asProjectId(request?.project_id);
     const name = asString(request?.name);
     const workspaceRoot = asWorkspaceRoot(request?.workspace_root);
     if (!sessionId || sessionId !== client.sessionId || !provider || !threadId || !name) {
       throw new BrowserAutomationHostError({ code: "BrowserInputUnsupported" });
     }
-    if (client.threadId && client.threadId !== threadId) {
+    // Thread binding is enforced for Thread-owned requests. Once a client has
+    // bound an owning Project, the threadId is provenance only and may vary
+    // across conversations of the same Project (WP5/Decision 0002); the owner
+    // consistency checks below are what hold the workspace binding stable.
+    if (client.projectId === null && client.threadId && client.threadId !== threadId) {
       throw new BrowserAutomationHostError({
         code: "BrowserTabScopeViolation",
         retryable: false,
@@ -456,11 +477,35 @@ export class BrowserHostPipeServer {
         effectMayHaveCommitted: false,
       });
     }
-    client.threadId = threadId as ThreadId;
+    // Per-client owner consistency (Decision 0002): once a connection has
+    // bound an owning Project, every later request must address the same
+    // Project (or none at all only before the first binding). A request may
+    // carry a provenance threadId alongside a projectId; the thread stays
+    // provenance and never selects the workspace.
+    if (client.projectId !== null && projectId === undefined) {
+      throw new BrowserAutomationHostError({
+        code: "BrowserTabScopeViolation",
+        retryable: false,
+        phase: "routing",
+        effectMayHaveCommitted: false,
+      });
+    }
+    if (projectId !== undefined && client.projectId !== null && client.projectId !== projectId) {
+      throw new BrowserAutomationHostError({
+        code: "BrowserTabScopeViolation",
+        retryable: false,
+        phase: "routing",
+        effectMayHaveCommitted: false,
+      });
+    }
+    const brandedThreadId = ThreadIdValue.makeUnsafe(threadId);
+    client.threadId = brandedThreadId;
+    if (projectId !== undefined) client.projectId = projectId;
     return this.automationHost.executeTool({
       sessionId,
       provider,
-      threadId: threadId as ThreadId,
+      threadId: brandedThreadId,
+      ...(projectId === undefined ? {} : { projectId }),
       name: name as BrowserToolName,
       arguments: request?.arguments ?? {},
       ...(workspaceRoot === undefined ? {} : { workspaceRoot }),

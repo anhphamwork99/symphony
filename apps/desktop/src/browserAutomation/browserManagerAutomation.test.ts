@@ -103,7 +103,7 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
         string,
         {
           key: string;
-          threadId: typeof THREAD_ID;
+          owner: { kind: "thread"; threadId: typeof THREAD_ID };
           tabId: string;
           webContents: WebContents;
           view: object | null;
@@ -112,10 +112,10 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
         }
       >;
     };
-    const key = `${THREAD_ID}:${tabId}`;
+    const key = `t:${THREAD_ID}:${tabId}`;
     access.runtimes.set(key, {
       key,
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: {},
@@ -129,7 +129,7 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
 
     access.runtimes.set(key, {
       key,
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -415,8 +415,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const tabId = prepared.activeTabId!;
     const webContents = new FakeWebContents();
     const runtime = {
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -471,8 +471,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const tabId = prepared.activeTabId!;
     const webContents = new FakeWebContents();
     const runtime = {
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -572,8 +572,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const tabId = prepared.activeTabId!;
     const nativeWebContents = new FakeWebContents();
     const nativeRuntime = {
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: nativeWebContents as unknown as WebContents,
       view: {},
@@ -599,8 +599,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const tabId = prepared.activeTabId!;
     const webContents = new FakeWebContents();
     const runtime = {
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -621,7 +621,10 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     willDownloadListener.current?.(agentEvent, {}, webContents);
 
     expect(agentEvent.preventDefault).toHaveBeenCalledOnce();
-    expect(observed).toHaveBeenCalledWith({ threadId: THREAD_ID, sourceTabId: tabId });
+    expect(observed).toHaveBeenCalledWith({
+      owner: { kind: "thread", threadId: THREAD_ID },
+      sourceTabId: tabId,
+    });
     expect(agentEvent.preventDefault.mock.invocationCallOrder[0]).toBeLessThan(
       observed.mock.invocationCallOrder[0]!,
     );
@@ -699,8 +702,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
       }),
     });
     const runtime = {
-      key: `${THREAD_ID}:${tabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${tabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -745,8 +748,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
       const tabId = prepared.activeTabId!;
       const webContents = new FakeWebContents();
       const runtime = {
-        key: `${THREAD_ID}:${tabId}`,
-        threadId: THREAD_ID,
+        key: `t:${THREAD_ID}:${tabId}`,
+        owner: { kind: "thread", threadId: THREAD_ID },
         tabId,
         webContents: webContents as unknown as WebContents,
         view: null,
@@ -793,8 +796,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const sourceTabId = prepared.activeTabId!;
     const webContents = new FakeWebContents();
     const runtime = {
-      key: `${THREAD_ID}:${sourceTabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${sourceTabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId: sourceTabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -861,7 +864,7 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
       expect.objectContaining({
         kind: "tab",
         sourceTabId,
-        threadId: THREAD_ID,
+        owner: { kind: "thread", threadId: THREAD_ID },
       }),
     ]);
     releaseWindowOpenTracking();
@@ -874,7 +877,7 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
         kind: "tab",
         openedTabId: afterAgentOpen.activeTabId,
         sourceTabId,
-        threadId: THREAD_ID,
+        owner: { kind: "thread", threadId: THREAD_ID },
       },
     ]);
     expect(openedTabStateEmission).not.toHaveBeenCalled();
@@ -898,8 +901,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     const sourceTabId = prepared.activeTabId!;
     const webContents = new FakeWebContents();
     const runtime = {
-      key: `${THREAD_ID}:${sourceTabId}`,
-      threadId: THREAD_ID,
+      key: `t:${THREAD_ID}:${sourceTabId}`,
+      owner: { kind: "thread", threadId: THREAD_ID },
       tabId: sourceTabId,
       webContents: webContents as unknown as WebContents,
       view: null,
@@ -928,7 +931,7 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
     ).toMatchObject({ action: "allow" });
     expect(observed).toHaveBeenCalledOnce();
     expect(observed).toHaveBeenCalledWith({
-      threadId: THREAD_ID,
+      owner: { kind: "thread", threadId: THREAD_ID },
       sourceTabId,
       kind: "popup",
       openedTabId: null,
@@ -947,8 +950,8 @@ describe("DesktopBrowserManager automation runtime boundary", () => {
       const sourceTabId = prepared.activeTabId!;
       const webContents = new FakeWebContents();
       const runtime = {
-        key: `${THREAD_ID}:${sourceTabId}`,
-        threadId: THREAD_ID,
+        key: `t:${THREAD_ID}:${sourceTabId}`,
+        owner: { kind: "thread", threadId: THREAD_ID },
         tabId: sourceTabId,
         webContents: webContents as unknown as WebContents,
         view: null,
