@@ -331,6 +331,7 @@ describe("empty launcher state", () => {
 
     expect(closePaneInState(open, "browser-1")).toEqual({
       open: true,
+      preferredWidthPx: null,
       panes: [],
       activePaneId: null,
     });

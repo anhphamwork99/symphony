@@ -690,48 +690,55 @@ describe("pi-subagents artifact staging (Ticket 01b)", () => {
   });
 
   describe("prompt-closure staging (Ticket 01c, Decision 0010)", () => {
-    it(
-      "real pin: stages exactly the four mechanically derived agent/system entries with manifest-exact size and digest (AC1/AC3)",
-      { timeout: 120_000 },
+    describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
+      "real pinned Alfie checkout",
       () => {
-        const provenance = loadRealProvenance();
-        const artifactDir = join(makeTempRoot("pi-t01c-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
-        const staged = buildPiSubagentArtifact({
-          repoDir: REAL_ALFIE_REPO_DIR,
-          artifactDir,
-          provenance,
-        });
-        const manifest = JSON.parse(readFileSync(staged.manifestPath, "utf8")) as {
-          readonly files: ReadonlyArray<{
-            readonly path: string;
-            readonly sizeBytes: number;
-            readonly sha256: string;
-          }>;
-        };
-        const systemEntries = manifest.files
-          .map((record) => record.path)
-          .filter((path) => path.startsWith("agent/system/"))
-          .toSorted();
-        expect(systemEntries).toEqual(SYNTHETIC_PROMPT_FILES);
-        for (const record of manifest.files.filter((r) => r.path.startsWith("agent/system/"))) {
-          const stagedBytes = readFileSync(join(artifactDir, record.path));
-          expect(stagedBytes.length).toBe(record.sizeBytes);
-          expect(sha256(stagedBytes)).toBe(record.sha256);
-          // The bytes are the exact clean pinned checkout's bytes.
-          expect(sha256(readFileSync(join(REAL_ALFIE_REPO_DIR, record.path)))).toBe(record.sha256);
-          expect(stagedBytes.length).toBeGreaterThan(0);
-          expect(lstatSync(join(artifactDir, record.path)).isSymbolicLink()).toBe(false);
-        }
+        it(
+          "stages exactly the four mechanically derived agent/system entries with manifest-exact size and digest (AC1/AC3)",
+          { timeout: 120_000 },
+          () => {
+            const provenance = loadRealProvenance();
+            const artifactDir = join(makeTempRoot("pi-t01c-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+            const staged = buildPiSubagentArtifact({
+              repoDir: REAL_ALFIE_REPO_DIR,
+              artifactDir,
+              provenance,
+            });
+            const manifest = JSON.parse(readFileSync(staged.manifestPath, "utf8")) as {
+              readonly files: ReadonlyArray<{
+                readonly path: string;
+                readonly sizeBytes: number;
+                readonly sha256: string;
+              }>;
+            };
+            const systemEntries = manifest.files
+              .map((record) => record.path)
+              .filter((path) => path.startsWith("agent/system/"))
+              .toSorted();
+            expect(systemEntries).toEqual(SYNTHETIC_PROMPT_FILES);
+            for (const record of manifest.files.filter((r) => r.path.startsWith("agent/system/"))) {
+              const stagedBytes = readFileSync(join(artifactDir, record.path));
+              expect(stagedBytes.length).toBe(record.sizeBytes);
+              expect(sha256(stagedBytes)).toBe(record.sha256);
+              // The bytes are the exact clean pinned checkout's bytes.
+              expect(sha256(readFileSync(join(REAL_ALFIE_REPO_DIR, record.path)))).toBe(
+                record.sha256,
+              );
+              expect(stagedBytes.length).toBeGreaterThan(0);
+              expect(lstatSync(join(artifactDir, record.path)).isSymbolicLink()).toBe(false);
+            }
 
-        // Repeat staging is deterministic including the derived prompt entries.
-        const secondDir = join(makeTempRoot("pi-t01c-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
-        const second = buildPiSubagentArtifact({
-          repoDir: REAL_ALFIE_REPO_DIR,
-          artifactDir: secondDir,
-          provenance,
-        });
-        expect(readFileSync(second.manifestPath, "utf8")).toBe(
-          readFileSync(staged.manifestPath, "utf8"),
+            // Repeat staging is deterministic including the derived prompt entries.
+            const secondDir = join(makeTempRoot("pi-t01c-2-"), PI_SUBAGENT_ARTIFACT_DIR_NAME);
+            const second = buildPiSubagentArtifact({
+              repoDir: REAL_ALFIE_REPO_DIR,
+              artifactDir: secondDir,
+              provenance,
+            });
+            expect(readFileSync(second.manifestPath, "utf8")).toBe(
+              readFileSync(staged.manifestPath, "utf8"),
+            );
+          },
         );
       },
     );
