@@ -197,7 +197,15 @@ async function main(): Promise<number> {
       console.error(`      ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 --no-file-parallelism ${failure.label}`);
     }
   }
-  return exitCodeFor(failures[0]);
+  const firstFailure = failures[0];
+  // Narrow without a runtime assumption: this line is reachable only when
+  // `failures.length > 0` above returned early, so a missing entry is a
+  // harness bug that must fail closed rather than crash the orchestrator.
+  if (firstFailure === undefined) {
+    console.error("> test orchestrator: failed-invocation list became empty before exit");
+    return 1;
+  }
+  return exitCodeFor(firstFailure);
 }
 
 // Guard: `planInvocations` is exported for reuse/tests; only run the

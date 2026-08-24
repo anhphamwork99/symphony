@@ -40,7 +40,7 @@ import {
   BACKEND_CHILD_SERVER_ENTRY_ENV,
   buildBackendChildSpawnEnv,
   SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
-} from "../../../desktop/src/piSubagentDesktopArtifactEnvironment.ts";
+} from "@synara/shared/piSubagentDesktopArtifactEnvironment";
 import { stagePiSubagentArtifactIntoDesktopResources } from "../../../../scripts/lib/piSubagentArtifactStaging.ts";
 import { verifyPiSubagentArtifact } from "./piSubagentArtifactVerifier.ts";
 import {
@@ -785,7 +785,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         const hydratedBackgroundCard = await waitFor(
           async () => {
             const detail = await freshClient.getThreadDetailSnapshot(String(threadId));
-            return detail.thread.piSubagentExecutions.find(
+            return (detail?.thread.piSubagentExecutions ?? []).find(
               (card) => card.executionId === executionId,
             );
           },
@@ -824,7 +824,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         const terminalCard = await waitFor(
           async () => {
             const detail = await freshClient.getThreadDetailSnapshot(String(threadId));
-            return detail.thread.piSubagentExecutions.find(
+            return (detail?.thread.piSubagentExecutions ?? []).find(
               (card) => card.executionId === executionId,
             );
           },
