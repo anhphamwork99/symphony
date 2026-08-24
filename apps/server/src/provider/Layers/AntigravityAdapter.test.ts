@@ -3349,11 +3349,25 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
     const scriptPath = path.join(directory, "capture.cjs");
     const eventPath = path.join(directory, "events.ndjson");
     try {
-      await fs.writeFile(scriptPath, hookScriptSource(), { mode: 0o700 });
+      const source = hookScriptSource();
+      expect(source).not.toContain("readFileSync");
+      await fs.writeFile(scriptPath, source, { mode: 0o700 });
       const env = {
         SYNARA_ANTIGRAVITY_STOP_IDLE: "1",
         SYNARA_ANTIGRAVITY_STOP_IDLE_MAX_CONTINUATIONS: "2",
       };
+      const scanProofEventPath = path.join(directory, "events-with-history.ndjson");
+      await fs.writeFile(
+        scanProofEventPath,
+        Array.from({ length: 20 }, () => 'stop\t{"fullyIdle":false}\n').join(""),
+      );
+      const scanProof = runStopHook(
+        scriptPath,
+        scanProofEventPath,
+        { fullyIdle: false, executionNum: 0 },
+        env,
+      );
+      expect(scanProof.stdout.trim()).toBe('{"decision":"continue"}');
       const first = runStopHook(
         scriptPath,
         eventPath,
@@ -3389,6 +3403,15 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
         env,
       );
       expect(capped.stdout.trim()).toBe("{}");
+      const missingExecution = runStopHook(scriptPath, eventPath, { fullyIdle: false }, env);
+      expect(missingExecution.stdout.trim()).toBe("{}");
+      const malformedExecution = runStopHook(
+        scriptPath,
+        eventPath,
+        { fullyIdle: false, executionNum: 1.5 },
+        env,
+      );
+      expect(malformedExecution.stdout.trim()).toBe("{}");
       const idle = runStopHook(
         scriptPath,
         eventPath,
@@ -3413,6 +3436,8 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
         false,
         false,
         false,
+        false,
+        false,
         true,
         undefined,
         undefined,
@@ -3425,7 +3450,11 @@ describe("Antigravity Stop fullyIdle capture hook", () => {
       });
       expect(records[1]).toMatchObject({ continued: true });
       expect(records[2]).toMatchObject({ continued: false, continuationLimit: 2 });
-      expect(records[3]).toMatchObject({ continued: false });
+      expect(records[3]).toMatchObject({ continued: false, continuationLimit: 2 });
+      expect(records[3]?.executionNum).toBeUndefined();
+      expect(records[4]).toMatchObject({ continued: false, continuationLimit: 2 });
+      expect(records[4]?.executionNum).toBeUndefined();
+      expect(records[5]).toMatchObject({ continued: false });
       // Sanitization: unknown fields are dropped, error text is bounded.
       expect(JSON.stringify(records[0])).not.toContain("workspacePaths");
       expect(JSON.stringify(records[0])).not.toContain("artifactDirectoryPath");
@@ -3959,6 +3988,146 @@ describe("Antigravity Stop fullyIdle background lifecycle", () => {
         expect(turnTerminals(harness)).toHaveLength(1);
       },
     );
+  });
+
+  it.each([
+    {
+      name: "background deadline",
+      stopIdle: { ...defaultStopIdle, backgroundDeadlineMs: 1000 },
+      stopRecord: {
+        fullyIdle: false,
+        continued: true,
+        continuationLimit: 8,
+        executionNum: 0,
+      },
+      expectedState: "failed",
+    },
+    {
+      name: "close-wait timeout",
+      stopIdle: { ...defaultStopIdle, closeWaitMs: 200 },
+      stopRecord: { fullyIdle: true, continued: false, executionNum: 0 },
+      expectedState: "completed",
+    },
+  ])(
+    "lets stopSession join $name settlement through re-entrant close with one teardown and cleanup owner",
+    async ({ stopIdle, stopRecord, expectedState }) => {
+      const teardownEntered = Promise.withResolvers<void>();
+      const releaseTeardown = Promise.withResolvers<void>();
+      let child: StopIdleHarness["child"] | undefined;
+      const teardown = vi.fn(async () => {
+        child?.emit("close", 0, null);
+        teardownEntered.resolve();
+        await releaseTeardown.promise;
+        return { escalated: false, signalErrors: [] };
+      });
+      const rm = vi.spyOn(fs, "rm");
+      try {
+        await runHarness({ stopIdle, teardown, graceMs: 10_000 }, async (harness) => {
+          child = harness.child;
+          const runDir = path.dirname(harness.eventFile);
+          await attachTranscript(harness);
+          await appendStopRecord(harness, stopRecord);
+          await drainFor(1250);
+          await teardownEntered.promise;
+
+          let stopSettled = false;
+          const stop = Effect.runPromise(harness.adapter.stopSession(harness.threadId)).then(() => {
+            stopSettled = true;
+          });
+          await flushTimers();
+          expect(stopSettled).toBe(false);
+          expect(teardown).toHaveBeenCalledTimes(1);
+
+          releaseTeardown.resolve();
+          await drainFor(1500);
+          await stop;
+          await waitFor(
+            () => rm.mock.calls.filter(([target]) => String(target) === runDir).length === 1,
+            "stop-idle settlement owner did not clean its run directory exactly once",
+          );
+          expect(turnTerminals(harness)).toHaveLength(1);
+          expect(turnTerminals(harness)[0]?.payload).toMatchObject({ state: expectedState });
+          expect(teardown).toHaveBeenCalledTimes(1);
+          expect(rm.mock.calls.filter(([target]) => String(target) === runDir)).toHaveLength(1);
+        });
+      } finally {
+        releaseTeardown.resolve();
+        rm.mockRestore();
+      }
+    },
+  );
+
+  it("fails error-first stop-idle with retained output and re-entrant close under one cleanup owner", async () => {
+    let child: StopIdleHarness["child"] | undefined;
+    const teardown = vi.fn(async () => {
+      child?.emit("close", 1, "SIGTERM");
+      return { escalated: false, signalErrors: [] };
+    });
+    const rm = vi.spyOn(fs, "rm");
+    try {
+      await runHarness(
+        { stopIdle: defaultStopIdle, teardown, graceMs: 10_000 },
+        async (harness) => {
+          child = harness.child;
+          const runDir = path.dirname(harness.eventFile);
+          await attachTranscript(harness);
+          await appendPlannerStep(harness, 1, "output survives process error");
+          await appendStopRecord(harness, {
+            fullyIdle: false,
+            continued: true,
+            continuationLimit: 8,
+            executionNum: 0,
+          });
+          await waitFor(
+            () => activityStates(harness).includes("active"),
+            "background-active observation was not consumed",
+          );
+
+          harness.child.emit("error", new Error("synthetic background process error"));
+          await waitFor(
+            () => turnTerminals(harness).length === 1,
+            "background-idle-unconfirmed process error did not settle",
+          );
+          await waitFor(
+            () => rm.mock.calls.filter(([target]) => String(target) === runDir).length === 1,
+            "process-error owner did not clean its run directory exactly once",
+          );
+
+          const events = eventsOf(harness);
+          const terminalIndex = events.findIndex((event) => event.type === "turn.completed");
+          expect(JSON.stringify(events.slice(0, terminalIndex))).toContain(
+            "output survives process error",
+          );
+          expect(turnTerminals(harness)[0]?.payload).toMatchObject({
+            state: "failed",
+            stopReason: "error",
+          });
+          expect(JSON.stringify(turnTerminals(harness)[0])).toContain(
+            "background_idle_unconfirmed",
+          );
+          expect(
+            harness.diagnostics.some(
+              ({ name }) => name === "antigravity.background_idle_unconfirmed",
+            ),
+          ).toBe(true);
+          expect(
+            events.some(
+              (event) =>
+                event.type === "runtime.error" &&
+                JSON.stringify(event.payload).includes("background_idle_unconfirmed"),
+            ),
+          ).toBe(true);
+          expect(teardown).toHaveBeenCalledTimes(1);
+          expect(rm.mock.calls.filter(([target]) => String(target) === runDir)).toHaveLength(1);
+          harness.child.emit("close", 1, null);
+          await flushTimers();
+          expect(turnTerminals(harness)).toHaveLength(1);
+          expect(teardown).toHaveBeenCalledTimes(1);
+        },
+      );
+    } finally {
+      rm.mockRestore();
+    }
   });
 
   it("settles exactly one interrupted terminal when interrupting during background-active", async () => {

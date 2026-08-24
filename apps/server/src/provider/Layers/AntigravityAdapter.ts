@@ -536,20 +536,12 @@ process.stdin.on("end", () => {
           if (input.fullyIdle) {
             sanitized.continued = false;
           } else {
-            // Continuations granted so far = prior non-idle Stop records this
-            // same event file already holds (one agy -p process per turn).
-            let priorNonIdleStops = 0;
-            try {
-              const recorded = fs.readFileSync(target, "utf8");
-              for (const line of recorded.split("\\n")) {
-                if (!line.startsWith("stop\\t")) continue;
-                try {
-                  const prior = JSON.parse(line.slice(5));
-                  if (prior && prior.fullyIdle === false) priorNonIdleStops += 1;
-                } catch { /* ignore malformed record */ }
-              }
-            } catch { /* first record: nothing counted yet */ }
-            const continued = priorNonIdleStops < continuationLimit;
+            // Stop's official executionNum is the zero-based continuation
+            // sequence, so the decision stays O(1) regardless of event-file size.
+            const continued =
+              Number.isInteger(input.executionNum) &&
+              input.executionNum >= 0 &&
+              input.executionNum < continuationLimit;
             sanitized.continued = continued;
             sanitized.continuationLimit = continuationLimit;
             if (continued) hookOutput = '{"decision":"continue"}';
@@ -2303,6 +2295,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           if (context.stopIdle !== stopIdle) return;
           delete stopIdle.timer;
           const settlement = settleStopIdleTimeout(context, ownership, kind);
+          context.terminalSettlement = settlement;
           void settlement.finally(() => {
             if (context.terminalSettlement === settlement) delete context.terminalSettlement;
           });
@@ -3363,6 +3356,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           if (context.pollTimer === timer) delete context.pollTimer;
           if (!ownsTurn()) return;
           if (!claimTerminal(context, "process-error")) return;
+          const stopIdleUnconfirmed =
+            context.stopIdle !== undefined && !context.stopIdle.idleConfirmed;
           clearStopIdleTimer(context);
           delete context.stopIdle;
           noteActivity(context, { invalidate: true, reason: "process-error" });
@@ -3375,7 +3370,10 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
               ) {
                 return;
               }
-              const outputRecovered = context.turnOutputProduced;
+              const outputRecovered = !stopIdleUnconfirmed && context.turnOutputProduced;
+              const processErrorMessage = stopIdleUnconfirmed
+                ? "Antigravity errored before confirming background work was idle (background_idle_unconfirmed)."
+                : "Antigravity process failed before emitting a close event.";
               const errorOwnership = captureOwnership(context);
               let errorQuarantine: QuarantineRecord | undefined;
               let teardownFailure: unknown;
@@ -3419,7 +3417,30 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                     )
                   : undefined);
               if (errorOwnership && !cleanupFence) return;
-              if (outputRecovered) {
+              if (stopIdleUnconfirmed) {
+                diagnose(
+                  "antigravity.background_idle_unconfirmed",
+                  recoveryFields(context, {
+                    settlementSource: "process-error",
+                    stopIdleOutcome: "process-error",
+                    idleConfirmed: false,
+                  }),
+                );
+                offer({
+                  ...base(context, { includeTurn: false }),
+                  type: "runtime.error",
+                  payload: {
+                    message: processErrorMessage,
+                    class: "transport_error",
+                  },
+                  raw: raw("process-error-idle-unconfirmed", {
+                    threadId: input.threadId,
+                    turnId,
+                    lifecycleGeneration: context.lifecycleGeneration,
+                    settlementSource: "process-error",
+                  }),
+                } satisfies ProviderRuntimeEvent);
+              } else if (outputRecovered) {
                 offer({
                   ...base(context, { includeTurn: false }),
                   type: "runtime.warning",
@@ -3439,7 +3460,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                   ...base(context, { includeTurn: false }),
                   type: "runtime.error",
                   payload: {
-                    message: "Antigravity process failed before emitting a close event.",
+                    message: processErrorMessage,
                     class: "transport_error",
                   },
                   raw: raw("process-error", {
@@ -3455,7 +3476,7 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
                 stopReason: outputRecovered ? "model_stop" : "error",
                 claimant: "process-error",
                 ...(!outputRecovered
-                  ? { errorMessage: "Antigravity process failed before emitting a close event." }
+                  ? { errorMessage: processErrorMessage }
                   : {}),
                 raw: raw("process-error-settlement", {
                   threadId: input.threadId,
