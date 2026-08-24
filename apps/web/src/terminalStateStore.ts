@@ -1231,10 +1231,19 @@ function updateTerminalStateByThreadId(
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<TerminalStateScope, ThreadTerminalState>;
   openChatThreadPage: (threadId: TerminalStateScope) => void;
-  openTerminalThreadPage: (threadId: TerminalStateScope, options?: { terminalOnly?: boolean }) => void;
+  openTerminalThreadPage: (
+    threadId: TerminalStateScope,
+    options?: { terminalOnly?: boolean },
+  ) => void;
   setTerminalOpen: (threadId: TerminalStateScope, open: boolean) => void;
-  setTerminalPresentationMode: (threadId: TerminalStateScope, mode: ThreadTerminalPresentationMode) => void;
-  setTerminalWorkspaceLayout: (threadId: TerminalStateScope, layout: ThreadTerminalWorkspaceLayout) => void;
+  setTerminalPresentationMode: (
+    threadId: TerminalStateScope,
+    mode: ThreadTerminalPresentationMode,
+  ) => void;
+  setTerminalWorkspaceLayout: (
+    threadId: TerminalStateScope,
+    layout: ThreadTerminalWorkspaceLayout,
+  ) => void;
   setTerminalWorkspaceTab: (threadId: TerminalStateScope, tab: ThreadTerminalWorkspaceTab) => void;
   setTerminalHeight: (threadId: TerminalStateScope, height: number) => void;
   setTerminalMetadata: (
@@ -1258,7 +1267,11 @@ interface TerminalStateStoreState {
   splitTerminalDown: (threadId: TerminalStateScope, terminalId: string) => void;
   splitTerminalUp: (threadId: TerminalStateScope, terminalId: string) => void;
   newTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
-  newTerminalTab: (threadId: TerminalStateScope, targetTerminalId: string, terminalId: string) => void;
+  newTerminalTab: (
+    threadId: TerminalStateScope,
+    targetTerminalId: string,
+    terminalId: string,
+  ) => void;
   openNewFullWidthTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
   closeWorkspaceChat: (threadId: TerminalStateScope) => void;
   setActiveTerminal: (threadId: TerminalStateScope, terminalId: string) => void;
@@ -1268,7 +1281,10 @@ interface TerminalStateStoreState {
     terminalId: string,
     replacementTerminalId: string,
   ) => void;
-  closeExitedTerminal: (threadId: TerminalStateScope, terminalId: string) => TerminalExitDisposition;
+  closeExitedTerminal: (
+    threadId: TerminalStateScope,
+    terminalId: string,
+  ) => TerminalExitDisposition;
   closeTerminalGroup: (threadId: TerminalStateScope, groupId: string) => void;
   resizeTerminalSplit: (
     threadId: TerminalStateScope,

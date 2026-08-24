@@ -45,9 +45,7 @@ interface TerminalProjectRpcClient {
   readonly close: () => Promise<void>;
 }
 
-async function connectTerminalProjectClient(
-  port: number,
-): Promise<TerminalProjectRpcClient> {
+async function connectTerminalProjectClient(port: number): Promise<TerminalProjectRpcClient> {
   const negotiateUrl = new URL(`http://127.0.0.1:${port}${WS_NEGOTIATE_HTTP_PATH}`);
   negotiateUrl.searchParams.set(WS_NEGOTIATE_QUERY.clientBuild, HARNESS_CLIENT_BUILD);
   negotiateUrl.searchParams.set(WS_NEGOTIATE_QUERY.protocolEpoch, String(WS_PROTOCOL_EPOCH));

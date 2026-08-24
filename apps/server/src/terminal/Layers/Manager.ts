@@ -1056,8 +1056,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     const currentRuntimeEnv = existing.runtimeEnv;
     const targetCols = input.cols ?? existing.cols;
     const targetRows = input.rows ?? existing.rows;
-    const runtimeEnvChanged =
-      JSON.stringify(currentRuntimeEnv) !== JSON.stringify(nextRuntimeEnv);
+    const runtimeEnvChanged = JSON.stringify(currentRuntimeEnv) !== JSON.stringify(nextRuntimeEnv);
 
     if (existing.process) {
       // A renderer reattach/reconcile is not an explicit restart; keep the live
@@ -1237,10 +1236,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     await this.clearOwnerSession(owner, input.terminalId);
   }
 
-  private async clearOwnerSession(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): Promise<void> {
+  private async clearOwnerSession(owner: TerminalSessionOwner, terminalId: string): Promise<void> {
     await this.runWithOwnerLock(owner, async () => {
       const session = this.requireSession(owner, terminalId);
       resetSessionHistory(session);
@@ -1436,9 +1432,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       this.sessions.delete(toSessionKey(session.owner, session.terminalId));
     }
     await Promise.all(
-      ownerSessions.map((session) =>
-        this.flushPersistQueue(session.owner, session.terminalId),
-      ),
+      ownerSessions.map((session) => this.flushPersistQueue(session.owner, session.terminalId)),
     );
     for (const session of ownerSessions) {
       this.releasePersistedHistoryCache(session.owner, session.terminalId);
@@ -2094,7 +2088,12 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     session.updatedAt = new Date().toISOString();
     this.emitSessionEvent(session, {
       thread: (base) =>
-        ({ type: "exited", ...base, exitCode: session.exitCode, exitSignal: session.exitSignal }) as TerminalEvent,
+        ({
+          type: "exited",
+          ...base,
+          exitCode: session.exitCode,
+          exitSignal: session.exitSignal,
+        }) as TerminalEvent,
       project: (base) =>
         ({
           type: "exited",
@@ -2378,10 +2377,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     this.persistTimers.delete(persistenceKey);
   }
 
-  private async readHistory(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): Promise<string> {
+  private async readHistory(owner: TerminalSessionOwner, terminalId: string): Promise<string> {
     const nextPath = this.historyPath(owner, terminalId);
     const persistenceKey = toSessionKey(owner, terminalId);
     try {
@@ -2446,10 +2442,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     }
   }
 
-  private async deleteHistory(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): Promise<void> {
+  private async deleteHistory(owner: TerminalSessionOwner, terminalId: string): Promise<void> {
     this.persistedHistoryByKey.delete(toSessionKey(owner, terminalId));
     const deletions = [fs.promises.rm(this.historyPath(owner, terminalId), { force: true })];
     if (owner.kind === "thread" && terminalId === DEFAULT_TERMINAL_ID) {
@@ -2467,10 +2460,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     }
   }
 
-  private async flushPersistQueue(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): Promise<void> {
+  private async flushPersistQueue(owner: TerminalSessionOwner, terminalId: string): Promise<void> {
     const persistenceKey = toSessionKey(owner, terminalId);
     this.clearPersistTimer(owner, terminalId);
 
@@ -2720,18 +2710,13 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
    * the lifetime of the process. Dropping the entry costs at most one redundant file
    * write later; `readHistory` re-populates it when the terminal is reopened.
    */
-  private releasePersistedHistoryCache(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): void {
+  private releasePersistedHistoryCache(owner: TerminalSessionOwner, terminalId: string): void {
     this.persistedHistoryByKey.delete(toSessionKey(owner, terminalId));
   }
 
   private sessionsForOwner(owner: TerminalSessionOwner): TerminalSessionState[] {
     const ownerKey = toOwnerKey(owner);
-    return [...this.sessions.values()].filter(
-      (session) => toOwnerKey(session.owner) === ownerKey,
-    );
+    return [...this.sessions.values()].filter((session) => toOwnerKey(session.owner) === ownerKey);
   }
 
   private async deleteAllHistoryForOwner(owner: TerminalSessionOwner): Promise<void> {
@@ -2772,10 +2757,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     );
   }
 
-  private requireSession(
-    owner: TerminalSessionOwner,
-    terminalId: string,
-  ): TerminalSessionState {
+  private requireSession(owner: TerminalSessionOwner, terminalId: string): TerminalSessionState {
     const session = this.sessions.get(toSessionKey(owner, terminalId));
     if (!session) {
       throw new Error(
@@ -2841,11 +2823,14 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   ): void {
     const createdAt = new Date().toISOString();
     if (session.owner.kind === "project") {
-      this.emit("projectEvent", builders.project({
-        projectId: ProjectId.makeUnsafe(session.owner.projectId),
-        terminalId: session.terminalId,
-        createdAt,
-      }));
+      this.emit(
+        "projectEvent",
+        builders.project({
+          projectId: ProjectId.makeUnsafe(session.owner.projectId),
+          terminalId: session.terminalId,
+          createdAt,
+        }),
+      );
       return;
     }
     this.emit(

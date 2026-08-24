@@ -336,9 +336,8 @@ const createManager = () => {
       (_owner: { kind: "thread"; threadId: ThreadId }, _listener: () => void) => () => undefined,
     ),
     getOwnerAutomationRuntime: vi.fn(
-      (
-        input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
-      ) => Promise.resolve(getVisibleAutomationRuntime(input)),
+      (input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string }) =>
+        Promise.resolve(getVisibleAutomationRuntime(input)),
     ),
     trackAutomationWindowOpen: vi.fn(
       (_input: { threadId: ThreadId; tabId: string }, _listener: (event: unknown) => void) => () =>
@@ -348,7 +347,9 @@ const createManager = () => {
       (
         _input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
         _listener: (event: unknown) => void,
-      ) => () => undefined,
+      ) =>
+        () =>
+          undefined,
     ),
     trackAutomationDownload: vi.fn(
       (_input: { threadId: ThreadId; tabId: string }, _listener: (event: unknown) => void) => () =>
@@ -358,7 +359,9 @@ const createManager = () => {
       (
         _input: { owner: { kind: "thread"; threadId: ThreadId }; tabId: string },
         _listener: (event: unknown) => void,
-      ) => () => undefined,
+      ) =>
+        () =>
+          undefined,
     ),
     selectAutomationTab: vi.fn(() => state),
     prepareAutomationTab: vi.fn(() => state),
@@ -374,7 +377,10 @@ const createManager = () => {
     getVisibleAutomationRuntime,
     getAutomationRuntime: vi.fn((input: { threadId: ThreadId; tabId: string }) =>
       Promise.resolve(
-        getVisibleAutomationRuntime({ owner: { kind: "thread", threadId: input.threadId }, tabId: input.tabId }),
+        getVisibleAutomationRuntime({
+          owner: { kind: "thread", threadId: input.threadId },
+          tabId: input.tabId,
+        }),
       ),
     ),
     closeAutomationTab: vi.fn(() => ({ ...state, activeTabId: null, tabs: [] })),
@@ -1454,7 +1460,9 @@ describe("DesktopBrowserAutomationHost", () => {
         effectMayHaveCommitted: true,
       },
     });
-    expect(raw.trackOwnerAutomationDownload).toHaveBeenCalledBefore(raw.prepareAutomationNavigation);
+    expect(raw.trackOwnerAutomationDownload).toHaveBeenCalledBefore(
+      raw.prepareAutomationNavigation,
+    );
   });
 
   it("does not attribute downloads to read-only observation tools", async () => {
@@ -2462,7 +2470,9 @@ describe("DesktopBrowserAutomationHost project routing", () => {
   it("requests the project panel reveal through the project hook", async () => {
     const { manager } = createProjectManager();
     const openProjectPanel = vi.fn(async () => undefined);
-    const host = new DesktopBrowserAutomationHost(manager, { requestOpenProjectPanel: openProjectPanel });
+    const host = new DesktopBrowserAutomationHost(manager, {
+      requestOpenProjectPanel: openProjectPanel,
+    });
     const request = {
       sessionId: "project-reveal",
       provider: "gemini",

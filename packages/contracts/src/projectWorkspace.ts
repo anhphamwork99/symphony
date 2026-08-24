@@ -57,12 +57,16 @@ export const PROJECT_WORKSPACE_TERMINAL_ID_MAX_LENGTH = 128;
 export const PROJECT_WORKSPACE_DIAGNOSTIC_MAX_LENGTH = 2_048;
 export const PROJECT_WORKSPACE_TAB_ID_MAX_LENGTH = 128;
 
-const PaneId = TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WORKSPACE_PANE_ID_MAX_LENGTH));
+const PaneId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(PROJECT_WORKSPACE_PANE_ID_MAX_LENGTH),
+);
 const TerminalId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROJECT_WORKSPACE_TERMINAL_ID_MAX_LENGTH),
 );
 const TabId = TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WORKSPACE_TAB_ID_MAX_LENGTH));
-const BoundedUrl = TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WORKSPACE_URL_MAX_LENGTH));
+const BoundedUrl = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(PROJECT_WORKSPACE_URL_MAX_LENGTH),
+);
 const BoundedTitle = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROJECT_WORKSPACE_TITLE_MAX_LENGTH),
 );
@@ -186,8 +190,7 @@ export const ProjectWorkspaceDockSlice = Schema.Struct({
 }).check(
   Schema.makeFilter(
     (dock) =>
-      dock.activePaneId === null ||
-      dock.panes.some((pane) => pane.id === dock.activePaneId),
+      dock.activePaneId === null || dock.panes.some((pane) => pane.id === dock.activePaneId),
   ),
 );
 export type ProjectWorkspaceDockSlice = typeof ProjectWorkspaceDockSlice.Type;
@@ -197,8 +200,7 @@ export type ProjectWorkspaceTerminalPresentationMode =
   typeof ProjectWorkspaceTerminalPresentationMode.Type;
 
 export const ProjectWorkspaceTerminalWorkspaceTab = Schema.Literals(["terminal", "chat"]);
-export type ProjectWorkspaceTerminalWorkspaceTab =
-  typeof ProjectWorkspaceTerminalWorkspaceTab.Type;
+export type ProjectWorkspaceTerminalWorkspaceTab = typeof ProjectWorkspaceTerminalWorkspaceTab.Type;
 
 export const ProjectWorkspaceTerminalWorkspaceLayout = Schema.Literals(["both", "terminal-only"]);
 export type ProjectWorkspaceTerminalWorkspaceLayout =
@@ -304,8 +306,7 @@ export const ProjectWorkspaceMigrationProvenance = Schema.Struct({
   sourceSchemaVersion: Schema.Literals([PROJECT_WORKSPACE_LEGACY_SCHEMA_VERSION] as const),
   sourceThreadId: ThreadId,
 });
-export type ProjectWorkspaceMigrationProvenance =
-  typeof ProjectWorkspaceMigrationProvenance.Type;
+export type ProjectWorkspaceMigrationProvenance = typeof ProjectWorkspaceMigrationProvenance.Type;
 
 /**
  * Durable publication record for one Project's workspace. A boundary writes it

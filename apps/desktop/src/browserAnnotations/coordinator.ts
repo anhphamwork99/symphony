@@ -61,9 +61,7 @@ export function browserAnnotationOwnerKey(
   owner: BrowserAnnotationWorkspaceOwner,
   tabId: string,
 ): string {
-  return owner.kind === "thread"
-    ? `t:${owner.threadId}:${tabId}`
-    : `p:${owner.projectId}:${tabId}`;
+  return owner.kind === "thread" ? `t:${owner.threadId}:${tabId}` : `p:${owner.projectId}:${tabId}`;
 }
 
 /** Extract the owning ProjectId, or null for a legacy Thread-owned surface. */
@@ -117,9 +115,7 @@ interface BrowserAnnotationAffinity {
 }
 
 type BrowserAnnotationEventListener = (event: BrowserAnnotationEvent) => void;
-type BrowserAnnotationProjectEventListener = (
-  event: BrowserAnnotationProjectEvent,
-) => void;
+type BrowserAnnotationProjectEventListener = (event: BrowserAnnotationProjectEvent) => void;
 
 function runtimeKey(threadId: ThreadId, tabId: string): string {
   return `t:${threadId}:${tabId}`;
@@ -362,9 +358,7 @@ export class BrowserAnnotationCoordinator {
     this.emitCommitted(runtime, session, message.annotation);
   }
 
-  startForProject(
-    input: BrowserAnnotationProjectStartInput,
-  ): BrowserAnnotationProjectSession {
+  startForProject(input: BrowserAnnotationProjectStartInput): BrowserAnnotationProjectSession {
     const theme = parseBrowserAnnotationTheme(input.theme);
     if (!theme) {
       throw new Error("Invalid browser annotation theme.");
@@ -480,11 +474,7 @@ export class BrowserAnnotationCoordinator {
     const runtime = this.options.resolveRuntimeByWebContentsId(
       this.documentsByRuntimeKey.get(key)?.webContentsId ?? -1,
     );
-    if (
-      runtime &&
-      runtime.projectId === input.projectId &&
-      runtime.tabId === input.tabId
-    ) {
+    if (runtime && runtime.projectId === input.projectId && runtime.tabId === input.tabId) {
       this.sendProjection(runtime, projection);
     }
   }
@@ -708,8 +698,11 @@ export class BrowserAnnotationCoordinator {
   projectWorkspaceSeededMarkers(input: {
     readonly projectId: ProjectId;
     readonly tabId: string;
-  }):
-    ReadonlyArray<{ readonly id: string; readonly ordinal: number; readonly documentKey: string }> {
+  }): ReadonlyArray<{
+    readonly id: string;
+    readonly ordinal: number;
+    readonly documentKey: string;
+  }> {
     return (
       this.seededProjectMarkersByRuntimeKey.get(
         browserAnnotationOwnerKey({ kind: "project", projectId: input.projectId }, input.tabId),
@@ -784,9 +777,7 @@ export class BrowserAnnotationCoordinator {
   }
 
   private sendProjection(runtime: BrowserAnnotationRuntime, projection: MarkerProjection): void {
-    const documentState = this.documentsByRuntimeKey.get(
-      this.ownerRuntimeKey(runtime),
-    );
+    const documentState = this.documentsByRuntimeKey.get(this.ownerRuntimeKey(runtime));
     if (
       !documentState ||
       documentState.webContentsId !== runtime.webContents.id ||

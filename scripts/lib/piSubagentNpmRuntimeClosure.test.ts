@@ -67,9 +67,7 @@ function lockEntry(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
-function baseLock(
-  packages: Record<string, Record<string, unknown>>,
-): Record<string, unknown> {
+function baseLock(packages: Record<string, Record<string, unknown>>): Record<string, unknown> {
   const root = packages[""] ?? {};
   return {
     name: "@alfie/pi-subagents",
@@ -169,7 +167,9 @@ describe("selectNpmRuntimeClosure (lock-proven selection)", () => {
     expectClosureError(
       () =>
         selectNpmRuntimeClosure({
-          packageJson: basePackageJson({ peerDependencies: { "@earendil-works/pi-ai": ">=0.83.0" } }),
+          packageJson: basePackageJson({
+            peerDependencies: { "@earendil-works/pi-ai": ">=0.83.0" },
+          }),
           packageLockJson: baseLock({
             "": {
               dependencies: { croner: "^10.0.1" },
@@ -389,7 +389,11 @@ function writeSyntheticExtensionRepo(options: {
   mkdirSync(extensionRoot, { recursive: true });
   writeFileSync(
     join(extensionRoot, "package.json"),
-    JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.4", dependencies: options.dependencies }),
+    JSON.stringify({
+      name: "@alfie/pi-subagents",
+      version: "0.15.0-alfie.4",
+      dependencies: options.dependencies,
+    }),
   );
   writeFileSync(
     join(extensionRoot, "package-lock.json"),

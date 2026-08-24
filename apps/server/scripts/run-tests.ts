@@ -79,7 +79,10 @@ function signalNumber(signal: string): number {
   return known[signal] ?? 1;
 }
 
-function runInvocation(invocation: Invocation, vitestCli: string): Promise<InvocationFailure | null> {
+function runInvocation(
+  invocation: Invocation,
+  vitestCli: string,
+): Promise<InvocationFailure | null> {
   return new Promise((resolvePromise, rejectPromise) => {
     // stdio inherit keeps vitest's live reporter output streaming to this
     // process's stdout/stderr unchanged. The explicit env spread documents
@@ -109,9 +112,7 @@ function runInvocation(invocation: Invocation, vitestCli: string): Promise<Invoc
       process.off("SIGINT", forwardSignal);
       process.off("SIGTERM", forwardSignal);
       resolvePromise(
-        code === 0 && signal === null
-          ? null
-          : { label: invocation.label, code, signal },
+        code === 0 && signal === null ? null : { label: invocation.label, code, signal },
       );
     });
   });
@@ -143,7 +144,9 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  console.log(`> test orchestrator: 1 unit run + ${WALLCLOCK_TESTS.length} standalone wallclock runs`);
+  console.log(
+    `> test orchestrator: 1 unit run + ${WALLCLOCK_TESTS.length} standalone wallclock runs`,
+  );
   const firstPassFailures: InvocationFailure[] = [];
   for (const [index, invocation] of invocations.entries()) {
     console.log(
@@ -183,7 +186,9 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  console.error(`\n> test orchestrator: ${failures.length}/${invocations.length} invocation(s) failed:`);
+  console.error(
+    `\n> test orchestrator: ${failures.length}/${invocations.length} invocation(s) failed:`,
+  );
   for (const failure of failures) {
     const detail =
       failure.code !== null
@@ -194,7 +199,9 @@ async function main(): Promise<number> {
     if (!isUnit) {
       // Actionable standalone rerun context for the wall-clock method.
       console.error(`    rerun standalone from apps/server:`);
-      console.error(`      ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 --no-file-parallelism ${failure.label}`);
+      console.error(
+        `      ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 --no-file-parallelism ${failure.label}`,
+      );
     }
   }
   const firstFailure = failures[0];
@@ -212,8 +219,7 @@ async function main(): Promise<number> {
 // orchestrator when this file is executed directly as a script (not when it
 // is imported by another module).
 const isDirectExecution =
-  process.argv[1] !== undefined &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isDirectExecution) {
   main().then(

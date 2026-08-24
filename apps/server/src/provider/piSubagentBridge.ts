@@ -293,9 +293,7 @@ export interface PiSubagentExtensionBridge {
    */
   readonly teardownOwnedProcesses?: (
     command: PiSubagentTeardownOwnedProcessesCommand,
-  ) =>
-    | Promise<PiSubagentTeardownOwnedProcessesResult>
-    | PiSubagentTeardownOwnedProcessesResult;
+  ) => Promise<PiSubagentTeardownOwnedProcessesResult> | PiSubagentTeardownOwnedProcessesResult;
   readonly abort?: (id: string) => boolean | Promise<boolean>;
   readonly abortAll?: () => number | Promise<number>;
   readonly getActiveExecutions?: () => ReadonlyArray<PiSubagentActiveChild>;
@@ -330,9 +328,7 @@ export function negotiationSupportsPiSubagentCapability(
   negotiated: PiSubagentNegotiatedCapability,
   capability: PiSubagentCapability,
 ): boolean {
-  return (
-    negotiated.isManaged && (negotiated.capabilities ?? []).includes(capability)
-  );
+  return negotiated.isManaged && (negotiated.capabilities ?? []).includes(capability);
 }
 
 /**
@@ -347,9 +343,9 @@ export function validatePiSubagentTeardownOwnedProcessesResult(
   raw: unknown,
   command: PiSubagentTeardownOwnedProcessesCommand,
 ): PiSubagentTeardownOwnedProcessesResult | undefined {
-  const decodedOption = Schema.decodeUnknownOption(
-    PiSubagentTeardownOwnedProcessesResultSchema,
-  )(raw);
+  const decodedOption = Schema.decodeUnknownOption(PiSubagentTeardownOwnedProcessesResultSchema)(
+    raw,
+  );
   if (Option.isNone(decodedOption)) {
     return undefined;
   }
@@ -422,11 +418,14 @@ export async function dispatchPiSubagentTeardownOwnedProcesses(
   try {
     raw = await new Promise<unknown>((resolve, reject) => {
       let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        resolve(PI_SUBAGENT_TEARDOWN_DISPATCH_TIMED_OUT);
-      }, Math.max(0, timeoutMs));
+      const timer = setTimeout(
+        () => {
+          if (settled) return;
+          settled = true;
+          resolve(PI_SUBAGENT_TEARDOWN_DISPATCH_TIMED_OUT);
+        },
+        Math.max(0, timeoutMs),
+      );
       timer.unref?.();
       const accept = (value: unknown) => {
         if (settled) return;
@@ -474,9 +473,9 @@ export async function dispatchPiSubagentTeardownOwnedProcesses(
     };
   }
 
-  const decodedOption = Schema.decodeUnknownOption(
-    PiSubagentTeardownOwnedProcessesResultSchema,
-  )(raw);
+  const decodedOption = Schema.decodeUnknownOption(PiSubagentTeardownOwnedProcessesResultSchema)(
+    raw,
+  );
   if (Option.isNone(decodedOption)) {
     return {
       kind: "unproven",
@@ -537,8 +536,7 @@ export async function dispatchPiSubagentTeardownOwnedProcesses(
         kind: "unproven",
         reason: "owner_unavailable",
         diagnosticCode: "pi_subagent_teardown_owner_unproven",
-        diagnosticMessage:
-          "No live owner endpoint exists to ask; no teardown was proven",
+        diagnosticMessage: "No live owner endpoint exists to ask; no teardown was proven",
         attemptedCommand: command,
         result,
       };
@@ -782,9 +780,7 @@ export interface CompatibleExtensionOptions {
   /** Decision 0033 optional child-owner teardown endpoint fixture wiring. */
   readonly onTeardownOwnedProcesses?: (
     command: PiSubagentTeardownOwnedProcessesCommand,
-  ) =>
-    | Promise<PiSubagentTeardownOwnedProcessesResult>
-    | PiSubagentTeardownOwnedProcessesResult;
+  ) => Promise<PiSubagentTeardownOwnedProcessesResult> | PiSubagentTeardownOwnedProcessesResult;
 }
 
 export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionOptions) {
@@ -834,7 +830,13 @@ export function makeCompatiblePiSubagentExtension(options?: CompatibleExtensionO
           label: "Managed Agent",
           description: "Managed Pi subagent tool",
           parameters: {} as any,
-          execute: async (_toolCallId: string, params: any, _signal?: unknown, _onUpdate?: unknown, ctx?: unknown) => {
+          execute: async (
+            _toolCallId: string,
+            params: any,
+            _signal?: unknown,
+            _onUpdate?: unknown,
+            ctx?: unknown,
+          ) => {
             options?.onExecuteContext?.(ctx);
             if (bridge.spawn) {
               const spawnResult = await bridge.spawn({

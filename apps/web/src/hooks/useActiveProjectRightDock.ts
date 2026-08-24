@@ -9,7 +9,11 @@ import type { ThreadId } from "@synara/contracts";
 import { useMemo } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
-import { resolveDockOwnerProjectId, selectRightDockState, useRightDockStore } from "../rightDockStore";
+import {
+  resolveDockOwnerProjectId,
+  selectRightDockState,
+  useRightDockStore,
+} from "../rightDockStore";
 import { useStore } from "../store";
 import { createThreadProjectIdSelector } from "../storeSelectors";
 
@@ -18,9 +22,7 @@ export function useActiveProjectRightDockState(activeThreadId: ThreadId | null) 
     useMemo(() => createThreadProjectIdSelector(activeThreadId), [activeThreadId]),
   );
   const draftProjectId = useComposerDraftStore((store) =>
-    activeThreadId
-      ? (store.draftThreadsByThreadId[activeThreadId]?.projectId ?? null)
-      : null,
+    activeThreadId ? (store.draftThreadsByThreadId[activeThreadId]?.projectId ?? null) : null,
   );
   const ownerProjectId = resolveDockOwnerProjectId({ threadProjectId, draftProjectId });
   return {

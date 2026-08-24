@@ -189,8 +189,7 @@ describe("DeviceProjectEvent", () => {
       lastError: null,
     };
     expect(
-      decodeSync(DeviceProjectStateEvent, { type: "device.project-state", state }).state
-        .projectId,
+      decodeSync(DeviceProjectStateEvent, { type: "device.project-state", state }).state.projectId,
     ).toBe("project-1");
     expect(
       decodes(DeviceProjectEvent, {

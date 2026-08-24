@@ -756,10 +756,7 @@ export const makePiSubagentCompletionCoordinator = (
 };
 
 /** Production scheduler (real timers); tests inject a virtual clock. */
-const defaultSchedule: CompletionCoordinatorScheduler["schedule"] = (
-  delayMs,
-  callback,
-) => {
+const defaultSchedule: CompletionCoordinatorScheduler["schedule"] = (delayMs, callback) => {
   const timer = setTimeout(callback, Math.max(0, delayMs));
   return {
     cancel: () => {

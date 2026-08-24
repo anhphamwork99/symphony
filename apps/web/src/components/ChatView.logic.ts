@@ -1030,7 +1030,12 @@ export function createWorktreeSetupSnapshot(
   return {
     steps: stepDefinitions.map((step, index) =>
       Object.assign({}, step, {
-        status: index < activeIndex ? ("done" as const) : index === activeIndex ? ("active" as const) : ("pending" as const),
+        status:
+          index < activeIndex
+            ? ("done" as const)
+            : index === activeIndex
+              ? ("active" as const)
+              : ("pending" as const),
       }),
     ),
   };

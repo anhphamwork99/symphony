@@ -5,10 +5,7 @@
 import { ProjectId, ThreadId, type ProviderKind } from "@synara/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const depsEqual = (
-  left: readonly unknown[] | undefined,
-  right: readonly unknown[],
-): boolean =>
+const depsEqual = (left: readonly unknown[] | undefined, right: readonly unknown[]): boolean =>
   left !== undefined &&
   left.length === right.length &&
   left.every((value, index) => Object.is(value, right[index]));

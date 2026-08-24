@@ -26,11 +26,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import * as http from "node:http";
-import {
-  type AgentSession,
-  ModelRegistry,
-  ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
+import { type AgentSession, ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { DateTime, Effect, Layer } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

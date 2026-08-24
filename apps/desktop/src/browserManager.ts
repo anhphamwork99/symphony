@@ -289,9 +289,10 @@ function threadOwner(threadId: ThreadId): { kind: "thread"; threadId: ThreadId }
   return { kind: "thread", threadId };
 }
 
-
 /** Map an internal owner onto the annotation coordinator's owner union. */
-function toAnnotationOwner(owner: BrowserWorkspaceOwner): { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId } {
+function toAnnotationOwner(
+  owner: BrowserWorkspaceOwner,
+): { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId } {
   return owner;
 }
 
@@ -406,9 +407,7 @@ export function browserOwnerWorkspaceKey(owner: BrowserWorkspaceOwner): string {
 
 /** Collision-free runtime key for one owner's tab. */
 export function browserOwnerRuntimeKey(owner: BrowserWorkspaceOwner, tabId: string): string {
-  return owner.kind === "thread"
-    ? `t:${owner.threadId}:${tabId}`
-    : `p:${owner.projectId}:${tabId}`;
+  return owner.kind === "thread" ? `t:${owner.threadId}:${tabId}` : `p:${owner.projectId}:${tabId}`;
 }
 
 /** Structural equality of two owners via their canonical keys. */
@@ -724,9 +723,7 @@ export class DesktopBrowserManager {
     }
     this.window = window;
     if (window) {
-      const bounds = this.activeOwner
-        ? this.getVisibleBoundsForOwner(this.activeOwner)
-        : null;
+      const bounds = this.activeOwner ? this.getVisibleBoundsForOwner(this.activeOwner) : null;
       if (this.activeOwner && bounds) {
         this.attachActiveTab(this.activeOwner, bounds);
       }
@@ -1187,11 +1184,7 @@ export class DesktopBrowserManager {
     if (
       this.disposed ||
       pending.sourceWebContents.isDestroyed() ||
-      !this.isCurrentWindowOpenSource(
-        pending.owner,
-        pending.sourceTabId,
-        pending.sourceWebContents,
-      )
+      !this.isCurrentWindowOpenSource(pending.owner, pending.sourceTabId, pending.sourceWebContents)
     ) {
       return;
     }
@@ -1664,9 +1657,7 @@ export class DesktopBrowserManager {
    * whether it is a native agent view or a legacy renderer guest. Annotation
    * callers rely on this method never constructing or revealing a runtime.
    */
-  getVisibleOwnerAutomationRuntime(
-    input: BrowserOwnerTabInput,
-  ): BrowserAutomationVisibleRuntime {
+  getVisibleOwnerAutomationRuntime(input: BrowserOwnerTabInput): BrowserAutomationVisibleRuntime {
     const state = this.states.get(browserOwnerWorkspaceKey(input.owner));
     const tab = state ? this.getTab(state, input.tabId) : null;
     if (!state?.open || !tab) {
@@ -1928,10 +1919,7 @@ export class DesktopBrowserManager {
     const owner = projectOwner(input.projectId);
     return toProjectBrowserState(
       { kind: "project", projectId: input.projectId },
-      this.openOwner(
-        owner,
-        input.initialUrl === undefined ? undefined : input.initialUrl,
-      ),
+      this.openOwner(owner, input.initialUrl === undefined ? undefined : input.initialUrl),
     );
   }
 
@@ -2045,7 +2033,9 @@ export class DesktopBrowserManager {
 
   /** Has this Project's workspace been hydrated already in this lifetime? */
   isProjectWorkspaceActivated(projectId: ProjectId): boolean {
-    return this.activatedProjectWorkspaceKeys.has(browserOwnerWorkspaceKey(projectOwner(projectId)));
+    return this.activatedProjectWorkspaceKeys.has(
+      browserOwnerWorkspaceKey(projectOwner(projectId)),
+    );
   }
 
   applyProjectWorkspaceActivation(input: {
@@ -2090,10 +2080,7 @@ export class DesktopBrowserManager {
       }
       tabIds.add(tab.id);
     }
-    if (
-      input.browser.activeTabId !== null &&
-      !tabIds.has(input.browser.activeTabId)
-    ) {
+    if (input.browser.activeTabId !== null && !tabIds.has(input.browser.activeTabId)) {
       throw new Error(
         "Project workspace browser publication names an active tab that does not exist.",
       );
@@ -2108,9 +2095,7 @@ export class DesktopBrowserManager {
         typeof marker.documentKey !== "string" ||
         marker.documentKey.length === 0
       ) {
-        throw new Error(
-          "Project workspace annotation publication has a malformed marker.",
-        );
+        throw new Error("Project workspace annotation publication has a malformed marker.");
       }
       // The annotation projection may reference only valid tabs.
       if (!tabIds.has(marker.tabId)) {
@@ -2119,9 +2104,7 @@ export class DesktopBrowserManager {
         );
       }
       if (annotationIds.has(marker.id)) {
-        throw new Error(
-          "Project workspace annotation publication has duplicate marker ids.",
-        );
+        throw new Error("Project workspace annotation publication has duplicate marker ids.");
       }
       annotationIds.add(marker.id);
     }
@@ -2473,7 +2456,11 @@ export class DesktopBrowserManager {
   }
 
   /** Owner-generic navigate core. */
-  private navigateOwner(owner: BrowserWorkspaceOwner, tabId: string | undefined, url: string): OwnerWorkspaceState {
+  private navigateOwner(
+    owner: BrowserWorkspaceOwner,
+    tabId: string | undefined,
+    url: string,
+  ): OwnerWorkspaceState {
     this.markOwnerHumanControl(owner);
     const state = this.ensureOwnerWorkspace(owner);
     const tab = this.resolveTab(state, tabId);
@@ -2935,7 +2922,6 @@ export class DesktopBrowserManager {
           (this.runtimeLastActiveAtByKey.get(left.key) ?? 0) -
           (this.runtimeLastActiveAtByKey.get(right.key) ?? 0),
       );
-
 
     const changedOwners: BrowserWorkspaceOwner[] = [];
     for (const runtime of evictionCandidates) {
@@ -3783,7 +3769,6 @@ export class DesktopBrowserManager {
     };
   }
 
-
   private getOrCreateOwnerState(owner: BrowserWorkspaceOwner): OwnerWorkspaceState {
     const key = browserOwnerWorkspaceKey(owner);
     const existing = this.states.get(key);
@@ -3963,9 +3948,10 @@ export class DesktopBrowserManager {
   }
 
   /** Public Project projection with the same identity contract. */
-  private projectStateProjection(
-    owner: { kind: "project"; projectId: ProjectId },
-  ): ProjectBrowserState {
+  private projectStateProjection(owner: {
+    kind: "project";
+    projectId: ProjectId;
+  }): ProjectBrowserState {
     const key = browserOwnerWorkspaceKey(owner);
     const snapshot = this.snapshotOwnerState(owner);
     const cached = this.projectProjectionCacheByKey.get(key);

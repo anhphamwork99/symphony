@@ -77,7 +77,9 @@ afterEach(() => {
 describe("DesktopProjectWorkspaceMigration", () => {
   it("stages every slice, publishes marker last, and retains the winner diagnostic", () => {
     const path = storePath();
-    const migration = new DesktopProjectWorkspaceMigration(path, { now: () => "2026-08-24T00:00:00Z" });
+    const migration = new DesktopProjectWorkspaceMigration(path, {
+      now: () => "2026-08-24T00:00:00Z",
+    });
     const result = migration.migrate({ projectId, threads: [legacyThread("thread-winner")] });
 
     expect(result.status).toBe("published");
@@ -85,10 +87,16 @@ describe("DesktopProjectWorkspaceMigration", () => {
     expect(migration.read(projectId).slices).toHaveLength(5);
     expect(migration.read(projectId).slices[0]).toMatchObject({
       slice: "right-dock",
-      panes: [expect.objectContaining({ restorationDiagnostic: "The browser page could not be restored." })],
+      panes: [
+        expect.objectContaining({
+          restorationDiagnostic: "The browser page could not be restored.",
+        }),
+      ],
     });
     const document = readDesktopProjectWorkspaceDocument(path);
-    expect(Object.keys(document.published)).toEqual(["synara:project-workspace:v2:published:project-desktop"]);
+    expect(Object.keys(document.published)).toEqual([
+      "synara:project-workspace:v2:published:project-desktop",
+    ]);
   });
 
   it("leaves a failed Project unpublished and retries idempotently", () => {
@@ -154,7 +162,10 @@ describe("DesktopProjectWorkspaceMigration", () => {
   it("retains a diagnostic for malformed desktop backing data", () => {
     const path = storePath();
     FS.mkdirSync(Path.dirname(path), { recursive: true });
-    FS.writeFileSync(path, JSON.stringify({ version: 2, staged: [], published: {}, diagnostics: {} }));
+    FS.writeFileSync(
+      path,
+      JSON.stringify({ version: 2, staged: [], published: {}, diagnostics: {} }),
+    );
     const migration = new DesktopProjectWorkspaceMigration(path);
     expect(migration.read(projectId)).toMatchObject({
       status: "unpublished",

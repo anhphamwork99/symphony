@@ -78,9 +78,7 @@ export interface ProjectWorkspaceStoreShape {
    * The already-written destination payload for one Project (marker + staged
    * slice payloads as raw JSON), for shared-policy precedence inspection.
    */
-  readonly readPublishedTarget: (input: {
-    readonly projectId: ProjectId;
-  }) => Effect.Effect<
+  readonly readPublishedTarget: (input: { readonly projectId: ProjectId }) => Effect.Effect<
     {
       readonly publicationMarker: unknown;
       readonly stagedSlices: ReadonlyArray<unknown>;

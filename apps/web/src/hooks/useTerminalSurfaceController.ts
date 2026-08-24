@@ -234,9 +234,8 @@ async function disposeAndCloseTerminalRuntime(input: {
   terminalId: string;
 }): Promise<void> {
   try {
-    const { terminalRuntimeRegistry } = await import(
-      "~/components/terminal/terminalRuntimeRegistry"
-    );
+    const { terminalRuntimeRegistry } =
+      await import("~/components/terminal/terminalRuntimeRegistry");
     terminalRuntimeRegistry.disposeTerminal(input.threadId, input.terminalId);
   } catch (error) {
     console.error("Failed to dispose terminal runtime", { ...input, error });

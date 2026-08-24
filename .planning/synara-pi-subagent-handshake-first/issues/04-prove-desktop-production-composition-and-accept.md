@@ -15,21 +15,21 @@ at `6ccda4d91`.
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1:** Real desktop/server composition selects the packaged official
-  artifact while an isolated old global extension remains present, untouched,
-  and unused.
+      artifact while an isolated old global extension remains present, untouched,
+      and unused.
 - [x] **AC2:** The same real composition proves handshake readiness before
-  Agent exposure, a detached child with continued liveness and one committed
-  terminal result, and the matching `Running in background` to terminal card
-  transition.
+      Agent exposure, a detached child with continued liveness and one committed
+      terminal result, and the matching `Running in background` to terminal card
+      transition.
 - [x] **AC3:** Missing, corrupt, unsupported, or malformed artifacts and
-  bridge/runtime configuration failures fail before managed durable side
-  effects with actionable safe diagnostics.
+      bridge/runtime configuration failures fail before managed durable side
+      effects with actionable safe diagnostics.
 - [x] **AC4:** Regression evidence preserves journal-first terminal integrity,
-  non-terminal orphaning, stale-generation fencing after Resume, and
-  non-terminal teardown uncertainty.
+      non-terminal orphaning, stale-generation fencing after Resume, and
+      non-terminal teardown uncertainty.
 - [x] **AC5:** The full verification suite, one independent feature review,
-  and one Supervisor acceptance consultation pass before the project is marked
-  accepted.
+      and one Supervisor acceptance consultation pass before the project is marked
+      accepted.
 
 ## Testing Seams
 

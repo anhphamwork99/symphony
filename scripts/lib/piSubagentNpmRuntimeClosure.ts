@@ -244,7 +244,9 @@ export function selectNpmRuntimeClosure(input: {
 
   assertLockRootMatchesPackageManifest({ lockRootPackagesEntry: lockRoot, packageManifest });
 
-  const seedNames = Object.keys(normalizeDependencyMap(packageManifest.dependencies) ?? {}).toSorted();
+  const seedNames = Object.keys(
+    normalizeDependencyMap(packageManifest.dependencies) ?? {},
+  ).toSorted();
   const selected = new Map<string, NpmRuntimeClosurePackage>();
   const queue = [...seedNames];
   const visited = new Set<string>();

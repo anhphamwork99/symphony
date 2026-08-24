@@ -37,10 +37,7 @@ vi.mock("electron", () => ({
   WebContentsView: emptyElectronConstructor,
 }));
 
-import {
-  DesktopBrowserManager,
-  type ProjectBrowserCopyLinkEvent,
-} from "./browserManager";
+import { DesktopBrowserManager, type ProjectBrowserCopyLinkEvent } from "./browserManager";
 
 // Callable stand-in for Electron constructors the manager only treats as
 // presence-checks (never constructed in these suites): a standalone function
@@ -119,9 +116,7 @@ interface BrowserManagerCharacterizationAccess {
     string,
     {
       key: string;
-      owner:
-        | { kind: "thread"; threadId: ThreadId }
-        | { kind: "project"; projectId: ProjectId };
+      owner: { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId };
       tabId: string;
       webContents: WebContents;
       view: null;

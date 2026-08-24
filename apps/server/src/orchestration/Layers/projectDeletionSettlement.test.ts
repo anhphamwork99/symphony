@@ -68,79 +68,73 @@ const makeFakeTerminalManagerLayer = (state: FakeTerminalState) => {
   state.fences = fences;
   const fencesObservedAtList = (state.fencesObservedAtList ??= []);
   const fencesObservedAtSettle = (state.fencesObservedAtSettle ??= []);
-  return Layer.succeed(
-    TerminalManager,
-    {
-      open: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      write: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      ackOutput: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      resize: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      clear: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      restart: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      close: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      closeSessionsOpenedAtOrBefore: () =>
-        Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      openProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      writeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      ackOutputProject: () =>
-        Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      resizeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      clearProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      restartProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      closeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
-      listProjectTerminals: ({ projectId }) =>
-        Effect.sync(() => {
-          state.listCalls.push(projectId);
-          fencesObservedAtList.push(fences.get(projectId) ?? null);
-          return state.sessionsByProject.get(projectId) ?? [];
-        }),
-      settleProjectTerminals: ({ projectId }) =>
-        Effect.sync(() => {
-          state.settleCalls.push(projectId);
-          fencesObservedAtSettle.push(fences.get(projectId) ?? null);
-          const sessions = state.sessionsByProject.get(projectId) ?? [];
-          state.sessionsByProject.set(projectId, []);
-          const outcomes =
-            state.settlementOutcomes.get(projectId) ??
-            sessions.map(() => "settled" as const);
-          return sessions.map((session, index) => {
-            const outcome = outcomes[index] ?? "settled";
-            return {
-              projectId,
-              terminalId: session.terminalId,
-              outcome,
-              detail:
-                outcome === "settled"
-                  ? null
-                  : outcome === "uncertain"
-                    ? "stop signals were sent but no process exit was observed within the proof window"
-                    : "injected settlement failure",
-            } satisfies TerminalProjectSettlementResult;
-          });
-        }),
-      beginProjectDeletionFence: ({ projectId }) =>
-        Effect.sync(() => {
-          if (!fences.has(projectId)) {
-            fences.set(projectId, "deleting");
-          }
-        }),
-      commitProjectDeletionFence: ({ projectId }) =>
-        Effect.sync(() => {
-          fences.set(projectId, "deleted");
-        }),
-      releaseProjectDeletionFence: ({ projectId }) =>
-        Effect.sync(() => {
-          if (fences.get(projectId) === "deleting") {
-            fences.delete(projectId);
-          }
-        }),
-      projectDeletionFenceState: ({ projectId }) =>
-        Effect.sync(() => fences.get(projectId) ?? null),
-      subscribe: () => Effect.sync(() => () => undefined),
-      subscribeProject: () => Effect.sync(() => () => undefined),
-      dispose: Effect.void,
-    } satisfies TerminalManagerShape,
-  );
+  return Layer.succeed(TerminalManager, {
+    open: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    write: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    ackOutput: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    resize: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    clear: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    restart: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    close: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    closeSessionsOpenedAtOrBefore: () =>
+      Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    openProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    writeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    ackOutputProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    resizeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    clearProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    restartProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    closeProject: () => Effect.fail(new TerminalError({ message: "not used in this suite" })),
+    listProjectTerminals: ({ projectId }) =>
+      Effect.sync(() => {
+        state.listCalls.push(projectId);
+        fencesObservedAtList.push(fences.get(projectId) ?? null);
+        return state.sessionsByProject.get(projectId) ?? [];
+      }),
+    settleProjectTerminals: ({ projectId }) =>
+      Effect.sync(() => {
+        state.settleCalls.push(projectId);
+        fencesObservedAtSettle.push(fences.get(projectId) ?? null);
+        const sessions = state.sessionsByProject.get(projectId) ?? [];
+        state.sessionsByProject.set(projectId, []);
+        const outcomes =
+          state.settlementOutcomes.get(projectId) ?? sessions.map(() => "settled" as const);
+        return sessions.map((session, index) => {
+          const outcome = outcomes[index] ?? "settled";
+          return {
+            projectId,
+            terminalId: session.terminalId,
+            outcome,
+            detail:
+              outcome === "settled"
+                ? null
+                : outcome === "uncertain"
+                  ? "stop signals were sent but no process exit was observed within the proof window"
+                  : "injected settlement failure",
+          } satisfies TerminalProjectSettlementResult;
+        });
+      }),
+    beginProjectDeletionFence: ({ projectId }) =>
+      Effect.sync(() => {
+        if (!fences.has(projectId)) {
+          fences.set(projectId, "deleting");
+        }
+      }),
+    commitProjectDeletionFence: ({ projectId }) =>
+      Effect.sync(() => {
+        fences.set(projectId, "deleted");
+      }),
+    releaseProjectDeletionFence: ({ projectId }) =>
+      Effect.sync(() => {
+        if (fences.get(projectId) === "deleting") {
+          fences.delete(projectId);
+        }
+      }),
+    projectDeletionFenceState: ({ projectId }) => Effect.sync(() => fences.get(projectId) ?? null),
+    subscribe: () => Effect.sync(() => () => undefined),
+    subscribeProject: () => Effect.sync(() => () => undefined),
+    dispose: Effect.void,
+  } satisfies TerminalManagerShape);
 };
 
 const TestServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -167,10 +161,7 @@ async function createSystem(state: FakeTerminalState) {
     // assertions share one in-memory database).
     ProjectWorkspaceStoreLive.pipe(Layer.provide(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
-  ).pipe(
-    Layer.provideMerge(TestServerConfigLayer),
-    Layer.provideMerge(NodeServices.layer),
-  );
+  ).pipe(Layer.provideMerge(TestServerConfigLayer), Layer.provideMerge(NodeServices.layer));
   const runtime = ManagedRuntime.make(layer);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   const store = await runtime.runPromise(Effect.service(ProjectWorkspaceStore));

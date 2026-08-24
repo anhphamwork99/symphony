@@ -114,7 +114,9 @@ type BrowserSurface = {
 
 function unavailableProjectBrowserAction(action: string): Promise<never> {
   return Promise.reject(
-    new Error(`Project browser ${action} is unavailable in this renderer; use the Project browser host.`),
+    new Error(
+      `Project browser ${action} is unavailable in this renderer; use the Project browser host.`,
+    ),
   );
 }
 
@@ -127,7 +129,8 @@ function createBrowserSurface(
     const projectBrowser = api?.projectBrowser;
     if (!projectBrowser) return null;
     return {
-      open: (initialUrl) => projectBrowser.open({ projectId, ...(initialUrl ? { initialUrl } : {}) }),
+      open: (initialUrl) =>
+        projectBrowser.open({ projectId, ...(initialUrl ? { initialUrl } : {}) }),
       close: () => projectBrowser.close({ projectId }),
       hide: () => projectBrowser.hide({ projectId }),
       setPanelBounds: (input) => projectBrowser.setPanelBounds({ projectId, ...input }),
@@ -158,7 +161,8 @@ function createBrowserSurface(
     closeTab: (tabId) => api.browser.closeTab({ threadId, tabId }),
     selectTab: (tabId) => api.browser.selectTab({ threadId, tabId }),
     captureScreenshot: (tabId) => api.browser.captureScreenshot({ threadId, tabId }),
-    copyScreenshotToClipboard: (tabId) => api.browser.copyScreenshotToClipboard({ threadId, tabId }),
+    copyScreenshotToClipboard: (tabId) =>
+      api.browser.copyScreenshotToClipboard({ threadId, tabId }),
     copyLink: (tabId) => api.browser.copyLink({ threadId, tabId }),
   };
 }
@@ -1202,9 +1206,7 @@ export function BrowserPanel({
       }
       lastSentBoundsRef.current = nextKey;
       perfCountersRef.current.syncSends += 1;
-      void browserSurface
-        .setPanelBounds({ bounds, surface })
-        .catch(ignoreBrowserBoundsSyncError);
+      void browserSurface.setPanelBounds({ bounds, surface }).catch(ignoreBrowserBoundsSyncError);
     };
 
     // The panel can slide horizontally without resizing. A short burst keeps the
@@ -1459,29 +1461,31 @@ export function BrowserPanel({
       return;
     }
 
-    void runBrowserAction(() =>
-      browserSurface.captureScreenshot(activeTab.id),
-    ).then(async (screenshot) => {
-      if (!screenshot) {
-        return;
-      }
-      try {
-        const inserted = addComposerDraftImage(
-          threadId,
-          await prepareComposerImageFromBrowserScreenshot(screenshot),
-        );
-        if (!inserted) {
-          throw new Error(
-            `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`,
+    void runBrowserAction(() => browserSurface.captureScreenshot(activeTab.id)).then(
+      async (screenshot) => {
+        if (!screenshot) {
+          return;
+        }
+        try {
+          const inserted = addComposerDraftImage(
+            threadId,
+            await prepareComposerImageFromBrowserScreenshot(screenshot),
+          );
+          if (!inserted) {
+            throw new Error(
+              `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`,
+            );
+          }
+          setLocalError(null);
+        } catch (cause) {
+          setLocalError(
+            cause instanceof Error
+              ? cause.message
+              : "The browser screenshot could not be prepared.",
           );
         }
-        setLocalError(null);
-      } catch (cause) {
-        setLocalError(
-          cause instanceof Error ? cause.message : "The browser screenshot could not be prepared.",
-        );
-      }
-    });
+      },
+    );
   }, [
     activeTab,
     addComposerDraftImage,
@@ -1502,32 +1506,32 @@ export function BrowserPanel({
       return;
     }
 
-    void runBrowserAction(() =>
-      browserSurface.copyScreenshotToClipboard(activeTab.id),
-    ).then((result) => {
-      if (result === null) {
-        return;
-      }
-      const anchor = copyScreenshotButtonRef.current;
-      if (anchor) {
-        anchoredToastManager.add({
-          data: {
-            tooltipStyle: true,
-          },
-          positionerProps: {
-            anchor,
-          },
-          timeout: 1_200,
+    void runBrowserAction(() => browserSurface.copyScreenshotToClipboard(activeTab.id)).then(
+      (result) => {
+        if (result === null) {
+          return;
+        }
+        const anchor = copyScreenshotButtonRef.current;
+        if (anchor) {
+          anchoredToastManager.add({
+            data: {
+              tooltipStyle: true,
+            },
+            positionerProps: {
+              anchor,
+            },
+            timeout: 1_200,
+            title: "Browser screenshot copied",
+          });
+          return;
+        }
+
+        toastManager.add({
+          type: "success",
           title: "Browser screenshot copied",
         });
-        return;
-      }
-
-      toastManager.add({
-        type: "success",
-        title: "Browser screenshot copied",
-      });
-    });
+      },
+    );
   }, [activeTab, browserSurface, ensureLiveRuntime, runBrowserAction]);
 
   const copyActiveTabLink = useCallback(() => {
@@ -1915,11 +1919,13 @@ export function BrowserPanel({
                     onClick={() => {
                       if (!ensureLiveRuntime()) return;
                       if (!browserSurface) return;
-                      void runBrowserAction(() => browserSurface.selectTab(tab.id)).then((state) => {
-                        if (state) {
-                          upsertBrowserState(state);
-                        }
-                      });
+                      void runBrowserAction(() => browserSurface.selectTab(tab.id)).then(
+                        (state) => {
+                          if (state) {
+                            upsertBrowserState(state);
+                          }
+                        },
+                      );
                     }}
                   >
                     {tab.title || "Untitled"}

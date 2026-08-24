@@ -146,21 +146,21 @@ Cherry-pick order is WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP7 → WP8
 
 ## Traceability
 
-| Requirement | Owning WP(s) |
-|---|---|
-| Scenario 1 — conversation switch preserves workspace | WP4, WP6, WP8 |
-| Scenario 2 — Project isolation | WP5, WP6, WP7, WP8 |
-| Scenario 3 — Terminal continuity/reconnect | WP4, WP8 |
-| Scenario 4 — active Terminal close confirmation | WP4, WP6, WP8 |
-| Scenario 5 — unavailable content remains diagnostic | WP5, WP6, WP7, WP8 |
-| Scenario 6 — archive/restore preservation | WP3, WP4, WP6, WP8 |
-| Scenario 7 — settle then delete | WP4, WP8 |
-| Scenario 8 — temporary width clamp | WP6, WP8 |
-| Decision obligations 1–3 | WP2 |
-| Obligations 4–7 | WP3 plus WP6/WP7 boundary markers |
-| Obligation 8 | WP8 |
-| Obligation 9 | WP1–WP8 |
-| Obligation 10 | WP2, WP6, WP8 |
-| Obligations 11–12 | WP4, WP8 |
-| Obligation 13 | WP5–WP8 |
-| Obligation 14 | focused checks per WP; final full pass pending authorization |
+| Requirement                                          | Owning WP(s)                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
+| Scenario 1 — conversation switch preserves workspace | WP4, WP6, WP8                                                |
+| Scenario 2 — Project isolation                       | WP5, WP6, WP7, WP8                                           |
+| Scenario 3 — Terminal continuity/reconnect           | WP4, WP8                                                     |
+| Scenario 4 — active Terminal close confirmation      | WP4, WP6, WP8                                                |
+| Scenario 5 — unavailable content remains diagnostic  | WP5, WP6, WP7, WP8                                           |
+| Scenario 6 — archive/restore preservation            | WP3, WP4, WP6, WP8                                           |
+| Scenario 7 — settle then delete                      | WP4, WP8                                                     |
+| Scenario 8 — temporary width clamp                   | WP6, WP8                                                     |
+| Decision obligations 1–3                             | WP2                                                          |
+| Obligations 4–7                                      | WP3 plus WP6/WP7 boundary markers                            |
+| Obligation 8                                         | WP8                                                          |
+| Obligation 9                                         | WP1–WP8                                                      |
+| Obligation 10                                        | WP2, WP6, WP8                                                |
+| Obligations 11–12                                    | WP4, WP8                                                     |
+| Obligation 13                                        | WP5–WP8                                                      |
+| Obligation 14                                        | focused checks per WP; final full pass pending authorization |

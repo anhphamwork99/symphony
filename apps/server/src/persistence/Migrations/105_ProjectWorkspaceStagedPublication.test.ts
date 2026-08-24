@@ -36,19 +36,31 @@ layer("migration 105 — ProjectWorkspaceStagedPublication", (it) => {
       const pkColumns = yield* sql<{ readonly name: string }>`
         SELECT name FROM pragma_table_info('project_workspace_slices') WHERE pk > 0 ORDER BY pk ASC
       `;
-      assert.deepStrictEqual(pkColumns.map((row) => row.name), ["project_id", "slice_kind"]);
+      assert.deepStrictEqual(
+        pkColumns.map((row) => row.name),
+        ["project_id", "slice_kind"],
+      );
 
       const publicationColumns = yield* sql<{ readonly name: string }>`
         SELECT name FROM pragma_table_info('project_workspace_publications') ORDER BY name ASC
       `;
       assert.deepStrictEqual(
         publicationColumns.map((row) => row.name),
-        ["project_id", "published_at", "schema_version", "source_schema_version", "source_thread_id"],
+        [
+          "project_id",
+          "published_at",
+          "schema_version",
+          "source_schema_version",
+          "source_thread_id",
+        ],
       );
       const publicationPk = yield* sql<{ readonly name: string }>`
         SELECT name FROM pragma_table_info('project_workspace_publications') WHERE pk > 0
       `;
-      assert.deepStrictEqual(publicationPk.map((row) => row.name), ["project_id"]);
+      assert.deepStrictEqual(
+        publicationPk.map((row) => row.name),
+        ["project_id"],
+      );
 
       // The slice-kind CHECK admits exactly the five WP1 kinds.
       for (const kind of [
@@ -118,11 +130,13 @@ layer("migration 105 — ProjectWorkspaceStagedPublication", (it) => {
           'full-access', 'default', 'local'
         )
       `;
-      const before = yield* sql`SELECT * FROM projection_threads WHERE thread_id = 'thread-migration'`;
+      const before =
+        yield* sql`SELECT * FROM projection_threads WHERE thread_id = 'thread-migration'`;
 
       yield* runMigrations();
 
-      const after = yield* sql`SELECT * FROM projection_threads WHERE thread_id = 'thread-migration'`;
+      const after =
+        yield* sql`SELECT * FROM projection_threads WHERE thread_id = 'thread-migration'`;
       assert.deepStrictEqual(after, before);
 
       const workspaceRows = yield* sql<{ readonly count: number }>`

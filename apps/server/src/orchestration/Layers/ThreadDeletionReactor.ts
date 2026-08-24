@@ -37,9 +37,7 @@ export function isThreadLifecycleCleanupEvent(
   return event.type === "thread.deleted" || event.type === "thread.archived";
 }
 
-export function isProjectDeletedEvent(
-  event: OrchestrationEvent,
-): event is ProjectDeletedEvent {
+export function isProjectDeletedEvent(event: OrchestrationEvent): event is ProjectDeletedEvent {
   return event.type === "project.deleted";
 }
 
@@ -305,18 +303,13 @@ const make = Effect.gen(function* () {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
-        return Effect.logWarning(
-          "project deletion device attachment cleanup skipped",
-          {
-            projectId,
-            cause: Cause.pretty(cause),
-          },
-        );
+        return Effect.logWarning("project deletion device attachment cleanup skipped", {
+          projectId,
+          cause: Cause.pretty(cause),
+        });
       }),
     );
-    const residuals = yield* Effect.result(
-      terminalManager.settleProjectTerminals({ projectId }),
-    );
+    const residuals = yield* Effect.result(terminalManager.settleProjectTerminals({ projectId }));
     if (residuals._tag === "Failure") {
       yield* Effect.logWarning("project deletion postcondition terminal settlement failed", {
         projectId,
@@ -343,20 +336,17 @@ const make = Effect.gen(function* () {
     if (projectWorkspaceStore === undefined) {
       return;
     }
-    yield* projectWorkspaceStore
-      .deleteProjectWorkspace({ projectId })
-      .pipe(Effect.catchCause((cause) => {
+    yield* projectWorkspaceStore.deleteProjectWorkspace({ projectId }).pipe(
+      Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
-        return Effect.logWarning(
-          "project deletion postcondition workspace cleanup skipped",
-          {
-            projectId,
-            cause: Cause.pretty(cause),
-          },
-        );
-      }));
+        return Effect.logWarning("project deletion postcondition workspace cleanup skipped", {
+          projectId,
+          cause: Cause.pretty(cause),
+        });
+      }),
+    );
   });
 
   const processThreadLifecycleEvent = (event: ThreadLifecycleCleanupEvent) =>

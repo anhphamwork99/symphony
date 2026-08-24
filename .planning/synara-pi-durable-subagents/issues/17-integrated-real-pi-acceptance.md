@@ -103,11 +103,11 @@ any AC6 test was written**; that owner approval is now recorded below
 
 #### Approved seams and evidence split
 
-| Evidence class | Boundary | Coverage |
-| --- | --- | --- |
-| Mandatory real-Pi (unchanged) | Real Pi runtime through the integrated smoke harness | Watchdog stage progression on a deliberately wedged execution, provider-session stop, teardown **handoff** (band 74 journaled for the current attempt/generation), stage-scoped diagnostics, and the card remaining honest through `cancelling`. The harness cannot pass on provider fakes. |
-| Accepted deterministic (from Ticket 16) | Process-supervisor, repository, coordinator, sweep, and adapter-wiring fixtures already approved and implemented under Ticket 16 / Decision 0028 | Owned-only dispatch, proof-before-fence settlement (`proven` settles `cancelled` + generation advance), uncertain outcomes (`survivors` / `owner_unproven`) staying non-terminal and retryable, escalation to `proven`, bounded survivor evidence (cap 16), journal bands 75–78 identities. |
-| Isolated manual real-Pi (from Ticket 16) | The Ticket-16 manual verification recipe, run in isolation | The destructive outcome itself: observe band-75/76 rows and the supervisor's TERM→KILL escalation in the process table, and confirm the card settles `cancelled` with generation advanced. Explicitly labeled **manual** and retained as operational evidence only. |
+| Evidence class                           | Boundary                                                                                                                                         | Coverage                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mandatory real-Pi (unchanged)            | Real Pi runtime through the integrated smoke harness                                                                                             | Watchdog stage progression on a deliberately wedged execution, provider-session stop, teardown **handoff** (band 74 journaled for the current attempt/generation), stage-scoped diagnostics, and the card remaining honest through `cancelling`. The harness cannot pass on provider fakes. |
+| Accepted deterministic (from Ticket 16)  | Process-supervisor, repository, coordinator, sweep, and adapter-wiring fixtures already approved and implemented under Ticket 16 / Decision 0028 | Owned-only dispatch, proof-before-fence settlement (`proven` settles `cancelled` + generation advance), uncertain outcomes (`survivors` / `owner_unproven`) staying non-terminal and retryable, escalation to `proven`, bounded survivor evidence (cap 16), journal bands 75–78 identities. |
+| Isolated manual real-Pi (from Ticket 16) | The Ticket-16 manual verification recipe, run in isolation                                                                                       | The destructive outcome itself: observe band-75/76 rows and the supervisor's TERM→KILL escalation in the process table, and confirm the card settles `cancelled` with generation advanced. Explicitly labeled **manual** and retained as operational evidence only.                         |
 
 ### Reassessment extension (2026-08-20) — managed-child owner seam
 
@@ -121,11 +121,11 @@ The manual discovery run established that the former parent
 remained live. The concrete seam therefore changes only the source of
 ownership proof:
 
-| Evidence class | Approved seam | Required result |
-| --- | --- | --- |
-| Alfie deterministic ownership | The child session's supervised Bash and its opaque owner endpoint | Each managed child owns exactly one supervisor; every child Bash is observed there, not by the parent; stale/mismatched/disposed identities have no process-side effect. |
+| Evidence class                            | Approved seam                                                                          | Required result                                                                                                                                                                                                                                                  |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Alfie deterministic ownership             | The child session's supervised Bash and its opaque owner endpoint                      | Each managed child owns exactly one supervisor; every child Bash is observed there, not by the parent; stale/mismatched/disposed identities have no process-side effect.                                                                                         |
 | Contract/Symphony deterministic ownership | Capability-negotiated, schema-validated endpoint through Ticket-16 teardown resolution | Missing, old, malformed, stale, mismatched, timed-out, or failed endpoint → non-terminal band 78. It cannot call the parent supervisor, write band 76, settle `cancelled`, or advance generation. A valid owner result alone distinguishes band 77 from band 76. |
-| Isolated manual real-Pi | The exact child owner endpoint running the existing isolated Ticket-16 recipe | Observe that the TERM-ignoring Bash is owned by the exact child supervisor, not the parent observer; only child-owner TERM→KILL proof may precede band 76, cancelled card, generation advance, and zero-owned-child claim. |
+| Isolated manual real-Pi                   | The exact child owner endpoint running the existing isolated Ticket-16 recipe          | Observe that the TERM-ignoring Bash is owned by the exact child supervisor, not the parent observer; only child-owner TERM→KILL proof may precede band 76, cancelled card, generation advance, and zero-owned-child claim.                                       |
 
 **Owner approval:** the project owner approved this exact extension in the
 current implementation conversation on 2026-08-20: `Đồng ý, triển khai đi`.
@@ -181,7 +181,7 @@ destructive pass occurred is prohibited.
 - Approval date: 2026-08-20
 - Approval artifact: the current implementation conversation — the owner's
   chat response in the `/matt-implement` implementation session on
- 2026-08-20 (a project-scoped Decision Record per Decision 0001
+  2026-08-20 (a project-scoped Decision Record per Decision 0001
   §Exceptions is no longer required for the seam-design question per
   Decision 0031)
 - Verbatim confirmation: `okay đồng ý`
@@ -253,16 +253,16 @@ destructive pass occurred is prohibited.
     live-process monitor: no band 76 was observed while either exact PID was live
     durable bands: 75 → 76
     generation: 1 → 2
-    ```
+   ```
 
-    Both child PIDs were verified alive before teardown and absent from the
-    parent `PiBashProcessSupervisor` observer. The test did not call a
-    coordinator or bridge test seam: production `PiAdapter` retained-owner
-    registry plus its periodic teardown sweep performed the proof path. It
-    then verified both PIDs absent, card `cancelled`, and generation fenced.
-    The harness used an owned temporary root (`synara-realpi-t17-*`) and
-    removed it during test cleanup. This is the sole current source for the
-    zero-owned-child claim.
+   Both child PIDs were verified alive before teardown and absent from the
+   parent `PiBashProcessSupervisor` observer. The test did not call a
+   coordinator or bridge test seam: production `PiAdapter` retained-owner
+   registry plus its periodic teardown sweep performed the proof path. It
+   then verified both PIDs absent, card `cancelled`, and generation fenced.
+   The harness used an owned temporary root (`synara-realpi-t17-*`) and
+   removed it during test cleanup. This is the sole current source for the
+   zero-owned-child claim.
 
 **Open completion gates**
 

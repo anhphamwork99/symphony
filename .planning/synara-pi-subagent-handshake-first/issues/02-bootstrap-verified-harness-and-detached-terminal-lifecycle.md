@@ -29,19 +29,19 @@ consumed.
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1:** Desktop managed sessions load extensions only from the verified
-  release artifact while using only the user authentication/model configuration
-  needed to run Pi.
+      release artifact while using only the user authentication/model configuration
+      needed to run Pi.
 - [x] **AC2:** The managed handshake completes with the required lifecycle
-  capability profile before managed Agent work is exposed; failure is early and
-  never becomes a legacy fallback or a normal late Agent-call failure.
+      capability profile before managed Agent work is exposed; failure is early and
+      never becomes a legacy fallback or a normal late Agent-call failure.
 - [x] **AC3:** A normal supported managed Agent task is admitted once and runs
-  without a missing-handshake rejection.
+      without a missing-handshake rejection.
 - [x] **AC4:** A real child exceeding the foreground budget reports accepted,
-  started, detached, continuing liveness, and exactly one fenced committed
-  terminal result.
+      started, detached, continuing liveness, and exactly one fenced committed
+      terminal result.
 - [x] **AC5:** Invalid user runtime configuration and malformed/unsupported
-  bridge responses fail safely before durable managed side effects and do not
-  disclose credentials, paths, prompts, or provider configuration.
+      bridge responses fail safely before durable managed side effects and do not
+      disclose credentials, paths, prompts, or provider configuration.
 
 ## Testing Seams
 

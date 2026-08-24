@@ -30,43 +30,41 @@ import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubag
 import type { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { PiSubagentParentEffectDispatcher } from "./piSubagentParentEffectDispatcher.ts";
 
-export function makeServerProviderLayer(
-  options: {
-    readonly agentGatewayCredentialsLayer?: typeof AgentGatewayCredentialsWithSecretsLive;
-    /** Decision 0016 composition-owned late-bound parent-effect dispatcher. */
-    readonly completionDispatchBridge?: PiSubagentParentEffectDispatcher;
-    /**
-     * Decision 21 production composition: the ONE live MCP session authority
-     * registry, owned by `makeServerApplicationLayers` and shared with the
-     * runtime-services graph. The PiAdapter captures this exact registry at
-     * build time so managed admission re-validates the server-minted binding
-     * against runtime truth (revocation, expiry, generation, subject/project
-     * match). Required on purpose: a provider graph without it fails closed
-     * on every managed spawn with the missing-registry diagnostic. Never
-     * construct a second registry here — admission must consult the same
-     * in-memory registry the gateway/reactor mint, bind, and revoke through.
-     */
-    readonly mcpSessionAuthorityLayer: Layer.Layer<
-      McpSessionAuthority,
-      SecretStoreError,
-      FileSystem.FileSystem | Path.Path | ServerConfig
-    >;
-    /**
-     * Decision 21 production composition: the ONE live projection snapshot
-     * query, the same layer object the runtime-services graph merges. The
-     * PiAdapter resolves the genuine server read service at build time; a
-     * provider graph without it fails closed with the
-     * `server projection snapshot is unavailable` diagnostic. Required so an
-     * incomplete production construction is a compile error, not a silent
-     * runtime rejection.
-     */
-    readonly projectionSnapshotQueryLayer: Layer.Layer<
-      ProjectionSnapshotQuery,
-      never,
-      SqlClient.SqlClient
-    >;
-  },
-) {
+export function makeServerProviderLayer(options: {
+  readonly agentGatewayCredentialsLayer?: typeof AgentGatewayCredentialsWithSecretsLive;
+  /** Decision 0016 composition-owned late-bound parent-effect dispatcher. */
+  readonly completionDispatchBridge?: PiSubagentParentEffectDispatcher;
+  /**
+   * Decision 21 production composition: the ONE live MCP session authority
+   * registry, owned by `makeServerApplicationLayers` and shared with the
+   * runtime-services graph. The PiAdapter captures this exact registry at
+   * build time so managed admission re-validates the server-minted binding
+   * against runtime truth (revocation, expiry, generation, subject/project
+   * match). Required on purpose: a provider graph without it fails closed
+   * on every managed spawn with the missing-registry diagnostic. Never
+   * construct a second registry here — admission must consult the same
+   * in-memory registry the gateway/reactor mint, bind, and revoke through.
+   */
+  readonly mcpSessionAuthorityLayer: Layer.Layer<
+    McpSessionAuthority,
+    SecretStoreError,
+    FileSystem.FileSystem | Path.Path | ServerConfig
+  >;
+  /**
+   * Decision 21 production composition: the ONE live projection snapshot
+   * query, the same layer object the runtime-services graph merges. The
+   * PiAdapter resolves the genuine server read service at build time; a
+   * provider graph without it fails closed with the
+   * `server projection snapshot is unavailable` diagnostic. Required so an
+   * incomplete production construction is a compile error, not a silent
+   * runtime rejection.
+   */
+  readonly projectionSnapshotQueryLayer: Layer.Layer<
+    ProjectionSnapshotQuery,
+    never,
+    SqlClient.SqlClient
+  >;
+}) {
   return Effect.gen(function* () {
     const credentials = yield* ProviderCredentials;
     const resolveProviderServerPassword = makeProviderServerPasswordResolver(credentials);

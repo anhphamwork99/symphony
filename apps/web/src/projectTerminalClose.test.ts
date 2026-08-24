@@ -17,17 +17,16 @@ import {
   projectTerminalSnapshotToThreadSnapshot,
   writeTerminalSession,
 } from "~/components/terminal/terminalProjectRouting";
-import {
-  PROJECT_WORKSPACE_CAPABILITY,
-  readProjectTerminalApi,
-} from "~/projectWorkspaceApi";
+import { PROJECT_WORKSPACE_CAPABILITY, readProjectTerminalApi } from "~/projectWorkspaceApi";
 import * as projectWorkspaceApi from "~/projectWorkspaceApi";
 import type { TerminalProjectEvent, TerminalProjectSessionSnapshot } from "@synara/contracts";
 
 const projectId = ProjectId.makeUnsafe("project-1");
 const SCOPE = "dock-terminal-project:project-1";
 
-function snapshot(overrides?: Partial<TerminalProjectSessionSnapshot>): TerminalProjectSessionSnapshot {
+function snapshot(
+  overrides?: Partial<TerminalProjectSessionSnapshot>,
+): TerminalProjectSessionSnapshot {
   return {
     projectId,
     terminalId: "t1",
@@ -85,10 +84,12 @@ describe("projectTerminalEventToLocalEvent", () => {
 
 describe("preflightProjectTerminalRunning", () => {
   it("reports the server's truthful running status for the terminal", async () => {
-    const list = vi.fn().mockResolvedValue([
-      snapshot({ terminalId: "t1", status: "running" }),
-      snapshot({ terminalId: "t2", status: "exited" }),
-    ]);
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        snapshot({ terminalId: "t1", status: "running" }),
+        snapshot({ terminalId: "t2", status: "exited" }),
+      ]);
     const api = {
       open: vi.fn(),
       write: vi.fn(),

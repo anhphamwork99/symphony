@@ -24,10 +24,7 @@
 // observable, and retryable; v1 data is never modified or deleted.
 
 import type { ProjectId, ThreadId } from "@synara/contracts";
-import type {
-  LegacyTerminalPresentationSliceV1,
-  ProjectWorkspaceSlice,
-} from "@synara/contracts";
+import type { LegacyTerminalPresentationSliceV1, ProjectWorkspaceSlice } from "@synara/contracts";
 import { Schema } from "effect";
 import {
   PROJECT_WORKSPACE_SCHEMA_VERSION,
@@ -115,8 +112,7 @@ export function createLegacyLocalStorageSliceReaders(
 }
 
 /** The v1 legacy terminal slice shape this converter produces. */
-export type LegacyTerminalPresentationSliceShape =
-  typeof LegacyTerminalPresentationSliceV1.Type;
+export type LegacyTerminalPresentationSliceShape = typeof LegacyTerminalPresentationSliceV1.Type;
 
 /** Convert a web ThreadTerminalState into the v1 legacy schema shape. */
 export function toLegacyTerminalPresentationSlice(
@@ -253,10 +249,7 @@ function parseJson(raw: string | null): unknown {
   }
 }
 
-function readStagedSlices(
-  projectId: ProjectId,
-  storage: ProjectWorkspaceWebStorage,
-): unknown[] {
+function readStagedSlices(projectId: ProjectId, storage: ProjectWorkspaceWebStorage): unknown[] {
   const slices: unknown[] = [];
   for (const key of stagedSliceKeys(projectId)) {
     const raw = storage.getItem(key);
@@ -297,9 +290,7 @@ export function readPublishedProjectWorkspace(
   projectId: ProjectId,
   storage: ProjectWorkspaceWebStorage,
 ): PublishedProjectWorkspace | null {
-  const markerRaw = parseJson(
-    storage.getItem(projectWorkspacePublicationMarkerKey(projectId)),
-  );
+  const markerRaw = parseJson(storage.getItem(projectWorkspacePublicationMarkerKey(projectId)));
   const stagedSlices = readStagedSlices(projectId, storage);
   const status = inspectProjectWorkspacePublishedTarget(
     { publicationMarker: markerRaw, stagedSlices },
@@ -313,9 +304,7 @@ export function readPublishedProjectWorkspace(
       isSliceKind(raw, "right-dock"),
     ) as unknown,
   );
-  const terminalPresentation = Schema.decodeUnknownSync(
-    ProjectWorkspaceTerminalPresentationSlice,
-  )(
+  const terminalPresentation = Schema.decodeUnknownSync(ProjectWorkspaceTerminalPresentationSlice)(
     stagedSlices.find((raw): raw is Record<string, unknown> =>
       isSliceKind(raw, "terminal-presentation"),
     ) as unknown,
@@ -327,9 +316,5 @@ export function readPublishedProjectWorkspace(
 }
 
 function isSliceKind(raw: unknown, kind: string): boolean {
-  return (
-    typeof raw === "object" &&
-    raw !== null &&
-    (raw as { slice?: unknown }).slice === kind
-  );
+  return typeof raw === "object" && raw !== null && (raw as { slice?: unknown }).slice === kind;
 }

@@ -60,7 +60,9 @@ function createWorkspacePath(): string {
 }
 
 function publishDefaults(filePath: string, projectId: ProjectId): void {
-  expect(new DesktopProjectWorkspaceMigration(filePath).migrate({ projectId, threads: [] })).toMatchObject({
+  expect(
+    new DesktopProjectWorkspaceMigration(filePath).migrate({ projectId, threads: [] }),
+  ).toMatchObject({
     status: "published",
   });
 }
@@ -108,7 +110,9 @@ describe("Decision 0004 Desktop project workspace activation", () => {
       activeTabId: null,
       tabs: [],
     });
-    expect(manager.getProjectState({ projectId: ProjectId.makeUnsafe("different-project") })).toMatchObject({
+    expect(
+      manager.getProjectState({ projectId: ProjectId.makeUnsafe("different-project") }),
+    ).toMatchObject({
       tabs: [],
     });
   });
@@ -168,17 +172,19 @@ describe("Decision 0004 Desktop project workspace activation", () => {
       activeTabId: "durable-tab",
       tabs: [{ id: "durable-tab", url: "https://published.test/", title: "Published" }],
     });
-    const annotations = (manager as unknown as {
-      annotations: {
-        projectWorkspaceSeededMarkers: (input: {
-          projectId: typeof PROJECT_A;
-          tabId: string;
-        }) => unknown;
-      };
-    }).annotations;
-    expect(annotations.projectWorkspaceSeededMarkers({ projectId: PROJECT_A, tabId: "durable-tab" })).toEqual([
-      { id: "durable-marker", ordinal: 1, documentKey: "sha256:published" },
-    ]);
+    const annotations = (
+      manager as unknown as {
+        annotations: {
+          projectWorkspaceSeededMarkers: (input: {
+            projectId: typeof PROJECT_A;
+            tabId: string;
+          }) => unknown;
+        };
+      }
+    ).annotations;
+    expect(
+      annotations.projectWorkspaceSeededMarkers({ projectId: PROJECT_A, tabId: "durable-tab" }),
+    ).toEqual([{ id: "durable-marker", ordinal: 1, documentKey: "sha256:published" }]);
     expect(manager.getProjectState({ projectId: PROJECT_B }).tabs).toEqual([]);
     expect(() =>
       manager.getVisibleOwnerAutomationRuntime({
@@ -198,7 +204,9 @@ describe("Decision 0004 Desktop project workspace activation", () => {
     activation = projectActivation;
 
     await projectActivation.ensureProjectWorkspaceActivated(PROJECT_A);
-    expect(manager.openProject({ projectId: PROJECT_A, initialUrl: "https://first.test/" }).tabs).toHaveLength(1);
+    expect(
+      manager.openProject({ projectId: PROJECT_A, initialUrl: "https://first.test/" }).tabs,
+    ).toHaveLength(1);
     manager.handleProjectRemoved(PROJECT_A);
     await projectActivation.ensureProjectWorkspaceActivated(PROJECT_A);
     expect(manager.getProjectState({ projectId: PROJECT_A }).tabs).toEqual([]);
@@ -229,7 +237,9 @@ describe("Decision 0004 Desktop project workspace activation", () => {
     await removal;
     expect(apply).not.toHaveBeenCalled();
     expect(new DesktopProjectWorkspaceMigration(filePath).read(PROJECT_A).status).toBe("deleted");
-    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(
+      /permanently deleted/,
+    );
   });
 
   it("deletes one Project's manager state and remains terminal across restart", async () => {
@@ -244,10 +254,14 @@ describe("Decision 0004 Desktop project workspace activation", () => {
     await activation.handleProjectRemoved(PROJECT_A, "2026-08-24T00:00:00.000Z");
     expect(manager.getProjectState({ projectId: PROJECT_A }).tabs).toEqual([]);
     expect(manager.getProjectState({ projectId: PROJECT_B }).tabs).toHaveLength(1);
-    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+    await expect(activation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(
+      /permanently deleted/,
+    );
 
     const reopened = new DesktopProjectWorkspaceActivation(filePath, new DesktopBrowserManager());
-    await expect(reopened.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(/permanently deleted/);
+    await expect(reopened.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(
+      /permanently deleted/,
+    );
     expect(reopened.isActivated(PROJECT_A)).toBe(false);
     await reopened.ensureProjectWorkspaceActivated(PROJECT_B);
   });
@@ -255,10 +269,9 @@ describe("Decision 0004 Desktop project workspace activation", () => {
   it("gates automation only when a real ProjectId is present", async () => {
     const executeTool = vi.fn(async () => ({ ok: true }));
     const ensure = vi.fn(async () => undefined);
-    const host = createActivationGatedAutomationHost(
-      { executeTool },
-      { ensureProjectWorkspaceActivated: ensure } as unknown as DesktopProjectWorkspaceActivation,
-    );
+    const host = createActivationGatedAutomationHost({ executeTool }, {
+      ensureProjectWorkspaceActivated: ensure,
+    } as unknown as DesktopProjectWorkspaceActivation);
 
     await host.executeTool({
       sessionId: "session",
@@ -291,14 +304,20 @@ describe("Decision 0004 Desktop project workspace activation", () => {
       } else if (corruption === "mixed") {
         const staged = document.staged as Record<string, unknown>;
         staged[`synara:project-workspace:v2:stage:${PROJECT_A}:browser`] = {
-          ...(staged[`synara:project-workspace:v2:stage:${PROJECT_A}:browser`] as Record<string, unknown>),
+          ...(staged[`synara:project-workspace:v2:stage:${PROJECT_A}:browser`] as Record<
+            string,
+            unknown
+          >),
           projectId: PROJECT_B,
         };
         writeDocument(filePath, document);
       } else {
         const published = document.published as Record<string, unknown>;
         published[`synara:project-workspace:v2:published:${PROJECT_A}`] = {
-          ...(published[`synara:project-workspace:v2:published:${PROJECT_A}`] as Record<string, unknown>),
+          ...(published[`synara:project-workspace:v2:published:${PROJECT_A}`] as Record<
+            string,
+            unknown
+          >),
           schemaVersion: 1,
         };
         writeDocument(filePath, document);
@@ -324,11 +343,15 @@ describe("Decision 0004 Desktop project workspace activation", () => {
     const stagePath = createWorkspacePath();
     let failStage = true;
     const stagedManager = { applyProjectWorkspaceActivation: vi.fn() };
-    const stagedActivation = new DesktopProjectWorkspaceActivation(stagePath, stagedManager as never, {
-      beforePublish: () => {
-        if (failStage) throw new Error("stage publication failed");
+    const stagedActivation = new DesktopProjectWorkspaceActivation(
+      stagePath,
+      stagedManager as never,
+      {
+        beforePublish: () => {
+          if (failStage) throw new Error("stage publication failed");
+        },
       },
-    });
+    );
     await expect(stagedActivation.ensureProjectWorkspaceActivated(PROJECT_A)).rejects.toThrow(
       "stage publication failed",
     );
@@ -432,7 +455,11 @@ describe("Decision 0004 Project browser and annotation IPC activation gates", ()
       [PROJECT_BROWSER_IPC_CHANNELS.hide]: { projectId: PROJECT_A },
       [PROJECT_BROWSER_IPC_CHANNELS.getState]: { projectId: PROJECT_A },
       [PROJECT_BROWSER_IPC_CHANNELS.setBounds]: { projectId: PROJECT_A, bounds: null },
-      [PROJECT_BROWSER_IPC_CHANNELS.navigate]: { projectId: PROJECT_A, tabId: "tab", url: "https://test/" },
+      [PROJECT_BROWSER_IPC_CHANNELS.navigate]: {
+        projectId: PROJECT_A,
+        tabId: "tab",
+        url: "https://test/",
+      },
       [PROJECT_BROWSER_IPC_CHANNELS.reload]: { projectId: PROJECT_A, tabId: "tab" },
       [PROJECT_BROWSER_IPC_CHANNELS.goBack]: { projectId: PROJECT_A, tabId: "tab" },
       [PROJECT_BROWSER_IPC_CHANNELS.goForward]: { projectId: PROJECT_A, tabId: "tab" },
@@ -464,7 +491,9 @@ describe("Decision 0004 Project browser and annotation IPC activation gates", ()
     expect(activation.ensureProjectWorkspaceActivated).toHaveBeenCalledTimes(
       Object.keys(inputByChannel).length,
     );
-    await handlers.get(PROJECT_BROWSER_IPC_CHANNELS.removeProject)?.(event, { projectId: PROJECT_A });
+    await handlers.get(PROJECT_BROWSER_IPC_CHANNELS.removeProject)?.(event, {
+      projectId: PROJECT_A,
+    });
     expect(activation.handleProjectRemoved).toHaveBeenCalledWith(PROJECT_A);
     expect(order).toContain("remove");
   });

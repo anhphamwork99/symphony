@@ -200,7 +200,9 @@ describe("TerminalManager Project-owned terminals", () => {
 
     expect(ptyAdapter.spawnInputs).toHaveLength(2);
     ptyAdapter.processes[0]?.emitData("project one output\n");
-    await waitFor(() => fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))));
+    await waitFor(() =>
+      fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
+    );
 
     const projectOne = await manager.openProject(projectOpenInput({ projectId: "project-1" }));
     const projectTwo = await manager.openProject(projectOpenInput({ projectId: "project-2" }));
@@ -217,7 +219,9 @@ describe("TerminalManager Project-owned terminals", () => {
     expect(process).toBeDefined();
     if (!process) return;
     process.emitData("still running output\n");
-    await waitFor(() => fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))));
+    await waitFor(() =>
+      fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
+    );
 
     const reconnected = await manager.openProject(projectOpenInput());
 
@@ -374,8 +378,8 @@ describe("TerminalManager Project-owned terminals", () => {
 
     await manager.settleProjectTerminals("project-1" as never);
 
-    await waitFor(() =>
-      !fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
+    await waitFor(
+      () => !fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
     );
     expect(await manager.listProjectTerminals("project-1" as never)).toHaveLength(0);
 
@@ -411,8 +415,8 @@ describe("TerminalManager Project-owned terminals", () => {
     const proven = await manager.settleProjectTerminals("project-1" as never);
     expect(proven).toHaveLength(1);
     expect(proven[0]?.outcome).toBe("settled");
-    await waitFor(() =>
-      !fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
+    await waitFor(
+      () => !fs.existsSync(path.join(logsDir, projectHistoryLogName("project-1", "default"))),
     );
     expect(await manager.listProjectTerminals("project-1" as never)).toHaveLength(0);
 

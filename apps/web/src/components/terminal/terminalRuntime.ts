@@ -295,11 +295,11 @@ function flushPendingResize(entry: TerminalRuntimeEntry): void {
     cols: pendingResize.cols,
     rows: pendingResize.rows,
   }).catch(() => {
-      const current = entry.lastSentResize;
-      if (current && current.cols === pendingResize.cols && current.rows === pendingResize.rows) {
-        entry.lastSentResize = null;
-      }
-    });
+    const current = entry.lastSentResize;
+    if (current && current.cols === pendingResize.cols && current.rows === pendingResize.rows) {
+      entry.lastSentResize = null;
+    }
+  });
 }
 
 function queueBackendResize(entry: TerminalRuntimeEntry, cols: number, rows: number): void {

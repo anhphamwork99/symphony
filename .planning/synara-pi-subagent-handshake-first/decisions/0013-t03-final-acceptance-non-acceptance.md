@@ -195,8 +195,7 @@ verification.
 - Decisions accepting Tickets 01, 01b, 01c, and 02 remain unchanged.
 - Candidate behavior satisfying AC1–AC5 remains usable evidence; it need not be
   discarded solely because the completion checks were unauthorized.
-- Fresh passing heavyweight-check evidence does not automatically accept Ticket
-  03. It is material new evidence to be routed under the project’s governing
+- Fresh passing heavyweight-check evidence does not automatically accept Ticket 03. It is material new evidence to be routed under the project’s governing
   reassessment/owner process, not a second Ticket-03 final-acceptance
   consultation.
 

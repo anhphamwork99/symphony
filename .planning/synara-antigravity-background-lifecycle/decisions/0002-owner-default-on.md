@@ -35,11 +35,11 @@ qualification requirements.
 
 The lifecycle configuration contract is:
 
-| Input to `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` | Result |
-| --- | --- |
-| absent, empty, whitespace, or malformed | `true` product default |
-| `true`, `1`, or `on` | `true` |
-| explicit `false`, `0`, or `off` | `false`, legacy rollback path |
+| Input to `SYNARA_ANTIGRAVITY_STOP_IDLE_LIFECYCLE` | Result                        |
+| ------------------------------------------------- | ----------------------------- |
+| absent, empty, whitespace, or malformed           | `true` product default        |
+| `true`, `1`, or `on`                              | `true`                        |
+| explicit `false`, `0`, or `off`                   | `false`, legacy rollback path |
 
 The direct adapter composition fallback uses the shared product default
 constant. Legacy-only test harnesses may pass `stopIdleLifecycle: false`

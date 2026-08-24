@@ -262,9 +262,7 @@ describe("ProjectWorkspaceTerminalPresentationSlice", () => {
       { length: PROJECT_WORKSPACE_MAX_TERMINALS + 1 },
       (_, index) => `term-${index}`,
     );
-    const terminalLabelsById = Object.fromEntries(
-      terminalIds.map((id) => [id, `Label ${id}`]),
-    );
+    const terminalLabelsById = Object.fromEntries(terminalIds.map((id) => [id, `Label ${id}`]));
     expect(
       decodes(ProjectWorkspaceTerminalPresentationSlice, {
         ...valid,

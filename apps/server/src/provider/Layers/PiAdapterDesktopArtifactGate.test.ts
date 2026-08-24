@@ -54,10 +54,7 @@ vi.mock("../piSubagentDesktopArtifactGate.ts", async (importOriginal) => {
   // Ticket 01 ordering matrix, but route to the PRODUCTION gate (and through
   // it the PRODUCTION verifier) when a test opts in — so the fail-close
   // denial is proven from a real invalid on-disk artifact, never fabricated.
-  const actual =
-    await importOriginal<
-      typeof import("../piSubagentDesktopArtifactGate.ts")
-    >();
+  const actual = await importOriginal<typeof import("../piSubagentDesktopArtifactGate.ts")>();
   return {
     ...actual,
     evaluatePiSubagentDesktopArtifactGate: async (
@@ -115,10 +112,7 @@ const resetHarness = () => {
   piSdkHarness.sessionManagerOpenCalls = 0;
 };
 
-const makeAdapterLayer = (
-  mode: ServerConfigShape["mode"],
-  env: NodeJS.ProcessEnv,
-) =>
+const makeAdapterLayer = (mode: ServerConfigShape["mode"], env: NodeJS.ProcessEnv) =>
   makePiAdapterLive({
     piSubagentDesktopArtifactGateEnv: env,
   }).pipe(
@@ -182,7 +176,11 @@ const runPath = (input: {
   Effect.gen(function* () {
     const adapter = yield* PiAdapter;
     return yield* input.entry.invoke(adapter).pipe(Effect.flip);
-  }).pipe(Effect.provide(makeAdapterLayer(input.mode, input.env)), Effect.scoped, Effect.runPromise);
+  }).pipe(
+    Effect.provide(makeAdapterLayer(input.mode, input.env)),
+    Effect.scoped,
+    Effect.runPromise,
+  );
 
 describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
   it.for(entryPaths)(
@@ -327,9 +325,7 @@ const CLOSURE_BASE_FILES: ReadonlyArray<ClosureFileSpec> = [
 ];
 
 /** Records the manifest for exactly the staged file set. */
-const closureManifestFor = (
-  files: ReadonlyArray<ClosureFileSpec>,
-): Record<string, unknown> => ({
+const closureManifestFor = (files: ReadonlyArray<ClosureFileSpec>): Record<string, unknown> => ({
   schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   sourceIdentity: CLOSURE_SOURCE_IDENTITY,
   capabilityProfile: CLOSURE_CAPABILITY_PROFILE,
@@ -438,7 +434,9 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
       for (const entry of entryPaths) {
         resetHarness();
         gateHarness.mode = "real";
-        const artifactRoot = await mkdtemp(join(fixtureRoot, `${variant.label.replace(/[^a-z0-9]+/gu, "-")}-`));
+        const artifactRoot = await mkdtemp(
+          join(fixtureRoot, `${variant.label.replace(/[^a-z0-9]+/gu, "-")}-`),
+        );
         await variant.stage(artifactRoot);
 
         const failure = await runPath({

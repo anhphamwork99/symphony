@@ -32,7 +32,9 @@ export interface ProjectWorkspaceThreadSnapshot {
   readonly archivedAt: string | null;
 }
 
-function toPolicyThread(thread: ProjectWorkspaceThreadSnapshot): LegacyProjectWorkspaceThreadInput | null {
+function toPolicyThread(
+  thread: ProjectWorkspaceThreadSnapshot,
+): LegacyProjectWorkspaceThreadInput | null {
   // A Thread whose durable `updatedAt` is missing cannot be durably ordered;
   // the policy fails closed for it, so skip it rather than fabricating a stamp.
   if (thread.updatedAt === null) {

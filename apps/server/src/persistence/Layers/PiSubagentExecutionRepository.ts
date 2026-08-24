@@ -406,8 +406,10 @@ const CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES = [
  */
 export type PiSubagentCardCurrentTruthAlias = "base" | "ranked";
 
-const makePiSubagentCardCurrentTruthColumns =
-  (sql: SqlClient.SqlClient, alias: PiSubagentCardCurrentTruthAlias) => sql`
+const makePiSubagentCardCurrentTruthColumns = (
+  sql: SqlClient.SqlClient,
+  alias: PiSubagentCardCurrentTruthAlias,
+) => sql`
             CASE
               WHEN ${sql(alias)}.observed_state NOT IN ${sql.in(CARD_CURRENT_TRUTH_LIVE_OBSERVED_STATES)} THEN NULL
               WHEN ${sql(alias)}.mode = 'background' THEN 'detached'

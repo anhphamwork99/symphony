@@ -169,12 +169,8 @@ describe("device WebSocket project handlers", () => {
     const { handlers } = await setup();
     const projectId = ProjectId.makeUnsafe("project-b");
 
-    await Effect.runPromise(
-      handlers[DEVICE_WS_METHODS.attachProject]({ projectId, udid: DEVICE }),
-    );
-    const state = await Effect.runPromise(
-      handlers[DEVICE_WS_METHODS.detachProject]({ projectId }),
-    );
+    await Effect.runPromise(handlers[DEVICE_WS_METHODS.attachProject]({ projectId, udid: DEVICE }));
+    const state = await Effect.runPromise(handlers[DEVICE_WS_METHODS.detachProject]({ projectId }));
 
     expect(state.projectId).toBe(projectId);
     expect(state.attachedDeviceUdid).toBeNull();

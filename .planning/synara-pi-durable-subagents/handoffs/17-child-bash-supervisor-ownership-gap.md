@@ -70,18 +70,18 @@ parent-session custom-tool precedence as explanations.
 
 ## Evidence
 
-| Evidence | Location |
-| --- | --- |
-| Real-Pi integrated harness plus opt-in manual repro | `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts` |
-| Test-only real server/WS harness, parent-supervisor spawn observer | `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` |
-| Parent session custom Bash injection | `apps/server/src/provider/Layers/PiAdapter.ts` (`createSdkRuntime`, `makePiBashProcessSupervisor`) |
-| Parent-only active process tracking / `teardownAll()` | `apps/server/src/provider/Layers/PiAdapter.ts` (`makePiBashProcessSupervisor`) |
-| Exact root-and-descendant proof contract | `apps/server/src/provider/supervisedProcessTeardown.ts` |
-| Band 75–78 coordinator / proof-before-fence transaction | `apps/server/src/provider/piSubagentProcessTeardown.ts` |
-| Alfie child session construction with no `customTools` seam | `/Users/anhpham99/alfie/agent/extensions/pi-subagents/src/agent-runner.ts` |
-| Alfie child spawn call and pass-through boundary | `/Users/anhpham99/alfie/agent/extensions/pi-subagents/src/agent-manager.ts`, `index.ts` |
-| Existing destructive-test governance | `decisions/0028-t16-real-pi-destructive-test-substitution.md` |
-| T17 AC6 three-leg seam and owner approval | `decisions/0031-t17-ac6-destructive-boundary-evidence-split.md`, `decisions/0032-t17-ac6-testing-seam-owner-approval.md` |
+| Evidence                                                           | Location                                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Real-Pi integrated harness plus opt-in manual repro                | `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`                                                            |
+| Test-only real server/WS harness, parent-supervisor spawn observer | `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts`                                                          |
+| Parent session custom Bash injection                               | `apps/server/src/provider/Layers/PiAdapter.ts` (`createSdkRuntime`, `makePiBashProcessSupervisor`)                       |
+| Parent-only active process tracking / `teardownAll()`              | `apps/server/src/provider/Layers/PiAdapter.ts` (`makePiBashProcessSupervisor`)                                           |
+| Exact root-and-descendant proof contract                           | `apps/server/src/provider/supervisedProcessTeardown.ts`                                                                  |
+| Band 75–78 coordinator / proof-before-fence transaction            | `apps/server/src/provider/piSubagentProcessTeardown.ts`                                                                  |
+| Alfie child session construction with no `customTools` seam        | `/Users/anhpham99/alfie/agent/extensions/pi-subagents/src/agent-runner.ts`                                               |
+| Alfie child spawn call and pass-through boundary                   | `/Users/anhpham99/alfie/agent/extensions/pi-subagents/src/agent-manager.ts`, `index.ts`                                  |
+| Existing destructive-test governance                               | `decisions/0028-t16-real-pi-destructive-test-substitution.md`                                                            |
+| T17 AC6 three-leg seam and owner approval                          | `decisions/0031-t17-ac6-destructive-boundary-evidence-split.md`, `decisions/0032-t17-ac6-testing-seam-owner-approval.md` |
 
 ## Recommended remediation
 
@@ -104,13 +104,16 @@ Alfie must:
 
    ```ts
    teardownOwnedProcesses({
-     executionId, expectedAttemptId, expectedGeneration
-   })
+     executionId,
+     expectedAttemptId,
+     expectedGeneration,
+   });
    ```
 
    It returns only `proven`, `survivors`, `stale`, `missing`,
    `owner_unavailable`, or `dispatch_failed`, plus safe correlation and bounded
    survivor evidence.
+
 6. Retain the opaque child-owner endpoint across parent provider-session stop
    when a current-generation band-74 handoff exists.
 

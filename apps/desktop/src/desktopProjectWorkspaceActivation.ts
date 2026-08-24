@@ -23,10 +23,7 @@
 //   per-Project diagnostic, and stays retryable on a later call.
 
 import type { ProjectId } from "@synara/contracts";
-import {
-  ProjectWorkspaceSlice,
-  PROJECT_WORKSPACE_SCHEMA_VERSION,
-} from "@synara/contracts";
+import { ProjectWorkspaceSlice, PROJECT_WORKSPACE_SCHEMA_VERSION } from "@synara/contracts";
 import {
   isProjectWorkspaceStagingComplete,
   PROJECT_WORKSPACE_MIGRATION_SLICE_KINDS,
@@ -62,7 +59,11 @@ export interface ProjectWorkspaceActivationInput {
   readonly browser: {
     readonly open: boolean;
     readonly activeTabId: string | null;
-    readonly tabs: ReadonlyArray<{ readonly id: string; readonly url: string; readonly title: string }>;
+    readonly tabs: ReadonlyArray<{
+      readonly id: string;
+      readonly url: string;
+      readonly title: string;
+    }>;
   };
   readonly annotations: ReadonlyArray<{
     readonly id: string;
@@ -114,8 +115,7 @@ function validatePublishedSlices(
   if (read.status !== "published-current") {
     return {
       diagnostic:
-        read.diagnostic ??
-        "Project workspace publication is unavailable; activation is retryable.",
+        read.diagnostic ?? "Project workspace publication is unavailable; activation is retryable.",
     };
   }
   const byKind = new Map<string, ProjectWorkspaceSlice>();
@@ -387,9 +387,15 @@ export class DesktopProjectWorkspaceActivation {
         // before marker publication.
         const document = readDesktopProjectWorkspaceDocument(this.filePath);
         const markerKey = projectWorkspacePublicationMarkerKey(projectId);
-        const hasPublishedRecord = Object.prototype.hasOwnProperty.call(document.published, markerKey);
+        const hasPublishedRecord = Object.prototype.hasOwnProperty.call(
+          document.published,
+          markerKey,
+        );
         const hasStagedRecord = PROJECT_WORKSPACE_MIGRATION_SLICE_KINDS.some((kind) =>
-          Object.prototype.hasOwnProperty.call(document.staged, projectWorkspaceStagingSliceKey(projectId, kind)),
+          Object.prototype.hasOwnProperty.call(
+            document.staged,
+            projectWorkspaceStagingSliceKey(projectId, kind),
+          ),
         );
         if (document.diagnostics.store !== undefined) {
           throw new Error(document.diagnostics.store);
@@ -479,7 +485,7 @@ export function createActivationGatedAutomationHost(
     executeTool: async (request) => {
       if (request.projectId !== undefined) {
         await activation.ensureProjectWorkspaceActivated(request.projectId);
- }
+      }
       return host.executeTool(request);
     },
   };

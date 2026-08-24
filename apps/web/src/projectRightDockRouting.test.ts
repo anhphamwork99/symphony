@@ -15,7 +15,11 @@ import { ProjectId, ThreadId } from "@synara/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { resolveDockTerminalScope } from "./lib/dockTerminalScope";
-import { resolveDockOwnerProjectId, selectRightDockState, useRightDockStore } from "./rightDockStore";
+import {
+  resolveDockOwnerProjectId,
+  selectRightDockState,
+  useRightDockStore,
+} from "./rightDockStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
 import { createThreadProjectIdSelector } from "./storeSelectors";
 import type { AppState } from "./storeState";
@@ -69,7 +73,7 @@ function routeActiveThreadDock(activeThreadId: ThreadId | null) {
   const dockState = selectRightDockState(ownerProjectId)(useRightDockStore.getState());
   const terminalScope = resolveDockTerminalScope({
     projectId: ownerProjectId,
-  })!
+  })!;
   return { ownerProjectId, dockState, terminalScope };
 }
 

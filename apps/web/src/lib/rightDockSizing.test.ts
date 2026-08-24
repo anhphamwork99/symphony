@@ -135,31 +135,31 @@ describe("preferred width persistence (Project Contract scenario 8)", () => {
 
     // User drags to a comfortable width: remembered.
     setPreferredWidth(projectId, 520);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(520);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      520,
+    );
 
     // A narrow window's render-only clamp (below the schema floor) never writes.
     setPreferredWidth(projectId, 64);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(520);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      520,
+    );
 
     // Reopening after the window widens: the remembered width opens clamped
     // only downward by the geometric ceiling and the preference survives.
     const shellWidth = 1200;
     const opened = clampRightDockOpenWidth(520, shellWidth, RIGHT_DOCK_NORMAL_MIN_WIDTH);
     expect(opened).toBe(520);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(520);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      520,
+    );
 
     // A clamp while the shell is narrow renders smaller without persisting.
     const clamped = clampRightDockShrinkWidth(520, 700);
     expect(clamped).toBeLessThan(520);
-    expect(
-      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
-    ).toBe(520);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx).toBe(
+      520,
+    );
     useRightDockStore.setState({ dockStateByProjectId: {} });
   });
 

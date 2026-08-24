@@ -189,7 +189,10 @@ export function ComposerLocalDirectoryMenu(props: {
       if (cancelled) return;
       const api = readNativeApi();
       if (!api) {
-        setErrorState({ dir: expandedDirectory, message: "App is still connecting. Try again in a moment." });
+        setErrorState({
+          dir: expandedDirectory,
+          message: "App is still connecting. Try again in a moment.",
+        });
         return;
       }
 

@@ -71,9 +71,7 @@ import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { REQUIRED_SNAPSHOT_PROJECTORS } from "./ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
-import {
-  ProjectWorkspaceStore,
-} from "../../projectWorkspace/Services/ProjectWorkspaceStore.ts";
+import { ProjectWorkspaceStore } from "../../projectWorkspace/Services/ProjectWorkspaceStore.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -796,18 +794,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
         const terminalRuntime = terminalManager;
-        yield* terminalRuntime
-          .beginProjectDeletionFence({ projectId: command.projectId })
-          .pipe(
-            Effect.mapError(
-              (cause): OrchestrationDispatchError =>
-                new OrchestrationCommandInvariantError({
-                  commandType: command.type,
-                  detail: `Project deletion could not begin its terminal admission fence: ${describeSettlementFailureFor(command.type)(cause)}`,
-                  cause,
-                }),
-            ),
-          );
+        yield* terminalRuntime.beginProjectDeletionFence({ projectId: command.projectId }).pipe(
+          Effect.mapError(
+            (cause): OrchestrationDispatchError =>
+              new OrchestrationCommandInvariantError({
+                commandType: command.type,
+                detail: `Project deletion could not begin its terminal admission fence: ${describeSettlementFailureFor(command.type)(cause)}`,
+                cause,
+              }),
+          ),
+        );
         const describeSettlementFailure = describeSettlementFailureFor(command.type);
         const preflight = yield* terminalRuntime
           .listProjectTerminals({ projectId: command.projectId })
@@ -848,9 +844,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           // Settlement is unproven: release the deleting fence so the Project's
           // terminals remain usable, then reject. Nothing was committed and the
           // terminal runtime retained every session and history truthfully.
-          yield* terminalRuntime.releaseProjectDeletionFence({ projectId: command.projectId }).pipe(
-            Effect.ignore,
-          );
+          yield* terminalRuntime
+            .releaseProjectDeletionFence({ projectId: command.projectId })
+            .pipe(Effect.ignore);
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail:
@@ -870,9 +866,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       const releaseDeletionFence = () =>
         deletionFenceProjectId === null || terminalManager === undefined
           ? Effect.void
-          : terminalManager.releaseProjectDeletionFence({ projectId: deletionFenceProjectId }).pipe(
-              Effect.ignore,
-            );
+          : terminalManager
+              .releaseProjectDeletionFence({ projectId: deletionFenceProjectId })
+              .pipe(Effect.ignore);
 
       const transactionalCommitEffect: Effect.Effect<
         CommittedCommandResult,
@@ -1014,47 +1010,45 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         }),
       );
 
-      const committedCommand = yield* sql
-        .withTransaction(transactionalCommitEffect)
-        .pipe(
-          Effect.catchTag("SqlError", (sqlError) =>
-            Effect.fail(
-              toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(sqlError),
-            ),
+      const committedCommand = yield* sql.withTransaction(transactionalCommitEffect).pipe(
+        Effect.catchTag("SqlError", (sqlError) =>
+          Effect.fail(
+            toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(sqlError),
           ),
-          // WP4 admission fence: the deletion transaction COMMITTED, so promote
-          // the `deleting` fence to the retained `deleted` fence immediately —
-          // later failures in this dispatch (projection catch-up, event
-          // publish) cannot un-commit `project.deleted`, so the fence must not
-          // be released even if the dispatch continuation fails afterwards.
-          Effect.tap(() =>
-            deletionFenceProjectId === null || terminalManager === undefined
-              ? Effect.void
-              : terminalManager
-                  .commitProjectDeletionFence({ projectId: deletionFenceProjectId })
-                  .pipe(
-                    Effect.mapError(
-                      (cause): OrchestrationDispatchError =>
-                        new OrchestrationCommandInternalError({
-                          commandId: envelope.command.commandId,
-                          commandType: envelope.command.type,
-                          detail:
-                            "The Project deletion committed but its terminal admission fence could not be promoted to deleted.",
-                          cause,
-                        }),
-                    ),
+        ),
+        // WP4 admission fence: the deletion transaction COMMITTED, so promote
+        // the `deleting` fence to the retained `deleted` fence immediately —
+        // later failures in this dispatch (projection catch-up, event
+        // publish) cannot un-commit `project.deleted`, so the fence must not
+        // be released even if the dispatch continuation fails afterwards.
+        Effect.tap(() =>
+          deletionFenceProjectId === null || terminalManager === undefined
+            ? Effect.void
+            : terminalManager
+                .commitProjectDeletionFence({ projectId: deletionFenceProjectId })
+                .pipe(
+                  Effect.mapError(
+                    (cause): OrchestrationDispatchError =>
+                      new OrchestrationCommandInternalError({
+                        commandId: envelope.command.commandId,
+                        commandType: envelope.command.type,
+                        detail:
+                          "The Project deletion committed but its terminal admission fence could not be promoted to deleted.",
+                        cause,
+                      }),
                   ),
+                ),
+        ),
+        // The deletion transaction FAILED (SqlError or a typed invariant):
+        // nothing committed, so release the `deleting` fence and keep the
+        // Project's terminals usable for the truthful retry.
+        Effect.catch((error: OrchestrationDispatchError) =>
+          releaseDeletionFence().pipe(
+            Effect.flatMap(() => Effect.fail(error)),
+            Effect.orDie,
           ),
-          // The deletion transaction FAILED (SqlError or a typed invariant):
-          // nothing committed, so release the `deleting` fence and keep the
-          // Project's terminals usable for the truthful retry.
-          Effect.catch((error: OrchestrationDispatchError) =>
-            releaseDeletionFence().pipe(
-              Effect.flatMap(() => Effect.fail(error)),
-              Effect.orDie,
-            ),
-          ),
-        );
+        ),
+      );
 
       commandReadModel = committedCommand.nextCommandReadModel;
       yield* Effect.forEach(

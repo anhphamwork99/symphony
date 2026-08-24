@@ -82,9 +82,7 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { invalidateProjectFileQueriesForCwds, projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { useProjectRunStore } from "../projectRunStore";
-import {
-  dockTerminalProjectScope,
-} from "../lib/dockTerminalScope";
+import { dockTerminalProjectScope } from "../lib/dockTerminalScope";
 import {
   activateProjectWorkspace,
   type ProjectWorkspaceThreadSnapshot,
@@ -1500,14 +1498,16 @@ function EventRouter() {
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
-      const activeThreadIds = new Set<TerminalStateScope>(collectActiveTerminalThreadIds({
-        snapshotThreads: getThreadsFromState(useStore.getState()).map((thread) => ({
-          id: thread.id,
-          deletedAt: null,
-          archivedAt: thread.archivedAt ?? null,
-        })),
-        draftThreadIds,
-      }));
+      const activeThreadIds = new Set<TerminalStateScope>(
+        collectActiveTerminalThreadIds({
+          snapshotThreads: getThreadsFromState(useStore.getState()).map((thread) => ({
+            id: thread.id,
+            deletedAt: null,
+            archivedAt: thread.archivedAt ?? null,
+          })),
+          draftThreadIds,
+        }),
+      );
       // Right-dock terminals live under the owning Project's scope (Decision
       // 0002): retain the scope of every live Project so docked terminals are
       // never pruned by conversation churn. There is no draft-thread scope.

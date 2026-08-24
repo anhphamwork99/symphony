@@ -1,6 +1,13 @@
 import { Schema } from "effect";
 
-import { CommandId, EnvironmentId, NonNegativeInt, PositiveInt, ProjectId, ThreadId } from "./baseSchemas";
+import {
+  CommandId,
+  EnvironmentId,
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  ThreadId,
+} from "./baseSchemas";
 import { BoundedUtf8String, utf8ByteLength } from "./browserAutomationBounds";
 
 const BrowserUuidId = <Brand extends string>(brand: Brand) =>

@@ -26,49 +26,49 @@ Not Ticket 02's test-only WP-C write set; not Ticket 04 composition.
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1 — Mechanical derivation:** Staging derives the prompt-file
-  dependency closure mechanically from the clean pinned extension's actual
-  runtime prompt-read graph, rooted at the child execution entry path. It
-  resolves the path expressions used by `buildAgentPrompt`, collects every
-  file passed to the required prompt reader, and normalizes each result
-  inside the pinned Alfie repository. A derivation test against the clean
-  current pin produces exactly the four current prompt dependencies
-  (`agent/system/subagent-system.md`, `agent/system/tool-guidelines.md`,
-  `agent/system/skill-rules.md`, `agent/system/working-style.md`).
-  Negative fixtures prove that a new required prompt read is automatically
-  included or causes staging to fail — not silently omitted. A
-  hand-maintained four-name allowlist is insufficient.
+      dependency closure mechanically from the clean pinned extension's actual
+      runtime prompt-read graph, rooted at the child execution entry path. It
+      resolves the path expressions used by `buildAgentPrompt`, collects every
+      file passed to the required prompt reader, and normalizes each result
+      inside the pinned Alfie repository. A derivation test against the clean
+      current pin produces exactly the four current prompt dependencies
+      (`agent/system/subagent-system.md`, `agent/system/tool-guidelines.md`,
+      `agent/system/skill-rules.md`, `agent/system/working-style.md`).
+      Negative fixtures prove that a new required prompt read is automatically
+      included or causes staging to fail — not silently omitted. A
+      hand-maintained four-name allowlist is insufficient.
 - [x] **AC2 — Fail-closed derivation and staging:** Unsupported dynamic
-  paths, path escape, untracked input, dirty derived input, missing/empty
-  files, and symlinks fail staging. The four files are non-empty regular
-  files; a required prompt read resolving to an empty file fails closed.
+      paths, path escape, untracked input, dirty derived input, missing/empty
+      files, and symlinks fail staging. The four files are non-empty regular
+      files; a required prompt read resolving to an empty file fails closed.
 - [x] **AC3 — Deterministic manifest-exact staging:** Repeat staging of the
-  same pinned input yields an identical manifest, and every derived prompt
-  file is a manifest-listed regular file with exact size and SHA-256 digest,
-  staged at its original `agent/system/...` relative path from the exact
-  clean pinned Alfie commit (never an ambient checkout state).
+      same pinned input yields an identical manifest, and every derived prompt
+      file is a manifest-listed regular file with exact size and SHA-256 digest,
+      staged at its original `agent/system/...` relative path from the exact
+      clean pinned Alfie commit (never an ambient checkout state).
 - [x] **AC4 — Expanded verification:** Verification covers `agent/system`:
-  missing, tampered, unlisted, path-escaping, non-regular, and symlinked
-  entries under `agent/system` fail with the existing bounded diagnostic
-  categories, with bidirectional exact-tree matching and no partial trust. A
-  negative control removing or altering a required prompt file is rejected
-  by artifact verification before managed runtime use.
+      missing, tampered, unlisted, path-escaping, non-regular, and symlinked
+      entries under `agent/system` fail with the existing bounded diagnostic
+      categories, with bidirectional exact-tree matching and no partial trust. A
+      negative control removing or altering a required prompt file is rejected
+      by artifact verification before managed runtime use.
 - [x] **AC5 — Real child-spawn closure proof:** A real production-loader
-  controlled-artifact proof verifies the artifact before and after loading,
-  excludes user/global/ancestor/`NODE_PATH` canaries, invokes the real
-  Agent, and reaches at least the first real deterministic child model
-  request. Merely observing the Agent tool at extension-load time is not
-  sufficient closure evidence. If the real-checkout input is unavailable, the
-  leg records an explicit skip, never a silent pass.
+      controlled-artifact proof verifies the artifact before and after loading,
+      excludes user/global/ancestor/`NODE_PATH` canaries, invokes the real
+      Agent, and reaches at least the first real deterministic child model
+      request. Merely observing the Agent tool at extension-load time is not
+      sufficient closure evidence. If the real-checkout input is unavailable, the
+      leg records an explicit skip, never a silent pass.
 - [x] **AC6 — Exclusion and fail-close ordering:** Exclusion proof (no
-  credentials, authentication data, model configuration, key material, or
-  user-global extension content enters the artifact) and the desktop
-  fail-close-ordering proof (invalid artifact rejects
-  `managed-subagent-unavailable` before Pi SDK import, extension/global
-  discovery, and durable side effects) are rerun against the expanded
-  closure, with no fallback.
+      credentials, authentication data, model configuration, key material, or
+      user-global extension content enters the artifact) and the desktop
+      fail-close-ordering proof (invalid artifact rejects
+      `managed-subagent-unavailable` before Pi SDK import, extension/global
+      discovery, and durable side effects) are rerun against the expanded
+      closure, with no fallback.
 - [x] **AC7 — Review and acceptance:** Focused stager/verifier/runtime tests
-  pass, followed by an independent Ticket 01c review and exactly one Ticket
-  01c final-acceptance consultation.
+      pass, followed by an independent Ticket 01c review and exactly one Ticket
+      01c final-acceptance consultation.
 
 ## No-goals
 

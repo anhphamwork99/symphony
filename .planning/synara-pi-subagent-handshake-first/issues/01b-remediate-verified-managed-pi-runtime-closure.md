@@ -19,34 +19,34 @@ exact host-alias supply; the current host alias is not itself sufficient.
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1:** Staging from the clean pinned Alfie checkout assembles the
-  self-contained artifact — `agent/extensions/pi-subagents`, the necessary
-  `agent/extensions/shared` content it imports, and the lock-proven
-  release-owned `node_modules` regular-file dependency closure — with every
-  regular file recorded in the deterministic manifest with size and
-  SHA-256 digest.
+      self-contained artifact — `agent/extensions/pi-subagents`, the necessary
+      `agent/extensions/shared` content it imports, and the lock-proven
+      release-owned `node_modules` regular-file dependency closure — with every
+      regular file recorded in the deterministic manifest with size and
+      SHA-256 digest.
 - [x] **AC2:** Repeat staging of the same pinned input yields an identical
-  manifest, and dependency selection is proven from the lockfile rather than
-  a floating range or an ambient/user install.
+      manifest, and dependency selection is proven from the lockfile rather than
+      a floating range or an ambient/user install.
 - [x] **AC3:** Verification covers the expanded closure: missing, tampered,
-  unlisted, path-escaping, or symlinked entries anywhere in `shared` or
-  `node_modules` fail with the existing bounded categories, before Pi SDK
-  import and global discovery, with no partial trust and no
-  sensitive-diagnostic disclosure.
+      unlisted, path-escaping, or symlinked entries anywhere in `shared` or
+      `node_modules` fail with the existing bounded categories, before Pi SDK
+      import and global discovery, with no partial trust and no
+      sensitive-diagnostic disclosure.
 - [x] **AC4:** The Decision 0007 supported host-peer prerequisite is satisfied
-  by the aligned `0.83.0` production host in `799af158a`. Per Decision 0008,
-  the real pinned extension entry must load from the staged artifact alone with
-  `@sinclair/typebox@0.34.49` resolving artifact-locally (or from qualifying
-  exact host supply), global/ambient resolution excluded, and no post-verify
-  mutation; its `shared` and remaining dependency imports must resolve. If the
-  real-checkout input is unavailable, the leg records an explicit skip, never
-  a silent pass.
+      by the aligned `0.83.0` production host in `799af158a`. Per Decision 0008,
+      the real pinned extension entry must load from the staged artifact alone with
+      `@sinclair/typebox@0.34.49` resolving artifact-locally (or from qualifying
+      exact host supply), global/ambient resolution excluded, and no post-verify
+      mutation; its `shared` and remaining dependency imports must resolve. If the
+      real-checkout input is unavailable, the leg records an explicit skip, never
+      a silent pass.
 - [x] **AC5:** Exclusion proof: the artifact contains no user
-  authentication, model configuration, credentials, key material, or
-  user-global extension content.
+      authentication, model configuration, credentials, key material, or
+      user-global extension content.
 - [x] **AC6:** The desktop fail-close ordering proof is rerun against the
-  expanded closure: an invalid artifact rejects
-  `managed-subagent-unavailable` before Pi SDK import, agent-directory/global
-  discovery, and durable side effects, with no fallback.
+      expanded closure: an invalid artifact rejects
+      `managed-subagent-unavailable` before Pi SDK import, agent-directory/global
+      discovery, and durable side effects, with no fallback.
 
 ## No-goals
 

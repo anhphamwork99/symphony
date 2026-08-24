@@ -2614,26 +2614,28 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
-  it.effect("hydrates pi subagent execution cards with current-generation truth in the global snapshot", () =>
-    Effect.gen(function* () {
-      // Regression (WP-04a): the global getSnapshot() execution-card query
-      // ranks its outer rows as `ranked` and used to fail at prepare with
-      // `no such column: base.observed_state`, which PiAdapter mapped to an
-      // admission-unauthorized failure. The global path must share the exact
-      // current-truth derivation of the thread-scoped path.
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const sql = yield* SqlClient.SqlClient;
+  it.effect(
+    "hydrates pi subagent execution cards with current-generation truth in the global snapshot",
+    () =>
+      Effect.gen(function* () {
+        // Regression (WP-04a): the global getSnapshot() execution-card query
+        // ranks its outer rows as `ranked` and used to fail at prepare with
+        // `no such column: base.observed_state`, which PiAdapter mapped to an
+        // admission-unauthorized failure. The global path must share the exact
+        // current-truth derivation of the thread-scoped path.
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM pi_subagent_completion_outbox`;
-      yield* sql`DELETE FROM pi_subagent_lifecycle_journal`;
-      yield* sql`DELETE FROM pi_subagent_executions`;
-      yield* sql`DELETE FROM projection_thread_activities`;
-      yield* sql`DELETE FROM projection_thread_messages`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_state`;
+        yield* sql`DELETE FROM pi_subagent_completion_outbox`;
+        yield* sql`DELETE FROM pi_subagent_lifecycle_journal`;
+        yield* sql`DELETE FROM pi_subagent_executions`;
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_thread_messages`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_state`;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_projects (
           project_id, title, workspace_root, default_model_selection_json,
           scripts_json, created_at, updated_at, deleted_at
@@ -2643,7 +2645,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z', NULL
         )
       `;
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_threads (
           thread_id, project_id, title, model_selection_json, branch, worktree_path,
           latest_turn_id, created_at, updated_at, deleted_at
@@ -2653,7 +2655,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-08-23T00:00:01.000Z', '2026-08-23T00:00:01.000Z', NULL
         )
       `;
-      yield* sql`
+        yield* sql`
         INSERT INTO pi_subagent_executions (
           execution_id, attempt_id, generation, command_id, command_fingerprint,
           client_command_id, subject, project_id, parent_thread_id, parent_turn_id,
@@ -2687,9 +2689,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '2026-08-23T00:00:03.000Z', '2026-08-23T00:00:03.000Z'
           )
       `;
-      // Exact-identity journal evidence: seq-3 detach for the second
-      // execution, band-75 teardown request for both.
-      yield* sql`
+        // Exact-identity journal evidence: seq-3 detach for the second
+        // execution, band-75 teardown request for both.
+        yield* sql`
         INSERT INTO pi_subagent_lifecycle_journal (
           event_id, execution_id, attempt_id, generation, sequence, state,
           occurred_at, diagnostic_code, diagnostic_message, metadata_json
@@ -2711,7 +2713,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '2026-08-23T00:00:04.500Z', NULL, NULL, NULL
           )
       `;
-      yield* sql`
+        yield* sql`
         INSERT INTO pi_subagent_completion_outbox (
           outbox_id, execution_id, attempt_id, generation, terminal_event_id,
           parent_thread_id, delivery_state, terminal_state, summary, transcript_ref,
@@ -2726,42 +2728,40 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      const snapshot = yield* snapshotQuery.getSnapshot();
-      const thread = snapshot.threads.find(
-        (candidate) => candidate.id === asThreadId("thread-global-cards"),
-      );
-      assert.isDefined(thread);
-      const cards = thread?.piSubagentExecutions ?? [];
-      assert.equal(cards.length, 2);
+        const snapshot = yield* snapshotQuery.getSnapshot();
+        const thread = snapshot.threads.find(
+          (candidate) => candidate.id === asThreadId("thread-global-cards"),
+        );
+        assert.isDefined(thread);
+        const cards = thread?.piSubagentExecutions ?? [];
+        assert.equal(cards.length, 2);
 
-      const live = cards.find((card) => card.executionId === "exec-global-live");
-      assert.isDefined(live);
-      assert.equal(live?.currentAttachment, "attached");
-      assert.equal(live?.currentTeardownEvidence, "requested");
-      assert.equal(live?.deliveryState, "pending");
-      assert.equal(live?.observedState, "running");
+        const live = cards.find((card) => card.executionId === "exec-global-live");
+        assert.isDefined(live);
+        assert.equal(live?.currentAttachment, "attached");
+        assert.equal(live?.currentTeardownEvidence, "requested");
+        assert.equal(live?.deliveryState, "pending");
+        assert.equal(live?.observedState, "running");
 
-      const detached = cards.find((card) => card.executionId === "exec-global-detached");
-      assert.isDefined(detached);
-      assert.equal(detached?.currentAttachment, "detached");
-      assert.equal(detached?.currentTeardownEvidence, "requested");
+        const detached = cards.find((card) => card.executionId === "exec-global-detached");
+        assert.isDefined(detached);
+        assert.equal(detached?.currentAttachment, "detached");
+        assert.equal(detached?.currentTeardownEvidence, "requested");
 
-      // The thread-scoped path must agree exactly with the global path —
-      // one current-truth derivation, two aliases.
-      const detail = yield* snapshotQuery.getThreadDetailById(
-        asThreadId("thread-global-cards"),
-      );
-      assert.isTrue(Option.isSome(detail));
-      const detailCards = Option.isSome(detail) ? detail.value.piSubagentExecutions ?? [] : [];
-      assert.equal(detailCards.length, 2);
-      const detailLive = detailCards.find((card) => card.executionId === "exec-global-live");
-      const detailDetached = detailCards.find(
-        (card) => card.executionId === "exec-global-detached",
-      );
-      assert.equal(detailLive?.currentAttachment, live?.currentAttachment);
-      assert.equal(detailLive?.currentTeardownEvidence, live?.currentTeardownEvidence);
-      assert.equal(detailDetached?.currentAttachment, detached?.currentAttachment);
-      assert.equal(detailDetached?.currentTeardownEvidence, detached?.currentTeardownEvidence);
-    }),
+        // The thread-scoped path must agree exactly with the global path —
+        // one current-truth derivation, two aliases.
+        const detail = yield* snapshotQuery.getThreadDetailById(asThreadId("thread-global-cards"));
+        assert.isTrue(Option.isSome(detail));
+        const detailCards = Option.isSome(detail) ? (detail.value.piSubagentExecutions ?? []) : [];
+        assert.equal(detailCards.length, 2);
+        const detailLive = detailCards.find((card) => card.executionId === "exec-global-live");
+        const detailDetached = detailCards.find(
+          (card) => card.executionId === "exec-global-detached",
+        );
+        assert.equal(detailLive?.currentAttachment, live?.currentAttachment);
+        assert.equal(detailLive?.currentTeardownEvidence, live?.currentTeardownEvidence);
+        assert.equal(detailDetached?.currentAttachment, detached?.currentAttachment);
+        assert.equal(detailDetached?.currentTeardownEvidence, detached?.currentTeardownEvidence);
+      }),
   );
 });

@@ -61,7 +61,9 @@ function parseBrowserAnnotationEvent(payload: unknown): BrowserAnnotationEvent |
   return payload as BrowserAnnotationEvent;
 }
 
-function parseProjectBrowserAnnotationEvent(payload: unknown): BrowserAnnotationProjectEvent | null {
+function parseProjectBrowserAnnotationEvent(
+  payload: unknown,
+): BrowserAnnotationProjectEvent | null {
   if (!payload || typeof payload !== "object") return null;
   const event = payload as Record<string, unknown>;
   if (

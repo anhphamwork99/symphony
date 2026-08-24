@@ -54,7 +54,7 @@ A prior independent review of the `4e6ee09c2` candidate found defects;
 
 1. **P1 — cross-module reachability.** Static derivation previously stopped
    at the prompt-builder module, so a required prompt read living in an
-   *imported helper* could be silently omitted. Remediated: the analyzer now
+   _imported helper_ could be silently omitted. Remediated: the analyzer now
    traverses the reachable **relative** import graph from `buildAgentPrompt`,
    analyzing imported helpers in their own module's lexical scope; a fifth
    literal read inside an imported helper is derived automatically, and an
@@ -62,18 +62,18 @@ A prior independent review of the `4e6ee09c2` candidate found defects;
    `prompt_closure_unsupported` (nonrelative imports referenced from the
    reachable graph are rejected, not skipped). Proven by
    `P1 regression: a FIFTH literal required read inside an IMPORTED helper
-   module is derived automatically` and
+module is derived automatically` and
    `an imported helper with a dynamic required read fails unsupported (no
-   silent omission)` in the derivation suite, plus the corresponding staging
+silent omission)` in the derivation suite, plus the corresponding staging
    synthetic regressions.
 2. **P1 — same-name reader exemption.** Reader-ness was previously keyed by
-   identifier name, so a *different* function reusing the reader's parameter
+   identifier name, so a _different_ function reusing the reader's parameter
    name could be miscredited as a required read. Remediated: lexical node
    identity — a `readFileSync` call is "routed through the reader" only when
    the call site is inside the recognized reader's own body AND its path
    argument resolves lexically to that reader's own parameter declaration.
    Proven by `a same-NAME parameter raw readFileSync … is rejected, not
-   silently ignored` (derivation) and `never silently staged four` (staging).
+silently ignored` (derivation) and `never silently staged four` (staging).
 3. **P2 — static marker in the real-load proof.** The AC5 prompt-byte
    provenance previously matched a copied static string. Remediated: markers
    are now derived at runtime from the actual manifest-listed staged
@@ -89,15 +89,15 @@ A prior independent review of the `4e6ee09c2` candidate found defects;
 
 ## Criterion evidence
 
-| AC | Verdict | Evidence |
-| --- | --- | --- |
-| T01c-AC1 mechanical derivation | PASS | The clean current pin derives exactly `agent/system/subagent-system.md`, `tool-guidelines.md`, `skill-rules.md`, `working-style.md`; deterministic repeat; a fifth literal read — same-module or in an imported helper — is included automatically (`it` names at `piSubagentPromptClosureDerivation.test.ts:231`, `:248`, `:290`; staging synthetic AC1 fixtures). No hand-maintained allowlist exists in the derivation module. |
-| T01c-AC2 fail-closed derivation/staging | PASS | Dynamic (Date-derived), template-substitution, unresolved-identifier, and computed-`SYSTEM_DIR` paths fail `prompt_closure_unsupported`; repository-root escape and missing modules fail `prompt_closure_invalid`; untracked, dirty, absent, empty, and symlinked derived inputs fail staging (staging `it`s at `piSubagentArtifactStaging.test.ts:768`–`823`). |
-| T01c-AC3 deterministic manifest-exact staging | PASS | Repeat staging produces an identical manifest (staging `:348`); every derived prompt file is a manifest-listed regular file with exact size/SHA-256 staged from the clean pinned commit; the whole `agent/system` tree must be clean (`piSubagentArtifactStaging.ts:530`–`541`). |
-| T01c-AC4 expanded verification | PASS | `it.for(EXPANDED_SUBTREES)` covers `agent/system` (and `shared`, `node_modules`) for missing, tampered, unlisted, path-escape, non-regular, and symlinked entries with bounded categories and no partial trust (`piSubagentArtifactVerifier.test.ts:669`–`795`; gate `:417`–`492`). |
-| T01c-AC5 real child-spawn closure | PASS | The staged artifact alone — with user/global/ancestor/`NODE_PATH` resolution canaries and prompt-location decoys installed at every non-artifact prompt root — drives a real Agent delegation to a real deterministic child model request whose prompt bytes provably come from the staged `agent/system` closure; verify-before-load and verify-after-load both hold; absent `ALFIE_REPO_DIR` is an explicit `describe.skipIf`, never a silent pass (`piSubagentArtifactClosureRealLoad.test.ts:621`–`855`). |
-| T01c-AC6 exclusion and fail-close ordering | PASS | Deleted, same-length-tampered, and symlink-replaced required prompt files each fail both verification and the desktop gate before any runtime use, with zero model requests, canary/decoy bytes unchanged, and the untouched good artifact still verifying (`piSubagentArtifactClosureRealLoad.test.ts:858`–`1012`); prohibited auth/model/key payload rejection retained (staging `:540`). |
-| T01c-AC7 review + consultation | PASS | Focused suites independently re-executed (below); this review is the required independent review; the consultation is recommended and not yet held. |
+| AC                                            | Verdict | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T01c-AC1 mechanical derivation                | PASS    | The clean current pin derives exactly `agent/system/subagent-system.md`, `tool-guidelines.md`, `skill-rules.md`, `working-style.md`; deterministic repeat; a fifth literal read — same-module or in an imported helper — is included automatically (`it` names at `piSubagentPromptClosureDerivation.test.ts:231`, `:248`, `:290`; staging synthetic AC1 fixtures). No hand-maintained allowlist exists in the derivation module.                                                                             |
+| T01c-AC2 fail-closed derivation/staging       | PASS    | Dynamic (Date-derived), template-substitution, unresolved-identifier, and computed-`SYSTEM_DIR` paths fail `prompt_closure_unsupported`; repository-root escape and missing modules fail `prompt_closure_invalid`; untracked, dirty, absent, empty, and symlinked derived inputs fail staging (staging `it`s at `piSubagentArtifactStaging.test.ts:768`–`823`).                                                                                                                                               |
+| T01c-AC3 deterministic manifest-exact staging | PASS    | Repeat staging produces an identical manifest (staging `:348`); every derived prompt file is a manifest-listed regular file with exact size/SHA-256 staged from the clean pinned commit; the whole `agent/system` tree must be clean (`piSubagentArtifactStaging.ts:530`–`541`).                                                                                                                                                                                                                              |
+| T01c-AC4 expanded verification                | PASS    | `it.for(EXPANDED_SUBTREES)` covers `agent/system` (and `shared`, `node_modules`) for missing, tampered, unlisted, path-escape, non-regular, and symlinked entries with bounded categories and no partial trust (`piSubagentArtifactVerifier.test.ts:669`–`795`; gate `:417`–`492`).                                                                                                                                                                                                                           |
+| T01c-AC5 real child-spawn closure             | PASS    | The staged artifact alone — with user/global/ancestor/`NODE_PATH` resolution canaries and prompt-location decoys installed at every non-artifact prompt root — drives a real Agent delegation to a real deterministic child model request whose prompt bytes provably come from the staged `agent/system` closure; verify-before-load and verify-after-load both hold; absent `ALFIE_REPO_DIR` is an explicit `describe.skipIf`, never a silent pass (`piSubagentArtifactClosureRealLoad.test.ts:621`–`855`). |
+| T01c-AC6 exclusion and fail-close ordering    | PASS    | Deleted, same-length-tampered, and symlink-replaced required prompt files each fail both verification and the desktop gate before any runtime use, with zero model requests, canary/decoy bytes unchanged, and the untouched good artifact still verifying (`piSubagentArtifactClosureRealLoad.test.ts:858`–`1012`); prohibited auth/model/key payload rejection retained (staging `:540`).                                                                                                                   |
+| T01c-AC7 review + consultation                | PASS    | Focused suites independently re-executed (below); this review is the required independent review; the consultation is recommended and not yet held.                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Focused commands and counts (independently re-run)
 

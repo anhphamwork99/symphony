@@ -107,7 +107,9 @@ export interface DesktopBrowserAutomationHostOptions {
 interface SessionAffinity {
   readonly provider: string;
   /** Owning workspace: Project when the request carried one, Thread otherwise. */
-  readonly owner: { kind: "thread"; threadId: ThreadId } | { kind: "project"; projectId: ProjectId };
+  readonly owner:
+    | { kind: "thread"; threadId: ThreadId }
+    | { kind: "project"; projectId: ProjectId };
   /** Provenance conversation; never a workspace key for Project owners. */
   readonly threadId: ThreadId;
   tabId: string | null;
@@ -751,9 +753,8 @@ export class DesktopBrowserAutomationHost {
       effectMayHaveCommitted: true,
       tabId: tabId as BrowserTabId,
     });
-    const releaseTracking = this.browserManager.trackOwnerAutomationDownload(
-      { owner, tabId },
-      () => interrupt(downloadError),
+    const releaseTracking = this.browserManager.trackOwnerAutomationDownload({ owner, tabId }, () =>
+      interrupt(downloadError),
     );
     try {
       const result = await action();
@@ -1108,11 +1109,8 @@ export class DesktopBrowserAutomationHost {
       const resolvedUrl =
         navigateInput.annotationId === undefined
           ? navigateInput.url
-          : this.resolveOwnerAnnotationTarget(
-              affinity,
-              navigateInput.annotationId,
-              targetTabId,
-            )?.url;
+          : this.resolveOwnerAnnotationTarget(affinity, navigateInput.annotationId, targetTabId)
+              ?.url;
       if (!resolvedUrl) {
         browserHostError({
           code: "BrowserNavigationBlocked",

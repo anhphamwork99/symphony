@@ -66,9 +66,7 @@ function promptsModule(options: {
   const unresolvedImportRead = options.unresolvedImportRead
     ? "  readRequiredPrompt(pathFromElsewhere),\n"
     : "";
-  const importedHelperRead = options.importedHelperRead
-    ? "  readImportedExtraPrompt(),\n"
-    : "";
+  const importedHelperRead = options.importedHelperRead ? "  readImportedExtraPrompt(),\n" : "";
   const importedHelperImport =
     options.importedHelperRead !== undefined
       ? 'import { readImportedExtraPrompt } from "./imported-prompts.js";\n'
@@ -181,7 +179,6 @@ const IMPORTED_SYSTEM_DIR = join(__dirname, "../../../system");
 ${literal}${reader}${exportedLiteralCall}${exportedRawCall}${exportedDynamicCall}`;
 }
 
-
 /** Synthetic pure source seam over in-memory module text. */
 function seamFor(modules: ReadonlyMap<string, string>): PromptClosureSourceSeam {
   return {
@@ -225,21 +222,18 @@ const CURRENT_FOUR = [
 ];
 
 describe("pi-subagents prompt closure derivation (Ticket 01c, AC1)", () => {
-  describe.skipIf(!REAL_ALFIE_REPO_DIR)(
-    "real pinned Alfie checkout",
-    () => {
-      it("derives exactly the four current runtime prompt dependencies", () => {
-        const closure = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
-        expect(closure.promptPaths).toEqual(CURRENT_FOUR);
-      });
+  describe.skipIf(!REAL_ALFIE_REPO_DIR)("real pinned Alfie checkout", () => {
+    it("derives exactly the four current runtime prompt dependencies", () => {
+      const closure = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
+      expect(closure.promptPaths).toEqual(CURRENT_FOUR);
+    });
 
-      it("derivation is deterministic (repeat invocation is identical)", () => {
-        const first = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
-        const second = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
-        expect(second.promptPaths).toEqual(first.promptPaths);
-      });
-    },
-  );
+    it("derivation is deterministic (repeat invocation is identical)", () => {
+      const first = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
+      const second = derivePromptClosureFromRepo({ repoDir: REAL_ALFIE_REPO_DIR });
+      expect(second.promptPaths).toEqual(first.promptPaths);
+    });
+  });
 
   it("derives exactly the four literal prompt reads from the synthetic pinned shape", () => {
     expect(derivePromptClosure(syntheticSeam()).promptPaths).toEqual(CURRENT_FOUR);
@@ -311,18 +305,14 @@ describe("pi-subagents prompt closure derivation (Ticket 01c, AC1)", () => {
     } catch (error) {
       const closureError = error as PiSubagentPromptClosureError;
       expect(closureError.code).toBe("prompt_closure_unsupported");
-      expect(closureError.message).toContain(
-        "outside the recognized required-prompt reader shape",
-      );
+      expect(closureError.message).toContain("outside the recognized required-prompt reader shape");
       expect(closureError.message).not.toContain(tmpdir());
     }
   });
 
   it("P1 regression: an imported helper whose own read is NOT the required-prompt reader shape fails unsupported", () => {
     expect(() =>
-      derivePromptClosure(
-        syntheticSeam({ importedHelperRead: "ignored.md" }, { rawRead: true }),
-      ),
+      derivePromptClosure(syntheticSeam({ importedHelperRead: "ignored.md" }, { rawRead: true })),
     ).toThrow(/outside the recognized required-prompt reader shape/);
   });
 
@@ -367,16 +357,12 @@ export function buildAgentPrompt()`,
 
   it("AC2: an unresolvable relative import fails unsupported", () => {
     const seam = seamFor(
-      new Map<string, string>([
-        [`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()],
-      ]),
+      new Map<string, string>([[`${EXT_SRC}/agent-runner.ts`, agentRunnerModule()]]),
     );
     // The pure seam resolves './prompts.js' but readSource then fails on the
     // absent module; the filesystem seam surfaces the dedicated unresolved-import
     // diagnostic ('./prompts.js') covered in the filesystem-seam test below.
-    expect(() => derivePromptClosure(seam)).toThrow(
-      /is missing from the synthetic fixture/,
-    );
+    expect(() => derivePromptClosure(seam)).toThrow(/is missing from the synthetic fixture/);
   });
 
   it("AC2: a missing module-directory anchor fails unsupported", () => {
@@ -415,10 +401,13 @@ export function buildAgentPrompt()`,
     const root = join(makeTempRoot("closure-escape-"), "alfie");
     mkdirSync(join(root, EXT_SRC), { recursive: true });
     writeFileSync(join(root, `${EXT_SRC}/agent-runner.ts`), agentRunnerModule());
-    writeFileSync(join(root, `${EXT_SRC}/prompts.ts`), promptsModule({}).replace(
-      'const SYSTEM_DIR = join(__dirname, "../../../system");',
-      'const SYSTEM_DIR = join(__dirname, "../../../../../../etc");',
-    ));
+    writeFileSync(
+      join(root, `${EXT_SRC}/prompts.ts`),
+      promptsModule({}).replace(
+        'const SYSTEM_DIR = join(__dirname, "../../../system");',
+        'const SYSTEM_DIR = join(__dirname, "../../../../../../etc");',
+      ),
+    );
     expect(() => derivePromptClosureFromRepo({ repoDir: root })).toThrow(
       /escapes the pinned repository/,
     );
@@ -437,9 +426,7 @@ export function buildAgentPrompt()`,
         ],
       ]),
     );
-    expect(() => derivePromptClosure(seam)).toThrow(
-      /does not anchor at the module directory/,
-    );
+    expect(() => derivePromptClosure(seam)).toThrow(/does not anchor at the module directory/);
   });
 
   it("AC2: a read with zero recognized reader calls fails unsupported (no silent empty closure)", () => {

@@ -145,7 +145,9 @@ const bridgeState = vi.hoisted(() => ({
    * createAgentSessionServices — used to emulate Pi SDK 0.83's session
    * setModel → settingsManager.setDefaultModelAndProvider persistence path.
    */
-  settingsManager: null as null | { setDefaultModelAndProvider: (provider: string, modelId: string) => void },
+  settingsManager: null as null | {
+    setDefaultModelAndProvider: (provider: string, modelId: string) => void;
+  },
   /**
    * Every emulated FILE-BACKED SettingsManager the SDK default would have
    * constructed (bound to the passed agentDir). Any entry or any write in it
@@ -626,20 +628,16 @@ const runStartSessionThenModelSwitch = async (input: {
 }> =>
   Effect.gen(function* () {
     const adapter = yield* PiAdapter;
-    const startOutcome = yield* Effect.exit(
-      adapter.startSession(startSessionInput as never),
-    );
+    const startOutcome = yield* Effect.exit(adapter.startSession(startSessionInput as never));
     const hasSession = yield* adapter.hasSession(startSessionInput.threadId);
     const sessions = yield* adapter.listSessions();
     const switchOutcome = Exit.isSuccess(startOutcome)
       ? yield* Effect.exit(
-          adapter.sendTurn(
-            {
-              threadId: startSessionInput.threadId,
-              input: "switch model please",
-              modelSelection: { provider: "pi", model: input.switchModel },
-            } as never,
-          ),
+          adapter.sendTurn({
+            threadId: startSessionInput.threadId,
+            input: "switch model please",
+            modelSelection: { provider: "pi", model: input.switchModel },
+          } as never),
         )
       : undefined;
     return {
@@ -651,15 +649,12 @@ const runStartSessionThenModelSwitch = async (input: {
         hasSession,
         listSessionCount: sessions.length,
       } satisfies RunResult,
-      switchFailure: switchOutcome && Exit.isFailure(switchOutcome)
-        ? (Cause.squash(switchOutcome.cause) as ProviderAdapterError)
-        : undefined,
+      switchFailure:
+        switchOutcome && Exit.isFailure(switchOutcome)
+          ? (Cause.squash(switchOutcome.cause) as ProviderAdapterError)
+          : undefined,
     };
-  }).pipe(
-    Effect.provide(makeAdapterLayer(input)),
-    Effect.scoped,
-    Effect.runPromise,
-  );
+  }).pipe(Effect.provide(makeAdapterLayer(input)), Effect.scoped, Effect.runPromise);
 
 // ---------------------------------------------------------------------------
 // Real verified mini artifact fixture

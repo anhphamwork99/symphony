@@ -17,19 +17,19 @@ and its remediation addendum finds no behavior or security regression. Ticket
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1:** Card projection includes bounded current-generation attachment
-  and teardown-evidence data derived from existing durable state without a
-  migration or schema rewrite.
+      and teardown-evidence data derived from existing durable state without a
+      migration or schema rewrite.
 - [x] **AC2:** A card presents `Running in background` only for a current
-  detached execution with a verified live owner.
+      detached execution with a verified live owner.
 - [x] **AC3:** Desired cancellation overrides an observed `running` label;
-  teardown uncertainty presents `Cancellation unverified` without a false
-  stopped claim.
+      teardown uncertainty presents `Cancellation unverified` without a false
+      stopped claim.
 - [x] **AC4:** Ownerless/no-terminal execution presents `Outcome unknown
-  (orphaned)`, has no spinner or Cancel action, and offers explicit Resume
-  only.
+(orphaned)`, has no spinner or Cancel action, and offers explicit Resume
+      only.
 - [x] **AC5:** Terminal and resumed generations do not inherit stale attachment
-  or teardown data; snapshot, replay, reconnect, card strip, and details agree
-  on the same presentation.
+      or teardown data; snapshot, replay, reconnect, card strip, and details agree
+      on the same presentation.
 
 ## Testing Seams
 
@@ -45,7 +45,7 @@ and its remediation addendum finds no behavior or security regression. Ticket
 - **AC3:** The web execution-card presentation boundary — a card whose
   observed state is `running` and desired state is `cancelling` presents
   `Cancelling`; authenticated teardown uncertainty presents `Cancellation
-  unverified` with no spinner or repeated Cancel.
+unverified` with no spinner or repeated Cancel.
 - **AC4:** The web execution-card control boundary — orphaned projection shows
   `Outcome unknown (orphaned)`, hides spinner/Cancel, and exposes explicit
   Resume only.
@@ -105,26 +105,26 @@ rejection is superseded by the binding Reassessment.
 
 ### Acceptance evidence
 
-| Criterion | Evidence | Result |
-| --- | --- | --- |
-| AC1 | Contract old-shape/default and closed-vocabulary tests; durable card-surface tests over list, identity read, snapshot, seq-3, background admission, bands 75/77/78, and explicit fresh fields | pass |
-| AC2 | Current-generation detach/background projection plus whole-card, strip, and reconnect tests for `Running in background`; attached and legacy-null cards remain `Running` | pass |
-| AC3 | Desired cancellation precedence; requested versus survivors/owner-unproven state table; no-spinner/no-repeat-control assertions; recorded 77/78 post-commit event publication and replay/stale suppression | pass |
-| AC4 | Whole-card, strip, dialog, and targeted ChatView browser journey prove exact orphan label, no spinner/Cancel, and explicit Resume only | pass |
-| AC5 | Resume and band-76 generation fences; list/get/snapshot agreement; old-event replay compatibility; snapshot/store/reconnect field preservation; strip and details share one presentation helper | pass |
+| Criterion | Evidence                                                                                                                                                                                                   | Result |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| AC1       | Contract old-shape/default and closed-vocabulary tests; durable card-surface tests over list, identity read, snapshot, seq-3, background admission, bands 75/77/78, and explicit fresh fields              | pass   |
+| AC2       | Current-generation detach/background projection plus whole-card, strip, and reconnect tests for `Running in background`; attached and legacy-null cards remain `Running`                                   | pass   |
+| AC3       | Desired cancellation precedence; requested versus survivors/owner-unproven state table; no-spinner/no-repeat-control assertions; recorded 77/78 post-commit event publication and replay/stale suppression | pass   |
+| AC4       | Whole-card, strip, dialog, and targeted ChatView browser journey prove exact orphan label, no spinner/Cancel, and explicit Resume only                                                                     | pass   |
+| AC5       | Resume and band-76 generation fences; list/get/snapshot agreement; old-event replay compatibility; snapshot/store/reconnect field preservation; strip and details share one presentation helper            | pass   |
 
 ### Verification
 
 - `cd packages/contracts && bun run test src/piSubagents.test.ts` — 34/34
   passed.
 - `cd apps/server && bun run test
-  src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts` — 17/17
+src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts` — 17/17
   passed.
 - `cd apps/web && bun run test
-  src/lib/piSubagentExecutionCardPresentation.test.ts
-  src/components/chat/PiSubagentExecutionCardStrip.test.tsx
-  src/piSubagentExecutionCardStore.test.ts
-  src/piSubagentExecutionCardReconnect.test.ts` — 40/40 passed.
+src/lib/piSubagentExecutionCardPresentation.test.ts
+src/components/chat/PiSubagentExecutionCardStrip.test.tsx
+src/piSubagentExecutionCardStore.test.ts
+src/piSubagentExecutionCardReconnect.test.ts` — 40/40 passed.
 - Dialog browser boundary — 6/6 passed.
 - Targeted ChatView orphan/Resume journey — 1/1 passed.
 - A full isolated-port ChatView browser run loaded and executed all 95 cases:

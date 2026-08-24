@@ -11,7 +11,12 @@
  * data wins and the two are never merged.
  */
 
-import type { ProjectBrowserState, ProjectId, ThreadBrowserState, ThreadId } from "@synara/contracts";
+import type {
+  ProjectBrowserState,
+  ProjectId,
+  ThreadBrowserState,
+  ThreadId,
+} from "@synara/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { isPlainObject, sanitizeStringKeyedRecord } from "./persistedRecord";

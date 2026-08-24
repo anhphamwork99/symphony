@@ -53,9 +53,7 @@ export interface AgentGatewayBrowserToolsOptions {
    * from public MCP arguments. Returning null keeps the legacy
    * provenance-only frame (no synthetic alias is ever fabricated).
    */
-  readonly resolveProjectWorkspace?: (
-    context: ToolContext,
-  ) => Effect.Effect<ProjectId | null>;
+  readonly resolveProjectWorkspace?: (context: ToolContext) => Effect.Effect<ProjectId | null>;
 }
 
 const NAMED_KEY_ALIASES = Object.freeze({
@@ -516,7 +514,9 @@ export function makeAgentGatewayBrowserTools(
           // Authoritative Thread→Project resolution (Decision 0002). One
           // resolution per tool call, outside public arguments; a null result
           // keeps the legacy frame rather than inventing an owner.
-          const projectId = yield* options.resolveProjectWorkspace?.(context) ?? Effect.succeed(null);
+          const projectId = yield* (
+            options.resolveProjectWorkspace?.(context) ?? Effect.succeed(null)
+          );
           const requestedTimeout = decodedArguments.timeoutMs;
           const timeoutMs =
             typeof requestedTimeout === "number"

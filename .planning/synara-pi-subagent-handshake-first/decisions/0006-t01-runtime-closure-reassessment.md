@@ -61,8 +61,7 @@ real-runtime acceptance?
     content.
 - The Ticket 02 worker challenged AC1–AC4 real-runtime acceptance on exactly
   this basis and refused substitutes (symlinked or shared-global resolution,
-  post-verify installation) that would violate Decisions 0001, 0003, and
-  0004.
+  post-verify installation) that would violate Decisions 0001, 0003, and 0004.
 - Resolving the omitted content at runtime from a user-global or ambient
   installation would reintroduce the mutable-global resolution this project
   exists to eliminate (Decision 0001) and would place execution outside

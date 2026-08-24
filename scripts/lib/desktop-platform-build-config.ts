@@ -38,8 +38,7 @@ export const PI_SUBAGENT_ARTIFACT_STAGED_PATH = `apps/desktop/prod-resources/${P
  * expansion in the glob covers both the directory entry itself and every
  * nested file inside its whole tree.
  */
-export const PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION =
-  `!${PI_SUBAGENT_ARTIFACT_STAGED_PATH}{,/**/*}`;
+export const PI_SUBAGENT_ARTIFACT_ASAR_EXCLUSION = `!${PI_SUBAGENT_ARTIFACT_STAGED_PATH}{,/**/*}`;
 
 /**
  * External resource mappings for the managed artifact. Advanced

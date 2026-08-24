@@ -1282,10 +1282,9 @@ export async function makeRealPiWsHarness(
     ...(options.desktopManaged === undefined
       ? {}
       : {
-          piSubagentDesktopArtifactGateEnv:
-            options.desktopManaged.backendEnv ?? {
-              SYNARA_PI_SUBAGENT_ARTIFACT_DIR: options.desktopManaged.artifactDir,
-            },
+          piSubagentDesktopArtifactGateEnv: options.desktopManaged.backendEnv ?? {
+            SYNARA_PI_SUBAGENT_ARTIFACT_DIR: options.desktopManaged.artifactDir,
+          },
           piSubagentDesktopUserAgentDir: options.desktopManaged.userAgentDir,
         }),
     spawnProcess: (command, args, options) => {

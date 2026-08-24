@@ -73,7 +73,10 @@ class TerminalEventDispatcher {
     };
   }
 
-  private ensureProjectSubscription(projectId: ProjectId, scopeId: string): ProjectEventSubscription {
+  private ensureProjectSubscription(
+    projectId: ProjectId,
+    scopeId: string,
+  ): ProjectEventSubscription {
     const existing = this.projectSubscriptionsByScope.get(scopeId);
     if (existing) {
       return existing;

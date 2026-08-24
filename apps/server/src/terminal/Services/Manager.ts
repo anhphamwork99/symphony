@@ -231,9 +231,7 @@ export interface TerminalManagerShape {
   ) => Effect.Effect<TerminalProjectSessionSnapshot, TerminalError>;
 
   /** Write input bytes to a Project-owned terminal session. */
-  readonly writeProject: (
-    input: TerminalProjectWriteInput,
-  ) => Effect.Effect<void, TerminalError>;
+  readonly writeProject: (input: TerminalProjectWriteInput) => Effect.Effect<void, TerminalError>;
 
   /** Acknowledge Project terminal output after the renderer parser consumes it. */
   readonly ackOutputProject: (
@@ -241,14 +239,10 @@ export interface TerminalManagerShape {
   ) => Effect.Effect<void, TerminalError>;
 
   /** Resize the PTY backing a Project-owned terminal session. */
-  readonly resizeProject: (
-    input: TerminalProjectResizeInput,
-  ) => Effect.Effect<void, TerminalError>;
+  readonly resizeProject: (input: TerminalProjectResizeInput) => Effect.Effect<void, TerminalError>;
 
   /** Clear a Project-owned terminal's output history. */
-  readonly clearProject: (
-    input: TerminalProjectClearInput,
-  ) => Effect.Effect<void, TerminalError>;
+  readonly clearProject: (input: TerminalProjectClearInput) => Effect.Effect<void, TerminalError>;
 
   /** Restart a Project-owned terminal session in place. */
   readonly restartProject: (
@@ -259,9 +253,7 @@ export interface TerminalManagerShape {
    * Close Project-owned terminal session(s). When `terminalId` is omitted,
    * closes every session owned by the Project.
    */
-  readonly closeProject: (
-    input: TerminalProjectCloseInput,
-  ) => Effect.Effect<void, TerminalError>;
+  readonly closeProject: (input: TerminalProjectCloseInput) => Effect.Effect<void, TerminalError>;
 
   /**
    * List every Project-owned terminal session snapshot (preflight surface

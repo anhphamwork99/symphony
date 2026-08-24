@@ -62,7 +62,7 @@ override variables.
    → no `loadPiCodingAgentModule()` / `loadPiSdk()`
    → no `makeAgentDir()` / SDK global discovery
    → no session manager, child, admission, execution, lifecycle/card/outbox,
-     or other durable side effect.
+   or other durable side effect.
 
 6. Ticket 01 does not choose a usable controlled Pi `agentDir`, bind the
    verified extension into a Pi runtime, load user auth/models, or expose the
@@ -124,8 +124,7 @@ cover non-session Pi discovery entry points so they cannot bypass the gate.
 - Guarding only `startSession` while model/skill/command discovery retains a
   global fallback.
 - Selecting a controlled `agentDir` or handling user auth/models in Ticket 01.
-- Allowing a valid artifact to enable unmanaged/global fallback before Ticket
-  02.
+- Allowing a valid artifact to enable unmanaged/global fallback before Ticket 02.
 
 ## Failure and rollback implications
 

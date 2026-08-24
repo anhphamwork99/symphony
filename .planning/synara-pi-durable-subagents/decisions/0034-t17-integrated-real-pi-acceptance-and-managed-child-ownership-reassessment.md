@@ -99,17 +99,17 @@ recast as CI evidence.
 
 ## Criterion-level verdict
 
-| Criterion | Verdict | Acceptance basis |
-| --- | --- | --- |
-| T17-AC1 | PASS | The production WebSocket path starts a compatible real Pi session, negotiates the pinned managed capability, admits one managed execution, and preserves its durable identity through the execution card. |
-| T17-AC2 | PASS | A real slow child detaches within the bounded foreground budget; progress is bounded, and a new WebSocket client restores the running execution card from durable state. |
-| T17-AC3 | PASS | The production card-cancel path reaches the real child and preserves `cancelling` until current-attempt terminal evidence; inaccessible-session failure diagnostics are stable. |
-| T17-AC4 | PASS | Two real child completions produce one bounded parent follow-up and each result remains independently retrievable by execution identity. |
-| T17-AC5 | PASS | Restart from the isolated durable root reconciles a real non-terminal execution honestly, without new admission, delegation replay, or automatic resume. |
-| T17-AC6 | PASS, only through the binding three-leg split below | The terminal zero-owned-child assertion is derived exclusively from the recorded manual leg, not from fixtures or automated real-Pi execution. |
-| T17-AC7 | PASS | Capability-absent and bridge-absent real Pi paths retain legacy semantics and are not represented as managed or recoverable. |
-| T17-AC8 | PASS | The harness uses an isolated root, home, state database, workspace, agent directories, loopback model endpoint, and ephemeral non-default port; it restores environment state and leaves the user Pi home unchanged. |
-| T17-AC9 | PASS | The harness composes the production server/WebSocket/real-Pi-adapter graph, asserts stage-scoped stable diagnostics, fails loudly, and cannot pass through provider fakes alone. |
+| Criterion | Verdict                                              | Acceptance basis                                                                                                                                                                                                     |
+| --------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T17-AC1   | PASS                                                 | The production WebSocket path starts a compatible real Pi session, negotiates the pinned managed capability, admits one managed execution, and preserves its durable identity through the execution card.            |
+| T17-AC2   | PASS                                                 | A real slow child detaches within the bounded foreground budget; progress is bounded, and a new WebSocket client restores the running execution card from durable state.                                             |
+| T17-AC3   | PASS                                                 | The production card-cancel path reaches the real child and preserves `cancelling` until current-attempt terminal evidence; inaccessible-session failure diagnostics are stable.                                      |
+| T17-AC4   | PASS                                                 | Two real child completions produce one bounded parent follow-up and each result remains independently retrievable by execution identity.                                                                             |
+| T17-AC5   | PASS                                                 | Restart from the isolated durable root reconciles a real non-terminal execution honestly, without new admission, delegation replay, or automatic resume.                                                             |
+| T17-AC6   | PASS, only through the binding three-leg split below | The terminal zero-owned-child assertion is derived exclusively from the recorded manual leg, not from fixtures or automated real-Pi execution.                                                                       |
+| T17-AC7   | PASS                                                 | Capability-absent and bridge-absent real Pi paths retain legacy semantics and are not represented as managed or recoverable.                                                                                         |
+| T17-AC8   | PASS                                                 | The harness uses an isolated root, home, state database, workspace, agent directories, loopback model endpoint, and ephemeral non-default port; it restores environment state and leaves the user Pi home unchanged. |
+| T17-AC9   | PASS                                                 | The harness composes the production server/WebSocket/real-Pi-adapter graph, asserts stage-scoped stable diagnostics, fails loudly, and cannot pass through provider fakes alone.                                     |
 
 ## Explicit T17-AC6 disposition
 

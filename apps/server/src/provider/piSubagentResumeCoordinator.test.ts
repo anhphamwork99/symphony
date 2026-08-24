@@ -201,17 +201,17 @@ const makeResumeInput = (repository: ResumeRepository, overrides: Record<string,
 describe("Pi subagent explicit resume (Issue 14) — Seam 1: server resume boundary", () => {
   it("T14-AC1: resume keeps the executionId, mints ONE new attemptId, advances generation, and records the new generation BEFORE the child starts", async () => {
     const program = Effect.gen(function* () {
-        const repository = yield* PiSubagentExecutionRepository;
-        yield* admitThenOrphan("exec_resume_1");
+      const repository = yield* PiSubagentExecutionRepository;
+      yield* admitThenOrphan("exec_resume_1");
 
-        const lifecycleNotifications: Array<{
-          readonly executionId: string;
-          readonly journalSequence: number;
-        }> = [];
-        setPiSubagentExecutionLifecycleListener((notification) => {
-          lifecycleNotifications.push(notification);
-        });
-        let childStarted = false;
+      const lifecycleNotifications: Array<{
+        readonly executionId: string;
+        readonly journalSequence: number;
+      }> = [];
+      setPiSubagentExecutionLifecycleListener((notification) => {
+        lifecycleNotifications.push(notification);
+      });
+      let childStarted = false;
       let aggregateAtChildStart: PiSubagentExecutionRecord | null = null;
       const outcome = yield* resumePiSubagentExecution(
         makeResumeInput(repository, {
@@ -244,57 +244,55 @@ describe("Pi subagent explicit resume (Issue 14) — Seam 1: server resume bound
       expect(aggregateAtChildStart!.observedState).toBe("queued");
       expect(aggregateAtChildStart!.desiredState).toBe("running");
 
-        // Exactly ONE resume journal event, disjoint band 80, under the NEW
-        // attempt. Ticket 15 owns watchdog band 70–74.
-        const journal = yield* repository.listJournalEvents("exec_resume_1");
+      // Exactly ONE resume journal event, disjoint band 80, under the NEW
+      // attempt. Ticket 15 owns watchdog band 70–74.
+      const journal = yield* repository.listJournalEvents("exec_resume_1");
       const resumeEvents = journal.filter(
         (event) => event.sequence === PI_SUBAGENT_RESUME_SEQUENCE,
       );
       expect(resumeEvents).toHaveLength(1);
       expect(resumeEvents[0]!.attemptId).toBe(resumedAttemptId);
-        expect(resumeEvents[0]!.generation).toBe(3);
-        expect(resumeEvents[0]!.state).toBe("queued");
-        expect(
-          lifecycleNotifications.filter(
-            (notification) =>
-              notification.executionId === "exec_resume_1" &&
-              notification.journalSequence === PI_SUBAGENT_RESUME_SEQUENCE,
-          ),
-        ).toHaveLength(1);
+      expect(resumeEvents[0]!.generation).toBe(3);
+      expect(resumeEvents[0]!.state).toBe("queued");
+      expect(
+        lifecycleNotifications.filter(
+          (notification) =>
+            notification.executionId === "exec_resume_1" &&
+            notification.journalSequence === PI_SUBAGENT_RESUME_SEQUENCE,
+        ),
+      ).toHaveLength(1);
       // Prior-attempt evidence is retained (admission seq 1, started seq 2,
       // orphan band 50 all remain).
       expect(journal.some((event) => event.sequence === 1)).toBe(true);
-        expect(journal.some((event) => event.sequence === 2)).toBe(true);
-        expect(journal.some((event) => event.sequence === 50)).toBe(true);
+      expect(journal.some((event) => event.sequence === 2)).toBe(true);
+      expect(journal.some((event) => event.sequence === 50)).toBe(true);
 
-        // Regression for the PROJECT.md cross-ticket gate: watchdog stage 70
-        // must remain persistable on the resumed attempt. A resume at 70 would
-        // collide on UNIQUE(execution, attempt, generation, sequence).
-        const watchdog = yield* repository.recordWatchdogStageEvent({
-          executionId: "exec_resume_1",
-          attemptId: resumedAttemptId,
-          generation: 3,
-          sequence: PI_SUBAGENT_WATCHDOG_BAND.escalationStarted,
-          state: "queued",
-          occurredAt: BASE_TIME_2,
-          diagnosticCode: PI_SUBAGENT_WATCHDOG_WALLTIME_DIAGNOSTIC,
-          diagnosticMessage: "Watchdog can journal after explicit resume.",
-          metadata: { trigger: "wall_time" },
-        });
-        expect(watchdog.kind).toBe("recorded");
-        const journalWithWatchdog =
-          yield* repository.listJournalEvents("exec_resume_1");
-        expect(
-          journalWithWatchdog.some(
-            (event) =>
-              event.attemptId === resumedAttemptId &&
-              event.generation === 3 &&
-              event.sequence ===
-                PI_SUBAGENT_WATCHDOG_BAND.escalationStarted,
-          ),
-        ).toBe(true);
-        expect(PI_SUBAGENT_RESUME_SEQUENCE).toBe(80);
+      // Regression for the PROJECT.md cross-ticket gate: watchdog stage 70
+      // must remain persistable on the resumed attempt. A resume at 70 would
+      // collide on UNIQUE(execution, attempt, generation, sequence).
+      const watchdog = yield* repository.recordWatchdogStageEvent({
+        executionId: "exec_resume_1",
+        attemptId: resumedAttemptId,
+        generation: 3,
+        sequence: PI_SUBAGENT_WATCHDOG_BAND.escalationStarted,
+        state: "queued",
+        occurredAt: BASE_TIME_2,
+        diagnosticCode: PI_SUBAGENT_WATCHDOG_WALLTIME_DIAGNOSTIC,
+        diagnosticMessage: "Watchdog can journal after explicit resume.",
+        metadata: { trigger: "wall_time" },
       });
+      expect(watchdog.kind).toBe("recorded");
+      const journalWithWatchdog = yield* repository.listJournalEvents("exec_resume_1");
+      expect(
+        journalWithWatchdog.some(
+          (event) =>
+            event.attemptId === resumedAttemptId &&
+            event.generation === 3 &&
+            event.sequence === PI_SUBAGENT_WATCHDOG_BAND.escalationStarted,
+        ),
+      ).toBe(true);
+      expect(PI_SUBAGENT_RESUME_SEQUENCE).toBe(80);
+    });
     await Effect.runPromise(program.pipe(Effect.provide(repositoryLayer)));
   });
 

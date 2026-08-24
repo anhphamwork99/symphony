@@ -48,7 +48,6 @@ already authorized mechanism?
 - `buildAgentPrompt` synchronously and unconditionally requires these
   non-empty regular files (each read through `readRequiredPrompt`, which
   fails closed on a missing **or empty** file):
-
   - `agent/system/subagent-system.md`
   - `agent/system/tool-guidelines.md`
   - `agent/system/skill-rules.md`
@@ -72,7 +71,7 @@ already authorized mechanism?
 - The supplied controlled-artifact run reached real handshake, Agent
   admission, and durable lifecycle events but failed before the first child
   model request with `Required subagent prompt file missing:
-  <artifact>/agent/system/subagent-system.md`. That diagnostic was not
+<artifact>/agent/system/subagent-system.md`. That diagnostic was not
   retained in the draft source after the temporary instrumentation was
   reverted, but it is independently consistent with — and deterministically
   explained by — the inspected runtime and staging source.

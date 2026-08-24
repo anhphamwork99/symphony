@@ -13,18 +13,18 @@ lifecycle record exists. Synara does not select a user-global extension.
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
 - [x] **AC1:** The desktop release pipeline assembles a deterministic managed
-  artifact from the clean, pinned Alfie source and records a machine-verifiable
-  manifest, source identity, capability profile, and digest.
+      artifact from the clean, pinned Alfie source and records a machine-verifiable
+      manifest, source identity, capability profile, and digest.
 - [x] **AC2:** Artifact validation rejects missing content, tampered bytes,
-  malformed manifests, path escape, and symlink escape with bounded actionable
-  categories.
+      malformed manifests, path escape, and symlink escape with bounded actionable
+      categories.
 - [x] **AC3:** Desktop managed-harness initialization with an invalid artifact
-  fails before child spawn, admission, execution identity, card, lifecycle, or
-  outbox creation.
+      fails before child spawn, admission, execution identity, card, lifecycle, or
+      outbox creation.
 - [x] **AC4:** The artifact contains no user authentication, model
-  configuration, API key, or user-global extension content.
+      configuration, API key, or user-global extension content.
 - [x] **AC5:** Non-desktop Pi behavior remains outside this rollout and
-  preserves its existing runtime behavior.
+      preserves its existing runtime behavior.
 
 ## Completion evidence
 

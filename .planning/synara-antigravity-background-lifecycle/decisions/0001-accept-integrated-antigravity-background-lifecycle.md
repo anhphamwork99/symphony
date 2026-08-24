@@ -83,22 +83,22 @@ final acceptance consultation. Contrary evidence was reconciled here.
 
 ## Acceptance-criteria verdict
 
-| Criterion | Verdict |
-|---|---|
-| AC-01 Hook contract | PASS |
-| AC-02 Legacy safety | PASS |
-| AC-03 Active ownership | PASS |
-| AC-04 Recovery exclusion | PASS |
-| AC-05 Idle transition | PASS |
-| AC-06 Terminal ordering | PASS |
-| AC-07 Failure honesty | PASS |
-| AC-08 Cleanup safety | PASS |
-| AC-09 Cancellation | PASS |
-| AC-10 Typed aggregate surface | PASS |
-| AC-11 Web truth | PASS |
-| AC-12 Transcript isolation | PASS |
-| AC-13 Real-provider qualification | PASS |
-| AC-14 Rollback | PASS |
+| Criterion                         | Verdict |
+| --------------------------------- | ------- |
+| AC-01 Hook contract               | PASS    |
+| AC-02 Legacy safety               | PASS    |
+| AC-03 Active ownership            | PASS    |
+| AC-04 Recovery exclusion          | PASS    |
+| AC-05 Idle transition             | PASS    |
+| AC-06 Terminal ordering           | PASS    |
+| AC-07 Failure honesty             | PASS    |
+| AC-08 Cleanup safety              | PASS    |
+| AC-09 Cancellation                | PASS    |
+| AC-10 Typed aggregate surface     | PASS    |
+| AC-11 Web truth                   | PASS    |
+| AC-12 Transcript isolation        | PASS    |
+| AC-13 Real-provider qualification | PASS    |
+| AC-14 Rollback                    | PASS    |
 
 ## Binding decision
 

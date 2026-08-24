@@ -220,16 +220,16 @@ export const TerminalProjectAckOutputInput = Schema.Struct({
   ...TerminalProjectSessionInput.fields,
   bytes: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(8_388_608)),
 });
-export type TerminalProjectAckOutputInput =
-  Schema.Codec.Encoded<typeof TerminalProjectAckOutputInput>;
+export type TerminalProjectAckOutputInput = Schema.Codec.Encoded<
+  typeof TerminalProjectAckOutputInput
+>;
 
 export const TerminalProjectResizeInput = Schema.Struct({
   ...TerminalProjectSessionInput.fields,
   cols: TerminalColsSchema,
   rows: TerminalRowsSchema,
 });
-export type TerminalProjectResizeInput =
-  Schema.Codec.Encoded<typeof TerminalProjectResizeInput>;
+export type TerminalProjectResizeInput = Schema.Codec.Encoded<typeof TerminalProjectResizeInput>;
 
 export const TerminalProjectClearInput = TerminalProjectSessionInput;
 export type TerminalProjectClearInput = Schema.Codec.Encoded<typeof TerminalProjectClearInput>;
@@ -241,8 +241,7 @@ export const TerminalProjectRestartInput = Schema.Struct({
   rows: TerminalRowsSchema,
   env: Schema.optional(TerminalEnvSchema),
 });
-export type TerminalProjectRestartInput =
-  Schema.Codec.Encoded<typeof TerminalProjectRestartInput>;
+export type TerminalProjectRestartInput = Schema.Codec.Encoded<typeof TerminalProjectRestartInput>;
 
 export const TerminalProjectCloseInput = Schema.Struct({
   ...TerminalProjectInput.fields,

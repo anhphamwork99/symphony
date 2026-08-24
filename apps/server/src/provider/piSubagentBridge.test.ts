@@ -637,8 +637,9 @@ describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () =
 
     expect(negotiated.isManaged).toBe(true);
     expect(negotiated.status).toBe("managed_enabled");
-    expect(negotiationSupportsPiSubagentCapability(negotiated, "child-bash-process-ownership"))
-      .toBe(false);
+    expect(
+      negotiationSupportsPiSubagentCapability(negotiated, "child-bash-process-ownership"),
+    ).toBe(false);
   });
 
   it("gates the capability on when a compatible extension supplies it", async () => {
@@ -664,9 +665,9 @@ describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () =
         echoResult("owner_unavailable"),
         echoResult("dispatch_failed"),
       ] as PiSubagentTeardownOwnedProcessesResult[]) {
-        expect(
-          validatePiSubagentTeardownOwnedProcessesResult(result, validCommand),
-        ).toStrictEqual(result);
+        expect(validatePiSubagentTeardownOwnedProcessesResult(result, validCommand)).toStrictEqual(
+          result,
+        );
       }
     });
 
@@ -682,22 +683,64 @@ describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () =
         // Unknown status spellings must never decode.
         echoResult("owner_unproven" as never),
         echoResult("cancelled" as never),
-          // Malformed PID evidence.
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [0] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [Number.MAX_SAFE_INTEGER + 1] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: ["4242"] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [2, 1] },
-          { status: "survivors", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [1, 1] },
-          {
-            status: "survivors",
-            executionId: "exec_1",
-            attemptId: "att_1",
-            generation: 1,
-            survivorPids: Array.from({ length: 17 }, (_, index) => index + 1),
-          },
+        // Malformed PID evidence.
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [0],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [Number.MAX_SAFE_INTEGER + 1],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: ["4242"],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [2, 1],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [1, 1],
+        },
+        {
+          status: "survivors",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: Array.from({ length: 17 }, (_, index) => index + 1),
+        },
         // Survivor PIDs on a non-survivor status are forbidden by contract.
-        { status: "proven", executionId: "exec_1", attemptId: "att_1", generation: 1, survivorPids: [4242] },
+        {
+          status: "proven",
+          executionId: "exec_1",
+          attemptId: "att_1",
+          generation: 1,
+          survivorPids: [4242],
+        },
       ];
 
       for (const input of malformedInputs) {
@@ -884,10 +927,7 @@ describe("Pi subagent teardownOwnedProcesses bridge slice (Decision 0033)", () =
       );
       expect(withInvalidLow.kind).toBe("validated");
 
-      const withAbsent = await dispatchPiSubagentTeardownOwnedProcesses(
-        makeBridge(),
-        validCommand,
-      );
+      const withAbsent = await dispatchPiSubagentTeardownOwnedProcesses(makeBridge(), validCommand);
       expect(withAbsent.kind).toBe("validated");
     });
 

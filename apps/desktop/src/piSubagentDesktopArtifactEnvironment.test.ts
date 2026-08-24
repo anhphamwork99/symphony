@@ -112,7 +112,9 @@ describe("applyPiSubagentArtifactBackendEnv — packaged desktop", () => {
       appPath: PACKAGED_APP_PATH,
       resourcesPath: PACKAGED_RESOURCES_PATH,
       exists: (candidate) =>
-        candidate === packagedArtifactDir || candidate === prodResourcesDir || candidate === resourcesDir,
+        candidate === packagedArtifactDir ||
+        candidate === prodResourcesDir ||
+        candidate === resourcesDir,
     });
 
     expect(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]).toBe(packagedArtifactDir);
@@ -242,7 +244,8 @@ describe("buildBackendChildSpawnEnv — production backend spawn wiring", () => 
         HOME: "/home/dev",
         SYNARA_BROWSER_HOST_PIPE: "/inherited/pipe",
       };
-      const serverEntry = "/Applications/Synara.app/Contents/Resources/app.asar/apps/server/dist/main.js";
+      const serverEntry =
+        "/Applications/Synara.app/Contents/Resources/app.asar/apps/server/dist/main.js";
 
       const spawnEnv = buildBackendChildSpawnEnv({
         baseEnv,

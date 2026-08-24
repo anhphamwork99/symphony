@@ -36,8 +36,7 @@ const workEntry = (
 
 const collapsedSignature = (row: {
   collapsedTurnItems?: CollapsedTurnItem[] | undefined;
-}): string[] =>
-  (row.collapsedTurnItems ?? []).map((item) => `${item.kind}:${String(item.id)}`);
+}): string[] => (row.collapsedTurnItems ?? []).map((item) => `${item.kind}:${String(item.id)}`);
 
 const worktreeSetupSnapshot = (): WorktreeSetupSnapshot => ({
   steps: [
@@ -62,9 +61,6 @@ const makeWorktreeSetupRow = (
   open,
   steps: [{ id: "create-worktree", label: "Creating worktree", status }],
 });
-
-
-
 
 describe("canSubmitUserMessageEdit", () => {
   it("allows an empty edit only when hidden annotations remain attached", () => {
@@ -333,15 +329,27 @@ describe("computeStableMessagesTimelineRows", () => {
   });
 
   it("reuses worktree-setup rows until a step status or open state changes", () => {
-    const first = computeStableMessagesTimelineRows([makeWorktreeSetupRow("active", true)], emptyStableRows());
-    const unchanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("active", true)], first);
+    const first = computeStableMessagesTimelineRows(
+      [makeWorktreeSetupRow("active", true)],
+      emptyStableRows(),
+    );
+    const unchanged = computeStableMessagesTimelineRows(
+      [makeWorktreeSetupRow("active", true)],
+      first,
+    );
     expect(unchanged).toBe(first);
 
-    const statusChanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("done", true)], unchanged);
+    const statusChanged = computeStableMessagesTimelineRows(
+      [makeWorktreeSetupRow("done", true)],
+      unchanged,
+    );
     expect(statusChanged).not.toBe(unchanged);
     expect(statusChanged.result[0]).not.toBe(unchanged.result[0]);
 
-    const openChanged = computeStableMessagesTimelineRows([makeWorktreeSetupRow("done", false)], statusChanged);
+    const openChanged = computeStableMessagesTimelineRows(
+      [makeWorktreeSetupRow("done", false)],
+      statusChanged,
+    );
     expect(openChanged).not.toBe(statusChanged);
     expect(openChanged.result[0]).not.toBe(statusChanged.result[0]);
   });

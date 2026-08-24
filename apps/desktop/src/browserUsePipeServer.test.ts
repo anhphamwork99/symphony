@@ -656,5 +656,4 @@ describe("canonical browser host RPC", () => {
       expect(executeTool).toHaveBeenCalledTimes(2);
     });
   });
-
 });

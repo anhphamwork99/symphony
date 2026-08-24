@@ -116,9 +116,12 @@ export function registerBrowserIpcHandlers(
 
   ipcMain.removeHandler(BROWSER_IPC_CHANNELS.setBounds);
   ipcMain.removeAllListeners(BROWSER_IPC_CHANNELS.setBounds);
-  ipcMain.handle(BROWSER_IPC_CHANNELS.setBounds, async (_event, input: BrowserSetPanelBoundsInput) => {
-    browserManager.setPanelBounds(input);
-  });
+  ipcMain.handle(
+    BROWSER_IPC_CHANNELS.setBounds,
+    async (_event, input: BrowserSetPanelBoundsInput) => {
+      browserManager.setPanelBounds(input);
+    },
+  );
 
   ipcMain.removeHandler(BROWSER_IPC_CHANNELS.attachWebview);
   ipcMain.handle(
@@ -248,22 +251,16 @@ export function registerBrowserIpcHandlers(
   );
 
   ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.close);
-  ipcMain.handle(
-    PROJECT_BROWSER_IPC_CHANNELS.close,
-    async (_event, input: BrowserProjectInput) => {
-      await projectWorkspaceActivation.ensureProjectWorkspaceActivated(input.projectId);
-      return browserManager.closeProject(input);
-    },
-  );
+  ipcMain.handle(PROJECT_BROWSER_IPC_CHANNELS.close, async (_event, input: BrowserProjectInput) => {
+    await projectWorkspaceActivation.ensureProjectWorkspaceActivated(input.projectId);
+    return browserManager.closeProject(input);
+  });
 
   ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.hide);
-  ipcMain.handle(
-    PROJECT_BROWSER_IPC_CHANNELS.hide,
-    async (_event, input: BrowserProjectInput) => {
-      await projectWorkspaceActivation.ensureProjectWorkspaceActivated(input.projectId);
-      browserManager.hideProject(input);
-    },
-  );
+  ipcMain.handle(PROJECT_BROWSER_IPC_CHANNELS.hide, async (_event, input: BrowserProjectInput) => {
+    await projectWorkspaceActivation.ensureProjectWorkspaceActivated(input.projectId);
+    browserManager.hideProject(input);
+  });
 
   ipcMain.removeHandler(PROJECT_BROWSER_IPC_CHANNELS.getState);
   ipcMain.handle(
