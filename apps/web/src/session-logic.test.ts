@@ -289,7 +289,7 @@ describe("deriveActiveTurnBackgroundActivityState", () => {
     id: string;
     createdAt: string;
     turnId?: string;
-    state?: unknown;
+    state?: OrchestrationThreadActivity["payload"];
     payload?: OrchestrationThreadActivity["payload"];
   }) =>
     makeActivity({
@@ -301,7 +301,7 @@ describe("deriveActiveTurnBackgroundActivityState", () => {
       turnId: overrides.turnId ?? "turn-1",
       payload:
         overrides.payload ??
-        (typeof overrides.state === "string" ? { state: overrides.state } : overrides.state),
+        (typeof overrides.state === "string" ? { state: overrides.state } : (overrides.state ?? {})),
     });
 
   it("derives each aggregate state for the current turn by ordered sequence (last change wins)", () => {
