@@ -3,12 +3,12 @@
 ## Routing metadata
 
 - **Owner:** anhpham99
-- **Lifecycle:** Implementation in progress — Ticket 01, its runtime-closure
-  remediation Ticket 01b, its prompt-closure remediation Ticket 01c, and
-  Ticket 02 are accepted. Ticket 03 is accepted by Decision 0014 after
-  owner-authorized remediations `03cfdc8c8` and `ea2fd5e00` made `bun fmt`,
-  `bun lint`, and workspace `bun typecheck` pass while preserving the accepted
-  artifact/runtime boundaries.
+- **Lifecycle:** **Accepted / complete.** Tickets 01, 01b, 01c, 02, and 03
+  remain accepted. Ticket 04 and the integrated handshake-first project are
+  bindingly accepted by
+  [Decision 0017](decisions/0017-t04-final-acceptance.md) at source candidate
+  `59c06c413`, with the sole independent feature review persisted at
+  `6ccda4d91`.
 - **Triage status:** 02 and 03 accepted; 04 ready/unblocked.
 - **Tracker:** Local Markdown
 - **Related historical project:**

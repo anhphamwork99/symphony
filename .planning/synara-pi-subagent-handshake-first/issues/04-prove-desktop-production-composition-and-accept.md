@@ -8,24 +8,26 @@ handshake-first condition has evidence.
 
 **Blocked by:** 02 — Bootstrap the verified harness and detached terminal lifecycle; 03 — Present durable execution-card truth.
 
-**Status:** ready-for-agent
+**Status:** accepted — binding [Decision 0017](../decisions/0017-t04-final-acceptance.md)
+accepts source candidate `59c06c413` with the sole independent feature review
+at `6ccda4d91`.
 
 **Testing strategy:** [Decision 0001 — Testing Strategy Governance](../../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md).
 
-- [ ] **AC1:** Real desktop/server composition selects the packaged official
+- [x] **AC1:** Real desktop/server composition selects the packaged official
   artifact while an isolated old global extension remains present, untouched,
   and unused.
-- [ ] **AC2:** The same real composition proves handshake readiness before
+- [x] **AC2:** The same real composition proves handshake readiness before
   Agent exposure, a detached child with continued liveness and one committed
   terminal result, and the matching `Running in background` to terminal card
   transition.
-- [ ] **AC3:** Missing, corrupt, unsupported, or malformed artifacts and
+- [x] **AC3:** Missing, corrupt, unsupported, or malformed artifacts and
   bridge/runtime configuration failures fail before managed durable side
   effects with actionable safe diagnostics.
-- [ ] **AC4:** Regression evidence preserves journal-first terminal integrity,
+- [x] **AC4:** Regression evidence preserves journal-first terminal integrity,
   non-terminal orphaning, stale-generation fencing after Resume, and
   non-terminal teardown uncertainty.
-- [ ] **AC5:** The full verification suite, one independent feature review,
+- [x] **AC5:** The full verification suite, one independent feature review,
   and one Supervisor acceptance consultation pass before the project is marked
   accepted.
 
