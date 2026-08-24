@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ThreadId } from "@synara/contracts";
+import { ProjectId, ThreadId } from "@synara/contracts";
 
 import {
   RIGHT_DOCK_PANE_KINDS,
@@ -150,11 +150,13 @@ describe("sanitizeRightDockThreadState", () => {
   it("returns the default state for malformed input", () => {
     expect(sanitizeRightDockThreadState(null)).toEqual({
       open: false,
+      preferredWidthPx: null,
       panes: [],
       activePaneId: null,
     });
     expect(sanitizeRightDockThreadState({ panes: "nope" })).toEqual({
       open: false,
+      preferredWidthPx: null,
       panes: [],
       activePaneId: null,
     });
@@ -211,6 +213,7 @@ describe("sidechat pane", () => {
 
 describe("resolveVisibleDockSidechatThreadIds", () => {
   const hostThreadId = ThreadId.makeUnsafe("host-thread");
+  const projectId = ProjectId.makeUnsafe("project-1");
   const sidechatThreadId = ThreadId.makeUnsafe("sidechat-thread");
 
   function dockWithSidechat(open: boolean) {
@@ -226,8 +229,8 @@ describe("resolveVisibleDockSidechatThreadIds", () => {
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: dockWithSidechat(true) },
-        hostThreadIds: [hostThreadId],
+        dockStateByProjectId: { [projectId]: dockWithSidechat(true) },
+        hostProjectIds: [projectId],
       }),
     ).toEqual([sidechatThreadId]);
   });
@@ -236,22 +239,22 @@ describe("resolveVisibleDockSidechatThreadIds", () => {
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: false,
-        dockStateByThreadId: { [hostThreadId]: dockWithSidechat(true) },
-        hostThreadIds: [hostThreadId],
+        dockStateByProjectId: { [projectId]: dockWithSidechat(true) },
+        hostProjectIds: [projectId],
       }),
     ).toEqual([]);
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: dockWithSidechat(false) },
-        hostThreadIds: [hostThreadId],
+        dockStateByProjectId: { [projectId]: dockWithSidechat(false) },
+        hostProjectIds: [projectId],
       }),
     ).toEqual([]);
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: dockWithSidechat(true) },
-        hostThreadIds: [ThreadId.makeUnsafe("other-host")],
+        dockStateByProjectId: { [projectId]: dockWithSidechat(true) },
+        hostProjectIds: [ProjectId.makeUnsafe("other-project")],
       }),
     ).toEqual([]);
     const explorerOnly = openPaneInState(createDefaultRightDockState(), {
@@ -261,8 +264,8 @@ describe("resolveVisibleDockSidechatThreadIds", () => {
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: explorerOnly },
-        hostThreadIds: [hostThreadId],
+        dockStateByProjectId: { [projectId]: explorerOnly },
+        hostProjectIds: [projectId],
       }),
     ).toEqual([]);
     const inactiveSidechat = openPaneInState(dockWithSidechat(true), {
@@ -272,35 +275,39 @@ describe("resolveVisibleDockSidechatThreadIds", () => {
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: inactiveSidechat },
-        hostThreadIds: [hostThreadId],
+        dockStateByProjectId: { [projectId]: inactiveSidechat },
+        hostProjectIds: [projectId],
       }),
     ).toEqual([]);
   });
 
   it("deduplicates against host threads and across hosts", () => {
+    // A sidechat embedding a Main conversation of the SAME Project is a host
+    // thread of that project, so it needs no extra lease.
     const selfEmbedding = openPaneInState(createDefaultRightDockState(), {
       paneId: "side-pane",
       kind: "sidechat",
       threadId: hostThreadId,
     });
+
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: { [hostThreadId]: selfEmbedding },
+        dockStateByProjectId: { [projectId]: selfEmbedding },
+        hostProjectIds: [projectId],
         hostThreadIds: [hostThreadId],
       }),
     ).toEqual([]);
 
-    const otherHostThreadId = ThreadId.makeUnsafe("other-host");
+    const otherProjectId = ProjectId.makeUnsafe("other-project");
     expect(
       resolveVisibleDockSidechatThreadIds({
         dockRendered: true,
-        dockStateByThreadId: {
-          [hostThreadId]: dockWithSidechat(true),
-          [otherHostThreadId]: dockWithSidechat(true),
+        dockStateByProjectId: {
+          [projectId]: dockWithSidechat(true),
+          [otherProjectId]: dockWithSidechat(true),
         },
-        hostThreadIds: [hostThreadId, otherHostThreadId],
+        hostProjectIds: [projectId, otherProjectId],
       }),
     ).toEqual([sidechatThreadId]);
   });
@@ -310,6 +317,7 @@ describe("empty launcher state", () => {
   it("opens the dock without creating a pane", () => {
     expect(setDockOpenInState(createDefaultRightDockState(), true)).toEqual({
       open: true,
+      preferredWidthPx: null,
       panes: [],
       activePaneId: null,
     });

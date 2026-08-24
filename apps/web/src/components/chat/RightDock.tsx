@@ -90,6 +90,14 @@ interface RightDockProps {
   paneIconOverrides?: Record<string, ReactNode | undefined>;
   addMenuKinds: readonly RightDockPaneKind[];
   launcherItems?: readonly RightDockLauncherItem[];
+  /** Remembered preferred width for this Project's dock, when persisted. */
+  preferredWidthPx?: number | null;
+  /**
+   * Persist a user-intended dock width (open or drag). Never called for the
+   * render-only viewport clamp, so a narrow window cannot overwrite the
+   * remembered preference (scenario 8).
+   */
+  onPreferredWidthChange?: ((widthPx: number) => void) | undefined;
   // Single-pane hosts omit selection so their lone tab label is static; multi-pane chat hosts
   // provide the callback and keep the normal selectable-tab behavior.
   onSelectPane?: ((paneId: string) => void) | undefined;
@@ -210,6 +218,7 @@ export function createBoundedDockResizableOptions(input: {
   getMainTransitionTarget: () => HTMLElement | null;
   resolveSessionBounds: NonNullable<SidebarResizableOptions["resolveSessionBounds"]>;
   sessionHandleRef: NonNullable<SidebarResizableOptions["sessionHandleRef"]>;
+  onResize?: SidebarResizableOptions["onResize"];
 }): SidebarResizableOptions {
   return {
     minWidth: input.minWidth,
@@ -217,6 +226,7 @@ export function createBoundedDockResizableOptions(input: {
     getMainTransitionTarget: input.getMainTransitionTarget,
     resolveSessionBounds: input.resolveSessionBounds,
     sessionHandleRef: input.sessionHandleRef,
+    ...(input.onResize ? { onResize: input.onResize } : {}),
   };
 }
 
@@ -384,14 +394,15 @@ export function RightDock(props: RightDockProps) {
     };
   }, [boundsActive, restoreShrinkWriteTransitions, writeShrinkClamp]);
 
-  // The dock must open as an exact 50/50 split of the chat shell. The CSS
-  // default can only approximate half (it cannot observe the resizable left
-  // sidebar), so on every open we measure the shell row hosting chat + dock and
-  // pin the dock width to exactly half of it. Mid-session drags still resize
-  // freely; the next open re-centers the split. With a mainMinWidth bound the
-  // half-shell (or pane-preferred) default is clamped only downward, so narrow
-  // shells keep the Main conversation at or above that bound instead of
-  // over-running it.
+  // The dock must open at the remembered preferred width when one exists —
+  // clamped only downward by the geometric ceiling so a narrow shell renders
+  // without ever overwriting the preference. Without a preference it opens as
+  // an exact 50/50 split of the chat shell (or the pane's natural width): the
+  // CSS default can only approximate half (it cannot observe the resizable
+  // left sidebar), so on every open we measure the shell row hosting chat +
+  // dock and pin the dock width. Mid-session drags still resize freely; the
+  // next open re-centers the split. The opened width becomes the remembered
+  // preference only through the explicit callback.
   useEffect(() => {
     if (!props.state.open) {
       return;
@@ -406,15 +417,28 @@ export function RightDock(props: RightDockProps) {
     // at their own comfortable size instead of the even split.
     const preferredWidth = activePaneKind ? RIGHT_DOCK_PREFERRED_WIDTH[activePaneKind] : undefined;
     const shellWidthPx = shell.getBoundingClientRect().width;
-    const openWidth = preferredWidth ?? Math.round(shellWidthPx / 2);
+    const remembered = props.preferredWidthPx ?? null;
+    const openWidth =
+      remembered ?? preferredWidth ?? Math.round(shellWidthPx / 2);
     if (openWidth > 0) {
       const dockWidth =
         mainMinWidth === undefined
           ? Math.max(minWidth, openWidth)
           : clampRightDockOpenWidth(openWidth, shellWidthPx, minWidth);
       wrapper.style.setProperty("--sidebar-width", `${dockWidth}px`);
+      // A remembered width that fits is reaffirmed; a clamped one is NOT
+      // written back, so the original preference survives the narrow window.
+      if (
+        props.onPreferredWidthChange &&
+        remembered === null &&
+        preferredWidth === undefined &&
+        Number.isFinite(dockWidth) &&
+        dockWidth > 0
+      ) {
+        props.onPreferredWidthChange(Math.round(dockWidth));
+      }
     }
-  }, [props.state.open, minWidth, activePaneKind, mainMinWidth]);
+  }, [props.state.open, props.preferredWidthPx, props.onPreferredWidthChange, minWidth, activePaneKind, mainMinWidth]);
   const renderedPanes = props.state.panes.filter(
     (pane) => pane.id === activePane?.id || keepMountedPaneIds.has(pane.id),
   );
@@ -454,15 +478,32 @@ export function RightDock(props: RightDockProps) {
         getMainTransitionTarget: () => props.mainTransitionTargetRef?.current ?? null,
         resolveSessionBounds: resolveDockSessionBounds,
         sessionHandleRef: resizeSessionHandleRef,
+        // Drag-end widths are user-intended: remember them. The automatic shrink
+        // clamp writes the CSS var directly and never reaches this callback.
+        onResize: (width) => {
+          if (Number.isFinite(width) && width > 0) {
+            props.onPreferredWidthChange?.(Math.round(width));
+          }
+        },
       });
     }
     return {
       minWidth: props.minWidth,
       ...(props.shouldAcceptWidth ? { shouldAcceptWidth: props.shouldAcceptWidth } : {}),
+      ...(props.onPreferredWidthChange
+        ? {
+            onResize: (width) => {
+              if (Number.isFinite(width) && width > 0) {
+                props.onPreferredWidthChange(Math.round(width));
+              }
+            },
+          }
+        : {}),
     };
   }, [
     bounds,
     props.mainTransitionTargetRef,
+    props.onPreferredWidthChange,
     resolveDockSessionBounds,
     props.minWidth,
     props.shouldAcceptWidth,

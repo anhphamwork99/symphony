@@ -262,8 +262,10 @@ export function EnvironmentPullRequestSection({
     (repository) => repository.nameWithOwner.toLowerCase() === pullRequestRepository?.toLowerCase(),
   );
   const openPullRequest = (initialTab: "summary" | "code" = "summary") => {
-    if (activeThreadId && projectId && pullRequestRepository && repositoryBelongsToProject) {
-      openPane(activeThreadId, {
+    if (projectId && pullRequestRepository && repositoryBelongsToProject) {
+      // The dock belongs to the Project (Decision 0002); the pull request pane
+      // records its own project identity as content.
+      openPane(projectId, {
         kind: "pullRequest",
         pullRequestProjectId: projectId,
         pullRequestRepository,

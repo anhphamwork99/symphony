@@ -6,12 +6,13 @@
 // Note: raw <button>s for autocomplete-suggestion rows and tab-title activate
 // regions are intentional — list-row and tab semantics, not shadcn Buttons.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ServerLocalServerProcess,
   type ThreadBrowserState,
+  type ProjectId,
   type ThreadId,
 } from "@synara/contracts";
 import {
@@ -51,9 +52,11 @@ import { serverLocalServersQueryOptions } from "~/lib/serverReactQuery";
 import { cn, isMacPlatform } from "~/lib/utils";
 
 import {
-  useBrowserStateStore,
-  selectThreadBrowserHistory,
+  selectProjectBrowserState,
+  selectProjectBrowserHistory,
   selectThreadBrowserState,
+  selectThreadBrowserHistory,
+  useBrowserStateStore,
 } from "../browserStateStore";
 import { useComposerDraftStore, type BrowserAnnotationDraft } from "../composerDraftStore";
 import { anchoredToastManager } from "./ui/toast";
@@ -87,6 +90,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 interface BrowserPanelProps {
   mode: DiffPanelMode;
   threadId: ThreadId;
+  /**
+   * Owning Project of the Right-sidebar browser workspace (Decision 0002).
+   * When the Project-owned surface is available (desktop bridge `projectBrowser`
+   * or a published v2 slice), the panel renders and persists under the Project;
+   * otherwise it keeps the legacy Thread-keyed desktop surface.
+   */
+  projectId?: ProjectId | null;
   onClosePanel: () => void;
   runtimeMode?: DockPaneRuntimeMode;
   onRequestLive?: () => void;
@@ -545,6 +555,7 @@ function BrowserLocalServersHome({
 export function BrowserPanel({
   mode,
   threadId,
+  projectId = null,
   onClosePanel,
   runtimeMode: runtimeModeProp,
   onRequestLive,
@@ -554,9 +565,20 @@ export function BrowserPanel({
   const runtimeMode = runtimeModeProp ?? "live";
   const api = readNativeApi();
   const isLiveRuntime = runtimeMode === "live";
-  const threadBrowserState = useBrowserStateStore(selectThreadBrowserState(threadId));
-  const recentHistory = useBrowserStateStore(selectThreadBrowserHistory(threadId));
+  // Project-owned workspace state wins when present (Decision 0002); the
+  // Thread-keyed cache remains the legacy fallback and the two are never merged.
+  const legacyThreadBrowserState = useBrowserStateStore(selectThreadBrowserState(threadId));
+  const projectBrowserState = useBrowserStateStore(
+    useMemo(() => selectProjectBrowserState(projectId), [projectId]),
+  );
+  const projectBrowserHistory = useBrowserStateStore(
+    useMemo(() => selectProjectBrowserHistory(projectId), [projectId]),
+  );
+  const legacyBrowserHistory = useBrowserStateStore(selectThreadBrowserHistory(threadId));
+  const threadBrowserState = projectBrowserState ?? legacyThreadBrowserState;
+  const recentHistory = projectId !== null ? projectBrowserHistory : legacyBrowserHistory;
   const upsertThreadState = useBrowserStateStore((store) => store.upsertThreadState);
+  const upsertProjectBrowserState = useBrowserStateStore((store) => store.upsertProjectState);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addBrowserAnnotation = useComposerDraftStore((store) => store.addBrowserAnnotation);
   const browserAnnotations = useComposerDraftStore(
@@ -741,6 +763,22 @@ export function BrowserPanel({
       upsertThreadState(state);
     });
   }, [api, isLiveRuntime, upsertThreadState]);
+
+  // Project-owned browser state (Decision 0002): when the desktop bridge exposes
+  // the Project surface, its pushes feed the Project-keyed workspace slice. The
+  // legacy thread cache above keeps running unchanged; the two never merge and
+  // published Project state wins at render.
+  useEffect(() => {
+    if (!api?.projectBrowser || !isLiveRuntime || projectId === null) {
+      return;
+    }
+    return api.projectBrowser.onState((state) => {
+      if (state.projectId !== projectId) {
+        return;
+      }
+      upsertProjectBrowserState(state);
+    });
+  }, [api, isLiveRuntime, projectId, upsertProjectBrowserState]);
 
   useEffect(() => {
     if (!api || !isLiveRuntime) {

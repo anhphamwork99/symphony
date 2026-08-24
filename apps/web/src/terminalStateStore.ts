@@ -50,7 +50,14 @@ export interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
-const TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v1";
+// v2 is the Project-keyed workspace boundary: dock terminal scopes are
+// `dock-terminal-project:<projectId>` (lib/dockTerminalScope) and the v1
+// Thread-keyed blob stays on disk untouched as the migration input and
+// rollback source (Decision 0002 G).
+const TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v2";
+const LEGACY_TERMINAL_STATE_STORAGE_KEY = "synara:terminal-state:v1";
+
+export const TERMINAL_STATE_LEGACY_STORAGE_KEY = LEGACY_TERMINAL_STATE_STORAGE_KEY;
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -1268,6 +1275,23 @@ interface TerminalStateStoreState {
   ) => void;
   clearTerminalState: (threadId: ThreadId) => void;
   removeOrphanedTerminalStates: (activeThreadIds: Set<ThreadId>) => void;
+  /**
+   * Apply a published v2 migration terminal-presentation slice for one dock
+   * terminal scope (idempotent; only the migration activator calls this after
+   * the publication marker is durable).
+   */
+  applyPublishedTerminalPresentation: (
+    scopeId: ThreadId,
+    slice: {
+      presentationMode: ThreadTerminalPresentationMode;
+      workspaceTab: ThreadTerminalWorkspaceTab;
+      workspaceLayout: ThreadTerminalWorkspaceLayout;
+      terminalHeightPx: number;
+      terminalIds: string[];
+      activeTerminalId: string;
+      terminalLabelsById: Record<string, string>;
+    },
+  ) => void;
 }
 
 // Defers partialize + JSON.stringify off the hot set() path (terminal layout
@@ -1397,6 +1421,26 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               delete next[id as ThreadId];
             }
             return { terminalStateByThreadId: next };
+          }),
+        applyPublishedTerminalPresentation: (scopeId, slice) =>
+          set((state) => {
+            const current = selectThreadTerminalState(state.terminalStateByThreadId, scopeId);
+            const migrated = normalizeThreadTerminalState({
+              ...current,
+              presentationMode: slice.presentationMode,
+              workspaceActiveTab: slice.workspaceTab,
+              workspaceLayout: slice.workspaceLayout,
+              terminalHeight: slice.terminalHeightPx,
+              terminalIds: slice.terminalIds,
+              activeTerminalId: slice.activeTerminalId,
+              terminalLabelsById: slice.terminalLabelsById,
+            });
+            return {
+              terminalStateByThreadId: {
+                ...state.terminalStateByThreadId,
+                [scopeId]: migrated,
+              },
+            };
           }),
       };
     },

@@ -363,7 +363,7 @@ import {
   ComposerPickerMenuSubPopup,
 } from "./chat/ComposerPickerMenuPopup";
 import { selectSplitView, useSplitViewStore } from "../splitViewStore";
-import { useRightDockStore } from "../rightDockStore";
+import { resolveDockOwnerProjectId, useRightDockStore } from "../rightDockStore";
 import { THREAD_DRAG_MIME } from "./chat-drop-overlay/ChatPaneDropOverlay";
 import { useTemporaryThreadStore } from "../temporaryThreadStore";
 import { useThreadActivationController } from "../hooks/useThreadActivationController";
@@ -3224,11 +3224,19 @@ export default function Sidebar() {
     clearSelection,
     navigate,
     openChatThreadPage,
-    openSidechatDock: ({ sourceThreadId, sidechatThreadId }) =>
-      openRightDockPane(sourceThreadId, {
+    openSidechatDock: ({ sourceThreadId, sidechatThreadId }) => {
+      // The dock belongs to the source thread's Project (Decision 0002): the
+      // sidechat pane keeps its real nested ThreadId as content, while the
+      // workspace slice is written under the owning ProjectId.
+      const ownerProjectId = resolveDockOwnerProjectId({
+        threadProjectId: sidebarThreadSummaryById[sourceThreadId]?.projectId ?? null,
+      });
+      if (ownerProjectId === null) return;
+      openRightDockPane(ownerProjectId, {
         kind: "sidechat",
         threadId: sidechatThreadId,
-      }),
+      });
+    },
     openTerminalThreadPage,
     prewarmThreadDetailForIntent,
     rememberLastThreadRouteNow,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { sanitizePreferredDockWidthPx } from "../rightDockStore.logic";
+import { useRightDockStore } from "../rightDockStore";
+import { ProjectId } from "@synara/contracts";
 import {
   RIGHT_DOCK_MAIN_MIN_WIDTH,
   RIGHT_DOCK_NORMAL_MIN_WIDTH,
@@ -121,5 +124,50 @@ describe("clampRightDockShrinkWidth", () => {
     expect(clampRightDockShrinkWidth(640.5, 1200)).toBe(640.5);
     expect(clampRightDockShrinkWidth(340.5, 776)).toBe(340.5);
     expect(clampRightDockShrinkWidth(440.5, 800.5)).toBe(440.5);
+  });
+});
+
+describe("preferred width persistence (Project Contract scenario 8)", () => {
+  it("never persists a temporary viewport clamp: only in-bounds integers persist", () => {
+    const projectId = ProjectId.makeUnsafe("clamp-project");
+    useRightDockStore.setState({ dockStateByProjectId: {} });
+    const setPreferredWidth = useRightDockStore.getState().setPreferredWidth;
+
+    // User drags to a comfortable width: remembered.
+    setPreferredWidth(projectId, 520);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
+    ).toBe(520);
+
+    // A narrow window's render-only clamp (below the schema floor) never writes.
+    setPreferredWidth(projectId, 64);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
+    ).toBe(520);
+
+    // Reopening after the window widens: the remembered width opens clamped
+    // only downward by the geometric ceiling and the preference survives.
+    const shellWidth = 1200;
+    const opened = clampRightDockOpenWidth(520, shellWidth, RIGHT_DOCK_NORMAL_MIN_WIDTH);
+    expect(opened).toBe(520);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
+    ).toBe(520);
+
+    // A clamp while the shell is narrow renders smaller without persisting.
+    const clamped = clampRightDockShrinkWidth(520, 700);
+    expect(clamped).toBeLessThan(520);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectId]?.preferredWidthPx,
+    ).toBe(520);
+    useRightDockStore.setState({ dockStateByProjectId: {} });
+  });
+
+  it("sanitizes persisted preferred widths against the workspace dock bounds", () => {
+    expect(sanitizePreferredDockWidthPx(480)).toBe(480);
+    expect(sanitizePreferredDockWidthPx(255)).toBeNull();
+    expect(sanitizePreferredDockWidthPx(100_000)).toBeNull();
+    expect(sanitizePreferredDockWidthPx(520.5)).toBeNull();
+    expect(sanitizePreferredDockWidthPx("480")).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import type {
   DeviceDescriptor,
   DeviceHardwareButton,
   DeviceUdid,
+  ProjectId,
   ThreadId,
 } from "@synara/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,7 +21,12 @@ import type { DockPaneRuntimeMode } from "~/lib/dockPaneActivation";
 import { CheckIcon, ChevronDownIcon, LoaderCircleIcon, XIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 
-import { selectThreadDeviceState, useDeviceStateStore } from "../deviceStateStore";
+import {
+  selectProjectDeviceState,
+  selectThreadDeviceState,
+  useDeviceStateStore,
+} from "../deviceStateStore";
+import { readProjectDeviceApi } from "../projectWorkspaceApi";
 import {
   buildDevicePickerEntries,
   canvasPointToDevicePoint,
@@ -95,15 +101,31 @@ function errorMessage(error: unknown, fallback: string): string {
 export default function DevicePanel(props: {
   mode: DiffPanelMode;
   threadId: ThreadId;
+  /**
+   * Owning Project of the Right-sidebar device workspace (Decision 0002).
+   * When set and the Project device API is reachable, the pane seeds, attaches,
+   * and detaches through `device.project.*` keyed by the real ProjectId, and
+   * state survives conversation and Project navigation. Null keeps the legacy
+   * Thread-keyed surface.
+   */
+  projectId?: ProjectId | null;
   runtimeMode: DockPaneRuntimeMode;
   isVisible: boolean;
   onClosePanel: () => void;
   onRequestLive?: () => void;
 }) {
-  const { threadId, runtimeMode, isVisible } = props;
+  const { threadId, projectId = null, runtimeMode, isVisible } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const threadState = useDeviceStateStore(selectThreadDeviceState(threadId));
+  const legacyThreadState = useDeviceStateStore(selectThreadDeviceState(threadId));
+  const projectDeviceState = useDeviceStateStore(
+    useMemo(() => selectProjectDeviceState(projectId), [projectId]),
+  );
   const upsertThreadState = useDeviceStateStore((store) => store.upsertThreadState);
+  const upsertProjectState = useDeviceStateStore((store) => store.upsertProjectState);
+  // Project-owned state wins when present (Decision 0002); the two are never merged.
+  const threadState = projectDeviceState ?? legacyThreadState;
+  const upsertOwnedState =
+    projectId !== null && projectDeviceState !== undefined ? upsertProjectState : upsertThreadState;
   const [busy, setBusy] = useState(false);
   const [shutdownConfirm, setShutdownConfirm] = useState(false);
   const [landscape, setLandscape] = useState(false);
@@ -148,7 +170,24 @@ export default function DevicePanel(props: {
   // phase and device list until some unrelated device event arrived.
   useEffect(() => {
     let cancelled = false;
+    const projectApi = projectId !== null ? readProjectDeviceApi() : null;
     const seed = () => {
+      // Project-owned device workspace (Decision 0002): seed through the
+      // Project surface so the attachment survives conversation navigation.
+      // The legacy thread surface remains the fallback when the Project API is
+      // not reachable (older server, pre-migration bridge).
+      if (projectApi && projectId !== null) {
+        void projectApi
+          .getState({ projectId })
+          .then((state) => {
+            if (!cancelled) upsertProjectState(state);
+          })
+          .catch(() => {
+            // A refusal here is the off-macOS / no-engine case; the pane keeps
+            // rendering its blocked state from whatever availability it has.
+          });
+        return;
+      }
       void ensureNativeApi()
         .device.getThreadState({ threadId })
         .then((state) => {
@@ -160,6 +199,18 @@ export default function DevicePanel(props: {
         });
     };
     seed();
+    const unsubscribeProjectEvents =
+      projectApi && projectId !== null
+        ? projectApi.onEvent((event) => {
+            if (
+              event.type === "device.project-state" &&
+              event.state.projectId === projectId &&
+              !cancelled
+            ) {
+              upsertProjectState(event.state);
+            }
+          })
+        : null;
     const unsubscribe = addWsTransportStateListener((state) => {
       if (state === "open") seed();
     });
@@ -173,9 +224,10 @@ export default function DevicePanel(props: {
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeProjectEvents?.();
       if (poll !== null) clearInterval(poll);
     };
-  }, [threadId, upsertThreadState, pollSetupState]);
+  }, [threadId, projectId, upsertThreadState, upsertProjectState, pollSetupState]);
 
   // Non-null while the attachment is still coming up, and names which stage: a
   // cold boot spends most of a minute here, and "Starting up…" versus "Waiting
@@ -229,10 +281,15 @@ export default function DevicePanel(props: {
 
   const attachDevice = useCallback(
     async (udid: DeviceUdid) => {
+      const projectApi = projectId !== null ? readProjectDeviceApi() : null;
+      if (projectApi && projectId !== null) {
+        upsertProjectState(await projectApi.attach({ projectId, udid }));
+        return;
+      }
       const api = ensureNativeApi();
       upsertThreadState(await api.device.attach({ threadId, udid }));
     },
-    [threadId, upsertThreadState],
+    [projectId, threadId, upsertProjectState, upsertThreadState],
   );
 
   const selectDevice = useCallback(
@@ -303,9 +360,14 @@ export default function DevicePanel(props: {
   const detachDevice = useCallback(() => {
     setPendingDevice(null);
     void runDeviceAction(async () => {
+      const projectApi = projectId !== null ? readProjectDeviceApi() : null;
+      if (projectApi && projectId !== null) {
+        upsertProjectState(await projectApi.detach({ projectId }));
+        return;
+      }
       upsertThreadState(await ensureNativeApi().device.detach({ threadId }));
     }, "Could not detach the simulator");
-  }, [runDeviceAction, threadId, upsertThreadState]);
+  }, [projectId, runDeviceAction, threadId, upsertProjectState, upsertThreadState]);
 
   const shutdownAttached = useCallback(() => {
     if (!attachedDevice) return;

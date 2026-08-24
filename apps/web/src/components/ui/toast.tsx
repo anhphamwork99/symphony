@@ -31,7 +31,7 @@ import {
 } from "./notificationSurface";
 import { useDiffRouteSearch } from "../../hooks/useDiffRouteSearch";
 import { selectSplitView, useSplitViewStore } from "../../splitViewStore";
-import { selectRightDockState, useRightDockStore } from "../../rightDockStore";
+import { useActiveProjectRightDockState } from "../../hooks/useActiveProjectRightDock";
 import {
   resolveVisibleToastThreadIds,
   shouldRenderToastForVisibleThreads,
@@ -138,9 +138,7 @@ function useVisibleThreadIdsFromRoute(): ReadonlySet<ThreadId> {
   const splitView = useSplitViewStore(
     useMemo(() => selectSplitView(routeSearch.splitViewId ?? null), [routeSearch.splitViewId]),
   );
-  const rightDockState = useRightDockStore(
-    useMemo(() => selectRightDockState(activeThreadId), [activeThreadId]),
-  );
+  const { dockState: rightDockState } = useActiveProjectRightDockState(activeThreadId);
 
   return resolveVisibleToastThreadIds({
     activeThreadId,

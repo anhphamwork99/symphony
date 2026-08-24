@@ -1,12 +1,14 @@
 // FILE: DockTerminalPane.tsx
-// Purpose: Render an independent terminal workspace inside the right dock for a host thread.
+// Purpose: Render the Project-owned terminal workspace inside the right dock.
 // Layer: Chat right-dock UI
 // Depends on: useTerminalSurfaceController (shared store wiring), ThreadTerminalDrawer.
 //
-// The dock terminal set is isolated from the bottom drawer via a synthetic scope id
-// (dockTerminalThreadId), so the two never share xterm instances. All store wiring is
-// shared with other terminal surfaces through useTerminalSurfaceController; only the
-// "ensure a terminal is open" policy is surface-specific (here: a single terminal-only page).
+// The dock terminal set is keyed by the owning Project (Decision 0002): the
+// store scope (`dockTerminalProjectScope(projectId)`) and the xterm runtime keys
+// stay identical across every Main conversation in the Project, so switching
+// conversations neither resets the workspace nor restarts the runtime. The
+// runtime is isolated from the bottom drawer (a separate scope), and server
+// ownership travels on the real ProjectId via the `terminal.project.*` surface.
 
 import { type ProjectId, type ThreadId } from "@synara/contracts";
 import { resolveThreadWorkspaceCwd } from "@synara/shared/threadEnvironment";
@@ -14,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "r
 
 import { useTerminalSurfaceController } from "~/hooks/useTerminalSurfaceController";
 import { SINGLE_CHAT_PANE_SCOPE_ID } from "~/lib/chatPaneScope";
-import { dockTerminalThreadId } from "~/lib/dockTerminalScope";
+import { resolveDockTerminalScope } from "~/lib/dockTerminalScope";
 import {
   getTerminalContextComposerTarget,
   subscribeTerminalContextComposerTarget,
@@ -32,7 +34,10 @@ export function DockTerminalPane(props: {
   isActive?: boolean;
   onClosePanel: () => void;
 }) {
-  const scopeId = dockTerminalThreadId(props.hostThreadId);
+  const scopeId = resolveDockTerminalScope({
+    projectId: props.projectId,
+    hostThreadId: props.hostThreadId,
+  });
   const threadWorkspace = useStore(
     useMemo(() => createThreadWorkspaceMetadataSelector(props.hostThreadId), [props.hostThreadId]),
   );
@@ -54,7 +59,7 @@ export function DockTerminalPane(props: {
     ? projectScriptRuntimeEnv({ project: { cwd: runtimeProjectCwd }, worktreePath })
     : {};
 
-  const terminal = useTerminalSurfaceController(scopeId);
+  const terminal = useTerminalSurfaceController(scopeId, { projectId: props.projectId });
   const { terminalState, openTerminalThreadPage, bumpFocusRequest, newTerminalGroup } = terminal;
   const closedBySessionExitRef = useRef(false);
   const subscribeToComposerTarget = useCallback(
@@ -103,6 +108,7 @@ export function DockTerminalPane(props: {
     <ThreadTerminalDrawer
       key={scopeId}
       threadId={scopeId}
+      projectId={props.projectId}
       cwd={cwd}
       runtimeEnv={runtimeEnv}
       height={terminalState.terminalHeight}

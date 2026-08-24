@@ -60,6 +60,21 @@ export type { WsThreadStreamFailure } from "./wsTransport";
 
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 
+/** Structural request/subscription view of the live WS transport. */
+export type WsRequestTransport = Pick<
+  WsTransport,
+  "request" | "subscribe" | "getCompatibility" | "getState"
+>;
+
+/**
+ * The live WS transport backing `createWsNativeApi`, or null before the first
+ * creation (SSR, pre-bootstrap). Never creates a transport as a side effect:
+ * Project-owned surfaces degrade to the legacy path instead of forcing a socket.
+ */
+export function readWsTransport(): WsRequestTransport | null {
+  return instance?.transport ?? null;
+}
+
 export function readWsServerCapabilities(): ReadonlyArray<string> | null {
   return instance?.transport.getCompatibility()?.capabilities ?? null;
 }

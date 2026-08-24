@@ -24,6 +24,12 @@ import type { TerminalSessionSnapshot } from "@synara/contracts";
 import { Terminal } from "@xterm/xterm";
 
 import { readNativeApi } from "~/nativeApi";
+import {
+  acknowledgeTerminalOutput,
+  openTerminalSession,
+  resizeTerminalSession,
+  writeTerminalSession,
+} from "./terminalProjectRouting";
 import { suppressQueryResponses } from "~/lib/suppressQueryResponses";
 
 import { openInPreferredEditor } from "../../editorPreferences";
@@ -85,16 +91,7 @@ function terminalByteLength(data: string): number {
 
 function acknowledgeParsedOutput(entry: TerminalRuntimeEntry, bytes: number): void {
   if (bytes <= 0) return;
-  const api = readNativeApi();
-  if (!api) return;
-  const ackOutput = api.terminal.ackOutput;
-  if (typeof ackOutput !== "function") return;
-
-  void ackOutput({
-    threadId: entry.threadId,
-    terminalId: entry.terminalId,
-    bytes,
-  }).catch(() => {
+  void acknowledgeTerminalOutput(entry, bytes).catch(() => {
     // Flow control is best-effort; reconnect/replay will recover from a missed ACK.
   });
 }
@@ -289,20 +286,15 @@ function scheduleWrite(entry: TerminalRuntimeEntry, data: string, byteLength: nu
 }
 
 function flushPendingResize(entry: TerminalRuntimeEntry): void {
-  const api = readNativeApi();
   const pendingResize = entry.pendingResize;
-  if (!api || !pendingResize) return;
+  if (!pendingResize) return;
 
   entry.pendingResize = null;
   entry.lastSentResize = pendingResize;
-  void api.terminal
-    .resize({
-      threadId: entry.threadId,
-      terminalId: entry.terminalId,
-      cols: pendingResize.cols,
-      rows: pendingResize.rows,
-    })
-    .catch(() => {
+  void resizeTerminalSession(entry, {
+    cols: pendingResize.cols,
+    rows: pendingResize.rows,
+  }).catch(() => {
       const current = entry.lastSentResize;
       if (current && current.cols === pendingResize.cols && current.rows === pendingResize.rows) {
         entry.lastSentResize = null;
@@ -673,10 +665,8 @@ async function sendTerminalInput(
   data: string,
   fallbackError: string,
 ): Promise<void> {
-  const api = readNativeApi();
-  if (!api) return;
   try {
-    await api.terminal.write({ threadId: entry.threadId, terminalId: entry.terminalId, data });
+    await writeTerminalSession(entry, data);
   } catch (error) {
     writeSystemMessage(entry.terminal, describeErrorMessage(error, fallbackError));
   }
@@ -684,15 +674,12 @@ async function sendTerminalInput(
 
 function reconcileTerminalSnapshot(entry: TerminalRuntimeEntry): void {
   if (entry.disposed || !entry.opened || entry.hasHandledExit) return;
-  const api = readNativeApi();
-  if (!api) return;
 
   const outputEventVersionAtRequest = entry.outputEventVersion;
   const requestId = ++entry.snapshotReconcileRequestId;
   setRuntimeStatus(entry, "connecting");
 
-  void api.terminal
-    .open(buildOpenInput(entry))
+  void openTerminalSession(entry, buildOpenInput(entry))
     .then((snapshot) => {
       if (
         entry.disposed ||
@@ -793,6 +780,7 @@ export function createRuntimeEntry(config: TerminalRuntimeConfig): TerminalRunti
   const entry: TerminalRuntimeEntry = {
     runtimeKey: config.runtimeKey,
     threadId: config.threadId,
+    projectId: config.projectId ?? null,
     terminalId: config.terminalId,
     terminalLabel: config.terminalLabel,
     terminalCliKind: config.terminalCliKind ?? null,
@@ -979,13 +967,9 @@ export function createRuntimeEntry(config: TerminalRuntimeConfig): TerminalRunti
           label: submittedIdentity.title,
         });
       }
-      const api = readNativeApi();
-      if (!api) return;
-      void api.terminal
-        .write({ threadId: entry.threadId, terminalId: entry.terminalId, data })
-        .catch((error) =>
-          writeSystemMessage(terminal, describeErrorMessage(error, "Terminal write failed")),
-        );
+      void writeTerminalSession(entry, data).catch((error) =>
+        writeSystemMessage(terminal, describeErrorMessage(error, "Terminal write failed")),
+      );
     }),
   );
 
@@ -1083,14 +1067,14 @@ export function createRuntimeEntry(config: TerminalRuntimeConfig): TerminalRunti
         }, 0);
       }
     },
+    { projectId: entry.projectId },
   );
 
   return entry;
 }
 
 function openTerminal(entry: TerminalRuntimeEntry): void {
-  const api = readNativeApi();
-  if (!api || entry.opened) return;
+  if (entry.opened) return;
 
   fitTerminal(entry);
   entry.lastSentResize = null;
@@ -1099,8 +1083,7 @@ function openTerminal(entry: TerminalRuntimeEntry): void {
   const outputEventVersionAtOpen = entry.outputEventVersion;
   const openInput = buildOpenInput(entry);
 
-  void api.terminal
-    .open(openInput)
+  void openTerminalSession(entry, openInput)
     .then((snapshot) => {
       if (entry.disposed) return;
       if (
@@ -1118,8 +1101,7 @@ function openTerminal(entry: TerminalRuntimeEntry): void {
           ) {
             return;
           }
-          void api.terminal
-            .open(openInput)
+          void openTerminalSession(entry, openInput)
             .then((nextSnapshot) => {
               if (
                 entry.disposed ||
