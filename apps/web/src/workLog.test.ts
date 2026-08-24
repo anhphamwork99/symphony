@@ -3384,6 +3384,105 @@ describe("deriveTimelineEntries", () => {
   });
 });
 
+// Mirrors the aggregate kind emitted by the server projection in
+// apps/server/src/orchestration/providerRuntimeActivityProjection.ts (WP1).
+// The web app cannot import server modules, so the kind string is mirrored
+// here and in session-logic.ts — one owner per package.
+const BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND = "turn.background-activity.changed";
+
+function makeBackgroundActivityChangedActivity(overrides: {
+  id: string;
+  createdAt: string;
+  turnId?: string | null;
+  state: string;
+  payload?: OrchestrationThreadActivity["payload"];
+}): OrchestrationThreadActivity {
+  return makeActivity({
+    id: overrides.id,
+    createdAt: overrides.createdAt,
+    kind: BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND,
+    summary: `Background activity: ${overrides.state}`,
+    tone: "info",
+    turnId: overrides.turnId ?? "turn-1",
+    payload:
+      overrides.payload ?? { state: overrides.state, source: "provider_stop" },
+  });
+}
+
+describe("aggregate background-work activities are excluded from the transcript", () => {
+  it("never renders turn.background-activity.changed rows in the work log", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeBackgroundActivityChangedActivity({
+        id: "bg-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-1",
+        state: "active",
+      }),
+      makeActivity({
+        id: "tool-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+      makeBackgroundActivityChangedActivity({
+        id: "bg-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-1",
+        state: "finalizing",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"));
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-1"]);
+  });
+
+  it("excludes the aggregate kind regardless of turn attribution, including thread-level rows", () => {
+    // The kind can also arrive without a turn id (thread-scoped aggregate
+    // changes); the exclusion is kind-based, not turn-based, so those rows
+    // must not surface either.
+    const activities: OrchestrationThreadActivity[] = [
+      makeBackgroundActivityChangedActivity({
+        id: "bg-thread",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        turnId: null,
+        state: "idle",
+      }),
+      makeBackgroundActivityChangedActivity({
+        id: "bg-prior-turn",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-0",
+        state: "active",
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities, undefined)).toEqual([]);
+    expect(
+      deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-0"), {
+        visibleTurnIds: new Set([TurnId.makeUnsafe("turn-0")]),
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps the aggregate kind out of the timeline because it never becomes a work entry", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeBackgroundActivityChangedActivity({
+          id: "bg-1",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          turnId: "turn-1",
+          state: "active",
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+
+    const timeline = deriveTimelineEntries([], [], entries);
+    expect(timeline).toEqual([]);
+  });
+});
+
 describe("deriveWorkLogEntries context window handling", () => {
   it("excludes context window updates from the work log", () => {
     const entries = deriveWorkLogEntries(

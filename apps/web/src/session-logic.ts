@@ -71,6 +71,80 @@ export interface ActiveBackgroundTasksState {
   taskIds: string[];
 }
 
+// Aggregate provider background-work status for a turn, projected from the
+// `turn.background-activity.changed` orchestration activity. Aggregate-only by
+// contract (WP1): `state` is the whole-provider lifecycle, never per-job
+// identity, so this type deliberately carries no ids, counts, or rows.
+export interface ActiveTurnBackgroundActivityState {
+  state: "active" | "idle" | "finalizing";
+}
+
+// Mirrors the aggregate kind emitted by the server projection
+// (apps/server/src/orchestration/providerRuntimeActivityProjection.ts), which
+// the web app cannot import. One owner per package: this file, workLog.ts, and
+// the server projection each declare their own constant for the kind string.
+const BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND = "turn.background-activity.changed";
+
+function toBackgroundActivityState(value: unknown): ActiveTurnBackgroundActivityState["state"] | null {
+  if (value === "active" || value === "idle" || value === "finalizing") {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * Latest aggregate background-work state for the current turn, by ordered
+ * activity sequence (last change wins). Cleared once the turn cannot still be
+ * finishing background work: a settled/aborted latest turn or a non-running
+ * session. Prior-turn changes never stick, and because the input is the ordered
+ * activity journal, a reconnect snapshot replay (duplicate latest change)
+ * derives the same status.
+ */
+export function deriveActiveTurnBackgroundActivityState(input: {
+  activities: ReadonlyArray<OrchestrationThreadActivity>;
+  latestTurn: LatestTurnTiming | null;
+  session: SessionActivityState | null;
+}): ActiveTurnBackgroundActivityState | null {
+  const latestTurn = input.latestTurn;
+  const latestTurnId = latestTurn?.turnId;
+  if (!latestTurnId || !latestTurn?.startedAt) {
+    return null;
+  }
+  // Once the latest turn is settled (completed, failed, interrupted, or
+  // observed non-running), no background-work status remains.
+  if (isLatestTurnSettled(latestTurn, input.session)) {
+    return null;
+  }
+  // Background work only continues while the provider session is actually
+  // running; without that gate the status line would never clear.
+  if (!input.session || input.session.orchestrationStatus !== "running") {
+    return null;
+  }
+
+  const ordered = orderedActivities(input.activities);
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const activity = ordered[index];
+    if (
+      !activity ||
+      activity.kind !== BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND ||
+      activity.turnId !== latestTurnId
+    ) {
+      continue;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? ((activity.payload as Record<string, unknown>).state as unknown)
+        : undefined;
+    const state = toBackgroundActivityState(payload);
+    if (state) {
+      return { state };
+    }
+    // A malformed payload for the latest change is ignored: keep scanning for
+    // the most recent decodable change rather than rendering nothing at all.
+  }
+  return null;
+}
+
 export interface LatestProposedPlanState {
   id: OrchestrationProposedPlanId;
   createdAt: string;

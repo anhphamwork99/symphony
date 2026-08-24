@@ -5,6 +5,7 @@ import {
   buildSourceProposedPlanReference,
   deriveActiveBackgroundTasksState,
   deriveActiveTaskListState,
+  deriveActiveTurnBackgroundActivityState,
   deriveActiveWorkStartedAt,
   findLatestProposedPlan,
   findSidebarProposedPlan,
@@ -272,6 +273,279 @@ describe("deriveActiveBackgroundTasksState", () => {
     ];
 
     expect(deriveActiveBackgroundTasksState(activities, TurnId.makeUnsafe("turn-1"))).toBeNull();
+  });
+});
+
+describe("deriveActiveTurnBackgroundActivityState", () => {
+  const runningTurn = {
+    turnId: TurnId.makeUnsafe("turn-1"),
+    state: "running" as const,
+    startedAt: "2026-02-23T00:00:01.000Z",
+    completedAt: null,
+  };
+  const runningSession = { orchestrationStatus: "running" as const };
+
+  const backgroundActivity = (overrides: {
+    id: string;
+    createdAt: string;
+    turnId?: string;
+    state?: unknown;
+    payload?: OrchestrationThreadActivity["payload"];
+  }) =>
+    makeActivity({
+      id: overrides.id,
+      createdAt: overrides.createdAt,
+      kind: "turn.background-activity.changed",
+      summary: "Background activity changed",
+      tone: "info",
+      turnId: overrides.turnId ?? "turn-1",
+      payload:
+        overrides.payload ??
+        (typeof overrides.state === "string" ? { state: overrides.state } : overrides.state),
+    });
+
+  it("derives each aggregate state for the current turn by ordered sequence (last change wins)", () => {
+    for (const state of ["active", "idle", "finalizing"] as const) {
+      const activities = [
+        backgroundActivity({
+          id: "bg-earlier",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          state: "idle",
+        }),
+        backgroundActivity({
+          id: "bg-latest",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          state,
+        }),
+      ];
+      expect(
+        deriveActiveTurnBackgroundActivityState({
+          activities,
+          latestTurn: runningTurn,
+          session: runningSession,
+        }),
+      ).toEqual({ state });
+    }
+  });
+
+  it("ignores stale changes recorded on a prior turn", () => {
+    const activities = [
+      backgroundActivity({
+        id: "bg-prior-turn",
+        createdAt: "2026-02-23T00:00:01.500Z",
+        turnId: "turn-0",
+        state: "active",
+      }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: runningTurn,
+        session: runningSession,
+      }),
+    ).toBeNull();
+  });
+
+  it("clears once the latest turn is settled (completed and session no longer running)", () => {
+    const activities = [
+      backgroundActivity({ id: "bg-1", createdAt: "2026-02-23T00:00:02.000Z", state: "active" }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: {
+          ...runningTurn,
+          state: "completed" as const,
+          completedAt: "2026-02-23T00:00:09.000Z",
+        },
+        session: { orchestrationStatus: "ready" as const },
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the status through the finalizing window: completed turn while the session is still running", () => {
+    // The provider-stop window: the latest turn already carries a completion
+    // timestamp but the provider session is still running down background
+    // work. That is exactly when the aggregate status line must stay visible.
+    const activities = [
+      backgroundActivity({ id: "bg-1", createdAt: "2026-02-23T00:00:02.000Z", state: "active" }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: {
+          ...runningTurn,
+          state: "completed" as const,
+          completedAt: "2026-02-23T00:00:09.000Z",
+        },
+        session: runningSession,
+      }),
+    ).toEqual({ state: "active" });
+  });
+
+  it("clears on an aborted (interrupted) latest turn even while the session is still running", () => {
+    const activities = [
+      backgroundActivity({ id: "bg-1", createdAt: "2026-02-23T00:00:02.000Z", state: "active" }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: {
+          ...runningTurn,
+          state: "interrupted" as const,
+          completedAt: "2026-02-23T00:00:08.000Z",
+        },
+        session: runningSession,
+      }),
+    ).toBeNull();
+  });
+
+  it("clears when the session is no longer running", () => {
+    for (const orchestrationStatus of ["idle", "ready", "interrupted", "stopped", "error"] as const) {
+      const activities = [
+        backgroundActivity({
+          id: "bg-1",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          state: "active",
+        }),
+      ];
+      expect(
+        deriveActiveTurnBackgroundActivityState({
+          activities,
+          latestTurn: runningTurn,
+          session: { orchestrationStatus },
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("clears without a session or without a started latest turn", () => {
+    const activities = [
+      backgroundActivity({ id: "bg-1", createdAt: "2026-02-23T00:00:02.000Z", state: "active" }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: runningTurn,
+        session: null,
+      }),
+    ).toBeNull();
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: { ...runningTurn, startedAt: null },
+        session: runningSession,
+      }),
+    ).toBeNull();
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: null,
+        session: runningSession,
+      }),
+    ).toBeNull();
+  });
+
+  it("derives the same status from a reconnect snapshot replay of the same journal", () => {
+    const activities = [
+      backgroundActivity({ id: "bg-1", createdAt: "2026-02-23T00:00:02.000Z", state: "active" }),
+      backgroundActivity({
+        id: "bg-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        state: "finalizing",
+      }),
+    ];
+    // A reconnect snapshot replays the same ordered journal; the derivation is
+    // a pure function of that journal, so the replayed derivation must match.
+    const first = deriveActiveTurnBackgroundActivityState({
+      activities,
+      latestTurn: runningTurn,
+      session: runningSession,
+    });
+    const replayed = deriveActiveTurnBackgroundActivityState({
+      activities: [...activities],
+      latestTurn: { ...runningTurn },
+      session: { ...runningSession },
+    });
+    expect(first).toEqual({ state: "finalizing" });
+    expect(replayed).toEqual(first);
+  });
+
+  it("is stable when the latest change was appended twice (duplicate delivery)", () => {
+    const base = backgroundActivity({
+      id: "bg-1",
+      createdAt: "2026-02-23T00:00:02.000Z",
+      state: "active",
+    });
+    const latest = backgroundActivity({
+      id: "bg-2",
+      createdAt: "2026-02-23T00:00:03.000Z",
+      state: "finalizing",
+    });
+    const duplicated = [base, latest, { ...latest }];
+
+    const derived = deriveActiveTurnBackgroundActivityState({
+      activities: duplicated,
+      latestTurn: runningTurn,
+      session: runningSession,
+    });
+    expect(derived).toEqual({ state: "finalizing" });
+    // Idempotent across re-derivations of the same duplicated journal.
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities: [...duplicated],
+        latestTurn: { ...runningTurn },
+        session: { ...runningSession },
+      }),
+    ).toEqual(derived);
+  });
+
+  it("falls back to the most recent decodable change when the latest payload is malformed", () => {
+    for (const malformed of [
+      {},
+      { state: 42 },
+      { state: "running-background-work" },
+      { state: null },
+      "not-an-object",
+      null,
+    ] as const) {
+      const activities = [
+        backgroundActivity({
+          id: "bg-decodable",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          state: "active",
+        }),
+        backgroundActivity({
+          id: "bg-malformed",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          payload: malformed as OrchestrationThreadActivity["payload"],
+        }),
+      ];
+      expect(
+        deriveActiveTurnBackgroundActivityState({
+          activities,
+          latestTurn: runningTurn,
+          session: runningSession,
+        }),
+      ).toEqual({ state: "active" });
+    }
+  });
+
+  it("returns null when no change for the current turn is decodable", () => {
+    const activities = [
+      backgroundActivity({
+        id: "bg-malformed",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        payload: { state: "unknown-state" },
+      }),
+    ];
+    expect(
+      deriveActiveTurnBackgroundActivityState({
+        activities,
+        latestTurn: runningTurn,
+        session: runningSession,
+      }),
+    ).toBeNull();
   });
 });
 

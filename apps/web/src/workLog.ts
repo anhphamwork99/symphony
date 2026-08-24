@@ -53,6 +53,12 @@ const SYNARA_MCP_COMMAND_PENDING_ACTIVITY_KIND = "synara.mcp.command.pending";
 const SYNARA_MCP_COMMAND_SUCCEEDED_ACTIVITY_KIND = "synara.mcp.command.succeeded";
 const SYNARA_MCP_COMMAND_FAILED_ACTIVITY_KIND = "synara.mcp.command.failed";
 
+// Aggregate provider background-work lifecycle, mirrored from the server
+// projection (see session-logic.ts deriveActiveTurnBackgroundActivityState).
+// Aggregate-only by contract: it is composer status-line data, never a
+// transcript/work-log row.
+const BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND = "turn.background-activity.changed";
+
 const SYNARA_MCP_COMMAND_ACTIVITY_KINDS = new Set([
   SYNARA_MCP_COMMAND_PENDING_ACTIVITY_KIND,
   SYNARA_MCP_COMMAND_SUCCEEDED_ACTIVITY_KIND,
@@ -294,6 +300,9 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.summary !== "Checkpoint captured")
     // Server-side Studio output attribution is environment-panel data, not transcript work.
     .filter((activity) => activity.kind !== STUDIO_OUTPUTS_ACTIVITY_KIND)
+    // Aggregate background-work lifecycle is composer status-line data, not a
+    // work-log row (see deriveActiveTurnBackgroundActivityState).
+    .filter((activity) => activity.kind !== BACKGROUND_ACTIVITY_CHANGED_ACTIVITY_KIND)
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   // Strip the derivation-only helpers that exist solely on DerivedWorkLogEntry.
