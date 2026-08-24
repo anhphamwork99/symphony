@@ -1,4 +1,4 @@
-import { ThreadId } from "@synara/contracts";
+import { ProjectId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -84,14 +84,65 @@ describe("dockPaneActivation", () => {
     ).toBe("live");
   });
 
-  it("builds a stable pane key scoped by host thread, pane id, and kind", () => {
+  it("builds a pane key scoped by the owning Project, pane id, and kind", () => {
     expect(
       dockPaneActivationKey({
-        threadId: ThreadId.makeUnsafe("thread-1"),
+        projectId: ProjectId.makeUnsafe("project-1"),
         paneId: "pane-1",
         kind: "browser",
       }),
-    ).toBe("thread-1\u0000pane-1\u0000browser");
+    ).toBe("project-1\u0000pane-1\u0000browser");
+  });
+
+  it("scopes pane identity to the Project, not the conversation", () => {
+    // Same Project workspace: switching conversations (thread A1 -> A2) must
+    // not change the runtime identity of the same pane.
+    expect(
+      dockPaneActivationKey({
+        projectId: ProjectId.makeUnsafe("project-1"),
+        paneId: "pane-1",
+        kind: "terminal",
+      }),
+    ).toBe(
+      dockPaneActivationKey({
+        projectId: ProjectId.makeUnsafe("project-1"),
+        paneId: "pane-1",
+        kind: "terminal",
+      }),
+    );
+    // Another Project owns another dock slice, so its panes reset identity.
+    expect(
+      dockPaneActivationKey({
+        projectId: ProjectId.makeUnsafe("project-1"),
+        paneId: "pane-1",
+        kind: "terminal",
+      }),
+    ).not.toBe(
+      dockPaneActivationKey({
+        projectId: ProjectId.makeUnsafe("project-2"),
+        paneId: "pane-1",
+        kind: "terminal",
+      }),
+    );
+    // A ThreadId is not a valid dock owner: the namespace stays distinct from
+    // any legacy thread-scoped key (Decision 0002 — no pseudo-Thread fallback).
+    expect(
+      dockPaneActivationKey({
+        projectId: ProjectId.makeUnsafe("thread-1"),
+        paneId: "pane-1",
+        kind: "terminal",
+      }),
+    ).toBe("thread-1\u0000pane-1\u0000terminal");
+  });
+
+  it("creates no activation key for a Project-less surface", () => {
+    expect(
+      dockPaneActivationKey({
+        projectId: null,
+        paneId: "pane-1",
+        kind: "browser",
+      }),
+    ).toBeNull();
   });
 
   it("uses two frames for restored heavy-pane hydration", () => {

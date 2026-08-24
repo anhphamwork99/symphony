@@ -21,6 +21,7 @@ const TURN_ID = TurnId.makeUnsafe("turn-1");
 const OTHER_TURN_ID = TurnId.makeUnsafe("turn-2");
 const PROJECT_ID = ProjectId.makeUnsafe("project-1");
 const DRAFT_PROJECT_ID = ProjectId.makeUnsafe("project-draft");
+const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-2");
 
 describe("resolveThreadPickerTitle", () => {
   it("falls back to a stable untitled label", () => {
@@ -147,7 +148,7 @@ describe("single chat route helpers", () => {
 describe("resolveRoutePanelBootstrap", () => {
   it("hydrates diff deep links exactly once per scope and search payload", () => {
     const first = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
+      scopeId: PROJECT_ID,
       search: {
         panel: "diff",
         diff: "1",
@@ -165,7 +166,7 @@ describe("resolveRoutePanelBootstrap", () => {
     expect(first.nextAppliedSearchKey).toEqual(expect.any(String));
 
     const duplicate = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
+      scopeId: PROJECT_ID,
       search: {
         panel: "diff",
         diff: "1",
@@ -181,9 +182,57 @@ describe("resolveRoutePanelBootstrap", () => {
     });
   });
 
+  it("does not dedupe across Projects: another owner applies its own deep link", () => {
+    const first = resolveRoutePanelBootstrap({
+      scopeId: PROJECT_ID,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
+      lastAppliedSearchKey: null,
+    });
+
+    const otherProject = resolveRoutePanelBootstrap({
+      scopeId: OTHER_PROJECT_ID,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
+      lastAppliedSearchKey: first.nextAppliedSearchKey,
+    });
+
+    expect(otherProject.panelPatch).toEqual({
+      panel: "diff",
+      diffTurnId: TURN_ID,
+      diffFilePath: null,
+    });
+    expect(otherProject.nextAppliedSearchKey).not.toBe(first.nextAppliedSearchKey);
+  });
+
+  it("produces no key and no patch while the owner Project is unresolved", () => {
+    const pending = resolveRoutePanelBootstrap({
+      scopeId: null,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
+      lastAppliedSearchKey: null,
+    });
+
+    expect(pending).toEqual({
+      nextAppliedSearchKey: null,
+      panelPatch: null,
+    });
+
+    // The pending search was never consumed: once an owner resolves, the same
+    // deep link still applies rather than being swallowed by a stale key.
+    const resolved = resolveRoutePanelBootstrap({
+      scopeId: PROJECT_ID,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
+      lastAppliedSearchKey: pending.nextAppliedSearchKey,
+    });
+
+    expect(resolved.panelPatch).toEqual({
+      panel: "diff",
+      diffTurnId: TURN_ID,
+      diffFilePath: null,
+    });
+  });
+
   it("resets once route search params are stripped so the same deep link can replay", () => {
     const first = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
+      scopeId: PROJECT_ID,
       search: {
         panel: "diff",
         diff: "1",
@@ -194,7 +243,7 @@ describe("resolveRoutePanelBootstrap", () => {
     });
 
     const cleared = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
+      scopeId: PROJECT_ID,
       search: {},
       lastAppliedSearchKey: first.nextAppliedSearchKey,
     });
@@ -205,7 +254,7 @@ describe("resolveRoutePanelBootstrap", () => {
     });
 
     const replay = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
+      scopeId: PROJECT_ID,
       search: {
         panel: "diff",
         diff: "1",
@@ -222,31 +271,27 @@ describe("resolveRoutePanelBootstrap", () => {
     });
   });
 
-  it("reapplies the same deep link when the mounted thread scope changes", () => {
+  it("does not re-apply a deep link for a same-Project conversation switch with the same payload", () => {
+    // Conversation A1 opens a diff deep link: applied once.
     const first = resolveRoutePanelBootstrap({
-      scopeId: "thread-1",
-      search: {
-        panel: "diff",
-        diff: "1",
-        diffTurnId: TURN_ID,
-      },
+      scopeId: PROJECT_ID,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
       lastAppliedSearchKey: null,
     });
+    expect(first.panelPatch).not.toBeNull();
 
-    const nextThread = resolveRoutePanelBootstrap({
-      scopeId: "thread-2",
-      search: {
-        panel: "diff",
-        diff: "1",
-        diffTurnId: TURN_ID,
-      },
+    // Same Project, same payload — the user switched to conversation A2 while
+    // the search params were momentarily identical. The scope is the Project,
+    // so the identical payload dedupes and the dock workspace is untouched.
+    const sameProjectSwitch = resolveRoutePanelBootstrap({
+      scopeId: PROJECT_ID,
+      search: { panel: "diff", diff: "1", diffTurnId: TURN_ID },
       lastAppliedSearchKey: first.nextAppliedSearchKey,
     });
 
-    expect(nextThread.panelPatch).toEqual({
-      panel: "diff",
-      diffTurnId: TURN_ID,
-      diffFilePath: null,
+    expect(sameProjectSwitch).toEqual({
+      nextAppliedSearchKey: first.nextAppliedSearchKey,
+      panelPatch: null,
     });
   });
 });

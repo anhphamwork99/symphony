@@ -131,11 +131,24 @@ function createRoutePanelSearchKey(input: {
   });
 }
 
+// The bootstrap scope is the Project owning the dock workspace (Decision 0002).
+// Same-Project conversation switches share one scope, so an identical deep-link
+// payload dedupes instead of re-opening panes the user already closed; a
+// different Project owns a different dock and can apply its own deep link.
+// `null` (no resolvable owner Project) owns no dock slice: nothing is consumed
+// or applied, so the pending search stays replayable once an owner is known.
 export function resolveRoutePanelBootstrap(input: {
-  scopeId: string;
+  scopeId: ProjectId | null;
   search: DiffRouteSearch;
   lastAppliedSearchKey: string | null;
 }): RoutePanelBootstrapResult {
+  if (input.scopeId === null) {
+    return {
+      nextAppliedSearchKey: null,
+      panelPatch: null,
+    };
+  }
+
   const nextAppliedSearchKey = createRoutePanelSearchKey({
     scopeId: input.scopeId,
     search: input.search,

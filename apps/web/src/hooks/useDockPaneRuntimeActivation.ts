@@ -3,7 +3,7 @@
 // Layer: Web UI hook
 // Depends on: dockPaneActivation pure policy and rightDockStore pane metadata.
 
-import type { ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -23,7 +23,7 @@ const browserDockPaneHydrationScheduler: DeferredDockPaneHydrationScheduler = {
 };
 
 export function useDockPaneRuntimeActivation(input: {
-  threadId: ThreadId;
+  projectId: ProjectId | null;
   activePane: RightDockPane | null;
 }) {
   const immediateHydrationKindRef = useRef<RightDockPaneKind | "any" | null>(null);
@@ -31,16 +31,20 @@ export function useDockPaneRuntimeActivation(input: {
   const activePaneId = input.activePane?.id ?? null;
   const activePaneKind = input.activePane?.kind ?? null;
 
+  // Pane runtime identity follows the owning Project, not the conversation: the
+  // dock slice (and its pane ids) are shared by every Main conversation in the
+  // Project, so a same-Project thread switch keeps this key stable and the
+  // hydrated runtime stays live instead of resetting to preview.
   const activePaneKey = useMemo(
     () =>
       activePaneId !== null && activePaneKind !== null
         ? dockPaneActivationKey({
-            threadId: input.threadId,
+            projectId: input.projectId,
             paneId: activePaneId,
             kind: activePaneKind,
           })
         : null,
-    [activePaneId, activePaneKind, input.threadId],
+    [activePaneId, activePaneKind, input.projectId],
   );
 
   const activePaneRuntimeMode: DockPaneRuntimeMode =

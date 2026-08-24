@@ -15,6 +15,7 @@ import { ProjectId, ThreadId } from "@synara/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { resolveDockTerminalScope } from "./lib/dockTerminalScope";
+import { resolveRoutePanelBootstrap } from "./routes/-chatThreadRoute.logic";
 import {
   resolveDockOwnerProjectId,
   selectRightDockState,
@@ -75,6 +76,27 @@ function routeActiveThreadDock(activeThreadId: ThreadId | null) {
     projectId: ownerProjectId,
   })!;
   return { ownerProjectId, dockState, terminalScope };
+}
+
+/**
+ * The deep-link replay chain `SingleChatSurface` composes when a route mounts:
+ * the bootstrap scope is the dock owner Project, and an applied browser patch
+ * opens the Project's browser pane exactly like the production effect does.
+ */
+function applyRouteDeepLink(input: {
+  ownerProjectId: ProjectId | null;
+  search: { panel?: "browser" | "diff" };
+  lastAppliedSearchKey: string | null;
+}): string | null {
+  const { nextAppliedSearchKey, panelPatch } = resolveRoutePanelBootstrap({
+    scopeId: input.ownerProjectId,
+    search: input.search,
+    lastAppliedSearchKey: input.lastAppliedSearchKey,
+  });
+  if (panelPatch?.panel === "browser") {
+    useRightDockStore.getState().openPane(input.ownerProjectId!, { kind: "browser" });
+  }
+  return nextAppliedSearchKey;
 }
 
 beforeEach(() => {
@@ -165,5 +187,93 @@ describe("Project-owned dock routing — different-Project switch", () => {
     expect(fromB1.dockState).toBe(fromB1Again.dockState);
     expect(fromB1.dockState.panes).toHaveLength(0);
     expect(fromB1.dockState).not.toBe(routeActiveThreadDock(threadA1).dockState);
+  });
+});
+
+describe("Project-owned dock routing — deep-link bootstrap scoping", () => {
+  it("keeps a closed browser pane closed across a same-Project switch carrying the same deep-link payload", () => {
+    // Conversation A1 follows a browser deep link: the bootstrap opens the
+    // Project's browser pane once.
+    const a1 = routeActiveThreadDock(threadA1);
+    const appliedKey = applyRouteDeepLink({
+      ownerProjectId: a1.ownerProjectId,
+      search: { panel: "browser" },
+      lastAppliedSearchKey: null,
+    });
+    expect(typeof appliedKey).toBe("string");
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectA]!.panes.map((pane) => pane.kind),
+    ).toEqual(["browser"]);
+
+    // The user closes the browser tab and activates a file pane instead.
+    const slice = useRightDockStore.getState().dockStateByProjectId[projectA]!;
+    const browserPaneId = slice.panes.find((pane) => pane.kind === "browser")!.id;
+    useRightDockStore.getState().closePane(projectA, browserPaneId);
+    useRightDockStore.getState().openPane(projectA, { kind: "file", filePath: "src/app.ts" });
+    const filePane = useRightDockStore
+      .getState()
+      .dockStateByProjectId[projectA]!.panes.find((pane) => pane.kind === "file")!;
+    useRightDockStore.getState().setActivePane(projectA, filePane.id);
+
+    // Switch to conversation A2 while the same deep-link payload is still in
+    // the URL. The bootstrap scope is the Project, the payload is identical, so
+    // the deep link dedupes and must not reopen the closed browser pane.
+    const dockBefore = useRightDockStore.getState().dockStateByProjectId[projectA];
+    const writes: unknown[] = [];
+    const unsubscribe = useRightDockStore.subscribe((state) => {
+      writes.push(state.dockStateByProjectId);
+    });
+
+    const a2 = routeActiveThreadDock(threadA2);
+    const replayKey = applyRouteDeepLink({
+      ownerProjectId: a2.ownerProjectId,
+      search: { panel: "browser" },
+      lastAppliedSearchKey: appliedKey,
+    });
+
+    expect(replayKey).toBe(appliedKey);
+    expect(a2.ownerProjectId).toBe(a1.ownerProjectId);
+    // Browser pane stays closed; the file pane stays active; zero extra writes.
+    expect(useRightDockStore.getState().dockStateByProjectId[projectA]).toBe(dockBefore);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectA]!.panes.map((pane) => pane.kind),
+    ).toEqual(["file"]);
+    expect(useRightDockStore.getState().dockStateByProjectId[projectA]!.activePaneId).toBe(
+      filePane.id,
+    );
+    expect(writes).toHaveLength(0);
+
+    unsubscribe();
+  });
+
+  it("applies a deep link independently for another Project's dock", () => {
+    const a = routeActiveThreadDock(threadA1);
+    const appliedKeyA = applyRouteDeepLink({
+      ownerProjectId: a.ownerProjectId,
+      search: { panel: "browser" },
+      lastAppliedSearchKey: null,
+    });
+    expect(typeof appliedKeyA).toBe("string");
+
+    // Moving to Project B's conversation carries the same payload, but B owns a
+    // different dock slice: its bootstrap applies and opens B's browser pane.
+    const b = routeActiveThreadDock(threadB1);
+    const appliedKeyB = applyRouteDeepLink({
+      ownerProjectId: b.ownerProjectId,
+      search: { panel: "browser" },
+      lastAppliedSearchKey: appliedKeyA,
+    });
+
+    expect(b.ownerProjectId).toBe(projectB);
+    expect(appliedKeyB).not.toBe(appliedKeyA);
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectB]!.panes.map(
+        (pane) => pane.kind,
+      ),
+    ).toEqual(["browser"]);
+    // Project A's dock is untouched by B's application.
+    expect(
+      useRightDockStore.getState().dockStateByProjectId[projectA]!.panes.map((pane) => pane.kind),
+    ).toEqual(["browser"]);
   });
 });

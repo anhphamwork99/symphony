@@ -105,6 +105,11 @@ interface RightDockProps {
   onCollapse: () => void;
   onOpenChange: (open: boolean) => void;
   onAddPane: (kind: RightDockPaneKind) => void;
+  /**
+   * Identity of the surface that owns the dock's motion allowance. The chat
+   * surface passes its owning ProjectId so a same-Project conversation switch
+   * keeps motion enabled instead of re-suppressing chrome motion.
+   */
   motionKey?: string;
   activePaneRuntimeMode?: DockPaneRuntimeMode;
   renderPane: (

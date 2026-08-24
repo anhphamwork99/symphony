@@ -3,7 +3,7 @@
 // Layer: Web UI lifecycle helper
 // Depends on: rightDockStore pane kind taxonomy
 
-import type { ThreadId } from "@synara/contracts";
+import type { ProjectId } from "@synara/contracts";
 
 import type { RightDockPaneKind } from "~/rightDockStore.logic";
 
@@ -110,12 +110,20 @@ const KEEP_MOUNTED_PANE_KINDS: ReadonlySet<RightDockPaneKind> = new Set<RightDoc
   "explorer",
 ]);
 
+// The dock workspace is owned by the Project (Decision 0002), so pane runtime
+// identity is scoped by the owning ProjectId, never the active conversation.
+// A same-Project conversation switch resolves the identical key, keeping a
+// hydrated runtime (terminal, browser) live across the switch. A Project-less
+// surface owns no dock slice at all, so it produces no key and nothing hydrates.
 export function dockPaneActivationKey(input: {
-  threadId: ThreadId;
+  projectId: ProjectId | null;
   paneId: string;
   kind: RightDockPaneKind;
-}): string {
-  return `${input.threadId}\u0000${input.paneId}\u0000${input.kind}`;
+}): string | null {
+  if (input.projectId === null) {
+    return null;
+  }
+  return `${input.projectId}\u0000${input.paneId}\u0000${input.kind}`;
 }
 
 export function isDeferredRuntimePaneKind(kind: RightDockPaneKind): boolean {

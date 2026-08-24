@@ -276,7 +276,7 @@ export function SingleChatSurface(props: {
     requestActivePaneLive: requestActiveDockPaneLive,
     requestImmediateHydration: requestImmediateDockHydration,
   } = useDockPaneRuntimeActivation({
-    threadId: props.threadId,
+    projectId: dockOwnerProjectId,
     activePane,
   });
 
@@ -556,7 +556,7 @@ export function SingleChatSurface(props: {
 
   useEffect(() => {
     const { nextAppliedSearchKey, panelPatch } = resolveRoutePanelBootstrap({
-      scopeId: props.threadId,
+      scopeId: dockOwnerProjectId,
       search: props.search,
       lastAppliedSearchKey: lastAppliedRoutePanelSearchKeyRef.current,
     });
@@ -594,6 +594,10 @@ export function SingleChatSurface(props: {
     setDockOpen,
     dockOwnerProjectId,
   ]);
+
+  // Same-Project conversation switches keep this effect's key set unchanged: the
+  // bootstrap scope (dockOwnerProjectId) and payload (props.search) are both
+  // identical, so the dedupe above leaves the workspace untouched.
 
   useBrowserPanelDesktopBridge({
     onToggle: () => {
@@ -1139,7 +1143,7 @@ export function SingleChatSurface(props: {
           mainTransitionTargetRef={mainSurfaceRef}
           addMenuKinds={availableDockPaneKinds}
           launcherItems={dockLauncherItems}
-          motionKey={props.threadId}
+          motionKey={dockOwnerProjectId ?? undefined}
           activePaneRuntimeMode={activePaneRuntimeMode}
           preferredWidthPx={dockState.preferredWidthPx}
           onPreferredWidthChange={
