@@ -25,6 +25,21 @@ export const DEVICE_WS_METHODS = {
   describeUi: "device.describeUi",
   scrollToElement: "device.scrollToElement",
   subscribeEvents: "device.subscribeEvents",
+
+  // Project-owned device workspace methods (WP1 ProjectDevice schemas; the
+  // Right-sidebar device pane belongs to the Project, Decision 0002). Keyed by
+  // the real ProjectId — never a pseudo-ThreadId or the active conversation.
+  getProjectState: "device.project.getState",
+  attachProject: "device.project.attach",
+  detachProject: "device.project.detach",
+  subscribeProjectEvents: "device.project.subscribeEvents",
+} as const;
+
+// Project-owned device pushes ride their own channel so a Project pane costs
+// one stream lease and never has to filter Thread-scoped events (or vice
+// versa); each event already names its owning ProjectId.
+export const DEVICE_PROJECT_WS_CHANNELS = {
+  event: "device.project-event",
 } as const;
 
 // One channel carries every device push so a pane costs a single stream lease

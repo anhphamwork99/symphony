@@ -337,6 +337,81 @@ describe("agent gateway browser tools", () => {
     );
   });
 
+  it("keys browser automation by the authoritatively resolved owning Project (WP5)", async () => {
+    const execute = vi.fn(() =>
+      Effect.succeed({
+        tabs: [],
+        activeTabId: null,
+        assignedTabId: null,
+      }),
+    );
+    // The resolver is the server's authoritative Thread→Project derivation
+    // (durable thread.projectId → projected live project shell). It is called
+    // with the TOOL context — never with public MCP arguments — so whichever
+    // Thread happens to be active cannot influence the owner.
+    const resolveProjectWorkspace = vi.fn(() => Effect.succeed("project-owner-a" as never));
+    const tools = makeAgentGatewayBrowserTools(
+      { available: true, execute },
+      { resolveProjectWorkspace },
+    );
+
+    const tabs = tools.find((tool) => tool.definition.name === "browser_tabs")!;
+    const result = await Effect.runPromise(tabs.handler({}, context));
+
+    expect(result.isError).not.toBe(true);
+    expect(resolveProjectWorkspace).toHaveBeenCalledWith(context);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-a",
+        projectId: "project-owner-a",
+        name: "browser_tabs",
+      }),
+    );
+  });
+
+  it("shares the resolved Project across caller Threads and keeps a null resolution legacy", async () => {
+    const execute = vi.fn((_input: unknown) =>
+      Effect.succeed({
+        tabs: [],
+        activeTabId: null,
+        assignedTabId: null,
+      }),
+    );
+    // Two different caller Threads resolve to the SAME owning Project: the
+    // workspace is the Project's, and the caller Thread is provenance only.
+    const resolveProjectWorkspace = vi.fn(() => Effect.succeed("project-owner-shared" as never));
+    const tools = makeAgentGatewayBrowserTools(
+      { available: true, execute },
+      { resolveProjectWorkspace },
+    );
+    const tabs = tools.find((tool) => tool.definition.name === "browser_tabs")!;
+
+    const otherThreadContext: ToolContext = {
+      ...context,
+      principal: { ...context.principal, threadId: "thread-b" },
+      callerThreadId: "thread-b",
+    };
+    await Effect.runPromise(tabs.handler({}, context));
+    await Effect.runPromise(tabs.handler({}, otherThreadContext));
+
+    const owners = execute.mock.calls.map(
+      (call) => (call[0] as unknown as { projectId: string }).projectId,
+    );
+    expect(owners).toEqual(["project-owner-shared", "project-owner-shared"]);
+
+    // Unresolvable owner (missing thread or deleted Project): the frame keeps
+    // the legacy provenance-only shape — no synthetic owner is fabricated.
+    const unresolved = makeAgentGatewayBrowserTools(
+      { available: true, execute },
+      { resolveProjectWorkspace: () => Effect.succeed(null) },
+    );
+    const unresolvedTabs = unresolved.find((tool) => tool.definition.name === "browser_tabs")!;
+    await Effect.runPromise(unresolvedTabs.handler({}, context));
+    const lastCall = execute.mock.calls.at(-1)![0] as unknown as Record<string, unknown>;
+    expect(lastCall.projectId).toBeUndefined();
+    expect(lastCall.threadId).toBe("thread-a");
+  });
+
   it("resolves upload workspace server-side and never places it in public arguments", async () => {
     const execute = vi.fn(() =>
       Effect.succeed({

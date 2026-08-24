@@ -100,11 +100,16 @@ import {
 import { StudioListThreadOutputsInput } from "./studio";
 import { FilesystemBrowseInput } from "./filesystem";
 import {
+  DEVICE_PROJECT_WS_CHANNELS,
   DEVICE_WS_CHANNELS,
   DEVICE_WS_METHODS,
   DeviceAttachInput,
   DeviceBootInput,
   DeviceDescribeUiInput,
+  DeviceProjectEvent,
+  DeviceProjectGetStateInput,
+  DeviceProjectAttachInput,
+  DeviceProjectInput,
   DeviceScrollToElementInput,
   DeviceDetachInput,
   DeviceEvent,
@@ -421,6 +426,14 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(DEVICE_WS_METHODS.scrollToElement, DeviceScrollToElementInput),
   tagRequestBody(DEVICE_WS_METHODS.subscribeEvents, Schema.Struct({})),
 
+  // Project-owned device pane methods (WP1 ProjectDevice schemas). The
+  // owning Project is identified explicitly; ownership is never inferred
+  // from the active Thread.
+  tagRequestBody(DEVICE_WS_METHODS.getProjectState, DeviceProjectGetStateInput),
+  tagRequestBody(DEVICE_WS_METHODS.attachProject, DeviceProjectAttachInput),
+  tagRequestBody(DEVICE_WS_METHODS.detachProject, DeviceProjectInput),
+  tagRequestBody(DEVICE_WS_METHODS.subscribeProjectEvents, Schema.Struct({})),
+
   // Shell methods
   tagRequestBody(WS_METHODS.shellOpenInEditor, OpenInEditorInput),
 
@@ -574,6 +587,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.terminalProjectEvent]: typeof TerminalProjectEvent.Type;
   readonly [WS_CHANNELS.projectDevServerEvent]: typeof ProjectDevServerEvent.Type;
   readonly [DEVICE_WS_CHANNELS.event]: typeof DeviceEvent.Type;
+  readonly [DEVICE_PROJECT_WS_CHANNELS.event]: typeof DeviceProjectEvent.Type;
   readonly [ORCHESTRATION_WS_CHANNELS.domainEvent]: OrchestrationEvent;
   readonly [ORCHESTRATION_WS_CHANNELS.shellEvent]: OrchestrationShellStreamItem;
   readonly [ORCHESTRATION_WS_CHANNELS.threadEvent]: OrchestrationThreadStreamItem;
@@ -636,6 +650,10 @@ export const WsPushProjectDevServerEvent = makeWsPushSchema(
   ProjectDevServerEvent,
 );
 export const WsPushDeviceEvent = makeWsPushSchema(DEVICE_WS_CHANNELS.event, DeviceEvent);
+export const WsPushDeviceProjectEvent = makeWsPushSchema(
+  DEVICE_PROJECT_WS_CHANNELS.event,
+  DeviceProjectEvent,
+);
 export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
   ORCHESTRATION_WS_CHANNELS.domainEvent,
   OrchestrationEvent,
@@ -663,6 +681,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.terminalProjectEvent,
   WS_CHANNELS.projectDevServerEvent,
   DEVICE_WS_CHANNELS.event,
+  DEVICE_PROJECT_WS_CHANNELS.event,
   ORCHESTRATION_WS_CHANNELS.domainEvent,
   ORCHESTRATION_WS_CHANNELS.shellEvent,
   ORCHESTRATION_WS_CHANNELS.threadEvent,
@@ -683,6 +702,7 @@ export const WsPush = Schema.Union([
   WsPushTerminalProjectEvent,
   WsPushProjectDevServerEvent,
   WsPushDeviceEvent,
+  WsPushDeviceProjectEvent,
   WsPushOrchestrationDomainEvent,
   WsPushOrchestrationShellEvent,
   WsPushOrchestrationThreadEvent,

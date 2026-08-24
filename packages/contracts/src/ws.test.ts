@@ -2,7 +2,14 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import { ORCHESTRATION_WS_CHANNELS, ORCHESTRATION_WS_METHODS } from "./orchestration";
-import { WebSocketRequest, WsResponse, WS_CHANNELS, WS_METHODS } from "./ws";
+import { DEVICE_PROJECT_WS_CHANNELS, DEVICE_WS_METHODS } from "./device";
+import {
+  WsPushDeviceProjectEvent,
+  WebSocketRequest,
+  WsResponse,
+  WS_CHANNELS,
+  WS_METHODS,
+} from "./ws";
 
 const decode = <S extends Schema.Top>(
   schema: S,
@@ -356,5 +363,81 @@ it.effect("decodes project terminal push events on their own channel", () =>
     if (parsed.type === "push") {
       assert.strictEqual(parsed.channel, WS_CHANNELS.terminalProjectEvent);
     }
+  }),
+);
+
+// ── WP5: Project-owned device method registration ───────────────────
+
+it.effect("accepts project device requests keyed by real ProjectId", () =>
+  Effect.gen(function* () {
+    const getState = yield* decode(WebSocketRequest, {
+      id: "req-device-project-getstate-1",
+      body: {
+        _tag: DEVICE_WS_METHODS.getProjectState,
+        projectId: "project-1",
+      },
+    });
+    assert.strictEqual(getState.body._tag, DEVICE_WS_METHODS.getProjectState);
+
+    const attach = yield* decode(WebSocketRequest, {
+      id: "req-device-project-attach-1",
+      body: {
+        _tag: DEVICE_WS_METHODS.attachProject,
+        projectId: "project-1",
+        udid: "FAKE-0001",
+      },
+    });
+    assert.strictEqual(attach.body._tag, DEVICE_WS_METHODS.attachProject);
+
+    const detach = yield* decode(WebSocketRequest, {
+      id: "req-device-project-detach-1",
+      body: {
+        _tag: DEVICE_WS_METHODS.detachProject,
+        projectId: "project-1",
+      },
+    });
+    assert.strictEqual(detach.body._tag, DEVICE_WS_METHODS.detachProject);
+
+    // The owning Project must be identified explicitly: an attach without its
+    // ProjectId is not decodable, and no pseudo-ThreadId key is accepted.
+    const rejected = yield* Effect.exit(
+      decode(WebSocketRequest, {
+        id: "req-device-project-reject-1",
+        body: {
+          _tag: DEVICE_WS_METHODS.attachProject,
+          udid: "FAKE-0001",
+        },
+      }),
+    );
+    assert.strictEqual(rejected._tag, "Failure");
+  }),
+);
+
+it.effect("decodes project device push events on their own channel", () =>
+  Effect.gen(function* () {
+    // Decode through the dedicated push schema: the event must validate as a
+    // device.project-event push AND its payload as a ProjectDeviceState naming
+    // the owning Project — proving the channel carries Project-owned state,
+    // never a Thread-keyed snapshot.
+    const parsed = yield* decode(WsPushDeviceProjectEvent, {
+      type: "push",
+      sequence: 3,
+      channel: DEVICE_PROJECT_WS_CHANNELS.event,
+      data: {
+        type: "device.project-state",
+        state: {
+          projectId: "project-1",
+          version: 1,
+          attachedDeviceUdid: "FAKE-0001",
+          devices: [],
+          agentActive: false,
+          availability: { kind: "available" },
+          lastError: null,
+        },
+      },
+    });
+    assert.strictEqual(parsed.channel, DEVICE_PROJECT_WS_CHANNELS.event);
+    assert.strictEqual(parsed.data.state.projectId, "project-1");
+    assert.strictEqual(parsed.data.state.attachedDeviceUdid, "FAKE-0001");
   }),
 );

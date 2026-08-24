@@ -291,6 +291,29 @@ const make = Effect.gen(function* () {
    */
   const processProjectDeleted = Effect.fn(function* (event: ProjectDeletedEvent) {
     const projectId = ProjectId.makeUnsafe(event.payload.projectId);
+    // WP5 (Decision 0002): settle the deleted Project's device attachment
+    // AFTER the committed deletion (the same postcondition position as the
+    // terminal settlement above). Idempotent and scoped to this one Project:
+    // detaching clears the attachment truthfully and every OTHER Project's
+    // attachment is untouched. A device Synara booted that no other workspace
+    // still watches falls back to the normal idle ladder inside the manager.
+    yield* Effect.service(DeviceService).pipe(
+      Effect.flatMap((service) =>
+        Effect.promise(() => service.manager.handleProjectRemoved(projectId)),
+      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning(
+          "project deletion device attachment cleanup skipped",
+          {
+            projectId,
+            cause: Cause.pretty(cause),
+          },
+        );
+      }),
+    );
     const residuals = yield* Effect.result(
       terminalManager.settleProjectTerminals({ projectId }),
     );

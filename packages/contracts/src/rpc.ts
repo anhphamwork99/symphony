@@ -48,6 +48,10 @@ import {
   DeviceListResult,
   DeviceOpenUrlInput,
   DevicePressButtonInput,
+  DeviceProjectAttachInput,
+  DeviceProjectEvent,
+  DeviceProjectGetStateInput,
+  DeviceProjectInput,
   DeviceScreenshotInput,
   DeviceScreenshotResult,
   DeviceStartRecordingInput,
@@ -61,6 +65,7 @@ import {
   DeviceTapInput,
   DeviceThreadInput,
   DeviceTypeTextInput,
+  ProjectDeviceState,
   ThreadDeviceState,
 } from "./device";
 import { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
@@ -641,6 +646,37 @@ export const WsSubscribeDeviceEventsRpc = Rpc.make(DEVICE_WS_METHODS.subscribeEv
   stream: true,
 });
 
+// Project-owned device pane endpoints (WP1 ProjectDevice schemas; Decision
+// 0002). The owning Project is identified by its real ProjectId; a caller
+// Thread is provenance only and never infers the workspace owner.
+export const WsDeviceProjectGetStateRpc = Rpc.make(DEVICE_WS_METHODS.getProjectState, {
+  payload: DeviceProjectGetStateInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsDeviceProjectAttachRpc = Rpc.make(DEVICE_WS_METHODS.attachProject, {
+  payload: DeviceProjectAttachInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsDeviceProjectDetachRpc = Rpc.make(DEVICE_WS_METHODS.detachProject, {
+  payload: DeviceProjectInput,
+  success: ProjectDeviceState,
+  error: WsRpcError,
+});
+
+export const WsSubscribeDeviceProjectEventsRpc = Rpc.make(
+  DEVICE_WS_METHODS.subscribeProjectEvents,
+  {
+    payload: Schema.Struct({}),
+    success: DeviceProjectEvent,
+    error: WsRpcError,
+    stream: true,
+  },
+);
+
 export const WsDeviceRpcGroup = RpcGroup.make(
   WsDeviceListRpc,
   WsDeviceBootRpc,
@@ -662,6 +698,10 @@ export const WsDeviceRpcGroup = RpcGroup.make(
   WsDeviceDescribeUiRpc,
   WsDeviceScrollToElementRpc,
   WsSubscribeDeviceEventsRpc,
+  WsDeviceProjectGetStateRpc,
+  WsDeviceProjectAttachRpc,
+  WsDeviceProjectDetachRpc,
+  WsSubscribeDeviceProjectEventsRpc,
 );
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {

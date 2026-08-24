@@ -615,6 +615,21 @@ export const makeAgentGateway = Effect.gen(function* () {
           }) ?? null
         );
       }).pipe(Effect.orElseSucceed(() => null)),
+    // WP5 (Decision 0002): resolve the caller Thread's OWNING Project
+    // authoritatively — from the thread's durable `projectId` against the
+    // projected (deleted-at filtered) project shell. The result keys browser
+    // automation ownership; the caller Thread remains provenance only. An
+    // unresolvable owner (missing thread or deleted Project) yields null, and
+    // the browser tools keep the legacy provenance-only frame rather than
+    // fabricating a synthetic owner.
+    resolveProjectWorkspace: (context) =>
+      Effect.gen(function* () {
+        const thread = yield* requireThreadShell(context.callerThreadId);
+        const project = yield* snapshotQuery
+          .getProjectShellById(thread.projectId)
+          .pipe(Effect.map(Option.getOrNull));
+        return project ? thread.projectId : null;
+      }).pipe(Effect.orElseSucceed(() => null)),
   });
 
   const tools: ReadonlyArray<ToolEntry> = [

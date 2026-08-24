@@ -1,11 +1,15 @@
 /**
- * DeviceManager - thread-scoped device attachment and boot ownership.
+ * DeviceManager - Project-owned and thread-scoped device attachment and boot
+ * ownership.
  *
  * State the manager owns, and why it owns it rather than the backend:
  *
- * - Attachment is per thread (one device per thread, mirroring
- *   `ThreadBrowserState`). A thread's `ThreadDeviceState` is versioned and
- *   pushed on `device.event` so panes can drop stale snapshots.
+ * - Attachment per workspace owner (Decision 0002): a Project owns the
+ *   Right-sidebar device pane, so its attachment is keyed by the real
+ *   `ProjectId` and shared by every Main conversation in that Project. The
+ *   legacy thread registry remains for the v1 surface until every consumer
+ *   migrates; the two registries are distinct maps, so a `ProjectId` can
+ *   never collide with or masquerade as a `ThreadId`.
  * - Boot source. The backend cannot tell who booted a device, so the manager
  *   records the devices it booted itself. Only those are ever auto-shut-down;
  *   anything the user started (pane picker, Simulator.app) outlives us.
@@ -13,7 +17,8 @@
  *   refusable rather than fatal: the caller is handed the shutdown candidates
  *   so the pane can prompt.
  * - Shutdown triggers: app quit (`dispose`), thread removal
- *   (`handleThreadRemoved`), and an idle timeout after the last detach.
+ *   (`handleThreadRemoved`), Project removal (`handleProjectRemoved`), and an
+ *   idle timeout after the last detach.
  *
  * Everything the manager does to the device itself goes through DeviceBackend,
  * so the whole state machine is testable against `FakeDeviceBackend`.
@@ -28,6 +33,7 @@ import {
 } from "./bootOwnership.ts";
 import {
   DEVICE_SYNARA_BOOT_LIMIT,
+  ProjectId,
   ThreadId,
   type DeviceAttachPhase,
   type DeviceAvailability,
@@ -40,10 +46,12 @@ import {
   type DeviceLaunchAppResult,
   type DeviceListResult,
   type DeviceOpenPaneReason,
+  type DeviceProjectEvent,
   type DeviceScreenshotResult,
   type DeviceStartRecordingResult,
   type DeviceStopRecordingResult,
   type DeviceUiNode,
+  type ProjectDeviceState,
   type ThreadDeviceState,
 } from "@synara/contracts";
 
@@ -111,6 +119,7 @@ export function isTransientAttachFailure(error: unknown): boolean {
 export const DEVICE_DEFAULT_MAX_SCROLLS = 8;
 
 export type DeviceEventListener = (event: DeviceEvent) => void;
+export type DeviceProjectEventListener = (event: DeviceProjectEvent) => void;
 
 export interface DeviceManagerOptions {
   readonly backend: DeviceBackend;
@@ -160,6 +169,14 @@ export class DeviceManager {
   private readonly now: () => number;
 
   private readonly threads = new Map<string, ThreadAttachment>();
+  /**
+   * Project-owned attachments (Decision 0002). A separate map from the legacy
+   * thread registry: the key is a real `ProjectId`, never a `ProjectId`
+   * cast/encoded as a `ThreadId`, so the two ownership domains stay disjoint
+   * and Thread lifecycle operations can never touch Project state (and vice
+   * versa).
+   */
+  private readonly projects = new Map<string, ThreadAttachment>();
   /** Devices this manager booted, and therefore may shut down again. */
   private readonly synaraBooted = new Set<string>();
   private readonly idleTimers = new Map<string, NodeJS.Timeout>();
@@ -169,6 +186,7 @@ export class DeviceManager {
   private streamTransition: Promise<void> = Promise.resolve();
   private readonly recording = new Set<string>();
   private readonly listeners = new Set<DeviceEventListener>();
+  private readonly projectListeners = new Set<DeviceProjectEventListener>();
   private disposed = false;
 
   constructor(options: DeviceManagerOptions) {
@@ -233,6 +251,14 @@ export class DeviceManager {
   onEvent(listener: DeviceEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Subscribe to Project-owned device state pushes. Each event names its
+   * owning `ProjectId`, so one subscription serves every Project pane and the
+   * ownership is explicit on the wire — never inferred from an active thread. */
+  onProjectEvent(listener: DeviceProjectEventListener): () => void {
+    this.projectListeners.add(listener);
+    return () => this.projectListeners.delete(listener);
   }
 
   // ── Queries ────────────────────────────────────────────────────────
@@ -360,8 +386,11 @@ export class DeviceManager {
     this.synaraBooted.delete(udid);
     await this.recordBootOwnership();
     this.clearIdleTimer(udid);
-    // Any thread watching this device loses its attachment rather than pointing
-    // at a shut-down simulator.
+    // Any workspace watching this device loses its attachment rather than
+    // pointing at a shut-down simulator: threads (legacy surface) and Projects
+    // (Decision 0002) alike. The attachment is cleared truthfully and a fresh
+    // version is pushed — the pane keeps its descriptor and sees the empty
+    // attachment instead of a silent stale one.
     for (const [threadId, attachment] of this.threads) {
       if (attachment.attachedDeviceUdid !== udid) continue;
       attachment.attachedDeviceUdid = null;
@@ -370,6 +399,13 @@ export class DeviceManager {
       // coming, and the loop would otherwise time out into a misleading error.
       attachment.attachToken += 1;
       await this.publish(threadId);
+    }
+    for (const [projectId, attachment] of this.projects) {
+      if (attachment.attachedDeviceUdid !== udid) continue;
+      attachment.attachedDeviceUdid = null;
+      attachment.attachPhase = null;
+      attachment.attachToken += 1;
+      await this.publishProject(ProjectId.makeUnsafe(projectId));
     }
     await this.publishAllThreads();
   }
@@ -507,6 +543,148 @@ export class DeviceManager {
     if (!this.threads.has(threadId)) return;
     await this.detach(threadId);
     this.threads.delete(threadId);
+  }
+
+  // ── Project-owned attachment (Decision 0002) ────────────────────────
+  //
+  // The Right-sidebar device pane belongs to a Project. Every Main
+  // conversation in that Project addresses the SAME attachment through the
+  // owning `ProjectId`; a caller Thread is provenance only. Conversation
+  // switches, Project navigation, and Thread archive/delete never touch this
+  // state — only `handleProjectRemoved` (a committed Project deletion) or an
+  // explicit detach does. Visibility/navigation is never ownership
+  // termination: reading state never closes anything.
+
+  /** The Project's attachment record, created empty on first contact. */
+  private projectState(projectId: ProjectId): ThreadAttachment {
+    let attachment = this.projects.get(projectId);
+    if (!attachment) {
+      attachment = {
+        version: 0,
+        attachedDeviceUdid: null,
+        agentActiveCount: 0,
+        lastError: null,
+        attachPhase: null,
+        attachToken: 0,
+        paneSurfacedUdid: null,
+      };
+      this.projects.set(projectId, attachment);
+    }
+    return attachment;
+  }
+
+  async getProjectState(projectId: ProjectId): Promise<ProjectDeviceState> {
+    return await this.projectSnapshot(projectId);
+  }
+
+  /**
+   * Point the Project workspace at a device and bring its stream up.
+   *
+   * Resolves as soon as the attachment is recorded (same contract as the
+   * thread surface): the stream comes up in the background pushing a phase
+   * per stage. Every conversation in the Project observes the same result
+   * because there is exactly one attachment record for the Project.
+   */
+  async attachProject(projectId: ProjectId, udid: string): Promise<ProjectDeviceState> {
+    const attachment = this.projectState(projectId);
+    const previous = attachment.attachedDeviceUdid;
+    attachment.attachedDeviceUdid = udid;
+    attachment.lastError = null;
+    attachment.attachPhase = "connecting";
+    const token = (attachment.attachToken += 1);
+    if (previous !== null && previous !== udid) await this.releaseDevice(previous, "switched");
+    this.clearIdleTimer(udid);
+
+    if (this.activeStreamUdid === udid || this.desiredStreamUdid === udid) {
+      attachment.attachPhase = null;
+      return await this.publishProject(projectId);
+    }
+
+    const state = await this.publishProject(projectId);
+    void this.bringProjectStreamUp(projectId, udid, token);
+    return state;
+  }
+
+  /** Project twin of `bringStreamUp`: identical retry ladder, project publish. */
+  private async bringProjectStreamUp(
+    projectId: ProjectId,
+    udid: string,
+    token: number,
+  ): Promise<void> {
+    const deadline = this.now() + this.attachDeadlineMs;
+    let sawTransientFailure = false;
+
+    while (!this.disposed) {
+      const attachment = this.projects.get(projectId);
+      if (!attachment || attachment.attachToken !== token) return;
+
+      try {
+        const started = await this.startStream(udid);
+        if (!started) return;
+        if (attachment.attachPhase === null && attachment.lastError === null) return;
+        attachment.attachPhase = null;
+        attachment.lastError = null;
+        await this.publishProject(projectId);
+        return;
+      } catch (error) {
+        if (!isTransientAttachFailure(error)) {
+          // Truthful restore failure: the phase clears and the last error is
+          // retained on the Project state — never replaced by a blank default.
+          attachment.attachPhase = null;
+          attachment.lastError = errorMessage(error);
+          await this.publishProject(projectId);
+          return;
+        }
+        const phase: DeviceAttachPhase = /is not booted/iu.test(errorMessage(error))
+          ? "booting"
+          : "waiting-for-display";
+        if (attachment.attachPhase !== phase) {
+          attachment.attachPhase = phase;
+          await this.publishProject(projectId);
+        }
+        sawTransientFailure = true;
+      }
+
+      if (this.now() >= deadline) break;
+      await this.delay(this.attachRetryMs);
+    }
+
+    const attachment = this.projects.get(projectId);
+    if (!attachment || attachment.attachToken !== token) return;
+    attachment.attachPhase = null;
+    if (sawTransientFailure && !this.disposed) attachment.lastError = DISPLAY_TIMEOUT_MESSAGE;
+    await this.publishProject(projectId);
+  }
+
+  async detachProject(projectId: ProjectId): Promise<ProjectDeviceState> {
+    const attachment = this.projectState(projectId);
+    const udid = attachment.attachedDeviceUdid;
+    attachment.attachedDeviceUdid = null;
+    attachment.attachPhase = null;
+    attachment.attachToken += 1;
+    if (udid !== null) await this.releaseDevice(udid);
+    return await this.publishProject(projectId);
+  }
+
+  /**
+   * A committed `project.deleted` is terminal for the Project's device
+   * attachment (WP5 deletion settlement). Detaches truthfully and removes the
+   * registry entry; every OTHER Project's attachment is untouched. Idempotent:
+   * a Project with no entry is a no-op. The last Project watching a Synara-
+   * booted device releases it through the normal idle/switch ladder inside
+   * `releaseDevice`.
+   */
+  async handleProjectRemoved(projectId: ProjectId): Promise<void> {
+    if (!this.projects.has(projectId)) return;
+    await this.detachProject(projectId);
+    this.projects.delete(projectId);
+  }
+
+  /** Record a restore failure on the Project state, retained until the next
+   * successful attach clears it. Never resets the attachment to a default. */
+  async recordProjectError(projectId: ProjectId, message: string): Promise<void> {
+    this.projectState(projectId).lastError = message;
+    await this.publishProject(projectId);
   }
 
   // ── Streaming ──────────────────────────────────────────────────────
@@ -830,6 +1008,12 @@ export class DeviceManager {
     for (const [, attachment] of this.threads) {
       if (attachment.attachedDeviceUdid === udid) return true;
     }
+    // A Project-owned attachment keeps the device in use exactly like a
+    // thread-owned one: whichever registry holds it, the stream stays up and
+    // the idle sweep stays cancelled.
+    for (const [, attachment] of this.projects) {
+      if (attachment.attachedDeviceUdid === udid) return true;
+    }
     return false;
   }
 
@@ -840,7 +1024,7 @@ export class DeviceManager {
     return this.activeStreamUdid === udid;
   }
 
-  /** Clear stale startup state from every thread now watching this device. */
+  /** Clear stale startup state from every workspace now watching this device. */
   private async clearStreamStartupState(udid: string): Promise<void> {
     const cleared: string[] = [];
     for (const [threadId, attachment] of this.threads) {
@@ -855,6 +1039,21 @@ export class DeviceManager {
       cleared.push(threadId);
     }
     for (const threadId of cleared) await this.publish(threadId);
+    const clearedProjects: string[] = [];
+    for (const [projectId, attachment] of this.projects) {
+      if (
+        attachment.attachedDeviceUdid !== udid ||
+        (attachment.lastError === null && attachment.attachPhase === null)
+      ) {
+        continue;
+      }
+      attachment.lastError = null;
+      attachment.attachPhase = null;
+      clearedProjects.push(projectId);
+    }
+    for (const projectId of clearedProjects) {
+      await this.publishProject(ProjectId.makeUnsafe(projectId));
+    }
   }
 
   /**
@@ -1022,6 +1221,9 @@ export class DeviceManager {
   /** A boot or shutdown changes the device list every open pane is showing. */
   private async publishAllThreads(): Promise<void> {
     for (const [threadId] of this.threads) await this.publish(threadId);
+    for (const projectId of this.projects.keys()) {
+      await this.publishProject(ProjectId.makeUnsafe(projectId));
+    }
   }
 
   private emit(event: DeviceEvent): void {
@@ -1030,6 +1232,40 @@ export class DeviceManager {
         listener(event);
       } catch {
         // One bad listener must not stop the rest from seeing device events.
+      }
+    }
+  }
+
+  private async projectSnapshot(projectId: ProjectId): Promise<ProjectDeviceState> {
+    const attachment = this.projectState(projectId);
+    const availability = await this.backend.availability();
+    const devices = await this.discover(availability, { includeShutdown: true });
+    return {
+      projectId,
+      version: attachment.version,
+      attachedDeviceUdid: attachment.attachedDeviceUdid as ProjectDeviceState["attachedDeviceUdid"],
+      devices,
+      agentActive: attachment.agentActiveCount > 0,
+      availability,
+      lastError: attachment.lastError,
+      attachPhase: attachment.attachPhase,
+    };
+  }
+
+  private async publishProject(projectId: ProjectId): Promise<ProjectDeviceState> {
+    const attachment = this.projectState(projectId);
+    attachment.version += 1;
+    const state = await this.projectSnapshot(projectId);
+    this.emitProject({ type: "device.project-state", state });
+    return state;
+  }
+
+  private emitProject(event: DeviceProjectEvent): void {
+    for (const listener of this.projectListeners) {
+      try {
+        listener(event);
+      } catch {
+        // One bad listener must not stop the rest from seeing project events.
       }
     }
   }

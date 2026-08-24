@@ -19,6 +19,7 @@ import {
   WsRpcError,
   PullRequestsUnavailableError,
   type DeviceEvent,
+  type DeviceProjectEvent,
   type GitActionProgressEvent,
   type GitHubProjectProvisionProgressEvent,
   type GitWorktreeSetupProgressEvent,
@@ -1146,6 +1147,12 @@ const makeWsRpcHandlersLayer = () =>
       // critical section below (same pattern as the impl-08 reconcile path).
       const mcpSessionAuthority = yield* McpSessionAuthority;
 
+      // WP5: raw device manager handlers. The WS group below spreads these and
+      // then overrides ONLY the three Project-owned request routes with the
+      // active-Project admission guard; the Thread-keyed device routes are the
+      // untouched legacy surface.
+      const deviceHandlers = makeWsDeviceHandlers(deviceService);
+
       // Admission (review remediation): the OWNING Project must exist and not
       // be deleted in the authoritative orchestration read model — the Project
       // terminal workspace is owned by a real Project record, so a nonexistent
@@ -1171,6 +1178,42 @@ const makeWsRpcHandlersLayer = () =>
               return Effect.fail(
                 new WsRpcError({
                   message: `Project '${projectId}' was deleted; its terminal workspace no longer exists.`,
+                  code: "PROJECT_DELETED",
+                  retryable: false,
+                }),
+              );
+            }
+            return Effect.void;
+          }),
+        );
+
+      // WP5 (Decision 0002): the same active-Project admission for the
+      // Project-owned device workspace. A device attachment must belong to a
+      // real, live Project — a nonexistent or deleted ProjectId is rejected
+      // before the device runtime is touched, so a stale client can never
+      // fabricate a workspace for a Project that no longer exists. All three
+      // request routes are guarded (unlike terminals, no deletion-flow surface
+      // needs an admission-free device read); the event subscription is not a
+      // request and stays a plain stream.
+      const requireActiveProjectForDevice = (projectId: ProjectId) =>
+        orchestrationEngine.getReadModel().pipe(
+          Effect.flatMap((readModel) => {
+            const project = readModel.projects.find(
+              (candidate) => candidate.id === projectId && candidate.kind === "project",
+            );
+            if (project === undefined) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' does not exist; project devices require an existing Project.`,
+                  code: "PROJECT_NOT_FOUND",
+                  retryable: false,
+                }),
+              );
+            }
+            if (project.deletedAt !== null) {
+              return Effect.fail(
+                new WsRpcError({
+                  message: `Project '${projectId}' was deleted; its device workspace no longer exists.`,
                   code: "PROJECT_DELETED",
                   retryable: false,
                 }),
@@ -2383,7 +2426,57 @@ const makeWsRpcHandlersLayer = () =>
             ),
           ),
 
-        ...makeWsDeviceHandlers(deviceService),
+        ...deviceHandlers,
+        // ── Project-owned device admission (WP5, Decision 0002) ─────
+        // `makeWsDeviceHandlers` provides the raw manager calls; these thin
+        // overrides wrap exactly the three project request routes in the
+        // active-Project guard declared above. Thread-keyed device routes are
+        // untouched (legacy surface).
+        [DEVICE_WS_METHODS.getProjectState]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.getProjectState](input)),
+            ),
+            "Failed to read project device state",
+          ),
+        [DEVICE_WS_METHODS.attachProject]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.attachProject](input)),
+            ),
+            "Failed to attach device to project",
+          ),
+        [DEVICE_WS_METHODS.detachProject]: (input) =>
+          rpcEffect(
+            requireActiveProjectForDevice(input.projectId).pipe(
+              Effect.andThen(deviceHandlers[DEVICE_WS_METHODS.detachProject](input)),
+            ),
+            "Failed to detach device from project",
+          ),
+        [DEVICE_WS_METHODS.subscribeProjectEvents]: (_, { clientId }) =>
+          // Project-keyed pushes: every event names its owning ProjectId, so a
+          // single lossy stream serves every Project pane (full versioned
+          // snapshots; see the thread-events comment above). Same
+          // `Stream.never`-when-unsupported contract as `device.events` so a
+          // zombie-socket reconnect loop cannot start on platforms without a
+          // device engine.
+          streamAdmission.guard(
+            clientId,
+            { key: "device.project.events" },
+            deviceService?.supported !== true
+              ? Stream.never
+              : bufferLiveUiStream(
+                  Stream.callback<DeviceProjectEvent>((queue) =>
+                    Effect.gen(function* () {
+                      const unsubscribe = deviceService.manager.onProjectEvent((event) => {
+                        Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                      });
+                      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+                    }),
+                  ),
+                  { label: "device.project.events" },
+                ),
+          ),
         [DEVICE_WS_METHODS.subscribeEvents]: (_, { clientId }) =>
           streamAdmission.guard(
             clientId,

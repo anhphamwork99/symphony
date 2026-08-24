@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   BrowserMcpToolErrorEnvelope,
+  ProjectId,
   ThreadId,
   type BrowserAutomationError,
   type BrowserToolName,
@@ -44,6 +45,17 @@ const TARGET_ALIAS_TOOL_NAMES = new Set<BrowserToolName>([
 export interface AgentGatewayBrowserToolsOptions {
   /** Resolve the authenticated caller thread's canonical cwd outside public MCP arguments. */
   readonly resolveWorkspaceRoot?: (context: ToolContext) => Effect.Effect<string | null>;
+  /**
+   * Resolve the authenticated caller thread's OWNING Project authoritatively
+   * (Decision 0002): the Right-sidebar browser/automation workspace belongs to
+   * the Project, and the server derives it from the caller Thread's durable
+   * `projectId` — never from whichever Thread happens to be active, and never
+   * from public MCP arguments. Returning null keeps the legacy
+   * provenance-only frame (no synthetic alias is ever fabricated).
+   */
+  readonly resolveProjectWorkspace?: (
+    context: ToolContext,
+  ) => Effect.Effect<ProjectId | null>;
 }
 
 const NAMED_KEY_ALIASES = Object.freeze({
@@ -501,6 +513,10 @@ export function makeAgentGatewayBrowserTools(
               }),
             );
           }
+          // Authoritative Thread→Project resolution (Decision 0002). One
+          // resolution per tool call, outside public arguments; a null result
+          // keeps the legacy frame rather than inventing an owner.
+          const projectId = yield* options.resolveProjectWorkspace?.(context) ?? Effect.succeed(null);
           const requestedTimeout = decodedArguments.timeoutMs;
           const timeoutMs =
             typeof requestedTimeout === "number"
@@ -511,6 +527,7 @@ export function makeAgentGatewayBrowserTools(
               sessionKey: context.callerSessionKey,
               provider: context.callerProvider,
               threadId: ThreadId.makeUnsafe(context.callerThreadId),
+              ...(projectId === null ? {} : { projectId: ProjectId.makeUnsafe(projectId) }),
               name,
               arguments: decodedArguments,
               ...(workspaceRoot ? { workspaceRoot } : {}),

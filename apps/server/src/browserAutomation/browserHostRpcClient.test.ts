@@ -113,6 +113,76 @@ describe("browser host RPC client", () => {
     });
   });
 
+  it("forwards the owning Project alongside the provenance thread (WP5)", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    await withRpcServer(
+      (request) => {
+        requests.push(request);
+        const id = request.id;
+        return request.method === "getInfo"
+          ? { jsonrpc: "2.0", id, result: { protocolVersion: 1 } }
+          : {
+              jsonrpc: "2.0",
+              id,
+              result: { tabs: [], activeTabId: null, assignedTabId: null },
+            };
+      },
+      (pipePath) =>
+        callBrowserHostTool({
+          pipePath,
+          capability: TEST_CAPABILITY,
+          sessionKey: "gateway-session:two",
+          provider: "claudeAgent",
+          threadId: "thread-two" as never,
+          projectId: "project-owner-two" as never,
+          name: "browser_tabs",
+          arguments: {},
+          timeoutMs: 1_000,
+        }),
+    );
+
+    const executeRequest = requests.at(1);
+    if (!executeRequest) throw new Error("Expected executeTool request");
+    // The real ProjectId rides the frame next to the provenance thread; a
+    // host that predates the field ignores the additive param.
+    expect(executeRequest.params).toMatchObject({
+      thread_id: "thread-two",
+      project_id: "project-owner-two",
+    });
+  });
+
+  it("omits project_id when no owning Project was resolved (legacy frame)", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    await withRpcServer(
+      (request) => {
+        requests.push(request);
+        const id = request.id;
+        return request.method === "getInfo"
+          ? { jsonrpc: "2.0", id, result: { protocolVersion: 1 } }
+          : {
+              jsonrpc: "2.0",
+              id,
+              result: { tabs: [], activeTabId: null, assignedTabId: null },
+            };
+      },
+      (pipePath) =>
+        callBrowserHostTool({
+          pipePath,
+          capability: TEST_CAPABILITY,
+          sessionKey: "gateway-session:three",
+          provider: "claudeAgent",
+          threadId: "thread-three" as never,
+          name: "browser_tabs",
+          arguments: {},
+          timeoutMs: 1_000,
+        }),
+    );
+
+    const executeRequest = requests.at(1);
+    if (!executeRequest) throw new Error("Expected executeTool request");
+    expect(executeRequest.params).not.toHaveProperty("project_id");
+  });
+
   it("preserves canonical error data returned by the desktop host", async () => {
     const envelope = {
       type: "synara_browser_error",
