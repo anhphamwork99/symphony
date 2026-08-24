@@ -28,7 +28,9 @@ import {
   type TerminalProjectSessionSnapshot,
 } from "@synara/contracts";
 
-export { readWsTransport, type WsRequestTransport } from "./wsNativeApi";
+import { readWsTransport, type WsRequestTransport } from "./wsNativeApi";
+
+export { readWsTransport, type WsRequestTransport };
 
 export { PROJECT_WORKSPACE_CAPABILITY };
 

@@ -205,6 +205,7 @@ import {
   resolveBrowserHostPipeBackendEnv,
 } from "./browserUsePipeServer";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
+import { runDesktopProjectWorkspaceStartupMigration } from "./desktopProjectWorkspaceMigration";
 import {
   repairBrowserProfileFromBridgeManifest,
   resolveDesktopAppDataBase,
@@ -4410,6 +4411,31 @@ async function bootstrap(): Promise<void> {
 
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   await reserveBackendEndpoint("bootstrap");
+
+  // WP7 production wiring (Decision 0002 F): converge the Project workspace
+  // publication markers in the real userData store BEFORE any IPC handler is
+  // registered — `registerIpcHandlers()` exposes the Project browser surface,
+  // and no renderer may observe a half-staged Project workspace through it.
+  // The pass only touches Projects the durable document already names, never
+  // reads v1 records (the desktop boundary owns none), and never cleans up.
+  // Failures surface as diagnostics and stay retryable on the next start.
+  const workspaceMigrationOutcome = runDesktopProjectWorkspaceStartupMigration({
+    userDataPath: app.getPath("userData"),
+  });
+  if (workspaceMigrationOutcome.diagnostic !== null) {
+    console.warn(
+      "[Synara workspace] Project workspace startup migration unavailable:",
+      workspaceMigrationOutcome.diagnostic,
+    );
+  }
+  for (const result of workspaceMigrationOutcome.results) {
+    if (result.status === "unpublished") {
+      console.warn(
+        `[Synara workspace] Project workspace ${result.projectId} left unpublished and retryable:`,
+        result.diagnostic,
+      );
+    }
+  }
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");

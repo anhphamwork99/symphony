@@ -62,6 +62,7 @@ import { ManagedAttachmentCleanupLive } from "./managedAttachmentCleanup";
 import { PullRequestServiceLive } from "./pullRequests/Layers/PullRequestService";
 import { PiSubagentExecutionRepositoryLive } from "./persistence/Layers/PiSubagentExecutionRepository";
 import { ProjectWorkspaceStoreLive } from "./projectWorkspace/Layers/ProjectWorkspaceStore";
+import { ProjectWorkspaceMigrationCoordinatorLive } from "./projectWorkspace/projectWorkspaceMigrationCoordinator";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { makePiSubagentParentEffectDispatcher } from "./provider/piSubagentParentEffectDispatcher";
 import { makePiSubagentExecutionCardBridge } from "./provider/piSubagentExecutionCardBridge";
@@ -286,6 +287,7 @@ export function makeServerRuntimeServicesLayer(
     AutomationRepositoryLive,
     PiSubagentExecutionRepositoryLive,
     ProjectWorkspaceStoreLive,
+    ProjectWorkspaceMigrationCoordinatorLive,
     AgentGatewayOperationRepositoryLive,
     ExternalMcpRepositoryLive,
     externalMcpServiceLayer,

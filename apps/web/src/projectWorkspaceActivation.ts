@@ -13,10 +13,14 @@ import type { LegacyProjectWorkspaceThreadInput } from "@synara/shared/projectWo
 import { useRightDockStore } from "./rightDockStore";
 import { useTerminalStateStore } from "./terminalStateStore";
 import { dockTerminalProjectScope } from "./lib/dockTerminalScope";
+import { isProjectWorkspaceCapabilityPresent } from "./projectWorkspaceApi";
+import type {
+  ProjectWorkspaceWebStorage,
+  PublishedProjectWorkspace,
+} from "./projectWorkspaceWebMigration";
 import {
   migrateProjectWorkspaceOnWeb,
   readPublishedProjectWorkspace,
-  type ProjectWorkspaceWebStorage,
 } from "./projectWorkspaceWebMigration";
 
 /** Thread metadata the migration policy needs, projected from the app store. */
@@ -59,16 +63,32 @@ export interface ProjectWorkspaceActivationResult {
  * Idempotent: a second call for the same Project in the same session is a
  * no-op (`already-applied`), and the boundary itself is marker-gated — a valid
  * published target is never rederived or overwritten.
+ *
+ * `capabilityPresent` overrides the production capability read
+ * (`isProjectWorkspaceCapabilityPresent`) for tests only; production callers
+ * omit it.
  */
 export function activateProjectWorkspace(input: {
   readonly projectId: ProjectId;
   readonly threads: ReadonlyArray<ProjectWorkspaceThreadSnapshot>;
   readonly storage: ProjectWorkspaceWebStorage;
   readonly nowIso: string;
+  readonly capabilityPresent?: boolean;
 }): ProjectWorkspaceActivationResult {
   const { projectId } = input;
   if (appliedProjects.has(projectId)) {
     return { projectId, outcome: "already-applied" };
+  }
+
+  // Activation gate (Decision 0002 "Failure and rollback implications"): the
+  // Project-owned workspace activates only when the connected server (or
+  // desktop bridge) advertises the Project workspace capability. Without it,
+  // nothing is migrated, staged, or applied — readers keep their prior
+  // compatible (legacy) state and the next attempt re-checks the gate, so an
+  // upgraded server can activate the same Project without a reload.
+  const capabilityPresent = input.capabilityPresent ?? isProjectWorkspaceCapabilityPresent();
+  if (!capabilityPresent) {
+    return { projectId, outcome: "unpublished", reason: "capability-absent" };
   }
 
   const migration = migrateProjectWorkspaceOnWeb({
@@ -98,7 +118,7 @@ export function activateProjectWorkspace(input: {
 /** Map a published v2 workspace into the live stores (Project data wins). */
 export function applyPublishedWorkspace(
   projectId: ProjectId,
-  published: NonNullable<ReturnType<typeof readPublishedProjectWorkspace>>,
+  published: PublishedProjectWorkspace,
 ): void {
   useRightDockStore.getState().applyPublishedDockSlice(projectId, {
     open: published.dock.open,

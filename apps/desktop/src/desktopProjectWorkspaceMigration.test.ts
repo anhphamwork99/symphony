@@ -6,9 +6,13 @@ import { ProjectId, ThreadId } from "@synara/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  collectDesktopProjectWorkspaceProjectIds,
   DesktopProjectWorkspaceMigration,
+  DESKTOP_PROJECT_WORKSPACE_FILE_VERSION,
+  type DesktopProjectWorkspaceDocument,
   readDesktopProjectWorkspaceDocument,
   resolveDesktopProjectWorkspacePath,
+  runDesktopProjectWorkspaceStartupMigration,
 } from "./desktopProjectWorkspaceMigration";
 
 const projectId = ProjectId.makeUnsafe("project-desktop");
@@ -129,5 +133,107 @@ describe("DesktopProjectWorkspaceMigration", () => {
       status: "unpublished",
       diagnostic: "Desktop Project workspace data is malformed or unavailable.",
     });
+  });
+});
+
+describe("runDesktopProjectWorkspaceStartupMigration — production startup pass", () => {
+  it("runs against the real userData file store and converges staged records", () => {
+    const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "synara-project-startup-"));
+    roots.push(root);
+    const userDataPath = Path.join(root, "electron-userdata");
+    FS.mkdirSync(userDataPath, { recursive: true });
+
+    // First run: a fresh store has no known Projects — nothing invented,
+    // nothing published, no diagnostic.
+    const first = runDesktopProjectWorkspaceStartupMigration({ userDataPath });
+    expect(first.results).toEqual([]);
+    expect(first.diagnostic).toBeNull();
+
+    // A renderer-independent migration stages one Project's slices but fails
+    // before the marker (the retryable state a crashed start can leave).
+    const staged = new DesktopProjectWorkspaceMigration(
+      resolveDesktopProjectWorkspacePath(userDataPath),
+      {
+        beforePublish: () => {
+          throw new Error("crash before marker");
+        },
+      },
+    );
+    expect(staged.migrate({ projectId, threads: [legacyThread("thread-crashed")] }).status).toBe(
+      "unpublished",
+    );
+
+    // The startup pass re-derives the same deterministic target from the
+    // document's own keys and publishes it — retry convergence (F.7).
+    const second = runDesktopProjectWorkspaceStartupMigration({ userDataPath });
+    expect(second.diagnostic).toBeNull();
+    expect(second.results).toHaveLength(1);
+    expect(second.results[0]).toMatchObject({ status: "published", projectId });
+
+    // A third pass is idempotent: the published marker is kept, not rewritten.
+    const third = runDesktopProjectWorkspaceStartupMigration({ userDataPath });
+    expect(third.results[0]).toMatchObject({ status: "kept-published", projectId });
+
+    // The publication is real and complete in the durable document.
+    const document = readDesktopProjectWorkspaceDocument(
+      resolveDesktopProjectWorkspacePath(userDataPath),
+    );
+    expect(Object.keys(document.published)).toEqual([
+      "synara:project-workspace:v2:published:project-desktop",
+    ]);
+  });
+
+  it("derives retry Project IDs only from the document's own durable keys", () => {
+    const document: DesktopProjectWorkspaceDocument = {
+      version: DESKTOP_PROJECT_WORKSPACE_FILE_VERSION,
+      staged: {
+        "synara:project-workspace:v2:stage:project-a:right-dock": { slice: "right-dock" },
+      },
+      published: {
+        "synara:project-workspace:v2:published:project-b": { schemaVersion: 2 },
+      },
+      diagnostics: {
+        "project-failed": "per-Project diagnostic key is the raw ProjectId",
+      },
+    };
+    expect(collectDesktopProjectWorkspaceProjectIds(document)).toEqual([
+      "project-a",
+      "project-b",
+      "project-failed",
+    ]);
+  });
+
+  it("reports persistence failure as a per-Project diagnostic without throwing", () => {
+    const root = FS.mkdtempSync(Path.join(OS.tmpdir(), "synara-project-readonly-"));
+    roots.push(root);
+    const userDataPath = Path.join(root, "userdata");
+    FS.mkdirSync(userDataPath, { recursive: true });
+
+    // Leave one Project staged-but-unpublished: the retryable state whose
+    // convergence attempt must persist, which a read-only store cannot do.
+    const staged = new DesktopProjectWorkspaceMigration(
+      resolveDesktopProjectWorkspacePath(userDataPath),
+      {
+        beforePublish: () => {
+          throw new Error("first start crashed before the marker");
+        },
+      },
+    );
+    expect(staged.migrate({ projectId, threads: [legacyThread("thread-ro")] }).status).toBe(
+      "unpublished",
+    );
+
+    FS.chmodSync(userDataPath, 0o500);
+    try {
+      const outcome = runDesktopProjectWorkspaceStartupMigration({ userDataPath });
+      // The pass itself never throws; the failure is a diagnostic that stays
+      // retryable, and no success is claimed.
+      expect(outcome.results).toHaveLength(1);
+      const result = outcome.results[0];
+      if (result?.status !== "unpublished") throw new Error("expected unpublished");
+      expect(typeof result.diagnostic).toBe("string");
+    } finally {
+      FS.chmodSync(userDataPath, 0o700);
+    }
   });
 });

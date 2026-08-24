@@ -24,7 +24,10 @@
 // observable, and retryable; v1 data is never modified or deleted.
 
 import type { ProjectId, ThreadId } from "@synara/contracts";
-import type { ProjectWorkspaceSlice } from "@synara/contracts";
+import type {
+  LegacyTerminalPresentationSliceV1,
+  ProjectWorkspaceSlice,
+} from "@synara/contracts";
 import { Schema } from "effect";
 import {
   PROJECT_WORKSPACE_SCHEMA_VERSION,
@@ -111,16 +114,23 @@ export function createLegacyLocalStorageSliceReaders(
   };
 }
 
+/** The v1 legacy terminal slice shape this converter produces. */
+export type LegacyTerminalPresentationSliceShape =
+  typeof LegacyTerminalPresentationSliceV1.Type;
+
 /** Convert a web ThreadTerminalState into the v1 legacy schema shape. */
-export function toLegacyTerminalPresentationSlice(state: {
-  presentationMode: "drawer" | "workspace";
-  workspaceActiveTab: "terminal" | "chat";
-  workspaceLayout: "both" | "terminal-only";
-  terminalHeight: number;
-  terminalIds: string[];
-  activeTerminalId: string;
-  terminalLabelsById: Record<string, string>;
-}): { threadId: ThreadId } | null {
+export function toLegacyTerminalPresentationSlice(
+  threadId: ThreadId,
+  state: {
+    presentationMode: "drawer" | "workspace";
+    workspaceActiveTab: "terminal" | "chat";
+    workspaceLayout: "both" | "terminal-only";
+    terminalHeight: number;
+    terminalIds: string[];
+    activeTerminalId: string;
+    terminalLabelsById: Record<string, string>;
+  },
+): LegacyTerminalPresentationSliceShape | null {
   if (!state.terminalIds.includes(state.activeTerminalId)) {
     return null;
   }
@@ -130,8 +140,11 @@ export function toLegacyTerminalPresentationSlice(state: {
   if (!labelsNameKnownTerminals) {
     return null;
   }
+  // The caller supplies the real owning ThreadId explicitly — the converter
+  // never fabricates a placeholder owner (Decision 0002 prohibited shortcuts:
+  // no synthetic Thread alias of any kind, including an empty one).
   return {
-    threadId: "" as ThreadId,
+    threadId,
     presentationMode: state.presentationMode,
     workspaceTab: state.workspaceActiveTab,
     workspaceLayout: state.workspaceLayout,

@@ -648,10 +648,21 @@ function buildMigrationTarget(
             sourceSchemaVersion: PROJECT_WORKSPACE_LEGACY_SCHEMA_VERSION,
             sourceThreadId: winner.thread.threadId,
           },
-    stagedEntries: slices.map((slice, index) => ({
-      key: projectWorkspaceStagingSliceKey(projectId, kinds[index]),
-      slice,
-    })),
+    stagedEntries: slices.map((slice, index) => {
+      // Safe co-indexing: `slices` is built in the exact canonical order of
+      // `kinds` two lines above, so a missing entry is a programming error,
+      // never a data condition. Fail closed instead of fabricating a key.
+      const kind = kinds[index];
+      if (kind === undefined) {
+        throw new Error(
+          `projectWorkspaceMigration: staged slice ${index} has no canonical kind`,
+        );
+      }
+      return {
+        key: projectWorkspaceStagingSliceKey(projectId, kind),
+        slice,
+      };
+    }),
     publicationMarkerKey: projectWorkspacePublicationMarkerKey(projectId),
   };
 }

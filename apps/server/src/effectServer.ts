@@ -1,6 +1,6 @@
 import http from "node:http";
 
-import type { ServerSettingsError } from "@synara/contracts";
+import type { ProjectId, ServerSettingsError } from "@synara/contracts";
 import { Effect, Exit, FileSystem, Layer, Path, Schema, Scope, ServiceMap } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -36,6 +36,10 @@ import { recoverSynaraMcpPendingOperations } from "./orchestration/synaraMcpStar
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
 import { ProviderRuntimeReconciler } from "./provider/Services/ProviderRuntimeReconciler";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
+import {
+  ProjectWorkspaceMigrationCoordinator,
+  type ProjectWorkspaceMigrationCoordinatorShape,
+} from "./projectWorkspace/projectWorkspaceMigrationCoordinator";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -68,6 +72,7 @@ export interface ServerShape {
     | OrchestrationEngineService
     | OrchestrationReactor
     | ProjectionSnapshotQuery
+    | ProjectWorkspaceMigrationCoordinator
     | ProviderSessionReaper
     | ProviderRuntimeReconciler
     | ProviderService
@@ -90,6 +95,58 @@ export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycl
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export interface ProjectWorkspaceMigrationStartupInput {
+  /** The composed production coordinator (WP3). */
+  readonly coordinator: ProjectWorkspaceMigrationCoordinatorShape;
+}
+
+/** Startup outcome of the Project workspace staged publication pass. */
+export interface ProjectWorkspaceMigrationStartupOutcome {
+  readonly published: ReadonlyArray<ProjectId>;
+  readonly kept: ReadonlyArray<ProjectId>;
+  readonly failed: ReadonlyArray<{ readonly projectId: ProjectId; readonly reason: string }>;
+}
+
+/**
+ * Run the per-Project staged workspace publication once at startup.
+ *
+ * Never fails: a per-Project failure is collected as a diagnostic and logged
+ * — the server stays command-ready and the next start retries that Project
+ * from the same deterministic derivation (Decision 0002 F.6/F.8). Extracted
+ * as its own exported function so the startup ordering and the nonblocking
+ * contract are testable without booting the full server graph.
+ */
+export function runProjectWorkspaceMigrationOnStartup(
+  input: ProjectWorkspaceMigrationStartupInput,
+): Effect.Effect<ProjectWorkspaceMigrationStartupOutcome> {
+  return Effect.gen(function* () {
+    const results = yield* input.coordinator.migrateAllProjects({
+      legacySlicesByThreadId: new Map(),
+    });
+    const published: ProjectId[] = [];
+    const kept: ProjectId[] = [];
+    const failed: Array<{ readonly projectId: ProjectId; readonly reason: string }> = [];
+    for (const result of results) {
+      if (result.outcome.kind === "published") {
+        published.push(result.projectId);
+      } else if (result.outcome.kind === "kept-published") {
+        kept.push(result.projectId);
+      } else {
+        failed.push({ projectId: result.projectId, reason: result.outcome.reason });
+      }
+    }
+    if (failed.length > 0) {
+      yield* Effect.logWarning(
+        "Project workspace migration left Projects unpublished and retryable",
+        {
+          failed: failed.map((entry) => `${entry.projectId}:${entry.reason}`).join(","),
+        },
+      );
+    }
+    return { published, kept, failed };
+  });
+}
 
 export function closeServerRuntimePipeline(input: {
   readonly orchestrationEngine: Pick<OrchestrationEngineShape, "quiesce" | "drain" | "stop">;
@@ -131,6 +188,7 @@ export const createEffectServer = Effect.fn(function* (
   const providerService = yield* ProviderService;
   const providerSessionReaper = yield* ProviderSessionReaper;
   const providerRuntimeReconciler = yield* ProviderRuntimeReconciler;
+  const projectWorkspaceMigrationCoordinator = yield* ProjectWorkspaceMigrationCoordinator;
   const runtimeStartup = yield* ServerRuntimeStartup;
   const serverSettings = yield* ServerSettingsService;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
@@ -269,6 +327,21 @@ export const createEffectServer = Effect.fn(function* (
         new ServerLifecycleError({ operation: "recoverSynaraMcpPendingOperations", cause }),
     ),
   );
+  // WP3 production wiring (Decision 0002 F): stage and publish every
+  // Project-owned workspace boundary BEFORE command-ready so the first client
+  // that observes the advertised `project.right-sidebar-workspace` capability
+  // can only ever read a fully published target — never a partial stage. The
+  // server's durable truth is its own Thread/Project projection; the v1 legacy
+  // workspace slices live in web/desktop storage, so the server boundary runs
+  // with an empty legacy-slice map: every Thread is ineligible and the plan
+  // publishes the canonical empty workspace per Project (Decision 0002 C.5).
+  // The boundary is idempotent (`keep-published` never rewrites) and each
+  // Project is independent; a per-Project failure is a logged diagnostic that
+  // stays retryable (next start reruns the same deterministic derivation) —
+  // it never blocks server readiness and never touches v1 rows or cleanup.
+  yield* runProjectWorkspaceMigrationOnStartup({
+    coordinator: projectWorkspaceMigrationCoordinator,
+  });
   yield* runtimeStartup.markCommandReady;
 
   yield* lifecycleEvents.publish({

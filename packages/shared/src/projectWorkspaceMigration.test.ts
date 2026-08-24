@@ -1,4 +1,9 @@
-import { ProjectId, type ProjectId as ProjectIdType, ThreadId } from "@synara/contracts";
+import {
+  ProjectId,
+  type ProjectId as ProjectIdType,
+  ThreadId,
+  type ThreadId as ThreadIdType,
+} from "@synara/contracts";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -807,7 +812,9 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
     });
     if (plan.outcome !== "migrate-legacy-winner") throw new Error("expected a legacy winner");
     const dock = plan.target.stagedEntries.map((entry) => entry.slice)[0];
-    if (dock.slice !== "right-dock") throw new Error("expected the dock slice");
+    if (dock === undefined || dock.slice !== "right-dock") {
+      throw new Error("expected the dock slice");
+    }
     const browserPane = dock.panes.find((candidate) => candidate.kind === "browser");
     const terminalPane = dock.panes.find((candidate) => candidate.kind === "terminal");
     if (browserPane === undefined || terminalPane === undefined) {
@@ -847,7 +854,9 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
     });
     if (plan.outcome !== "migrate-legacy-winner") throw new Error("expected a legacy winner");
     const dock = plan.target.stagedEntries.map((entry) => entry.slice)[0];
-    if (dock.slice !== "right-dock") throw new Error("expected the dock slice");
+    if (dock === undefined || dock.slice !== "right-dock") {
+      throw new Error("expected the dock slice");
+    }
     // No browser pane invented; existing pane untouched.
     expect(dock.panes.map((candidate) => candidate.kind)).toEqual(["terminal"]);
     expect(dock.panes[0]?.restorationDiagnostic).toBeNull();
@@ -903,7 +912,9 @@ describe("planProjectWorkspaceMigration all-slices conversion", () => {
     });
     if (plan.outcome !== "migrate-legacy-winner") throw new Error("expected a legacy winner");
     const dock = plan.target.stagedEntries.map((entry) => entry.slice)[0];
-    if (dock.slice !== "right-dock") throw new Error("expected the dock slice");
+    if (dock === undefined || dock.slice !== "right-dock") {
+      throw new Error("expected the dock slice");
+    }
     const browserPane = dock.panes.find((candidate) => candidate.kind === "browser");
     if (browserPane === undefined) throw new Error("expected the winner's browser pane");
     expect(browserPane.id).toBe("pane-winner-browser");

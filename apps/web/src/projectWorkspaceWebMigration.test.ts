@@ -330,12 +330,14 @@ describe("activateProjectWorkspace — store application", () => {
       threads: [threadInput({ threadId: "thread-winner", projectId })],
       storage,
       nowIso: "2026-08-24T00:00:00.000Z",
+      capabilityPresent: true,
     });
     const second = activateProjectWorkspace({
       projectId,
       threads: [threadInput({ threadId: "thread-winner", projectId })],
       storage,
       nowIso: "2026-08-25T00:00:00.000Z",
+      capabilityPresent: true,
     });
 
     expect(first.outcome).toBe("published");
@@ -365,6 +367,7 @@ describe("activateProjectWorkspace — store application", () => {
       threads: [threadInput({ threadId: "thread-a", projectId })],
       storage,
       nowIso: "2026-08-24T00:00:00.000Z",
+      capabilityPresent: true,
     });
 
     expect(useRightDockStore.getState().dockStateByProjectId[otherProjectId]).toBeUndefined();
@@ -388,6 +391,7 @@ describe("activateProjectWorkspace — store application", () => {
       ],
       storage,
       nowIso: "2026-08-24T00:00:00.000Z",
+      capabilityPresent: true,
     });
 
     expect(result.outcome).toBe("published");
@@ -410,6 +414,7 @@ describe("activateProjectWorkspace — store application", () => {
       ],
       storage,
       nowIso: "2026-08-24T00:00:00.000Z",
+      capabilityPresent: true,
     });
 
     // Fail closed: no candidate is durably orderable, so the canonical empty

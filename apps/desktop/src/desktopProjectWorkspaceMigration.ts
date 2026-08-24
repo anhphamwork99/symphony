@@ -169,6 +169,11 @@ export class DesktopProjectWorkspaceMigration {
     this.document = readDesktopProjectWorkspaceDocument(filePath);
   }
 
+  /** The durable document backing this migration instance. */
+  getDocument(): Readonly<DesktopProjectWorkspaceDocument> {
+    return this.document;
+  }
+
   /** Read only published Project data; staged data is never mixed into a read. */
   read(projectId: ProjectId): DesktopProjectWorkspaceReadResult {
     const target = projectTargetFromDocument(this.document, projectId);
@@ -254,5 +259,105 @@ export class DesktopProjectWorkspaceMigration {
 
   private persist(): void {
     writeDocument(this.filePath, this.document);
+  }
+}
+
+// ── Production startup helper (WP7) ──────────────────────────────────
+
+/** The deterministic key prefix every per-Project record carries. */
+const PROJECT_WORKSPACE_RECORD_KEY_PREFIX = "synara:project-workspace:v2:";
+
+/**
+ * Derive the retryable Project IDs honestly from the migration document's own
+ * durable keys (staged slices, published markers, per-Project diagnostics).
+ *
+ * The desktop main process has no durable Thread/Project projection of its
+ * own — Projects and Threads are server-owned — so it NEVER invents a Project
+ * list. The only Projects the desktop boundary may re-run are the ones its
+ * own userData document already references: an incomplete stage left by a
+ * previous run converges here (Decision 0002 F.7 retry), and a published
+ * marker simply reports `kept-published` (idempotent, no rewrite).
+ */
+export function collectDesktopProjectWorkspaceProjectIds(
+  document: Readonly<DesktopProjectWorkspaceDocument>,
+): ReadonlyArray<ProjectId> {
+  const projectIds = new Set<string>();
+  for (const key of Object.keys(document.diagnostics)) {
+    // Diagnostic keys are the raw ProjectId (set/cleared per Project).
+    if (key.startsWith(PROJECT_WORKSPACE_RECORD_KEY_PREFIX)) continue;
+    if (key.length > 0) {
+      projectIds.add(key);
+    }
+  }
+  for (const key of [
+    ...Object.keys(document.staged),
+    ...Object.keys(document.published),
+  ]) {
+    if (!key.startsWith(PROJECT_WORKSPACE_RECORD_KEY_PREFIX)) continue;
+    const segments = key.slice(PROJECT_WORKSPACE_RECORD_KEY_PREFIX.length).split(":");
+    // stage:<projectId>:<kind> | published:<projectId>
+    const id = segments[0] === "stage" || segments[0] === "published" ? segments[1] : undefined;
+    if (id !== undefined && id.length > 0) {
+      projectIds.add(id);
+    }
+  }
+  return [...projectIds].sort().map((id) => id as ProjectId);
+}
+
+export interface DesktopProjectWorkspaceStartupOutcome {
+  /** One entry per retryable Project the startup pass processed. */
+  readonly results: ReadonlyArray<DesktopProjectWorkspaceMigrationResult>;
+  /** Diagnostic when the userData document itself could not be processed. */
+  readonly diagnostic: string | null;
+}
+
+/**
+ * The production startup pass: open the real userData store, converge every
+ * Project the boundary already knows about, and surface diagnostics.
+ *
+ * Called from the desktop main bootstrap BEFORE the Project browser surface is
+ * exposed over IPC, so no renderer can observe the Project workspace through a
+ * half-staged boundary. Never throws: a store-level failure returns a
+ * diagnostic (logged by the caller) and leaves the previous document intact;
+ * per-Project failures are reported per Project and stay retryable on the next
+ * start. v1 records are never read here at all — the desktop boundary owns no
+ * v1 slices — and nothing is cleaned up.
+ */
+export function runDesktopProjectWorkspaceStartupMigration(input: {
+  readonly userDataPath: string;
+  readonly now?: () => string;
+}): DesktopProjectWorkspaceStartupOutcome {
+  const filePath = resolveDesktopProjectWorkspacePath(input.userDataPath);
+  try {
+    const migration = new DesktopProjectWorkspaceMigration(filePath, {
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+    const projectIds = collectDesktopProjectWorkspaceProjectIds(migration.getDocument());
+    const results: DesktopProjectWorkspaceMigrationResult[] = [];
+    for (const projectId of projectIds) {
+      try {
+        results.push(migration.migrate({ projectId, threads: [] }));
+      } catch (error) {
+        // `migrate` is expected to catch internally; guard the boundary so one
+        // Project's defect can never abort the remaining convergence passes.
+        results.push({
+          status: "unpublished",
+          projectId,
+          diagnostic:
+            error instanceof Error
+              ? error.message
+              : "Desktop Project workspace migration failed before publication.",
+        });
+      }
+    }
+    return { results, diagnostic: null };
+  } catch (error) {
+    return {
+      results: [],
+      diagnostic:
+        error instanceof Error
+          ? error.message
+          : "Desktop Project workspace store is unavailable.",
+    };
   }
 }
