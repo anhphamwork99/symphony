@@ -538,7 +538,15 @@ export function RightDock(props: RightDockProps) {
               desktopTopBarWindowControlsGutterClassName,
             )}
           >
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {/* The tab strip is one horizontal scroller: the mapped tabs plus the
+                Add-panel trigger, so the add affordance sits immediately after the
+                last tab and scrolls with it when the strip overflows. The Collapse
+                control intentionally stays OUTSIDE the scroller as a pinned header
+                sibling so it never scrolls away. */}
+            <div
+              data-right-dock-tab-strip
+              className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            >
               {props.state.panes.map((pane) => (
                 <RightDockTab
                   key={pane.id}
@@ -550,35 +558,35 @@ export function RightDock(props: RightDockProps) {
                   onClose={() => props.onClosePane(pane.id)}
                 />
               ))}
+              {props.state.panes.length > 0 && props.addMenuKinds.length > 0 ? (
+                <Menu modal={false}>
+                  <MenuTrigger
+                    render={
+                      <Button
+                        variant="chrome"
+                        size="icon-xs"
+                        aria-label="Add panel"
+                        title="Add panel"
+                        className={DOCK_HEADER_ICON_BUTTON_CLASS}
+                      />
+                    }
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </MenuTrigger>
+                  <ComposerPickerMenuPopup align="end" side="bottom" className="w-44 min-w-44">
+                    {props.addMenuKinds.map((kind) => {
+                      const { Icon, label } = getRightDockPaneMeta(kind);
+                      return (
+                        <MenuItem key={kind} onClick={() => props.onAddPane(kind)}>
+                          <Icon className="size-3.5 shrink-0" />
+                          <span>{label}</span>
+                        </MenuItem>
+                      );
+                    })}
+                  </ComposerPickerMenuPopup>
+                </Menu>
+              ) : null}
             </div>
-            {props.state.panes.length > 0 && props.addMenuKinds.length > 0 ? (
-              <Menu modal={false}>
-                <MenuTrigger
-                  render={
-                    <Button
-                      variant="chrome"
-                      size="icon-xs"
-                      aria-label="Add panel"
-                      title="Add panel"
-                      className={DOCK_HEADER_ICON_BUTTON_CLASS}
-                    />
-                  }
-                >
-                  <PlusIcon className="size-3.5" />
-                </MenuTrigger>
-                <ComposerPickerMenuPopup align="end" side="bottom" className="w-44 min-w-44">
-                  {props.addMenuKinds.map((kind) => {
-                    const { Icon, label } = getRightDockPaneMeta(kind);
-                    return (
-                      <MenuItem key={kind} onClick={() => props.onAddPane(kind)}>
-                        <Icon className="size-3.5 shrink-0" />
-                        <span>{label}</span>
-                      </MenuItem>
-                    );
-                  })}
-                </ComposerPickerMenuPopup>
-              </Menu>
-            ) : null}
             <IconButton
               variant="chrome"
               size="icon-xs"
