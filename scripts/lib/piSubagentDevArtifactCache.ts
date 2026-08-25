@@ -36,8 +36,8 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
 } from "node:fs";
+import { open as openFile, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
@@ -72,6 +72,14 @@ export type PiSubagentDevArtifactCacheErrorCode =
   | "provenance_unreadable"
   | "alfie_repo_unresolved"
   | "cache_location_invalid"
+  | "cache_root_unavailable"
+  | "cache_quarantine_failed"
+  | "lock_open_failed"
+  | "lock_write_failed"
+  | "lock_close_failed"
+  | "lock_read_failed"
+  | "lock_remove_failed"
+  | "lock_timeout"
   | "staging_failed"
   | "verification_failed";
 
@@ -95,6 +103,34 @@ export interface PreparedPiSubagentDevArtifact {
   readonly pinnedCommit: string;
 }
 
+export interface PiSubagentDevArtifactCacheLockHandle {
+  writeFile(data: string, encoding: "utf8"): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** Narrow cache-only filesystem seam used to prove bounded failure mapping. */
+export interface PiSubagentDevArtifactCacheFs {
+  mkdirSync(path: string, options: { readonly recursive: true }): void;
+  existsSync(path: string): boolean;
+  readdirSync(path: string): ReadonlyArray<string>;
+  rmSync(path: string, options: { readonly recursive?: boolean; readonly force?: boolean }): void;
+  readFileSync(path: string, encoding: "utf8"): string;
+  open(path: string, flags: "wx"): Promise<PiSubagentDevArtifactCacheLockHandle>;
+}
+
+const defaultCacheFs: PiSubagentDevArtifactCacheFs = {
+  mkdirSync: (path, options) => mkdirSync(path, options),
+  existsSync,
+  readdirSync: (path) => readdirSync(path, { encoding: "utf8" }),
+  rmSync: (path, options) => rmSync(path, options),
+  readFileSync: (path, encoding) => readFileSync(path, encoding),
+  open: async (path, flags): Promise<FileHandle> => openFile(path, flags),
+};
+
+const resolveCacheFs = (
+  overrides: Partial<PiSubagentDevArtifactCacheFs> | undefined,
+): PiSubagentDevArtifactCacheFs => ({ ...defaultCacheFs, ...overrides });
+
 export interface PreparePiSubagentDevArtifactInput {
   /** Synara repository root (locates the read-only pin fixture). */
   readonly repoRoot: string;
@@ -106,6 +142,8 @@ export interface PreparePiSubagentDevArtifactInput {
    * locator convention. The pin itself never comes from here.
    */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Internal cache-filesystem seam; production uses the real filesystem. */
+  readonly cacheFs?: Partial<PiSubagentDevArtifactCacheFs>;
 }
 
 const asRecord = (
@@ -209,18 +247,37 @@ const verifyCacheEntry = (
  * staging siblings the release stager may have left behind a crashed run
  * (the stager names its temp siblings `<entry>.staging-<hex>`).
  */
-function quarantineCacheEntry(artifactDir: string): void {
-  // rm on a symlink path removes the link only (lstat semantics), so a
-  // hostile symlinked cache entry cannot delete content outside the cache.
-  rmSync(artifactDir, { recursive: true, force: true });
-  const parent = join(artifactDir, "..");
-  const entryBase = artifactDir.split(/[\\/]/).pop() ?? "";
-  if (entryBase !== "" && existsSync(parent)) {
-    for (const name of readdirSync(parent)) {
-      if (name.startsWith(`${entryBase}.staging-`)) {
-        rmSync(join(parent, name), { recursive: true, force: true });
+function cacheFailure(
+  code: PiSubagentDevArtifactCacheErrorCode,
+  message: string,
+  cause?: unknown,
+): PiSubagentDevArtifactCacheError {
+  return new PiSubagentDevArtifactCacheError(code, message, cause);
+}
+
+function quarantineCacheEntry(
+  artifactDir: string,
+  cacheFs: PiSubagentDevArtifactCacheFs,
+): void {
+  try {
+    // rm on a symlink path removes the link only (lstat semantics), so a
+    // hostile symlinked cache entry cannot delete content outside the cache.
+    cacheFs.rmSync(artifactDir, { recursive: true, force: true });
+    const parent = join(artifactDir, "..");
+    const entryBase = artifactDir.split(/[\\/]/).pop() ?? "";
+    if (entryBase !== "" && cacheFs.existsSync(parent)) {
+      for (const name of cacheFs.readdirSync(parent)) {
+        if (name.startsWith(`${entryBase}.staging-`)) {
+          cacheFs.rmSync(join(parent, name), { recursive: true, force: true });
+        }
       }
     }
+  } catch (cause) {
+    throw cacheFailure(
+      "cache_quarantine_failed",
+      "Could not quarantine the managed pi-subagents dev artifact cache entry.",
+      cause,
+    );
   }
 }
 
@@ -236,6 +293,7 @@ async function prepareOnce(input: {
   readonly artifactDir: string;
   readonly repoRoot: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly cacheFs: PiSubagentDevArtifactCacheFs;
 }): Promise<PreparedPiSubagentDevArtifact> {
   const existing = await verifyCacheEntry(input.artifactDir, input.provenance);
   if (existing !== undefined) {
@@ -249,7 +307,7 @@ async function prepareOnce(input: {
   // Miss (absent, invalid, tampered, or symlinked): quarantine and restage
   // from the pinned source. The stager proves the source is the exact clean
   // pinned checkout before any byte is staged.
-  quarantineCacheEntry(input.artifactDir);
+  quarantineCacheEntry(input.artifactDir, input.cacheFs);
 
   let repoDir: string;
   try {
@@ -278,7 +336,7 @@ async function prepareOnce(input: {
 
   const staged = await verifyCacheEntry(input.artifactDir, input.provenance);
   if (staged === undefined) {
-    quarantineCacheEntry(input.artifactDir);
+    quarantineCacheEntry(input.artifactDir, input.cacheFs);
     throw new PiSubagentDevArtifactCacheError(
       "verification_failed",
       "A freshly staged managed pi-subagents dev artifact failed production verification; refusing to forward it.",
@@ -292,65 +350,145 @@ async function prepareOnce(input: {
 }
 
 /**
- * Cross-process lock for one pin's cache entry. The lock file lives inside
- * the cache root (created on demand). A holder that crashed leaves a stale
- * lock; the bounded wait below treats an over-aged lock as abandoned and
- * takes it over, so a crashed preparation can never wedge dev startup
- * forever.
+ * Cross-process lock for one pin's cache entry. Lock ownership is deliberately
+ * never taken over: a crashed holder requires bounded manual recovery. This
+ * prevents a waiter from removing a lock it did not acquire and closes the
+ * stale-stat/remove and read/remove TOCTOU paths.
  */
-const STALE_LOCK_MS = 180_000;
+export interface PiSubagentDevArtifactPinLockOptions {
+  readonly cacheFs?: Partial<PiSubagentDevArtifactCacheFs>;
+  readonly waitTimeoutMs?: number;
+  readonly pollMs?: number;
+}
+
+const LOCK_TIMEOUT_MESSAGE =
+  "Managed pi-subagents lock timed out; confirm no dev runner is active, then remove the lock manually and retry.";
+
+const errorCode = (cause: unknown): string | undefined =>
+  typeof cause === "object" && cause !== null && "code" in cause
+    ? String((cause as { readonly code?: unknown }).code)
+    : undefined;
+
+async function releasePinLock(
+  lockPath: string,
+  ownerToken: string,
+  handle: PiSubagentDevArtifactCacheLockHandle,
+  cacheFs: PiSubagentDevArtifactCacheFs,
+): Promise<void> {
+  try {
+    await handle.close();
+  } catch (cause) {
+    throw cacheFailure(
+      "lock_close_failed",
+      "Could not close the managed pi-subagents dev artifact lock.",
+      cause,
+    );
+  }
+
+  let contents: string;
+  try {
+    contents = cacheFs.readFileSync(lockPath, "utf8");
+  } catch (cause) {
+    if (errorCode(cause) === "ENOENT") return;
+    throw cacheFailure(
+      "lock_read_failed",
+      "Could not validate ownership of the managed pi-subagents dev artifact lock.",
+      cause,
+    );
+  }
+  if (contents.trim() !== ownerToken) return;
+
+  try {
+    cacheFs.rmSync(lockPath, { force: true });
+  } catch (cause) {
+    if (errorCode(cause) === "ENOENT") return;
+    throw cacheFailure(
+      "lock_remove_failed",
+      "Could not remove the managed pi-subagents dev artifact lock after preparation.",
+      cause,
+    );
+  }
+}
 
 export async function withPinLock<T>(
   cacheRoot: string,
   pinnedCommit: string,
   run: () => Promise<T>,
+  options: PiSubagentDevArtifactPinLockOptions = {},
 ): Promise<T> {
-  mkdirSync(cacheRoot, { recursive: true });
+  const cacheFs = resolveCacheFs(options.cacheFs);
+  try {
+    cacheFs.mkdirSync(cacheRoot, { recursive: true });
+  } catch (cause) {
+    throw cacheFailure(
+      "cache_root_unavailable",
+      "Could not create the managed pi-subagents dev artifact cache root.",
+      cause,
+    );
+  }
+
   const lockPath = join(cacheRoot, `${pinnedCommit.trim().toLowerCase()}${LOCK_FILE_SUFFIX}`);
-  const { open } = await import("node:fs/promises");
   const ownerToken = randomBytes(16).toString("hex");
-  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
+  const deadline = Date.now() + (options.waitTimeoutMs ?? LOCK_WAIT_TIMEOUT_MS);
+  const pollMs = options.pollMs ?? LOCK_POLL_MS;
+  let handle: PiSubagentDevArtifactCacheLockHandle | undefined;
   for (;;) {
     try {
-      const handle = await open(lockPath, "wx");
-      await handle.writeFile(`${ownerToken}\n`, "utf8");
-      await handle.close();
-      break;
+      handle = await cacheFs.open(lockPath, "wx");
     } catch (cause) {
-      const code = (cause as { readonly code?: string }).code;
-      if (code !== "EEXIST") throw cause;
-      // Abandoned-lock takeover: a lock older than STALE_LOCK_MS belongs to
-      // a dead preparation and is removed so this one can proceed. The
-      // owner token makes release conditional: an old owner cannot remove a
-      // successor's lock after takeover.
-      try {
-        const stats = statSync(lockPath);
-        if (Date.now() - stats.mtimeMs > STALE_LOCK_MS) {
-          rmSync(lockPath, { force: true });
-          continue;
-        }
-      } catch {
-        // The lock vanished between open and stat — retry immediately.
-      }
-      if (Date.now() >= deadline) {
-        throw new PiSubagentDevArtifactCacheError(
-          "cache_location_invalid",
-          "Timed out waiting for a concurrent managed pi-subagents dev artifact preparation.",
+      if (errorCode(cause) !== "EEXIST") {
+        throw cacheFailure(
+          "lock_open_failed",
+          "Could not open the managed pi-subagents dev artifact lock.",
+          cause,
         );
       }
-      await new Promise((resolveSleep) => setTimeout(resolveSleep, LOCK_POLL_MS));
+      if (Date.now() >= deadline) {
+        throw cacheFailure("lock_timeout", LOCK_TIMEOUT_MESSAGE);
+      }
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, pollMs));
+      continue;
     }
+
+    const acquiredHandle = handle;
+    if (acquiredHandle === undefined) {
+      throw cacheFailure(
+        "lock_open_failed",
+        "Could not open the managed pi-subagents dev artifact lock.",
+      );
+    }
+    try {
+      await acquiredHandle.writeFile(`${ownerToken}\n`, "utf8");
+    } catch (cause) {
+      try {
+        await acquiredHandle.close();
+        cacheFs.rmSync(lockPath, { force: true });
+      } catch (cleanupCause) {
+        throw cacheFailure(
+          "lock_remove_failed",
+          "Could not remove the managed pi-subagents dev artifact lock after lock setup failed.",
+          cleanupCause,
+        );
+      }
+      throw cacheFailure(
+        "lock_write_failed",
+        "Could not write the managed pi-subagents dev artifact lock.",
+        cause,
+      );
+    }
+    break;
   }
+
   try {
     return await run();
   } finally {
-    try {
-      if (readFileSync(lockPath, "utf8").trim() === ownerToken) {
-        rmSync(lockPath, { force: true });
-      }
-    } catch {
-      // A successor may have taken over, or the lock may already be gone.
+    if (handle === undefined) {
+      throw cacheFailure(
+        "lock_open_failed",
+        "Could not open the managed pi-subagents dev artifact lock.",
+      );
     }
+    await releasePinLock(lockPath, ownerToken, handle, cacheFs);
   }
 }
 
@@ -374,9 +512,28 @@ export async function preparePiSubagentDevArtifact(
     pinnedCommit: provenance.pinnedCommit,
   });
   const cacheRoot = join(resolve(input.synaraHome), PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME);
-  mkdirSync(cacheRoot, { recursive: true });
+  const cacheFs = resolveCacheFs(input.cacheFs);
+  try {
+    cacheFs.mkdirSync(cacheRoot, { recursive: true });
+  } catch (cause) {
+    throw cacheFailure(
+      "cache_root_unavailable",
+      "Could not create the managed pi-subagents dev artifact cache root.",
+      cause,
+    );
+  }
 
-  return withPinLock(cacheRoot, provenance.pinnedCommit, () =>
-    prepareOnce({ provenance, artifactDir, repoRoot: input.repoRoot, env: asRecord(input.env) }),
+  return withPinLock(
+    cacheRoot,
+    provenance.pinnedCommit,
+    () =>
+      prepareOnce({
+        provenance,
+        artifactDir,
+        repoRoot: input.repoRoot,
+        env: asRecord(input.env),
+        cacheFs,
+      }),
+    { cacheFs },
   );
 }

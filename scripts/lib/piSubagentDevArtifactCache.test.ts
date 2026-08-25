@@ -32,6 +32,7 @@ import {
   piSubagentDevArtifactCacheEntryDir,
   preparePiSubagentDevArtifact,
   withPinLock,
+  type PiSubagentDevArtifactCacheFs,
 } from "./piSubagentDevArtifactCache.ts";
 
 /**
@@ -504,49 +505,197 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     );
   }, 120_000);
 
-  it("does not let an old owner release a successor lock after stale takeover", async () => {
+  it("never removes or replaces a stale lock and times out within the bound", async () => {
     const root = makeTempRoot("dev-cache-lock-");
     const cacheRoot = join(root, "cache");
     const pin = "aa6fa4a8540644d2509b10d6df854486ddc67d1d";
-    let firstAcquired!: () => void;
-    const acquired = new Promise<void>((resolve) => {
-      firstAcquired = resolve;
-    });
-    let releaseFirst!: () => void;
-    const firstRun = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const first = withPinLock(cacheRoot, pin, async () => {
-      firstAcquired();
-      await firstRun;
-    });
-    await acquired;
+    mkdirSync(cacheRoot, { recursive: true });
     const lockPath = join(cacheRoot, `${pin}.lock`);
+    const foreignToken = "owner-from-a-crashed-preparation";
+    writeFileSync(lockPath, `${foreignToken}\n`);
     const stale = new Date(Date.now() - 181_000);
     utimesSync(lockPath, stale, stale);
 
-    let secondAcquired!: () => void;
-    const successorReady = new Promise<void>((resolve) => {
-      secondAcquired = resolve;
-    });
-    let releaseSecond!: () => void;
-    const secondRun = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    const second = withPinLock(cacheRoot, pin, async () => {
-      secondAcquired();
-      await secondRun;
-    });
-    await successorReady;
+    const startedAt = Date.now();
+    const error = await expectCacheError(
+      withPinLock(cacheRoot, pin, async () => undefined, { waitTimeoutMs: 35, pollMs: 5 }),
+      "lock_timeout",
+    );
 
-    releaseFirst();
-    await first;
-    expect(existsSync(lockPath)).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(error.message).toBe(
+      "Managed pi-subagents lock timed out; confirm no dev runner is active, then remove the lock manually and retry.",
+    );
+    expect(error.message).not.toContain(cacheRoot);
+    expect(error.message.length).toBeLessThanOrEqual(128);
+    expect(readFileSync(lockPath, "utf8")).toBe(`${foreignToken}\n`);
+  });
 
-    releaseSecond();
-    await second;
-    expect(existsSync(lockPath)).toBe(false);
-  }, 30_000);
+  it("only the owner removes its lock", async () => {
+    const root = makeTempRoot("dev-cache-lock-owner-");
+    const cacheRoot = join(root, "cache");
+    const pin = "aa6fa4a8540644d2509b10d6df854486ddc67d1d";
+    await withPinLock(cacheRoot, pin, async () => undefined);
+    expect(existsSync(join(cacheRoot, `${pin}.lock`))).toBe(false);
+
+    const lockPath = join(cacheRoot, `${pin}.lock`);
+    writeFileSync(lockPath, "different-owner\n");
+    await expectCacheError(
+      withPinLock(cacheRoot, pin, async () => undefined, { waitTimeoutMs: 20, pollMs: 5 }),
+      "lock_timeout",
+    );
+    expect(readFileSync(lockPath, "utf8")).toBe("different-owner\n");
+  });
+
+  it("maps cache-root and lock filesystem failures without raw diagnostics", async () => {
+    const environment = createDevCacheEnvironment();
+    const cacheRoot = join(environment.synaraHome, PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME);
+    const absoluteCause = new Error(`permission denied at ${cacheRoot}`);
+    const cacheFs: Partial<PiSubagentDevArtifactCacheFs> = {
+      mkdirSync: () => {
+        throw absoluteCause;
+      },
+    };
+
+    const rootError = await expectCacheError(
+      preparePiSubagentDevArtifact({
+        repoRoot: environment.repoRoot,
+        synaraHome: environment.synaraHome,
+        env: { ALFIE_REPO_DIR: environment.alfieRepoDir },
+        cacheFs,
+      }),
+      "cache_root_unavailable",
+    );
+    expect(rootError.message).toBe(
+      "Could not create the managed pi-subagents dev artifact cache root.",
+    );
+    expect(rootError.message).not.toContain(cacheRoot);
+    expect(rootError.message).not.toContain(absoluteCause.message);
+
+    const lockError = await expectCacheError(
+      withPinLock(cacheRoot, environment.pinnedCommit, async () => undefined, {
+        cacheFs: {
+          open: async () => {
+            throw Object.assign(new Error(`open failed at ${cacheRoot}`), { code: "EACCES" });
+          },
+        },
+        waitTimeoutMs: 20,
+      }),
+      "lock_open_failed",
+    );
+    expect(lockError.message).toBe("Could not open the managed pi-subagents dev artifact lock.");
+    expect(lockError.message).not.toContain(cacheRoot);
+    expect(lockError.message).not.toContain("EACCES");
+
+    const writeCause = new Error(`write failed at ${cacheRoot}`);
+    const writeError = await expectCacheError(
+      withPinLock(
+        join(makeTempRoot("dev-cache-lock-write-fs-"), "cache"),
+        environment.pinnedCommit,
+        async () => undefined,
+        {
+          cacheFs: {
+            open: async () => ({
+              writeFile: async () => {
+                throw writeCause;
+              },
+              close: async () => undefined,
+            }),
+          },
+        },
+      ),
+      "lock_write_failed",
+    );
+    expect(writeError.message).toBe(
+      "Could not write the managed pi-subagents dev artifact lock.",
+    );
+    expect(writeError.message).not.toContain(writeCause.message);
+
+    const closeCause = new Error(`close failed at ${cacheRoot}`);
+    const closeError = await expectCacheError(
+      withPinLock(
+        join(makeTempRoot("dev-cache-lock-close-fs-"), "cache"),
+        environment.pinnedCommit,
+        async () => undefined,
+        {
+          cacheFs: {
+            open: async () => ({
+              writeFile: async () => undefined,
+              close: async () => {
+                throw closeCause;
+              },
+            }),
+          },
+        },
+      ),
+      "lock_close_failed",
+    );
+    expect(closeError.message).toBe(
+      "Could not close the managed pi-subagents dev artifact lock.",
+    );
+    expect(closeError.message).not.toContain(closeCause.message);
+  });
+
+  it("maps quarantine and owner cleanup filesystem failures without raw diagnostics", async () => {
+    const environment = createDevCacheEnvironment();
+    const entryDir = expectedEntryDir(environment);
+    const quarantineCause = new Error(`remove failed at ${entryDir}`);
+    const quarantineError = await expectCacheError(
+      preparePiSubagentDevArtifact({
+        repoRoot: environment.repoRoot,
+        synaraHome: environment.synaraHome,
+        env: { ALFIE_REPO_DIR: environment.alfieRepoDir },
+        cacheFs: {
+          rmSync: (path, options) => {
+            if (path === entryDir) throw quarantineCause;
+            rmSync(path, options);
+          },
+        },
+      }),
+      "cache_quarantine_failed",
+    );
+    expect(quarantineError.message).toBe(
+      "Could not quarantine the managed pi-subagents dev artifact cache entry.",
+    );
+    expect(quarantineError.message).not.toContain(entryDir);
+    expect(quarantineError.message).not.toContain(quarantineCause.message);
+
+    const lockRoot = join(makeTempRoot("dev-cache-lock-fs-"), "cache");
+    const pin = "aa6fa4a8540644d2509b10d6df854486ddc67d1d";
+    const readCause = new Error("read failed with /private/raw/path");
+    const readError = await expectCacheError(
+      withPinLock(lockRoot, pin, async () => undefined, {
+        cacheFs: {
+          readFileSync: () => {
+            throw readCause;
+          },
+        },
+      }),
+      "lock_read_failed",
+    );
+    expect(readError.message).toBe(
+      "Could not validate ownership of the managed pi-subagents dev artifact lock.",
+    );
+    expect(readError.message).not.toContain(readCause.message);
+
+    const removeCause = new Error("remove failed with /private/raw/path");
+    const removeRoot = join(makeTempRoot("dev-cache-lock-remove-fs-"), "cache");
+    const removeError = await expectCacheError(
+      withPinLock(removeRoot, pin, async () => undefined, {
+        cacheFs: {
+          rmSync: (path, options) => {
+            if (path.endsWith(".lock")) throw removeCause;
+            rmSync(path, options);
+          },
+        },
+      }),
+      "lock_remove_failed",
+    );
+    expect(removeError.message).toBe(
+      "Could not remove the managed pi-subagents dev artifact lock after preparation.",
+    );
+    expect(removeError.message).not.toContain(removeCause.message);
+  });
 
   it("removes only the symlink (never its target) and restages", async () => {
     const environment = createDevCacheEnvironment();

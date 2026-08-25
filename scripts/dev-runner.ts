@@ -79,6 +79,13 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly cause?: unknown;
 }> {}
 
+export function formatDevArtifactPreparationError(cause: unknown): string {
+  if (cause instanceof PiSubagentDevArtifactCacheError) {
+    return cause.message;
+  }
+  return "Failed to prepare the managed pi-subagents dev artifact.";
+}
+
 const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
   Config.string(name).pipe(
     Config.option,
@@ -512,13 +519,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
           }),
         catch: (cause) =>
           new DevRunnerError({
-            message:
-              cause instanceof PiSubagentDevArtifactCacheError
-                ? `Failed to prepare the managed pi-subagents dev artifact (${cause.code}): ${cause.message}`
-                : `Failed to prepare the managed pi-subagents dev artifact: ${
-                    cause instanceof Error ? cause.message : String(cause)
-                  }`,
-            cause,
+            message: formatDevArtifactPreparationError(cause),
           }),
       });
       piSubagentArtifactDir = prepared.artifactDir;

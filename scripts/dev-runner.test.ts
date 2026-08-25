@@ -5,9 +5,11 @@ import { resolve } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
+import { PiSubagentDevArtifactCacheError } from "./lib/piSubagentDevArtifactCache.ts";
 import {
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  formatDevArtifactPreparationError,
   modeLaunchesServer,
   readDevRunnerBooleanEnvironment,
   resolveDevRunnerBooleanOverrides,
@@ -304,6 +306,30 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.SYNARA_HOME, resolve("/tmp/my-synara"));
       }),
     );
+  });
+
+  describe("managed pi artifact error mapping", () => {
+    it("exposes only the bounded cache message", () => {
+      const bounded = new PiSubagentDevArtifactCacheError(
+        "cache_root_unavailable",
+        "Could not create the managed pi-subagents dev artifact cache root.",
+        new Error("raw cause at /private/secret/path"),
+      );
+
+      assert.equal(formatDevArtifactPreparationError(bounded), bounded.message);
+      assert.ok(!/private|raw cause/.test(formatDevArtifactPreparationError(bounded)));
+    });
+
+    it("uses a stable generic message for unexpected preparation failures", () => {
+      assert.equal(
+        formatDevArtifactPreparationError(new Error("unexpected raw path /private/secret")),
+        "Failed to prepare the managed pi-subagents dev artifact.",
+      );
+      assert.equal(
+        formatDevArtifactPreparationError("unexpected raw cause"),
+        "Failed to prepare the managed pi-subagents dev artifact.",
+      );
+    });
   });
 
   describe("managed pi artifact locator policy", () => {
