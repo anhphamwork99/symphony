@@ -331,34 +331,75 @@ const boundExcerpt = (value: string | null | undefined, maxChars: number): strin
 };
 
 /**
- * Ticket 11 progress-summary extraction (T11-AC1). The coalesced progress
- * JSON is producer-defined; the card exposes only a bounded plain-text
- * excerpt so no raw JSON or transcript content ever reaches the snapshot.
+ * Ticket 11 progress projection (T11-AC1/WP-2). The coalesced progress JSON
+ * is producer-defined; the card exposes only a bounded plain-text excerpt
+ * plus independently validated top-level turn counters. Parsing happens once
+ * so summary and counter projections cannot disagree about the source value.
  */
-const progressJsonToSummary = (value: string | null | undefined): string | null => {
+interface ProgressJsonProjection {
+  readonly summary: string | null;
+  readonly turnCount: number | null;
+  readonly maxTurns: number | null;
+}
+
+const progressJsonToProjection = (value: string | null | undefined): ProgressJsonProjection => {
+  const emptyProjection: ProgressJsonProjection = {
+    summary: null,
+    turnCount: null,
+    maxTurns: null,
+  };
   if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
+    return emptyProjection;
   }
+
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed !== null && typeof parsed === "object") {
-      const record = parsed as Record<string, unknown>;
-      for (const key of ["summary", "text", "message", "detail", "status"]) {
-        const candidate = record[key];
-        if (typeof candidate === "string" && candidate.trim().length > 0) {
-          return boundExcerpt(candidate, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
-        }
-      }
-      const stringified = JSON.stringify(parsed);
-      return boundExcerpt(stringified, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
-    }
-    if (typeof parsed === "string") {
-      return boundExcerpt(parsed, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
-    }
+    parsed = JSON.parse(value);
   } catch {
-    // Fall through to the raw bounded excerpt.
+    // Preserve the existing malformed-input summary fallback, but malformed
+    // JSON cannot provide trusted numeric projections.
+    return {
+      ...emptyProjection,
+      summary: boundExcerpt(value, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS),
+    };
   }
-  return boundExcerpt(value, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+
+  let summary: string | null = null;
+  if (parsed !== null && typeof parsed === "object") {
+    const record = parsed as Record<string, unknown>;
+    for (const key of ["summary", "text", "message", "detail", "status"]) {
+      const candidate = record[key];
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        summary = boundExcerpt(candidate, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+        break;
+      }
+    }
+    if (summary === null) {
+      const stringified = JSON.stringify(parsed);
+      summary = boundExcerpt(stringified, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+    }
+  } else if (typeof parsed === "string") {
+    summary = boundExcerpt(parsed, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+  } else {
+    // Preserve the existing fallback for valid primitive JSON values.
+    summary = boundExcerpt(value, PI_SUBAGENT_EXECUTION_CARD_PROGRESS_SUMMARY_MAX_CHARS);
+  }
+
+  let turnCount: number | null = null;
+  let maxTurns: number | null = null;
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    const turnCountCandidate = record["turnCount"];
+    const maxTurnsCandidate = record["maxTurns"];
+    if (typeof turnCountCandidate === "number" && Number.isSafeInteger(turnCountCandidate)) {
+      turnCount = turnCountCandidate >= 0 ? Math.max(0, turnCountCandidate) : null;
+    }
+    if (typeof maxTurnsCandidate === "number" && Number.isSafeInteger(maxTurnsCandidate)) {
+      maxTurns = maxTurnsCandidate > 0 ? maxTurnsCandidate : null;
+    }
+  }
+
+  return { summary, turnCount, maxTurns };
 };
 
 const telemetryMetric = (value: number | undefined): number =>
@@ -518,6 +559,7 @@ export interface PiSubagentExecutionCardRow {
 export function piSubagentExecutionCardRowToCard(
   row: PiSubagentExecutionCardRow,
 ): PiSubagentExecutionCard {
+  const progress = progressJsonToProjection(row.lastProgressJson);
   return {
     executionId: row.executionId,
     attemptId: row.attemptId,
@@ -542,11 +584,13 @@ export function piSubagentExecutionCardRowToCard(
     leaseExpiresAt: row.leaseExpiresAt,
     ...(row.lastProgressAt !== null || row.lastProgressJson !== null
       ? {
-          lastProgressSummary: progressJsonToSummary(row.lastProgressJson) ?? null,
+          lastProgressSummary: progress.summary ?? null,
           lastProgressAt: row.lastProgressAt,
         }
       : {}),
     droppedProgressCount: Math.max(0, Number(row.droppedProgressCount ?? 0)),
+    turnCount: progress.turnCount,
+    maxTurns: progress.maxTurns,
     ...(row.terminalSummary !== null || row.terminalTranscriptRef !== null
       ? {
           terminalSummary: boundExcerpt(

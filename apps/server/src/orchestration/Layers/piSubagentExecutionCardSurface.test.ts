@@ -209,6 +209,8 @@ describe("Ticket 03 durable card truth (current-generation attachment + teardown
       const byId = await currentCard(system, "exec-t03-fresh");
       expect(byId.currentAttachment).toBe("attached");
       expect(byId.currentTeardownEvidence).toBe("none");
+      expect(byId.turnCount).toBeNull();
+      expect(byId.maxTurns).toBeNull();
 
       const byThread = await system.run(
         system.repository.listExecutionCardsByThreadId("thread-t11-t03a", 64),
@@ -227,6 +229,8 @@ describe("Ticket 03 durable card truth (current-generation attachment + teardown
         expect(snapshotCards).toHaveLength(1);
         expect(snapshotCards[0]!.currentAttachment).toBe("attached");
         expect(snapshotCards[0]!.currentTeardownEvidence).toBe("none");
+        expect(snapshotCards[0]!.turnCount).toBeNull();
+        expect(snapshotCards[0]!.maxTurns).toBeNull();
       }
     } finally {
       await system.dispose();
@@ -872,7 +876,11 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
       await system.run(
         system.repository.recordProgressObservation({
           executionId: "exec-t11-ac1",
-          progressJson: JSON.stringify({ summary: "Compiling module 7 of 9" }),
+          progressJson: JSON.stringify({
+            summary: "Compiling module 7 of 9",
+            turnCount: 7,
+            maxTurns: 12,
+          }),
           occurredAt: "2026-08-19T00:00:05.000Z",
           droppedCountDelta: 3,
         }),
@@ -897,6 +905,8 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
       expect(card.lastProgressSummary).toBe("Compiling module 7 of 9");
       expect(card.lastProgressAt).toBe("2026-08-19T00:00:05.000Z");
       expect(card.droppedProgressCount).toBe(3);
+      expect(card.turnCount).toBe(7);
+      expect(card.maxTurns).toBe(12);
 
       // Snapshot path: the thread-detail snapshot carries the same bounded
       // aggregate (T11-AC5: hydration independent of any live tool row).
@@ -911,12 +921,111 @@ describe("Ticket 11 execution-card snapshot/replay surface", () => {
       expect(snapshotCards).toHaveLength(1);
       expect(snapshotCards[0]!.executionId).toBe("exec-t11-ac1");
       expect(snapshotCards[0]!.leaseExpiresAt).toBe("2026-08-19T00:00:38.000Z");
+      expect(snapshotCards[0]!.turnCount).toBe(card.turnCount);
+      expect(snapshotCards[0]!.maxTurns).toBe(card.maxTurns);
 
       // T11-AC1 bound contract: no prompt, no raw progress JSON anywhere in
       // the serialized card payload.
       const serialized = JSON.stringify(detail.value.thread.piSubagentExecutions);
       expect(serialized).not.toContain("SECRET PROMPT CONTENT");
       expect(serialized).not.toContain("progressJson");
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("WP-2: projects only finite safe top-level turn counters, independently, across repository and snapshot cards", async () => {
+    const system = await createEngineSystem();
+    try {
+      setPiSubagentExecutionLifecycleListener(undefined);
+      await createProjectAndThread(system, "a");
+      const cases = [
+        { name: "malformed", progressJson: '{"turnCount":4', turnCount: null, maxTurns: null },
+        {
+          name: "nested-only",
+          progressJson: JSON.stringify({ progress: { turnCount: 8, maxTurns: 9 } }),
+          turnCount: null,
+          maxTurns: null,
+        },
+        {
+          name: "wrong-types",
+          progressJson: JSON.stringify({ turnCount: "8", maxTurns: true }),
+          turnCount: null,
+          maxTurns: null,
+        },
+        {
+          name: "invalid-bounds",
+          progressJson: JSON.stringify({ turnCount: -1, maxTurns: 0 }),
+          turnCount: null,
+          maxTurns: null,
+        },
+        {
+          name: "fractional-and-nonfinite",
+          progressJson: '{"turnCount":1.5,"maxTurns":1e999}',
+          turnCount: null,
+          maxTurns: null,
+        },
+        {
+          name: "turn-count-only",
+          progressJson: JSON.stringify({ turnCount: 0, maxTurns: "12" }),
+          turnCount: 0,
+          maxTurns: null,
+        },
+        {
+          name: "max-turns-only",
+          progressJson: JSON.stringify({ turnCount: "3", maxTurns: 20 }),
+          turnCount: null,
+          maxTurns: 20,
+        },
+      ] as const;
+
+      for (const [index, testCase] of cases.entries()) {
+        const executionId = `exec-wp2-${testCase.name}`;
+        await admitExecution(system, {
+          executionId,
+          threadId: "thread-t11-a",
+          now: new Date(Date.parse("2026-08-19T00:02:00.000Z") + index * 1000).toISOString(),
+        });
+        await system.run(
+          system.repository.recordProgressObservation({
+            executionId,
+            progressJson: testCase.progressJson,
+            occurredAt: new Date(
+              Date.parse("2026-08-19T00:03:00.000Z") + index * 1000,
+            ).toISOString(),
+            droppedCountDelta: 0,
+          }),
+        );
+      }
+
+      const repositoryCards = await system.run(
+        system.repository.listExecutionCardsByThreadId("thread-t11-a", 64),
+      );
+      const repositoryById = new Map(repositoryCards.map((card) => [card.executionId, card]));
+      for (const testCase of cases) {
+        const card = repositoryById.get(`exec-wp2-${testCase.name}`);
+        expect(card).toBeDefined();
+        expect(card).toHaveProperty("turnCount", testCase.turnCount);
+        expect(card).toHaveProperty("maxTurns", testCase.maxTurns);
+      }
+
+      const detail = await system.run(
+        system.snapshotQuery.getThreadDetailSnapshotById(asThreadId("thread-t11-a")),
+      );
+      expect(detail._tag).toBe("Some");
+      if (detail._tag !== "Some") {
+        return;
+      }
+      const snapshotCards = detail.value.thread.piSubagentExecutions ?? [];
+      const snapshotById = new Map(snapshotCards.map((card) => [card.executionId, card]));
+      for (const testCase of cases) {
+        const executionId = `exec-wp2-${testCase.name}`;
+        const repositoryCard = repositoryById.get(executionId);
+        const snapshotCard = snapshotById.get(executionId);
+        expect(snapshotCard).toBeDefined();
+        expect(snapshotCard?.turnCount).toBe(repositoryCard?.turnCount);
+        expect(snapshotCard?.maxTurns).toBe(repositoryCard?.maxTurns);
+      }
     } finally {
       await system.dispose();
     }
