@@ -11,9 +11,13 @@
   `6ccda4d91`. The scoped web/dev controlled Pi artifact follow-up for
   `dev`/`dev:server` is bindingly accepted by
   [Decision 0018](decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md)
-  at candidate `5c27bcb4f`.
-- **Triage status:** Original desktop production acceptance complete; web/dev
-  controlled artifact follow-up accepted by Decision 0018.
+  at candidate `5c27bcb4f`. The managed Pi discovery immutability bugfix is
+  bindingly accepted by [Decision 0019](decisions/0019-managed-pi-discovery-immutability-bugfix-acceptance.md)
+  at candidate `ba4a32e32ccd7552ed8dd74950bc49f8778cf9a2`, narrowly superseding
+  Decision 0018's source frontier while retaining its broader web/dev scope.
+- **Triage status:** Original desktop production acceptance complete; broader
+  web/dev controlled artifact follow-up accepted by Decision 0018; managed Pi
+  discovery immutability follow-up accepted by Decision 0019.
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -86,13 +90,24 @@
   mandatory-check blocker; Ticket 03 AC1–AC5 are finally accepted. Ticket 04
   becomes ready/unblocked but is not accepted.
 - [decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md](decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md)
-  — **Authoritative** binding Supervisor Reassessment for the narrow web/dev
+  — **Authoritative** binding Supervisor Reassessment for the broader web/dev
   controlled Pi artifact follow-up: candidate
   `5c27bcb4fc4a1056d6cc3d0c63187f5336fc0359`, range
   `2e4ea4de9..5c27bcb4f`, and verification/review evidence are accepted for
   `dev`/`dev:server`. It extends Decision 0017's controlled artifact boundary
   narrowly and does not supersede Decision 0017's original packaged desktop
-  production acceptance.
+  production acceptance. Its managed-discovery source frontier is narrowly
+  superseded by Decision 0019.
+- [decisions/0019-managed-pi-discovery-immutability-bugfix-acceptance.md](decisions/0019-managed-pi-discovery-immutability-bugfix-acceptance.md)
+  — **Authoritative** binding Supervisor Reassessment for the managed Pi
+  discovery immutability bugfix: candidate
+  `ba4a32e32ccd7552ed8dd74950bc49f8778cf9a2`, range
+  `f0ed0ac94..ba4a32e32`, focused unit evidence `33/33`, real-Pi evidence
+  `9/9`, and sole independent review **PASS** with **High** confidence and no
+  blockers. It is the current follow-up frontier for binding the
+  `userAgentDir`-backed model runtime while retaining controlled artifact
+  loading and in-memory settings. It does not supersede Decision 0018's
+  broader web/dev acceptance or Decision 0017's original desktop acceptance.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -136,6 +151,14 @@
   remediation.
 - **Web/dev controlled Pi artifact follow-up** is accepted by Decision 0018 at
   candidate `5c27bcb4fc4a1056d6cc3d0c63187f5336fc0359` across
-  `2e4ea4de9..5c27bcb4f`. This is a narrow extension of the controlled artifact
-  boundary for local `dev`/`dev:server`; it does not supersede Decision 0017
-  for original desktop production acceptance.
+  `2e4ea4de9..5c27bcb4f`. This remains the authoritative broader controlled
+  artifact boundary for local `dev`/`dev:server`; its managed-discovery source
+  frontier is narrowly superseded by Decision 0019, and it does not supersede
+  Decision 0017 for original desktop production acceptance.
+- **Managed Pi discovery immutability bugfix** is accepted by Decision 0019 at
+  candidate `ba4a32e32ccd7552ed8dd74950bc49f8778cf9a2` across
+  `f0ed0ac94..ba4a32e32`. This is the authoritative current follow-up frontier:
+  inactive managed skill/command discovery uses a `userAgentDir`-backed model
+  runtime while retaining the controlled artifact `agentDir`, artifact-only
+  loading, and in-memory settings. It does not replace Decision 0018's broader
+  web/dev acceptance or Decision 0017's original desktop acceptance.
