@@ -11,7 +11,6 @@
 // Layer: Web presentation logic
 // Exports: PI_SUBAGENT_EXECUTION_STATE_PRESENTATIONS,
 //          piSubagentExecutionStatePresentation,
-//          PI_SUBAGENT_LEGACY_UNMANAGED_LABEL,
 //          PI_SUBAGENT_RUNNING_IN_BACKGROUND_LABEL,
 //          PI_SUBAGENT_CANCELLING_LABEL,
 //          PI_SUBAGENT_CANCELLATION_UNVERIFIED_LABEL,
@@ -102,9 +101,6 @@ export function piSubagentExecutionStatePresentation(
 ): PiSubagentExecutionStatePresentation {
   return PRESENTATIONS[state] ?? PRESENTATIONS.orphaned!;
 }
-
-/** Ticket 11 (T11-AC8): the execution-card experience labels legacy agents. */
-export const PI_SUBAGENT_LEGACY_UNMANAGED_LABEL = "Unmanaged (legacy)";
 
 /** Ticket 03 (T03-AC2) exact whole-card labels. */
 export const PI_SUBAGENT_RUNNING_IN_BACKGROUND_LABEL = "Running in background";

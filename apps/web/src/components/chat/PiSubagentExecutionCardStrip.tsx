@@ -13,23 +13,24 @@
 // initial live expansion, label/dot/spinner, and the Cancel/Resume
 // affordances all consume `piSubagentExecutionCardPresentation` — local
 // cancel/resume pending state only disables an already-allowed action and
-// never changes the durable label or creates controls.
+// never changes the durable label or creates controls. The strip is
+// borderless and full width inside ComposerColumnFrame through the isolated
+// `ComposerStackedPanelExecutionStrip` variant; visible lifecycle status is
+// the dot only (the presentation label stays available to assistive tech as
+// `sr-only`), with no panel header/count and no details affordance.
 // Layer: Chat composer UI
 // Exports: PiSubagentExecutionCardStrip
 
 import type { PiSubagentExecutionCard } from "@synara/contracts";
 import { useEffect, useState } from "react";
 
-import { FileIcon, LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
-import {
-  PI_SUBAGENT_LEGACY_UNMANAGED_LABEL,
-  piSubagentExecutionCardPresentation,
-} from "~/lib/piSubagentExecutionCardPresentation";
+import { LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
+import { piSubagentExecutionCardPresentation } from "~/lib/piSubagentExecutionCardPresentation";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
-import { ComposerStackedPanel } from "./ComposerStackedPanel";
+import { ComposerStackedPanelExecutionStrip } from "./ComposerStackedPanel";
 
 /** Live-first, oldest-first ordering for stable rendering (T03-AC5). */
 function orderCards(cards: ReadonlyArray<PiSubagentExecutionCard>): PiSubagentExecutionCard[] {
@@ -63,8 +64,6 @@ interface ExecutionRowProps {
   /** Ticket 14 (T14-AC6): explicit resume of ONE orphaned execution. */
   readonly onResume?: (card: PiSubagentExecutionCard) => void;
   readonly resumePending?: boolean;
-  /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
-  readonly onOpenDetails: (card: PiSubagentExecutionCard) => void;
 }
 
 function ExecutionRow({
@@ -75,7 +74,6 @@ function ExecutionRow({
   cancelPending,
   onResume,
   resumePending,
-  onOpenDetails,
 }: ExecutionRowProps) {
   const presentation = piSubagentExecutionCardPresentation(card);
   const diagnostic =
@@ -101,12 +99,11 @@ function ExecutionRow({
           className={cn("size-1.5 shrink-0 rounded-full", presentation.dotClassName)}
           aria-hidden="true"
         />
-        <span className={cn("text-xs font-medium", presentation.textToneClassName)}>
+        {/* Visible lifecycle status is the dot only (T03 presentation truth);
+            the label stays available to screen readers. */}
+        <span className={cn("sr-only text-xs font-medium", presentation.textToneClassName)}>
           {presentation.label}
         </span>
-        {presentation.spinner ? (
-          <LoaderIcon className={cn("size-3 animate-spin", presentation.textToneClassName)} />
-        ) : null}
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
           {card.agentType}
         </span>
@@ -156,17 +153,6 @@ function ExecutionRow({
             )}
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="size-6 shrink-0"
-          title="View result and transcript"
-          aria-label={`View result and transcript for execution ${card.executionId}`}
-          onClick={() => onOpenDetails(card)}
-        >
-          <FileIcon className="size-3" />
-        </Button>
         {hasDetails ? (
           <button
             type="button"
@@ -205,7 +191,6 @@ function ExecutionRow({
             ) : null}
             <span className="text-muted-foreground/45">
               execution {card.executionId} · attempt {card.attemptId} · gen {card.generation}
-              {card.transcriptRef ? " · transcript ref available" : ""}
             </span>
           </div>
         </DisclosureRegion>
@@ -216,30 +201,20 @@ function ExecutionRow({
 
 export interface PiSubagentExecutionCardStripProps {
   readonly cards: ReadonlyArray<PiSubagentExecutionCard>;
-  /**
-   * Ticket 11 (T11-AC8): when the parent turn invoked the Pi `Agent` tool
-   * without managed-execution identity (legacy/unmanaged session), the strip
-   * labels it instead of fabricating a managed record.
-   */
-  readonly legacyAgentToolActive: boolean;
   readonly onCancelExecution: (card: PiSubagentExecutionCard) => void;
   readonly cancelPendingExecutionId: string | null;
   /** Ticket 14 (T14-AC6): explicit resume dispatcher (orphaned cards only). */
   readonly onResumeExecution?: (card: PiSubagentExecutionCard) => void;
   readonly resumePendingExecutionId?: string | null;
-  /** Ticket 12 (T12-AC3/AC4): opens the authorized result/transcript view. */
-  readonly onOpenExecutionDetails?: (card: PiSubagentExecutionCard) => void;
   readonly attachedToPrevious?: boolean;
 }
 
 export function PiSubagentExecutionCardStrip({
   cards,
-  legacyAgentToolActive,
   onCancelExecution,
   cancelPendingExecutionId,
   onResumeExecution,
   resumePendingExecutionId,
-  onOpenExecutionDetails,
   attachedToPrevious: attachedToPreviousProp,
 }: PiSubagentExecutionCardStripProps) {
   const attachedToPrevious = attachedToPreviousProp ?? false;
@@ -263,35 +238,19 @@ export function PiSubagentExecutionCardStrip({
     });
   }, [cards]);
 
-  if (cards.length === 0 && !legacyAgentToolActive) {
+  if (cards.length === 0) {
     return null;
   }
 
   const ordered = orderCards(cards);
 
   return (
-    <ComposerStackedPanel
+    <ComposerStackedPanelExecutionStrip
       passthroughSideMargins
       attachedToPrevious={attachedToPrevious}
       data-testid="pi-subagent-execution-card-strip"
     >
       <div className="flex flex-col gap-2 px-3 py-2.5">
-        <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/55">
-          <span>Managed subagent executions</span>
-          <span className="text-muted-foreground/35">{ordered.length}</span>
-        </div>
-        {legacyAgentToolActive ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-muted-foreground/25"
-              aria-hidden="true"
-            />
-            <span>{PI_SUBAGENT_LEGACY_UNMANAGED_LABEL}</span>
-            <span className="min-w-0 flex-1 truncate">
-              this session runs without the managed-execution bridge
-            </span>
-          </div>
-        ) : null}
         {ordered.map((card) => (
           <ExecutionRow
             key={card.executionId}
@@ -307,10 +266,9 @@ export function PiSubagentExecutionCardStrip({
             cancelPending={cancelPendingExecutionId === card.executionId}
             {...(onResumeExecution !== undefined ? { onResume: onResumeExecution } : {})}
             resumePending={resumePendingExecutionId === card.executionId}
-            onOpenDetails={onOpenExecutionDetails ?? (() => undefined)}
           />
         ))}
       </div>
-    </ComposerStackedPanel>
+    </ComposerStackedPanelExecutionStrip>
   );
 }

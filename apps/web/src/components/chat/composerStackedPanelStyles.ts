@@ -21,6 +21,17 @@ export const COMPOSER_STACKED_PANEL_CHROME_CLASS_NAME = [
 /** Divider between rows inside the same stacked panel. */
 export const COMPOSER_STACKED_PANEL_DIVIDER_CLASS_NAME = `border-t ${COMPOSER_STACKED_SURFACE_BORDER_CLASS_NAME}`;
 
+/**
+ * Isolated chrome for the managed Pi subagent execution strip (the only
+ * consumer): full width inside ComposerColumnFrame, borderless, and painted
+ * with the elevated secondary surface token instead of the shared translucent
+ * glass rail. Kept separate so no default stacked panel changes appearance.
+ */
+export const COMPOSER_STACKED_PANEL_EXECUTION_STRIP_CLASS_NAME = [
+  "relative w-full overflow-visible rounded-t-[var(--composer-radius)] border-0",
+  "bg-[var(--color-background-elevated-secondary)]",
+].join(" ");
+
 /** Standard single-line row inside a stacked panel header strip. */
 export const COMPOSER_STACKED_PANEL_ROW_CLASS_NAME =
   "flex items-center gap-2 px-2.5 py-1.5 text-[12px]";

@@ -509,7 +509,6 @@ import { useChatAutomationSetup } from "./chat/useChatAutomationSetup";
 import { ComposerActiveTaskListCard } from "./chat/ComposerActiveTaskListCard";
 import { ComposerBackgroundActivityStatus } from "./chat/ComposerBackgroundActivityStatus";
 import { PiSubagentExecutionCardStrip } from "./chat/PiSubagentExecutionCardStrip";
-import { PiSubagentResultTranscriptDialog } from "./chat/PiSubagentResultTranscriptDialog";
 import { ComposerSubagentStrip } from "./chat/ComposerSubagentStrip";
 import {
   collectForegroundRunningSubagentStripItems,
@@ -2921,19 +2920,12 @@ export default function ChatView({
   // Ticket 11 (T11-AC1/AC4/AC5): managed execution cards for the active Pi
   // thread, fed by thread-detail snapshots and execution-updated events. The
   // strip renders from durable state, so refresh/reconnect restores it without
-  // the parent tool row staying active.
+  // the parent tool row staying active. It mounts only with at least one
+  // managed card (no legacy/generic-running fallback row).
   const piSubagentExecutionCards = useMemo(
     () => activeThread?.piSubagentExecutions ?? [],
     [activeThread?.piSubagentExecutions],
   );
-  // A live parent turn on a Pi thread without any managed card = the Agent
-  // tool ran without the managed-execution bridge (legacy session). Label it
-  // in the execution-card experience instead of fabricating a managed record
-  // (T11-AC8).
-  const piSubagentLegacyAgentToolActive =
-    threadProvider === "pi" &&
-    piSubagentExecutionCards.length === 0 &&
-    Boolean(activeLatestTurn && activeLatestTurn.state === "running");
   const [piSubagentCancelPendingExecutionId, setPiSubagentCancelPendingExecutionId] = useState<
     string | null
   >(null);
@@ -2943,33 +2935,6 @@ export default function ChatView({
   const [piSubagentResumePendingExecutionId, setPiSubagentResumePendingExecutionId] = useState<
     string | null
   >(null);
-  // Ticket 12 (T12-AC3/AC4): the authorized result/transcript view opens per
-  // execution from the card strip; null = closed. The read adapters are
-  // plain functions (no hand-written useCallback) so React Compiler owns
-  // memoization — a manual dependency list here bails out ChatView's compile.
-  const [piSubagentDetailsCard, setPiSubagentDetailsCard] =
-    useState<PiSubagentExecutionCard | null>(null);
-  const onOpenPiSubagentExecutionDetails = (card: PiSubagentExecutionCard) => {
-    setPiSubagentDetailsCard(card);
-  };
-  const readPiSubagentResultForDialog = (input: { readonly executionId: string }) => {
-    const api = readNativeApi();
-    if (!api) {
-      return Promise.reject(new Error("Native API is not available."));
-    }
-    return api.orchestration.readPiSubagentResult(input);
-  };
-  const readPiSubagentTranscriptForDialog = (input: {
-    readonly executionId: string;
-    readonly cursor?: number;
-    readonly limit?: number;
-  }) => {
-    const api = readNativeApi();
-    if (!api) {
-      return Promise.reject(new Error("Native API is not available."));
-    }
-    return api.orchestration.readPiSubagentTranscript(input);
-  };
   const onCancelPiSubagentExecution = useCallback(
     (card: PiSubagentExecutionCard) => {
       const api = readNativeApi();
@@ -11409,16 +11374,13 @@ export default function ChatView({
                   }
                 />
               ) : null}
-              {(piSubagentExecutionCards.length > 0 || piSubagentLegacyAgentToolActive) &&
-              !planSidebarOpen ? (
+              {piSubagentExecutionCards.length > 0 && !planSidebarOpen ? (
                 <PiSubagentExecutionCardStrip
                   cards={piSubagentExecutionCards}
-                  legacyAgentToolActive={piSubagentLegacyAgentToolActive}
                   onCancelExecution={onCancelPiSubagentExecution}
                   cancelPendingExecutionId={piSubagentCancelPendingExecutionId}
                   onResumeExecution={onResumePiSubagentExecution}
                   resumePendingExecutionId={piSubagentResumePendingExecutionId}
-                  onOpenExecutionDetails={onOpenPiSubagentExecutionDetails}
                   attachedToPrevious={
                     showComposerLiveChangesHeader ||
                     showComposerActiveTaskListCard ||
@@ -12049,17 +12011,6 @@ export default function ChatView({
         currentTitle={activeThread.title}
         onOpenChange={setRenameDialogOpen}
         onSave={handleRenameActiveThread}
-      />
-      <PiSubagentResultTranscriptDialog
-        card={piSubagentDetailsCard}
-        open={piSubagentDetailsCard !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPiSubagentDetailsCard(null);
-          }
-        }}
-        readResult={readPiSubagentResultForDialog}
-        readTranscriptPage={readPiSubagentTranscriptForDialog}
       />
       {automationDraftForm ? (
         <AutomationDialog

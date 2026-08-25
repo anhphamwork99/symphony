@@ -4009,7 +4009,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Managed subagent executions");
+          // No strip header; the card identity row proves the strip mounted.
+          expect(
+            document.querySelector("[data-testid='pi-subagent-execution-card-strip']"),
+          ).not.toBeNull();
           expect(document.body.textContent).toContain("Outcome unknown (orphaned)");
         },
         { timeout: 8_000, interval: 50 },
@@ -4104,7 +4107,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await vi.waitFor(
         () => {
-          expect(document.body.textContent).toContain("Managed subagent executions");
+          // No strip header; the progress detail proves the strip mounted.
+          expect(
+            document.querySelector("[data-testid='pi-subagent-execution-card-strip']"),
+          ).not.toBeNull();
           expect(document.body.textContent).toContain(
             "coalesced progress from the durable snapshot",
           );
@@ -4139,6 +4145,55 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(cancelRequest).toBeDefined();
       expect(cancelRequest!.command!.executionId).toBe("exec-browser-cancel");
       expect(cancelRequest!.command!.threadId).toBe(THREAD_ID);
+    } finally {
+      restoreNativeApi();
+      await mounted.cleanup();
+    }
+  });
+
+  it("never mounts the execution card strip for a running turn with zero managed cards", async () => {
+    // Render-gate regression: a live parent turn on a Pi thread WITHOUT any
+    // managed execution card must NOT mount the strip — the legacy/generic
+    // running fallback row is gone, so the strip exists only when the durable
+    // snapshot carries at least one managed card.
+    const restoreNativeApi = installDeterministicSendNativeApi();
+    const runningSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-execution-card-none" as MessageId,
+      targetText: "execution card none target",
+      sessionStatus: "running",
+    });
+    const runningTurnId = TurnId.makeUnsafe("turn-execution-card-none");
+    const snapshotWithRunningTurn = {
+      ...runningSnapshot,
+      threads: runningSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              latestTurn: {
+                turnId: runningTurnId,
+                state: "running",
+                requestedAt: isoAt(3_100),
+                startedAt: isoAt(3_101),
+                completedAt: null,
+                assistantMessageId: null,
+              },
+            }
+          : thread,
+      ),
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: snapshotWithRunningTurn,
+    });
+
+    try {
+      await waitForComposerEditor();
+      await waitForLayout();
+      // A running turn with zero managed cards mounts no strip and never
+      // renders the removed legacy fallback copy.
+      expect(document.querySelector("[data-testid='pi-subagent-execution-card-strip']")).toBeNull();
+      expect(document.body.textContent).not.toContain("Unmanaged (legacy)");
+      expect(document.body.textContent).not.toContain("Managed subagent executions");
     } finally {
       restoreNativeApi();
       await mounted.cleanup();
