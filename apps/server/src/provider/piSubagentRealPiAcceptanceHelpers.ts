@@ -852,12 +852,29 @@ export class RealPiHarnessError extends Error {
  * managed path must ignore for extension discovery (extensions load only
  * from `<verified artifact>/agent`). Absent, every web-mode behavior is
  * preserved exactly.
+ *
+ * Local web/dev locator leg: `mode: "web"` composes the SAME production
+ * managed binding (gate locator env + explicit user agent dir + controlled
+ * `<artifact>/agent` extension discovery) while the ServerConfig stays in
+ * web mode — the exact production composition a dev-runner-launched web
+ * server with a prepared verified cache locator runs. The shared gate
+ * verifies any non-blank locator identically for both modes
+ * (`piSubagentDesktopArtifactGate.ts` decision order), so the only
+ * difference from the default leg is the ServerConfig `mode` value.
  */
 export interface RealPiWsHarnessDesktopManagedConfig {
   /** Verified-release artifact root (the gate locator value). */
   readonly artifactDir: string;
   /** Isolated user Pi agent dir supplying auth.json/models.json. */
   readonly userAgentDir: string;
+  /**
+   * Server runtime mode this harness leg reports. Defaults to `"desktop"`
+   * (the Ticket-02 desktop leg, unchanged). `"web"` keeps the local
+   * web/dev composition: the managed binding is still composed and the
+   * locator is still verified, exactly like a `dev`/`dev:server` launch
+   * with a prepared managed artifact locator.
+   */
+  readonly mode?: "desktop" | "web";
   /**
    * Ticket 04 WP1 / Decision 0016: a COMPLETE desktop-derived backend
    * environment (the exact object the production resolver
@@ -911,8 +928,15 @@ export interface RealPiWsHarness {
   /** Isolated PI_HOME (the extension's PREFERENCES.md root). */
   readonly piHomeDir: string;
   /**
+   * Runtime mode of the LIVE composed ServerConfig (read back from the
+   * harness ManagedRuntime, not from the options).
+   */
+  readonly serverMode: "web" | "desktop";
+  /**
    * Ticket 02: controlled desktop managed locations, present ONLY when the
-   * harness was composed with `desktopManaged` (undefined in web mode).
+   * harness was composed with `desktopManaged` (undefined in plain web
+   * mode). `mode` reports the ServerConfig runtime mode this leg composed
+   * (`"desktop"` by default; `"web"` for the local web/dev locator leg).
    */
   readonly desktop?: {
     readonly artifactDir: string;
@@ -921,6 +945,8 @@ export interface RealPiWsHarness {
     readonly managedAgentDir: string;
     /** Release-controlled extension dir (the only extension source). */
     readonly managedExtensionDir: string;
+    /** Server runtime mode this leg reported (default "desktop"). */
+    readonly mode: "desktop" | "web";
   };
   /** Writes an isolated subagent model preference (invalidates the loader's mtime cache). */
   readonly writeSubagentModelPreference: (selector: string) => void;
@@ -1194,8 +1220,14 @@ export async function makeRealPiWsHarness(
         // Ticket 02: ONLY the mode field changes on the desktop leg — the
         // desktop managed Pi bootstrap keys off `mode === "desktop"`; every
         // other production path (paths, roots, flags, subagent timers) is
-        // identical between the two harness legs.
-        mode: options.desktopManaged === undefined ? ("web" as const) : ("desktop" as const),
+        // identical between the two harness legs. The local web/dev locator
+        // leg (desktopManaged.mode === "web") keeps web mode: the shared gate
+        // verifies the non-blank locator identically for both modes, so the
+        // same managed binding is composed on a web-mode server.
+        mode:
+          options.desktopManaged === undefined || options.desktopManaged.mode === "web"
+            ? ("web" as const)
+            : ("desktop" as const),
         port: 0,
         host: "127.0.0.1",
         cwd: workspaceDir,
@@ -1375,6 +1407,15 @@ export async function makeRealPiWsHarness(
   setPiSubagentExecutionLifecycleListener((notification) => {
     executionCardBridge.handleNotification(repository, notification);
   });
+
+  // The LIVE composed ServerConfig's runtime mode (resolved from the same
+  // ManagedRuntime every production service above consumed — not a mirror
+  // of the harness options). Acceptance legs assert the mode the real
+  // composition actually ran under (e.g. web-mode locator legs prove the
+  // managed binding engaged while ServerConfig stayed in web mode).
+  const serverMode = (
+    await runtime.runPromise(Effect.service(ServerConfig))
+  ).mode;
 
   // Start the real orchestration reactor and mark command-ready, mirroring
   // the WsOrchestrationHarness startup sequence.
@@ -1699,6 +1740,7 @@ export async function makeRealPiWsHarness(
     parentAgentDir,
     childAgentDir,
     piHomeDir,
+    serverMode,
     ...(options.desktopManaged === undefined
       ? {}
       : {
@@ -1715,6 +1757,7 @@ export async function makeRealPiWsHarness(
                 PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT,
               ),
             ),
+            mode: options.desktopManaged.mode ?? "desktop",
           },
         }),
     writeSubagentModelPreference: (selector) => {
