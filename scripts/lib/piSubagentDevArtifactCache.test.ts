@@ -13,7 +13,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -63,6 +64,7 @@ import {
 
 const temporaryRoots: string[] = [];
 const REAL_ALFIE_REPO_DIR = process.env.ALFIE_REPO_DIR ?? "";
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
@@ -922,7 +924,7 @@ describe.skipIf(!REAL_ALFIE_REPO_DIR || !existsSync(REAL_ALFIE_REPO_DIR))(
       "stages and verifies the real pinned artifact into the dev cache",
       { timeout: 180_000 },
       async () => {
-        const repoRoot = join(process.cwd(), "..");
+        const repoRoot = REPO_ROOT;
         const synaraHome = join(makeTempRoot("dev-cache-real-home-"), ".synara");
         mkdirSync(synaraHome, { recursive: true });
 
