@@ -1,199 +1,147 @@
-// FILE: PiSubagentExecutionCardStrip.tsx
-// Purpose: Ticket 11 (T11-AC4/AC5/AC6/AC8) reconnectable execution-card strip
-// stacked above the composer: one row per managed Pi subagent execution of the
-// active thread (live states first, then terminal). Rows render the Ticket 03
-// WHOLE-CARD presentation (Running in background / Cancelling / Cancellation
-// unverified / Outcome unknown (orphaned) / ordinary lifecycle labels), the
-// bounded diagnostics, the terminal summary, and the completion-delivery
-// badge; an authorized Cancel button dispatches the durable per-execution
-// cancel command and stays visibly `cancelling` until the server's
-// journal-first acknowledgement projects a new card. Card state changes never
-// touch the transcript auto-follow path (T11-AC7) — the strip is composer
-// chrome, not a transcript message. Ticket 03 (T03-AC2–AC5): ordering,
-// initial live expansion, label/dot/spinner, and the Cancel/Resume
-// affordances all consume `piSubagentExecutionCardPresentation` — local
-// cancel/resume pending state only disables an already-allowed action and
-// never changes the durable label or creates controls. The strip is
-// borderless and full width inside ComposerColumnFrame through the isolated
-// `ComposerStackedPanelExecutionStrip` variant; visible lifecycle status is
-// the dot only (the presentation label stays available to assistive tech as
-// `sr-only`), with no panel header/count and no details affordance.
+// Purpose: Premium active-work rail for managed Pi subagent executions above the
+// composer. The strip is transparent composer chrome: each retained execution
+// is one compact, non-clickable row with a live dot grid, identity, elapsed
+// time, bounded progress, turn count, and its authorized action.
 // Layer: Chat composer UI
 // Exports: PiSubagentExecutionCardStrip
 
 import type { PiSubagentExecutionCard } from "@synara/contracts";
 import { useEffect, useState } from "react";
 
-import { LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
-import { piSubagentExecutionCardPresentation } from "~/lib/piSubagentExecutionCardPresentation";
+import {
+  piSubagentExecutionCardElapsedSeconds,
+  piSubagentExecutionCardIsRetainedInActiveStrip,
+  piSubagentExecutionCardPresentation,
+  piSubagentExecutionCardTurnLabel,
+} from "~/lib/piSubagentExecutionCardPresentation";
 import { cn } from "~/lib/utils";
+import { LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
-import { DisclosureChevron } from "../ui/DisclosureChevron";
-import { DisclosureRegion } from "../ui/DisclosureRegion";
 import { ComposerStackedPanelExecutionStrip } from "./ComposerStackedPanel";
 
-/** Live-first, oldest-first ordering for stable rendering (T03-AC5). */
+const DOT_DELAYS_MS = [0, 80, 160, 80, 160, 240, 160, 240, 320] as const;
+
 function orderCards(cards: ReadonlyArray<PiSubagentExecutionCard>): PiSubagentExecutionCard[] {
   return [...cards].toSorted((left, right) => {
-    const leftLive = piSubagentExecutionCardPresentation(left).live ? 0 : 1;
-    const rightLive = piSubagentExecutionCardPresentation(right).live ? 0 : 1;
-    if (leftLive !== rightLive) {
-      return leftLive - rightLive;
+    const leftPresentation = piSubagentExecutionCardPresentation(left);
+    const rightPresentation = piSubagentExecutionCardPresentation(right);
+    if (leftPresentation.spinner !== rightPresentation.spinner) {
+      return leftPresentation.spinner ? -1 : 1;
     }
     return left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0;
   });
 }
 
-function formatCardTimestamp(value: string | null | undefined): string | null {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
-    return null;
-  }
-  return new Date(parsed).toLocaleTimeString();
+function DotGrid({
+  animated,
+  className,
+}: {
+  readonly animated: boolean;
+  readonly className: string;
+}) {
+  return (
+    <span
+      className={cn("grid size-[15px] shrink-0 grid-cols-3 gap-[3px]", className)}
+      aria-hidden="true"
+      data-pi-subagent-dot-grid={animated ? "animated" : "static"}
+    >
+      {DOT_DELAYS_MS.map((delay, index) => (
+        <span
+          key={index}
+          className={cn(
+            "size-[3px] rounded-full bg-current",
+            animated && "animate-pulse [animation-duration:1.2s] motion-reduce:animate-none",
+          )}
+          style={animated ? { animationDelay: `-${delay}ms` } : undefined}
+        />
+      ))}
+    </span>
+  );
 }
 
 interface ExecutionRowProps {
   readonly card: PiSubagentExecutionCard;
-  readonly onRowExpandedChange: (executionId: string, expanded: boolean) => void;
-  readonly expanded: boolean;
+  readonly nowMs: number;
   readonly onCancel: (card: PiSubagentExecutionCard) => void;
   readonly cancelPending: boolean;
-  /** Ticket 14 (T14-AC6): explicit resume of ONE orphaned execution. */
   readonly onResume?: (card: PiSubagentExecutionCard) => void;
-  readonly resumePending?: boolean;
+  readonly resumePending: boolean;
 }
 
 function ExecutionRow({
   card,
-  onRowExpandedChange,
-  expanded,
+  nowMs,
   onCancel,
   cancelPending,
   onResume,
   resumePending,
 }: ExecutionRowProps) {
   const presentation = piSubagentExecutionCardPresentation(card);
+  const spinnerEligible = presentation.spinner;
+  const elapsedSeconds = piSubagentExecutionCardElapsedSeconds(card, nowMs);
+  const turnLabel = piSubagentExecutionCardTurnLabel(card);
   const diagnostic =
     card.diagnosticMessage ??
     (card.diagnosticCode !== undefined ? String(card.diagnosticCode) : null);
-  const hasDetails =
-    diagnostic !== null ||
-    card.terminalSummary != null ||
-    card.lastProgressSummary != null ||
-    presentation.detailMessage !== null ||
-    card.droppedProgressCount !== undefined;
-  // Control truth is durable-card-derived only (T03-AC2–AC5): the whole-card
-  // presentation decides visibility; local pending state may only disable an
-  // already-allowed action, never create or hide a control.
+  const progressText = spinnerEligible
+    ? (card.lastProgressSummary ?? "Working…")
+    : (card.lastProgressSummary ?? diagnostic ?? presentation.detailMessage ?? "Outcome unverified");
   const cancelVisible = presentation.showCancel;
   const cancelling = presentation.cancelDisabled;
   const resumeVisible = presentation.showResume && onResume !== undefined;
 
   return (
-    <div className="flex flex-col gap-1" data-pi-subagent-execution-id={card.executionId}>
-      <div className="flex items-center gap-2">
-        <span
-          className={cn("size-1.5 shrink-0 rounded-full", presentation.dotClassName)}
-          aria-hidden="true"
-        />
-        {/* Visible lifecycle status is the dot only (T03 presentation truth);
-            the label stays available to screen readers. */}
-        <span className={cn("sr-only text-xs font-medium", presentation.textToneClassName)}>
-          {presentation.label}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
-          {card.agentType}
-        </span>
-        {card.deliveryState !== undefined ? (
-          <span className="shrink-0 rounded bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-            delivery: {card.deliveryState.replace("_", " ")}
-          </span>
-        ) : null}
-        {cancelVisible ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="size-6 shrink-0"
-            disabled={cancelPending || cancelling}
-            title={
-              cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"
-            }
-            onClick={() => onCancel(card)}
-          >
-            {cancelling ? (
-              <LoaderIcon className="size-3 animate-spin" />
-            ) : (
-              <StopIcon className="size-3" />
-            )}
-          </Button>
-        ) : null}
-        {/* Ticket 14 (T14-AC6) / Ticket 03 (T03-AC4): explicit resume
-            affordance — ONLY an orphaned execution offers it. The dispatch is
-            the explicit user action; no automatic path produces the resume
-            command. */}
-        {resumeVisible ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="size-6 shrink-0"
-            disabled={resumePending === true}
-            title="Resume execution with a new attempt"
-            aria-label={`Resume execution ${card.executionId}`}
-            onClick={() => onResume(card)}
-          >
-            {resumePending === true ? (
-              <LoaderIcon className="size-3 animate-spin" />
-            ) : (
-              <RotateCcwIcon className="size-3" />
-            )}
-          </Button>
-        ) : null}
-        {hasDetails ? (
-          <button
-            type="button"
-            className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted-foreground/10"
-            aria-label={expanded ? "Collapse execution details" : "Expand execution details"}
-            onClick={() => onRowExpandedChange(card.executionId, !expanded)}
-          >
-            <DisclosureChevron open={expanded} className="size-3.5" />
-          </button>
-        ) : null}
-      </div>
-      {hasDetails ? (
-        <DisclosureRegion open={expanded}>
-          <div className="flex flex-col gap-1 pl-3.5 pr-1 text-xs text-muted-foreground/75">
-            {card.lastProgressSummary ? (
-              <span className="truncate" title={card.lastProgressSummary}>
-                {card.lastProgressSummary}
-                {formatCardTimestamp(card.lastProgressAt) !== null
-                  ? ` · ${formatCardTimestamp(card.lastProgressAt)}`
-                  : ""}
-              </span>
-            ) : null}
-            {card.terminalSummary ? (
-              <span className="line-clamp-3 whitespace-pre-wrap">{card.terminalSummary}</span>
-            ) : null}
-            {presentation.detailMessage !== null ? (
-              <span className="text-amber-300/80">{presentation.detailMessage}</span>
-            ) : null}
-            {diagnostic !== null ? (
-              <span className="text-muted-foreground/60">{diagnostic}</span>
-            ) : null}
-            {card.droppedProgressCount !== undefined && card.droppedProgressCount > 0 ? (
-              <span className="text-muted-foreground/50">
-                {card.droppedProgressCount} coalesced progress update(s) not shown
-              </span>
-            ) : null}
-            <span className="text-muted-foreground/45">
-              execution {card.executionId} · attempt {card.attemptId} · gen {card.generation}
-            </span>
-          </div>
-        </DisclosureRegion>
+    <div
+      className="flex min-h-7 min-w-0 items-center gap-2 px-3 py-1 text-xs"
+      data-pi-subagent-execution-id={card.executionId}
+      data-pi-subagent-execution-row="true"
+    >
+      <DotGrid animated={spinnerEligible} className={presentation.textToneClassName} />
+      <span className={cn("sr-only", presentation.textToneClassName)}>{presentation.label}</span>
+      <span className="max-w-36 shrink-0 truncate font-medium text-foreground/85" title={card.agentType}>
+        {card.agentType}
+      </span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/60">{elapsedSeconds}s</span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground/75",
+          spinnerEligible && "shimmer shimmer-duration-1800 motion-reduce:shimmer-none",
+        )}
+        title={progressText}
+        data-pi-subagent-progress="true"
+      >
+        {progressText}
+      </span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/60" data-pi-subagent-turn="true">
+        {turnLabel ?? "—"}
+      </span>
+      {cancelVisible ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="size-6 shrink-0"
+          disabled={cancelPending || cancelling}
+          title={cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"}
+          aria-label={cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"}
+          onClick={() => onCancel(card)}
+        >
+          {cancelling ? <LoaderIcon className="size-3 animate-spin" /> : <StopIcon className="size-3" />}
+        </Button>
+      ) : null}
+      {resumeVisible ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="size-6 shrink-0"
+          disabled={resumePending}
+          title="Resume execution with a new attempt"
+          aria-label={`Resume execution ${card.executionId}`}
+          onClick={() => onResume(card)}
+        >
+          {resumePending ? <LoaderIcon className="size-3 animate-spin" /> : <RotateCcwIcon className="size-3" />}
+        </Button>
       ) : null}
     </div>
   );
@@ -203,7 +151,6 @@ export interface PiSubagentExecutionCardStripProps {
   readonly cards: ReadonlyArray<PiSubagentExecutionCard>;
   readonly onCancelExecution: (card: PiSubagentExecutionCard) => void;
   readonly cancelPendingExecutionId: string | null;
-  /** Ticket 14 (T14-AC6): explicit resume dispatcher (orphaned cards only). */
   readonly onResumeExecution?: (card: PiSubagentExecutionCard) => void;
   readonly resumePendingExecutionId?: string | null;
   readonly attachedToPrevious?: boolean;
@@ -218,31 +165,24 @@ export function PiSubagentExecutionCardStrip({
   attachedToPrevious: attachedToPreviousProp,
 }: PiSubagentExecutionCardStripProps) {
   const attachedToPrevious = attachedToPreviousProp ?? false;
-  const [expandedByExecutionId, setExpandedByExecutionId] = useState<Record<string, boolean>>({});
+  const retainedCards = cards.filter(piSubagentExecutionCardIsRetainedInActiveStrip);
+  const orderedCards = orderCards(retainedCards);
+  const hasSpinnerEligibleRow = orderedCards.some(
+    (card) => piSubagentExecutionCardPresentation(card).spinner,
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Live (non-terminal) rows start expanded so diagnostics are visible on
-  // arrival; terminal rows start collapsed. Only applied once per card.
-  // Ticket 03: "live" is the whole-card presentation truth (an unverified or
-  // orphaned card starts collapsed — it is not live work).
   useEffect(() => {
-    setExpandedByExecutionId((previous) => {
-      let changed = false;
-      const next = { ...previous };
-      for (const card of cards) {
-        if (!(card.executionId in next)) {
-          next[card.executionId] = piSubagentExecutionCardPresentation(card).live;
-          changed = true;
-        }
-      }
-      return changed ? next : previous;
-    });
-  }, [cards]);
+    if (!hasSpinnerEligibleRow) {
+      return;
+    }
+    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(intervalId);
+  }, [hasSpinnerEligibleRow]);
 
-  if (cards.length === 0) {
+  if (retainedCards.length === 0) {
     return null;
   }
-
-  const ordered = orderCards(cards);
 
   return (
     <ComposerStackedPanelExecutionStrip
@@ -250,18 +190,12 @@ export function PiSubagentExecutionCardStrip({
       attachedToPrevious={attachedToPrevious}
       data-testid="pi-subagent-execution-card-strip"
     >
-      <div className="flex flex-col gap-2 px-3 py-2.5">
-        {ordered.map((card) => (
+      <div className="flex max-h-56 flex-col overflow-y-auto overscroll-contain">
+        {orderedCards.map((card) => (
           <ExecutionRow
             key={card.executionId}
             card={card}
-            expanded={expandedByExecutionId[card.executionId] ?? false}
-            onRowExpandedChange={(executionId, open) =>
-              setExpandedByExecutionId((previous) => ({
-                ...previous,
-                [executionId]: open,
-              }))
-            }
+            nowMs={nowMs}
             onCancel={onCancelExecution}
             cancelPending={cancelPendingExecutionId === card.executionId}
             {...(onResumeExecution !== undefined ? { onResume: onResumeExecution } : {})}

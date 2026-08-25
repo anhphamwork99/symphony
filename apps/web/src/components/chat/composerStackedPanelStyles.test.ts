@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   COMPOSER_STACKED_PANEL_CHROME_CLASS_NAME,
+  COMPOSER_STACKED_PANEL_EXECUTION_STRIP_CLASS_NAME,
   COMPOSER_STACKED_PANEL_ICON_CLASS_NAME,
   COMPOSER_STACKED_PANEL_LABEL_CLASS_NAME,
   COMPOSER_STACKED_PANEL_ROW_CLASS_NAME,
@@ -24,6 +25,15 @@ describe("composerStackedPanelStyles", () => {
     expect(COMPOSER_STACKED_PANEL_ROW_CLASS_NAME).toContain("px-2.5");
     expect(COMPOSER_STACKED_PANEL_ROW_CLASS_NAME).toContain("py-1.5");
     expect(COMPOSER_STACKED_PANEL_ROW_CLASS_NAME).toContain("text-[12px]");
+  });
+
+  it("keeps the execution strip transparent without changing default panel chrome", () => {
+    expect(COMPOSER_STACKED_PANEL_EXECUTION_STRIP_CLASS_NAME).toContain("bg-transparent");
+    expect(COMPOSER_STACKED_PANEL_EXECUTION_STRIP_CLASS_NAME).not.toContain(
+      "bg-[var(--color-background-elevated-secondary)]",
+    );
+    expect(COMPOSER_STACKED_PANEL_CHROME_CLASS_NAME).toContain("chat-composer-stacked-top");
+    expect(COMPOSER_STACKED_PANEL_CHROME_CLASS_NAME).toContain("border-b-0");
   });
 
   it("keeps unbounded row lists capped so large agent fleets cannot push the composer off-screen", () => {

@@ -23,13 +23,12 @@ export const COMPOSER_STACKED_PANEL_DIVIDER_CLASS_NAME = `border-t ${COMPOSER_ST
 
 /**
  * Isolated chrome for the managed Pi subagent execution strip (the only
- * consumer): full width inside ComposerColumnFrame, borderless, and painted
- * with the elevated secondary surface token instead of the shared translucent
- * glass rail. Kept separate so no default stacked panel changes appearance.
+ * consumer): full width inside ComposerColumnFrame, borderless, and
+ * transparent. Kept separate so no default stacked panel changes appearance.
  */
 export const COMPOSER_STACKED_PANEL_EXECUTION_STRIP_CLASS_NAME = [
   "relative w-full overflow-visible rounded-t-[var(--composer-radius)] border-0",
-  "bg-[var(--color-background-elevated-secondary)]",
+  "bg-transparent",
 ].join(" ");
 
 /** Standard single-line row inside a stacked panel header strip. */
