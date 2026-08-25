@@ -15,7 +15,10 @@ import {
   PI_SUBAGENT_CANCELLING_LABEL,
   PI_SUBAGENT_ORPHANED_LABEL,
   PI_SUBAGENT_RUNNING_IN_BACKGROUND_LABEL,
+  piSubagentExecutionCardElapsedSeconds,
+  piSubagentExecutionCardIsRetainedInActiveStrip,
   piSubagentExecutionCardPresentation,
+  piSubagentExecutionCardTurnLabel,
 } from "./piSubagentExecutionCardPresentation";
 import type { PiSubagentExecutionCardPresentationKind } from "./piSubagentExecutionCardPresentation";
 
@@ -311,5 +314,87 @@ describe("Ticket 03 whole-card presentation precedence (T03-AC2–AC5)", () => {
       expect(presentation.kind, name).toBe(kind);
       expect(presentation.label, name).toBe(label);
     }
+  });
+});
+
+describe("Ticket 11 active-strip card helpers", () => {
+  it("retains active states, orphaned cards, and teardown-unverified cards", () => {
+    const activeStates: Array<PiSubagentExecutionCard["observedState"]> = [
+      "requested",
+      "accepted",
+      "queued",
+      "running",
+      "cancelling",
+      "orphaned",
+    ];
+    for (const observedState of activeStates) {
+      expect(
+        piSubagentExecutionCardIsRetainedInActiveStrip(
+          makeCard({ observedState, desiredState: observedState }),
+        ),
+        observedState,
+      ).toBe(true);
+    }
+
+    expect(
+      piSubagentExecutionCardIsRetainedInActiveStrip(
+        makeCard({ observedState: "running", currentTeardownEvidence: "survivors" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes every committed outcome, including stale live evidence", () => {
+    for (const observedState of ["succeeded", "failed", "cancelled", "rejected"] as const) {
+      expect(
+        piSubagentExecutionCardIsRetainedInActiveStrip(
+          makeCard({
+            observedState,
+            desiredState: "cancelling",
+            currentAttachment: "detached",
+            currentTeardownEvidence: "survivors",
+          }),
+        ),
+        observedState,
+      ).toBe(false);
+    }
+  });
+
+  it("derives elapsed whole seconds and clamps invalid or future timestamps", () => {
+    const nowMs = Date.parse("2026-08-21T00:00:11.999Z");
+    expect(
+      piSubagentExecutionCardElapsedSeconds(
+        makeCard({ createdAt: "2026-08-21T00:00:00.000Z" }),
+        nowMs,
+      ),
+    ).toBe(11);
+    expect(
+      piSubagentExecutionCardElapsedSeconds(
+        makeCard({ createdAt: "2026-08-21T00:00:12.000Z" }),
+        nowMs,
+      ),
+    ).toBe(0);
+    expect(
+      piSubagentExecutionCardElapsedSeconds(makeCard({ createdAt: "not-a-date" }), nowMs),
+    ).toBe(0);
+    expect(piSubagentExecutionCardElapsedSeconds(makeCard(), Number.NaN)).toBe(0);
+  });
+
+  it("formats bounded and unbounded turn labels, including edge counts", () => {
+    expect(
+      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 1, maxTurns: 3 })),
+    ).toBe("1/3 turns");
+    expect(
+      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 3, maxTurns: 3 })),
+    ).toBe("3/3 turns");
+    expect(
+      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 4, maxTurns: 3 })),
+    ).toBe("4 turns");
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 1, maxTurns: null }))).toBe(
+      "1 turn",
+    );
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 0, maxTurns: null }))).toBe(
+      "0 turns",
+    );
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: null, maxTurns: 3 }))).toBeNull();
   });
 });

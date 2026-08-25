@@ -275,6 +275,64 @@ export function piSubagentExecutionCardPresentation(
   };
 }
 
+/**
+ * Pure active-strip retention predicate. The whole-card presentation preserves
+ * orphaned and teardown-unverified cards even though neither is live/spinner
+ * eligible; only committed outcomes are removed from the active strip.
+ */
+export function piSubagentExecutionCardIsRetainedInActiveStrip(
+  card: PiSubagentExecutionCard,
+): boolean {
+  // These observed outcomes are committed even if a stale desired state or
+  // attachment field would otherwise make the presentation look live.
+  if (
+    card.observedState === "cancelled" ||
+    card.observedState === "rejected"
+  ) {
+    return false;
+  }
+
+  const presentation = piSubagentExecutionCardPresentation(card);
+  if (presentation.kind === "terminal") {
+    return false;
+  }
+  if (presentation.kind !== "observed") {
+    return true;
+  }
+  return card.observedState !== "cancelled" && card.observedState !== "rejected";
+}
+
+/** Elapsed whole seconds since card creation, clamped for bad/future timestamps. */
+export function piSubagentExecutionCardElapsedSeconds(
+  card: Pick<PiSubagentExecutionCard, "createdAt">,
+  nowMs: number,
+): number {
+  const createdAtMs = Date.parse(card.createdAt);
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(nowMs)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((nowMs - createdAtMs) / 1_000));
+}
+
+/**
+ * Compact turn progress label. A valid non-null budget is shown only when it
+ * has not been exceeded; otherwise the observed count remains honest without
+ * inventing a total.
+ */
+export function piSubagentExecutionCardTurnLabel(
+  card: Pick<PiSubagentExecutionCard, "turnCount" | "maxTurns">,
+): string | null {
+  const turnCount = card.turnCount;
+  if (turnCount === null || turnCount === undefined) {
+    return null;
+  }
+  const maxTurns = card.maxTurns;
+  if (maxTurns !== null && maxTurns !== undefined && maxTurns >= turnCount) {
+    return `${turnCount}/${maxTurns} turns`;
+  }
+  return `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+}
+
 export function piSubagentExecutionStateTextToneClassName(state: PiSubagentLifecycleState): string {
   return piSubagentExecutionStatePresentation(state).textToneClassName;
 }
