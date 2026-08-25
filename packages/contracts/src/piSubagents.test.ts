@@ -899,6 +899,68 @@ describe("Pi subagent authorized result/transcript read schemas (Issue 12)", () 
       }),
     ).toThrow();
   });
+
+  it("decodes turnCount/maxTurns on execution cards with null replay defaults and strict integer bounds (WP-1)", () => {
+    // Old-shape replay cards carry NEITHER field; both must decode to null
+    // (same optional/decoding-default pattern as currentAttachment) so
+    // pre-turn-telemetry persisted card events keep replaying.
+    const baseCard = {
+      executionId: "exec_wp1_turns",
+      attemptId: "exec_wp1_turns_att1",
+      generation: 1,
+      projectId: "project-1",
+      parentThreadId: "thread-1",
+      parentTurnId: null,
+      parentToolCallId: null,
+      agentType: "worker",
+      mode: "foreground" as const,
+      cancellationScope: "parent_turn" as const,
+      desiredState: "running" as const,
+      observedState: "running" as const,
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:01.000Z",
+    };
+
+    // Missing (old shape) and explicit null both decode to null.
+    const oldShape = Schema.decodeSync(PiSubagentExecutionCard)(baseCard);
+    expect(oldShape.turnCount).toBeNull();
+    expect(oldShape.maxTurns).toBeNull();
+    const explicitNull = Schema.decodeSync(PiSubagentExecutionCard)({
+      ...baseCard,
+      turnCount: null,
+      maxTurns: null,
+    });
+    expect(explicitNull.turnCount).toBeNull();
+    expect(explicitNull.maxTurns).toBeNull();
+
+    // Valid integers decode as-is; turnCount zero is legitimate (spawned,
+    // no child turn completed yet) while maxTurns must be strictly positive.
+    const valid = Schema.decodeSync(PiSubagentExecutionCard)({
+      ...baseCard,
+      turnCount: 0,
+      maxTurns: 12,
+    });
+    expect(valid.turnCount).toBe(0);
+    expect(valid.maxTurns).toBe(12);
+
+    // Invalid shapes must reject: negative, fractional, string, boolean.
+    for (const badTurnCount of [-1, 1.5, "3" as never, true as never]) {
+      expect(() =>
+        Schema.decodeSync(PiSubagentExecutionCard)({
+          ...baseCard,
+          turnCount: badTurnCount,
+        }),
+      ).toThrow();
+    }
+    for (const badMaxTurns of [-1, 1.5, "3" as never, true as never, 0]) {
+      expect(() =>
+        Schema.decodeSync(PiSubagentExecutionCard)({
+          ...baseCard,
+          maxTurns: badMaxTurns,
+        }),
+      ).toThrow();
+    }
+  });
 });
 
 // Keep the sibling Ticket 06 cancel-command conventions pinned: the teardown

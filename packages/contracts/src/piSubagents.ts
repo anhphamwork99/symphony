@@ -565,6 +565,21 @@ export const PiSubagentExecutionCard = Schema.Struct({
   currentTeardownEvidence: Schema.optional(Schema.NullOr(PiSubagentTeardownEvidence)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
+  /**
+   * Completed child model turns for the current attempt (bounded counter
+   * projected from coalesced progress; zero is valid, null before the first
+   * turn-completion observation).
+   */
+  turnCount: Schema.optional(Schema.NullOr(NonNegativeInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  /**
+   * Spawn-time turn budget for the current attempt (strictly positive;
+   * null when the spawn carried no turn budget or none is known).
+   */
+  maxTurns: Schema.optional(Schema.NullOr(PositiveInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: TrimmedNonEmptyString,
   updatedAt: TrimmedNonEmptyString,
 });
