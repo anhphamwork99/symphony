@@ -534,6 +534,19 @@ function writeResearcherSlowPreference(piHomeDir: string): void {
   );
 }
 
+async function expectManagedArtifactUnchanged(artifactDir: string, managedAgentDir: string) {
+  const verified = await verifyPiSubagentArtifact(artifactDir);
+  expect(verified.valid).toBe(true);
+  for (const relativePath of [
+    "auth.json",
+    "models.json",
+    "models-store.json",
+    "settings.json",
+  ]) {
+    expect(existsSync(join(managedAgentDir, relativePath))).toBe(false);
+  }
+}
+
 beforeAll(async () => {
   const repoDir = requireAlfieRepoDir();
   const provenance = verifyRealPiExtensionProvenance();
@@ -568,6 +581,57 @@ afterAll(async () => {
 });
 
 describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
+  it("discovery keeps the verified artifact immutable before any active session", async () => {
+    const runArtifactDir = copyArtifactForRun("discovery-immutability");
+    const harness = await makeDesktopHarness(runArtifactDir);
+    try {
+      if (harness.desktop === undefined) {
+        throw new Error("Desktop harness did not expose controlled desktop paths.");
+      }
+      expect(harness.observedSessions()).toHaveLength(0);
+
+      await harness.client.listSkills({ provider: "pi", cwd: harness.workspaceDir });
+      expect(harness.observedSessions()).toHaveLength(0);
+      await expectManagedArtifactUnchanged(
+        harness.desktop.artifactDir,
+        harness.desktop.managedAgentDir,
+      );
+
+      await harness.client.listCommands({ provider: "pi", cwd: harness.workspaceDir });
+      expect(harness.observedSessions()).toHaveLength(0);
+      await expectManagedArtifactUnchanged(
+        harness.desktop.artifactDir,
+        harness.desktop.managedAgentDir,
+      );
+
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "discovery-immutability",
+        DETERMINISTIC_FAST_MODEL_ID,
+      );
+      await startTurn(
+        harness,
+        threadId,
+        "discovery-immutability",
+        "Reply with a short acknowledgment only. Do not delegate.",
+      );
+      await waitFor(
+        async () =>
+          (await harness.client.getThreadDetailSnapshot(String(threadId))) ?? undefined,
+        (value) => value.thread.latestTurn?.state === "completed",
+        90_000,
+        "managed session terminal success",
+      );
+      await expectManagedArtifactUnchanged(
+        harness.desktop.artifactDir,
+        harness.desktop.managedAgentDir,
+      );
+    } finally {
+      await harness.dispose();
+      expect(harness.envWasRestored()).toBe(true);
+    }
+  }, 180_000);
+
   it("AC1 + AC3: desktop managed loads only the staged artifact extension, ignores user/global and settings decoys, uses the real Agent tool, and commits exactly one durable admission", async () => {
     const harness = await makeDesktopHarness(copyArtifactForRun("ac1-ac3"));
     try {

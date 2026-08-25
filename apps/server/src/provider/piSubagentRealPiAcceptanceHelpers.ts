@@ -46,6 +46,10 @@ import {
   type DispatchResult,
   type OrchestrationReadModel,
   type PiSubagentResultReadResult,
+  type ProviderListCommandsInput,
+  type ProviderListCommandsResult,
+  type ProviderListSkillsInput,
+  type ProviderListSkillsResult,
   type OrchestrationReplayEventsInput,
   type OrchestrationReplayEventsResult,
   type OrchestrationThreadDetailSnapshot,
@@ -63,6 +67,7 @@ import {
   WS_PROTOCOL_MAX_REVISION,
   WS_PROTOCOL_MIN_REVISION,
   WS_SERVER_CAPABILITIES,
+  WS_METHODS,
   WsBootstrapNegotiateResult,
   WsDeviceRpcGroup,
   WsFeatureRpcGroup,
@@ -748,6 +753,8 @@ export interface RealPiWsClient {
   readonly readPiSubagentResult: (input: {
     readonly executionId: string;
   }) => Promise<PiSubagentResultReadResult>;
+  readonly listCommands: (input: ProviderListCommandsInput) => Promise<ProviderListCommandsResult>;
+  readonly listSkills: (input: ProviderListSkillsInput) => Promise<ProviderListSkillsResult>;
   readonly getServerSettings: () => Promise<ServerSettingsView>;
   readonly updateServerSettings: (patch: unknown) => Promise<ServerSettingsView>;
   readonly close: () => Promise<void>;
@@ -820,6 +827,8 @@ export async function connectRealPiWsClient(port: number): Promise<RealPiWsClien
       call(ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot, { threadId }),
     replayEvents: (input) => call(ORCHESTRATION_WS_METHODS.replayEvents, input),
     readPiSubagentResult: (input) => call(ORCHESTRATION_WS_METHODS.readPiSubagentResult, input),
+    listCommands: (input) => call(WS_METHODS.providerListCommands, input),
+    listSkills: (input) => call(WS_METHODS.providerListSkills, input),
     getServerSettings: () => call("server.getSettings", {}),
     updateServerSettings: (patch) => call("server.updateSettings", patch),
     close: async () => {

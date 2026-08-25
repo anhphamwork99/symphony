@@ -5940,9 +5940,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
             const agentDir =
               discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
+            const modelRuntime = await createPiModelRuntime(
+              discoveryBinding?.userAgentDir ?? agentDir,
+              discoverySdk,
+            );
             services = await discoverySdk.createAgentSessionServices({
               cwd: input.cwd,
               agentDir,
+              modelRuntime,
               ...(discoveryBinding
                 ? {
                     resourceLoaderOptions: makeManagedResourceLoaderOptions(
@@ -6029,9 +6034,14 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
           const agentDir =
             discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
+          const modelRuntime = await createPiModelRuntime(
+            discoveryBinding?.userAgentDir ?? agentDir,
+            discoverySdk,
+          );
           const services = await discoverySdk.createAgentSessionServices({
             cwd: input.cwd,
             agentDir,
+            modelRuntime,
             ...(discoveryBinding
               ? {
                   resourceLoaderOptions: makeManagedResourceLoaderOptions(

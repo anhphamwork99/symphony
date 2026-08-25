@@ -296,12 +296,12 @@ describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
         },
         settingsManager: { kind: "in-memory-settings" },
       });
-      if (entry.label === "listModels") {
-        expect(piSdkHarness.modelRuntimeOptions[0]).toEqual({
+      expect(piSdkHarness.modelRuntimeOptions).toEqual([
+        {
           authPath: join(userAgentDir, "auth.json"),
           modelsPath: join(userAgentDir, "models.json"),
-        });
-      }
+        },
+      ]);
     }
   });
 
