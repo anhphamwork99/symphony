@@ -4,12 +4,16 @@
 
 - **Owner:** anhpham99
 - **Lifecycle:** **Accepted / complete.** Tickets 01, 01b, 01c, 02, and 03
-  remain accepted. Ticket 04 and the integrated handshake-first project are
-  bindingly accepted by
-  [Decision 0017](decisions/0017-t04-final-acceptance.md) at source candidate
-  `59c06c413`, with the sole independent feature review persisted at
-  `6ccda4d91`.
-- **Triage status:** 02 and 03 accepted; 04 ready/unblocked.
+  remain accepted. The original packaged desktop production acceptance for
+  Ticket 04 and the integrated handshake-first project is bindingly accepted
+  by [Decision 0017](decisions/0017-t04-final-acceptance.md) at source
+  candidate `59c06c413`, with the sole independent feature review persisted at
+  `6ccda4d91`. The scoped web/dev controlled Pi artifact follow-up for
+  `dev`/`dev:server` is bindingly accepted by
+  [Decision 0018](decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md)
+  at candidate `5c27bcb4f`.
+- **Triage status:** Original desktop production acceptance complete; web/dev
+  controlled artifact follow-up accepted by Decision 0018.
 - **Tracker:** Local Markdown
 - **Related historical project:**
   `.planning/synara-pi-durable-subagents/`
@@ -81,6 +85,14 @@
   `03cfdc8c8` and `ea2fd5e00` discharge Decision 0013's sole
   mandatory-check blocker; Ticket 03 AC1–AC5 are finally accepted. Ticket 04
   becomes ready/unblocked but is not accepted.
+- [decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md](decisions/0018-web-dev-controlled-pi-artifact-follow-up-acceptance.md)
+  — **Authoritative** binding Supervisor Reassessment for the narrow web/dev
+  controlled Pi artifact follow-up: candidate
+  `5c27bcb4fc4a1056d6cc3d0c63187f5336fc0359`, range
+  `2e4ea4de9..5c27bcb4f`, and verification/review evidence are accepted for
+  `dev`/`dev:server`. It extends Decision 0017's controlled artifact boundary
+  narrowly and does not supersede Decision 0017's original packaged desktop
+  production acceptance.
 - [../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md](../synara-pi-durable-subagents/decisions/0001-testing-strategy-governance.md)
   — accepted feature-level Testing Strategy Governance reused by this
   follow-on durable-subagent work.
@@ -118,6 +130,12 @@
   AC1–AC5 and the complete `bun fmt` / `bun lint` / `bun typecheck` gate
   passes.
 - **04 — Prove desktop production composition and complete acceptance** is
-  ready/unblocked. It remains packaged desktop/server final composition only,
-  owns its own implementation/evidence/review/acceptance lifecycle, and does
-  not absorb Ticket 03's verification remediation.
+  accepted by Decision 0017 at source candidate `59c06c413`. Its packaged
+  desktop/server production-composition boundary remains authoritative there;
+  it does not absorb the web/dev follow-up or Ticket 03's verification
+  remediation.
+- **Web/dev controlled Pi artifact follow-up** is accepted by Decision 0018 at
+  candidate `5c27bcb4fc4a1056d6cc3d0c63187f5336fc0359` across
+  `2e4ea4de9..5c27bcb4f`. This is a narrow extension of the controlled artifact
+  boundary for local `dev`/`dev:server`; it does not supersede Decision 0017
+  for original desktop production acceptance.
