@@ -416,6 +416,33 @@ async function makeDesktopHarness(artifactDir: string): Promise<RealPiWsHarness>
   });
 }
 
+/**
+ * Local web/dev locator leg (dev-runner prepared cache composition): the
+ * SAME managed binding inputs as `makeDesktopHarness`, but the live
+ * ServerConfig stays in WEB mode — exactly what a `dev`/`dev:server`
+ * launch with a prepared verified cache locator runs. The shared gate
+ * verifies any non-blank locator identically for both modes, so the whole
+ * production managed path (gate locator env + explicit user agent dir +
+ * controlled `<artifact>/agent` extension discovery) engages unchanged
+ * while the server reports web mode.
+ */
+async function makeWebManagedHarness(artifactDir: string): Promise<RealPiWsHarness> {
+  const rootDir = makeTempRoot("t02-wpc-web-managed-");
+  const userAgentDir = join(rootDir, "web-managed-user-agent");
+  return makeRealPiWsHarness({
+    foregroundWaitMs: 300,
+    progressRateHz: 10,
+    heartbeatIntervalMs: 1_000,
+    leaseDurationMs: 3_000,
+    completionBatchWindowMs: 5_000,
+    desktopManaged: {
+      artifactDir,
+      userAgentDir,
+      mode: "web",
+    },
+  });
+}
+
 function copyArtifactForRun(label: string): string {
   const rootDir = makeTempRoot(`t02-wpc-artifact-copy-${label}-`);
   const artifactDir = join(rootDir, "artifact");
@@ -641,6 +668,132 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
           (request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
         ),
       ).toBe(true);
+
+      const userCanaryAfter = snapshotTree(userCanary.dir);
+      expect(userCanaryAfter).toEqual(userCanary.snapshot);
+
+      const artifactStillValid = await verifyPiSubagentArtifact(stagedFixture.sourceArtifactDir);
+      expect(artifactStillValid.valid).toBe(true);
+    } finally {
+      await harness.dispose();
+      expect(harness.envWasRestored()).toBe(true);
+    }
+  }, 180_000);
+
+  // Local web/dev locator leg (dev-runner prepared cache): the shared gate
+  // verifies any NON-BLANK locator identically for both modes, so a web-mode
+  // server started with a prepared verified cache locator composes the SAME
+  // managed binding as the desktop leg. This is the exact production
+  // composition a `dev`/`dev:server` launch with a pin-keyed verified cache
+  // entry runs: ServerConfig stays in WEB mode, the gate consumes the
+  // launcher-derived locator, and the desktop managed bootstrap keys off the
+  // gate's trusted controlled-runtime binding — never off the ServerConfig
+  // mode value itself. Adapts the AC1+AC3 desktop managed case (decoy
+  // parent/user-global canaries, capability-before-admission, artifact-only
+  // extension path) and extends it to a full terminal + public result read.
+  it("local web/dev locator: a web-mode server with a prepared verified cache locator engages the same managed binding end to end — live web ServerConfig, seven capabilities before admission, artifact-only extension, real managed spawn to terminal succeeded with a retrievable result, and an unchanged verified artifact", async () => {
+    const harness = await makeWebManagedHarness(copyArtifactForRun("web-locator"));
+    try {
+      if (harness.desktop === undefined) {
+        throw new Error("Web managed harness did not expose controlled managed paths.");
+      }
+      // The LIVE composed ServerConfig ran in web mode (read back from the
+      // harness ManagedRuntime, not from the options) and the managed leg
+      // reports web mode.
+      expect(harness.serverMode).toBe("web");
+      expect(harness.desktop.mode).toBe("web");
+
+      rewriteDecoyParentAgentDir(harness.parentAgentDir);
+      const userCanary = installUserGlobalCanary(harness.desktop.userAgentDir);
+
+      const { threadId } = await createThreadHarnessState(
+        harness,
+        "web-locator",
+        DETERMINISTIC_DRIVER_MODEL_ID,
+      );
+      await startTurn(
+        harness,
+        threadId,
+        "web-locator",
+        "Delegate this web managed acceptance task to a researcher subagent.",
+      );
+
+      // Managed capability (all seven required capabilities) negotiated
+      // BEFORE any Agent admission — same ordering contract as the desktop
+      // leg, now proven on a web-mode server.
+      const capabilityBeforeAdmission = await waitFor(
+        () => {
+          const capability = harness.observedCapabilities().get(String(threadId));
+          const admissions = harness
+            .observedAdmissions()
+            .filter((event) => String(event.threadId) === String(threadId));
+          return capability !== undefined && admissions.length === 0 ? capability : undefined;
+        },
+        (capability) => capability.status === "managed_enabled",
+        45_000,
+        "web-mode managed capability before Agent admission",
+      );
+      expect(capabilityBeforeAdmission.isManaged).toBe(true);
+      for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
+        expect(capabilityBeforeAdmission.capabilities).toContain(required);
+      }
+
+      const admission = await waitFor(
+        () =>
+          harness.observedAdmissions().find((event) => String(event.threadId) === String(threadId)),
+        (value) => value !== undefined && value.result.status !== "rejected",
+        90_000,
+        "web-mode managed admission",
+      );
+      expect(
+        harness.observedAdmissions().filter((event) => String(event.threadId) === String(threadId)),
+      ).toHaveLength(1);
+
+      const executionId = admission.result.executionId;
+      const durable = await waitFor(
+        () => harness.durable.getById(executionId),
+        (value) => value !== undefined,
+        30_000,
+        "web-mode durable admitted row",
+      );
+
+      // Extension loading stays isolated to the verified artifact's
+      // controlled extension dir — the user/global canary and the decoy
+      // parent agent dir never load in web mode either.
+      const loadedPath = loadedAgentExtensionPath(harness, threadId);
+      expect(loadedPath.startsWith(resolve(harness.desktop.managedExtensionDir))).toBe(true);
+      expect(loadedPath.startsWith(resolve(userCanary.dir))).toBe(false);
+      expect(loadedPath.startsWith(resolve(harness.parentAgentDir))).toBe(false);
+
+      // The real parent model traffic carries the real Agent tool — the
+      // managed spawn happened on a genuinely live web-mode session.
+      await waitFor(
+        () => harness.modelServer.requests(),
+        (requests) =>
+          requests.some(
+            (request) => request.model === DETERMINISTIC_DRIVER_MODEL_ID && request.hasAgentTool,
+          ),
+        45_000,
+        "web-mode real Agent parent model traffic",
+      );
+
+      // The managed child runs to terminal succeeded with a retrievable
+      // bounded summary through the public result read RPC (same public
+      // contract as the Ticket 17/T17-AC4 read leg).
+      const terminalCard = await harness.waitForExecutionCard(
+        String(threadId),
+        (candidate) =>
+          candidate.executionId === executionId && candidate.observedState === "succeeded",
+        90_000,
+      );
+      expect(terminalCard.attemptId).toBe(durable.attemptId);
+      expect(terminalCard.generation).toBe(durable.generation);
+
+      const result = await harness.client.readPiSubagentResult({ executionId });
+      expect(result.observedState).toBe("succeeded");
+      expect(result.terminalState).toBe("succeeded");
+      expect(result.summary).toContain("ACK");
+      expect(result.transcriptRef).toBeTruthy();
 
       const userCanaryAfter = snapshotTree(userCanary.dir);
       expect(userCanaryAfter).toEqual(userCanary.snapshot);
