@@ -6,6 +6,11 @@
 // verification now returns the trusted controlled-runtime binding (Ticket 02
 // WP1 / Decision 0003): the controlled `agentDir` `<verified-root>/agent` plus
 // bounded trusted metadata, and nothing else.
+// Local web/dev path (dev-runner prepared cache): a WEB-mode server started
+// with a NON-EMPTY locator is verified exactly like desktop and receives the
+// same trusted managed binding, while a WEB-mode server WITHOUT a locator
+// keeps the historical pass-through unchanged (no verifier call). Desktop is
+// unchanged.
 // Layer: Server provider seam (pure decision function — no PiAdapter wiring).
 // Depends: the Ticket 01 production verifier contract only. This module must
 // never import Pi SDK modules, touch Git or the network, read user Pi files,
@@ -27,6 +32,11 @@ import {
  * Env var carrying the release-derived managed Pi artifact locator
  * (Decision 0004 §1 — desktop main process supplies exactly one
  * release-derived value; never renderer/request/inherited input).
+ *
+ * For the local web/dev path the dev runner supplies exactly one value: the
+ * pin-keyed verified cache entry under the resolved SYNARA_HOME. The same
+ * rule holds — the locator is launcher-derived, never renderer/request or
+ * arbitrary user input.
  */
 export const SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV = "SYNARA_PI_SUBAGENT_ARTIFACT_DIR";
 
@@ -41,8 +51,9 @@ export const PI_SUBAGENT_DESKTOP_MANAGED_AGENT_DIR_SEGMENT = "agent";
 
 /**
  * Closed failure-reason vocabulary for the gate. `locator_missing` is
- * produced by the gate itself; every other reason is the verifier's closed
- * `PiSubagentArtifactVerificationCategory` (AC2).
+ * produced by the gate itself (desktop without a locator); every other
+ * reason is the verifier's closed `PiSubagentArtifactVerificationCategory`
+ * (AC2).
  */
 export type PiSubagentDesktopArtifactGateUnavailableReason =
   | "locator_missing"
@@ -152,21 +163,22 @@ const invalidDetail = (
 /**
  * Pure gate evaluation.
  *
- * Deterministic decision order (Decision 0004 §4-§6):
- *  1. `mode !== "desktop"` → pass WITHOUT invoking the verifier (AC5:
- *     non-desktop behavior is outside this rollout and unchanged).
- *  2. Desktop with absent/blank locator → unavailable `locator_missing`
- *     WITHOUT invoking the verifier (nothing release-derived to verify).
- *  3. Desktop locator present → evaluate it with the shared verifier.
- *     invalid result → unavailable carrying the verifier's closed category
- *     verbatim plus a safe bounded detail (AC2).
- *  4. Valid artifact → PASS carrying the trusted controlled-runtime binding:
+ * Deterministic decision order (Decision 0004 §4-§6; local web/dev path):
+ *  1. Absent/blank locator → desktop fails closed with `locator_missing`
+ *     WITHOUT invoking the verifier; every other mode passes through
+ *     unchanged (no verifier call) — the historical non-desktop behavior.
+ *  2. ANY mode with a NON-BLANK locator → evaluate it with the shared
+ *     verifier. This covers desktop (always required) and the local
+ *     web/dev path whose dev runner forwarded the pin-keyed verified cache
+ *     locator. An invalid result → unavailable carrying the verifier's
+ *     closed category verbatim plus a safe bounded detail (AC2).
+ *  3. Valid artifact → PASS carrying the trusted controlled-runtime binding:
  *     the controlled `agentDir` is exactly `<verified-root>/agent` (the
  *     staged `agent/extensions/...` layout), plus the verifier's trusted
- *     metadata. Desktop never falls back to unmanaged discovery (Decision
- *     0002 / 0004 §6-§7); the consumer must still complete the Ticket 02
- *     bootstrap (controlled runtime, artifact-only extensions, mandatory
- *     7-capability handshake) before publishing a managed session.
+ *     metadata. A gated mode never falls back to unmanaged discovery
+ *     (Decision 0002 / 0004 §6-§7); the consumer must still complete the
+ *     managed bootstrap (controlled runtime, artifact-only extensions,
+ *     mandatory 7-capability handshake) before publishing a managed session.
  *
  * The function is side-effect free and never throws for control flow: the
  * injected verifier is expected to return its closed result union rather
@@ -176,12 +188,16 @@ export async function evaluatePiSubagentDesktopArtifactGate(
   mode: RuntimeMode,
   options: EvaluatePiSubagentDesktopArtifactGateOptions,
 ): Promise<PiSubagentDesktopArtifactGateResult> {
-  if (mode !== "desktop") return { kind: "pass" };
-
   const rawLocator = options.env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV];
   const locator = rawLocator?.trim() ?? "";
   if (locator === "") {
-    return { kind: "unavailable", reason: "locator_missing", detail: DETAIL_LOCATOR_MISSING };
+    // Desktop without a launcher-derived locator: nothing release-derived
+    // to verify — fail closed without invoking the verifier. (A web/dev
+    // server without a locator passed through above, unchanged.)
+    if (mode === "desktop") {
+      return { kind: "unavailable", reason: "locator_missing", detail: DETAIL_LOCATOR_MISSING };
+    }
+    return { kind: "pass" };
   }
 
   const verify = options.verify ?? DEFAULT_VERIFY;

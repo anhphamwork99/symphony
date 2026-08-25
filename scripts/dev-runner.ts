@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { homedir } from "node:os";
-import { delimiter as pathDelimiter, join as pathJoin } from "node:path";
+import { delimiter as pathDelimiter, dirname, join as pathJoin } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -17,6 +18,21 @@ import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from 
 import * as ConfigProvider from "effect/ConfigProvider";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
+
+import {
+  preparePiSubagentDevArtifact,
+  PiSubagentDevArtifactCacheError,
+} from "./lib/piSubagentDevArtifactCache.ts";
+
+/**
+ * Env var carrying the launcher-derived managed Pi artifact locator into
+ * the dev server — the same var the packaged desktop main process sets and
+ * the production desktop artifact gate reads. The dev runner is the ONLY
+ * writer on the dev path: `dev`/`dev:server` prepare the pin-keyed verified
+ * cache entry and forward it; `dev:web`/`dev:desktop` scrub any inherited
+ * value so those modes never consume an unverified locator.
+ */
+const SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV = "SYNARA_PI_SUBAGENT_ARTIFACT_DIR";
 
 const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
@@ -46,6 +62,17 @@ type DevMode = keyof typeof MODE_ARGS;
 type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
 
 const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
+
+/**
+ * Whether a dev mode launches the server process (and therefore must
+ * prepare + forward the managed Pi artifact locator). `dev` and `dev:server`
+ * launch the server; `dev:web` and `dev:desktop` do not.
+ */
+export const modeLaunchesServer = (mode: DevMode): boolean =>
+  mode === "dev" || mode === "dev:server";
+
+/** Repository root (this script lives in `<repoRoot>/scripts`). */
+const REPO_ROOT = pathJoin(dirname(fileURLToPath(import.meta.url)), "..");
 
 class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly message: string;
@@ -156,6 +183,12 @@ interface CreateDevRunnerEnvInput {
   readonly host: string | undefined;
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
+  /**
+   * Prepared managed Pi artifact locator for server-launching modes
+   * (`dev`/`dev:server`). Undefined means "scrub any inherited value" for
+   * this mode — never "keep whatever the terminal had".
+   */
+  readonly piSubagentArtifactDir?: string | undefined;
 }
 
 export function createDevRunnerEnv({
@@ -171,6 +204,7 @@ export function createDevRunnerEnv({
   host,
   port,
   devUrl,
+  piSubagentArtifactDir,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
@@ -248,6 +282,21 @@ export function createDevRunnerEnv({
     if (mode === "dev:server" || mode === "dev:web") {
       output.SYNARA_MODE = "web";
       delete output.SYNARA_DESKTOP_WS_URL;
+    }
+
+    // Managed Pi artifact locator policy (controlled dev path):
+    // - `dev`/`dev:server` launch the server, so the launcher-derived
+    //   verified cache locator is forwarded exactly as prepared; an absent
+    //   preparation (never on these modes after the fail-closed prepare
+    //   step) still scrubs any inherited value.
+    // - `dev:web`/`dev:desktop` never launch the server: any inherited
+    //   locator is scrubbed so those modes cannot consume an unverified or
+    //   foreign artifact path (the packaged desktop resolver supplies its
+    //   own release-derived value in packaged launches).
+    if (piSubagentArtifactDir !== undefined) {
+      output[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV] = piSubagentArtifactDir;
+    } else {
+      delete output[SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV];
     }
 
     return output;
@@ -446,6 +495,38 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const envOverrides = yield* readDevRunnerBooleanEnvironment(process.env);
 
+    // Controlled managed Pi artifact preparation (dev/dev:server only):
+    // stage-and-verify the pin-keyed cache entry under the resolved
+    // SYNARA_HOME BEFORE any child launches. A preparation failure fails
+    // the dev launch itself (fail closed) — an unverified locator must
+    // never reach the server. `dev:web`/`dev:desktop` never prepare.
+    let piSubagentArtifactDir: string | undefined;
+    if (modeLaunchesServer(input.mode)) {
+      const resolvedHome = yield* resolveBaseDir(input.synaraHome);
+      const prepared = yield* Effect.tryPromise({
+        try: () =>
+          preparePiSubagentDevArtifact({
+            repoRoot: REPO_ROOT,
+            synaraHome: resolvedHome,
+            env: process.env,
+          }),
+        catch: (cause) =>
+          new DevRunnerError({
+            message:
+              cause instanceof PiSubagentDevArtifactCacheError
+                ? `Failed to prepare the managed pi-subagents dev artifact (${cause.code}): ${cause.message}`
+                : `Failed to prepare the managed pi-subagents dev artifact: ${
+                    cause instanceof Error ? cause.message : String(cause)
+                  }`,
+            cause,
+          }),
+      });
+      piSubagentArtifactDir = prepared.artifactDir;
+      yield* Effect.logInfo(
+        `[dev-runner] managedPiArtifact staged=${String(prepared.staged)} pin=${prepared.pinnedCommit.slice(0, 12)} locator=${prepared.artifactDir}`,
+      );
+    }
+
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
@@ -467,6 +548,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       host: input.host,
       port: input.port,
       devUrl: input.devUrl,
+      ...(piSubagentArtifactDir !== undefined ? { piSubagentArtifactDir } : {}),
     });
 
     const selectionSuffix =
