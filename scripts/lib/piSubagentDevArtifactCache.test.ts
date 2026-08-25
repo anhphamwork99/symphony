@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import { PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES } from "@synara/contracts";
 
 import { verifyPiSubagentArtifact } from "../../apps/server/src/provider/piSubagentArtifactVerifier.ts";
 import {
+  buildPiSubagentArtifact,
   PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
   loadPiSubagentExtensionProvenance,
 } from "./piSubagentArtifactStaging.ts";
@@ -29,6 +31,7 @@ import {
   loadDevArtifactPin,
   piSubagentDevArtifactCacheEntryDir,
   preparePiSubagentDevArtifact,
+  withPinLock,
 } from "./piSubagentDevArtifactCache.ts";
 
 /**
@@ -359,7 +362,13 @@ describe("loadDevArtifactPin", () => {
     try {
       loadDevArtifactPin(repoRoot);
     } catch (cause) {
-      expect((cause as PiSubagentDevArtifactCacheError).code).toBe("provenance_unreadable");
+      const error = cause as PiSubagentDevArtifactCacheError;
+      expect(error.code).toBe("provenance_unreadable");
+      expect(error.message).toBe(
+        "Could not read the managed pi-subagents pin fixture for the dev artifact cache.",
+      );
+      expect(error.message.length).toBeLessThanOrEqual(128);
+      expect(error.message).not.toContain(repoRoot);
     }
   });
 });
@@ -459,6 +468,86 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     ).toContain("@alfie/pi-subagents");
   }, 60_000);
 
+  it("quarantines a self-consistent artifact with different source pin metadata", async () => {
+    const environment = createDevCacheEnvironment();
+    const first = await prepareIn(environment);
+    const run = (args: ReadonlyArray<string>): string =>
+      execFileSync("git", args as string[], {
+        cwd: environment.alfieRepoDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    writeFileSync(
+      join(environment.alfieRepoDir, "agent/system/working-style.md"),
+      "content-of:agent/system/working-style.md\n// different valid pin\n",
+    );
+    run(["add", "."]);
+    run(["commit", "-m", "different valid pin"]);
+    const differentCommit = run(["rev-parse", "HEAD"]).trim();
+    const authoritative = loadDevArtifactPin(environment.repoRoot);
+    buildPiSubagentArtifact({
+      repoDir: environment.alfieRepoDir,
+      artifactDir: first.artifactDir,
+      provenance: { ...authoritative, pinnedCommit: differentCommit },
+    });
+    expect((await verifyPiSubagentArtifact(first.artifactDir)).valid).toBe(true);
+
+    run(["checkout", "--", "."]);
+    run(["checkout", authoritative.pinnedCommit]);
+    const prepared = await prepareIn(environment);
+
+    expect(prepared.staged).toBe(true);
+    expect(prepared.pinnedCommit).toBe(authoritative.pinnedCommit);
+    expect((await verifyPiSubagentArtifact(prepared.artifactDir)).valid).toBe(true);
+    expect(readFileSync(join(prepared.artifactDir, "manifest.json"), "utf8")).toContain(
+      authoritative.pinnedCommit,
+    );
+  }, 120_000);
+
+  it("does not let an old owner release a successor lock after stale takeover", async () => {
+    const root = makeTempRoot("dev-cache-lock-");
+    const cacheRoot = join(root, "cache");
+    const pin = "aa6fa4a8540644d2509b10d6df854486ddc67d1d";
+    let firstAcquired!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      firstAcquired = resolve;
+    });
+    let releaseFirst!: () => void;
+    const firstRun = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = withPinLock(cacheRoot, pin, async () => {
+      firstAcquired();
+      await firstRun;
+    });
+    await acquired;
+    const lockPath = join(cacheRoot, `${pin}.lock`);
+    const stale = new Date(Date.now() - 181_000);
+    utimesSync(lockPath, stale, stale);
+
+    let secondAcquired!: () => void;
+    const successorReady = new Promise<void>((resolve) => {
+      secondAcquired = resolve;
+    });
+    let releaseSecond!: () => void;
+    const secondRun = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const second = withPinLock(cacheRoot, pin, async () => {
+      secondAcquired();
+      await secondRun;
+    });
+    await successorReady;
+
+    releaseFirst();
+    await first;
+    expect(existsSync(lockPath)).toBe(true);
+
+    releaseSecond();
+    await second;
+    expect(existsSync(lockPath)).toBe(false);
+  }, 30_000);
+
   it("removes only the symlink (never its target) and restages", async () => {
     const environment = createDevCacheEnvironment();
     const first = await prepareIn(environment);
@@ -523,7 +612,11 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
 
     // First preparation fails closed: nothing is staged and nothing is left.
     const error = await expectCacheError(prepareIn(environment), "staging_failed");
-    expect(error.message).toContain("Failed to stage");
+    expect(error.message).toBe(
+      "Failed to stage the managed pi-subagents dev artifact from the pinned source.",
+    );
+    expect(error.message.length).toBeLessThanOrEqual(128);
+    expect(error.message).not.toContain(environment.alfieRepoDir);
     expect(existsSync(expectedEntryDir(environment))).toBe(false);
   }, 60_000);
 
@@ -531,7 +624,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     const environment = createDevCacheEnvironment();
     // Point the env at a non-existent checkout directory; the stager then
     // falls back to <repoRoot>/../alfie (also absent for the synthetic root).
-    await expectCacheError(
+    const error = await expectCacheError(
       preparePiSubagentDevArtifact({
         repoRoot: environment.repoRoot,
         synaraHome: environment.synaraHome,
@@ -539,6 +632,11 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
       }),
       "alfie_repo_unresolved",
     );
+    expect(error.message).toBe(
+      "Could not locate the pinned Alfie checkout for the managed pi-subagents dev artifact.",
+    );
+    expect(error.message.length).toBeLessThanOrEqual(128);
+    expect(error.message).not.toContain(environment.repoRoot);
   }, 60_000);
 
   it("serializes concurrent preparations of the same pin: one stages, the rest hit", async () => {

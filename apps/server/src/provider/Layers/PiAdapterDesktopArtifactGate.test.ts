@@ -45,6 +45,8 @@ const piSdkHarness = vi.hoisted(() => ({
   imports: 0,
   getAgentDirCalls: 0,
   serviceCreationCalls: 0,
+  serviceOptions: [] as Array<Record<string, unknown>>,
+  modelRuntimeOptions: [] as Array<Record<string, unknown>>,
   sessionManagerCreateCalls: 0,
   sessionManagerOpenCalls: 0,
 }));
@@ -80,9 +82,56 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       piSdkHarness.getAgentDirCalls += 1;
       return "/mock-pi-agent-dir";
     },
-    createAgentSessionServices: async () => {
+    ModelRuntime: {
+      create: async (options: Record<string, unknown>) => {
+        piSdkHarness.modelRuntimeOptions.push(options);
+        return {};
+      },
+    },
+    ModelRegistry: class {
+      getAvailable() {
+        return [];
+      }
+      getAll() {
+        return [];
+      }
+      getProviderDisplayName(provider: string) {
+        return provider;
+      }
+    },
+    SettingsManager: {
+      inMemory: () => ({ kind: "in-memory-settings" }),
+    },
+    createAgentSessionServices: async (options: Record<string, unknown>) => {
       piSdkHarness.serviceCreationCalls += 1;
-      throw new Error("mock Pi SDK reached");
+      piSdkHarness.serviceOptions.push(options);
+      if (gateHarness.result.kind !== "pass" || !("managed" in gateHarness.result)) {
+        throw new Error("mock Pi SDK reached");
+      }
+      return {
+        modelRuntime: {},
+        resourceLoader: {
+          getExtensions: () => ({
+            extensions: [{ path: "/controlled/artifact/agent/extensions/pi-subagents" }],
+          }),
+          getSkills: () => ({
+            skills: [
+              {
+                name: "controlled-skill",
+                filePath: "/controlled/artifact/agent/skills/controlled.md",
+                disableModelInvocation: false,
+                description: "controlled",
+                sourceInfo: { source: "controlled-artifact" },
+              },
+            ],
+          }),
+          getPrompts: () => ({
+            prompts: [{ name: "controlled-prompt", description: "controlled" }],
+          }),
+          reload: async () => undefined,
+        },
+        settingsManager: {},
+      };
     },
     SessionManager: {
       create: () => {
@@ -108,13 +157,20 @@ const resetHarness = () => {
   piSdkHarness.imports = 0;
   piSdkHarness.getAgentDirCalls = 0;
   piSdkHarness.serviceCreationCalls = 0;
+  piSdkHarness.serviceOptions.splice(0);
+  piSdkHarness.modelRuntimeOptions.splice(0);
   piSdkHarness.sessionManagerCreateCalls = 0;
   piSdkHarness.sessionManagerOpenCalls = 0;
 };
 
-const makeAdapterLayer = (mode: ServerConfigShape["mode"], env: NodeJS.ProcessEnv) =>
+const makeAdapterLayer = (
+  mode: ServerConfigShape["mode"],
+  env: NodeJS.ProcessEnv,
+  userAgentDir?: string,
+) =>
   makePiAdapterLive({
     piSubagentDesktopArtifactGateEnv: env,
+    ...(userAgentDir === undefined ? {} : { piSubagentDesktopUserAgentDir: userAgentDir }),
   }).pipe(
     Layer.provide(
       Layer.effect(
@@ -172,17 +228,83 @@ const runPath = (input: {
   readonly mode: ServerConfigShape["mode"];
   readonly env: NodeJS.ProcessEnv;
   readonly entry: EntryPath;
+  readonly userAgentDir?: string;
 }) =>
   Effect.gen(function* () {
     const adapter = yield* PiAdapter;
     return yield* input.entry.invoke(adapter).pipe(Effect.flip);
   }).pipe(
-    Effect.provide(makeAdapterLayer(input.mode, input.env)),
+    Effect.provide(makeAdapterLayer(input.mode, input.env, input.userAgentDir)),
+    Effect.scoped,
+    Effect.runPromise,
+  );
+
+const runSuccessfulPath = (input: {
+  readonly mode: ServerConfigShape["mode"];
+  readonly env: NodeJS.ProcessEnv;
+  readonly entry: EntryPath;
+  readonly userAgentDir?: string;
+}) =>
+  Effect.gen(function* () {
+    const adapter = yield* PiAdapter;
+    return yield* input.entry.invoke(adapter);
+  }).pipe(
+    Effect.provide(makeAdapterLayer(input.mode, input.env, input.userAgentDir)),
     Effect.scoped,
     Effect.runPromise,
   );
 
 describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
+  it("uses the controlled artifact runtime for valid-locator web discovery", async () => {
+    resetHarness();
+    gateHarness.result = {
+      kind: "pass",
+      managed: {
+        agentDir: "/controlled/artifact/agent",
+        metadata: {} as never,
+      },
+    };
+    const userAgentDir = "/isolated/user-agent";
+    const discoveryEntries = entryPaths.slice(1);
+    for (const entry of discoveryEntries) {
+      resetHarness();
+      gateHarness.result = {
+        kind: "pass",
+        managed: {
+          agentDir: "/controlled/artifact/agent",
+          metadata: {} as never,
+        },
+      };
+      const result = await runSuccessfulPath({
+        mode: "web",
+        env: {
+          [SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV]: "/controlled/artifact",
+          PI_CODING_AGENT_DIR: "/untrusted/inherited-pi-agent-dir",
+        },
+        userAgentDir,
+        entry,
+      });
+      expect(result).toBeDefined();
+      expect(piSdkHarness.getAgentDirCalls).toBe(0);
+      expect(piSdkHarness.serviceOptions[0]).toMatchObject({
+        agentDir: "/controlled/artifact/agent",
+        resourceLoaderOptions: {
+          noExtensions: true,
+          additionalExtensionPaths: [
+            "/controlled/artifact/agent/extensions/pi-subagents",
+          ],
+        },
+        settingsManager: { kind: "in-memory-settings" },
+      });
+      if (entry.label === "listModels") {
+        expect(piSdkHarness.modelRuntimeOptions[0]).toEqual({
+          authPath: join(userAgentDir, "auth.json"),
+          modelsPath: join(userAgentDir, "models.json"),
+        });
+      }
+    }
+  });
+
   it.for(entryPaths)(
     "rejects desktop %s before Pi SDK import, global agent-dir discovery, or service creation",
     async (entry) => {
@@ -216,6 +338,8 @@ describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
         imports: 0,
         getAgentDirCalls: 0,
         serviceCreationCalls: 0,
+        serviceOptions: [],
+        modelRuntimeOptions: [],
         sessionManagerCreateCalls: 0,
         sessionManagerOpenCalls: 0,
       });
@@ -249,7 +373,7 @@ describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
       },
     ]);
     expect(piSdkHarness).toMatchObject({
-      imports: 1,
+      imports: 0,
       getAgentDirCalls: 1,
       serviceCreationCalls: 1,
       sessionManagerCreateCalls: 0,
@@ -461,6 +585,8 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
           imports: 0,
           getAgentDirCalls: 0,
           serviceCreationCalls: 0,
+          serviceOptions: [],
+          modelRuntimeOptions: [],
           sessionManagerCreateCalls: 0,
           sessionManagerOpenCalls: 0,
         });
@@ -504,6 +630,8 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
       imports: 0,
       getAgentDirCalls: 0,
       serviceCreationCalls: 0,
+      serviceOptions: [],
+      modelRuntimeOptions: [],
       sessionManagerCreateCalls: 0,
       sessionManagerOpenCalls: 0,
     });

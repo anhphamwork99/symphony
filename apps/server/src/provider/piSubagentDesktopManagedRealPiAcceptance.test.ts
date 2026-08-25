@@ -31,6 +31,7 @@ import {
   buildPiSubagentArtifact,
   loadPiSubagentExtensionProvenance,
 } from "../../../../scripts/lib/piSubagentArtifactStaging.ts";
+import { preparePiSubagentDevArtifact } from "../../../../scripts/lib/piSubagentDevArtifactCache.ts";
 import { verifyPiSubagentArtifact } from "./piSubagentArtifactVerifier.ts";
 import {
   DETERMINISTIC_SLOW_MODEL_ID,
@@ -692,7 +693,15 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
   // parent/user-global canaries, capability-before-admission, artifact-only
   // extension path) and extends it to a full terminal + public result read.
   it("local web/dev locator: a web-mode server with a prepared verified cache locator engages the same managed binding end to end — live web ServerConfig, seven capabilities before admission, artifact-only extension, real managed spawn to terminal succeeded with a retrievable result, and an unchanged verified artifact", async () => {
-    const harness = await makeWebManagedHarness(copyArtifactForRun("web-locator"));
+    const synaraHomeRoot = makeTempRoot("t02-wpc-web-cache-home-");
+    const synaraHome = join(synaraHomeRoot, ".synara");
+    mkdirSync(synaraHome, { recursive: true });
+    const prepared = await preparePiSubagentDevArtifact({
+      repoRoot: REPO_ROOT,
+      synaraHome,
+      env: { ALFIE_REPO_DIR },
+    });
+    const harness = await makeWebManagedHarness(prepared.artifactDir);
     try {
       if (harness.desktop === undefined) {
         throw new Error("Web managed harness did not expose controlled managed paths.");
@@ -798,7 +807,8 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
       const userCanaryAfter = snapshotTree(userCanary.dir);
       expect(userCanaryAfter).toEqual(userCanary.snapshot);
 
-      const artifactStillValid = await verifyPiSubagentArtifact(stagedFixture.sourceArtifactDir);
+      expect(harness.desktop.artifactDir).toBe(prepared.artifactDir);
+      const artifactStillValid = await verifyPiSubagentArtifact(prepared.artifactDir);
       expect(artifactStillValid.valid).toBe(true);
     } finally {
       await harness.dispose();

@@ -29,7 +29,15 @@
 //   (the stager itself publishes atomically; the lock closes the
 //   remove-then-rename interleaving window between concurrent rebuilds).
 
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -147,9 +155,7 @@ export function loadDevArtifactPin(
   } catch (cause) {
     throw new PiSubagentDevArtifactCacheError(
       "provenance_unreadable",
-      `Could not read the managed pi-subagents pin fixture for the dev artifact cache: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
+      "Could not read the managed pi-subagents pin fixture for the dev artifact cache.",
       cause,
     );
   }
@@ -179,9 +185,21 @@ export function piSubagentDevArtifactCacheEntryDir(input: {
  * result or `undefined` — never throws for an invalid tree (the caller
  * decides between quarantine+restage and fail-closed).
  */
-const verifyCacheEntry = (artifactDir: string) =>
+const verifyCacheEntry = (
+  artifactDir: string,
+  provenance: PiSubagentExtensionProvenanceFixture,
+) =>
   verifyPiSubagentArtifact(artifactDir).then(
-    (result) => (result.valid ? result : undefined),
+    (result) => {
+      if (!result.valid) return undefined;
+      const sourceIdentity = result.metadata.sourceIdentity;
+      return sourceIdentity.repositoryUrl === provenance.expectedRepositoryUrl &&
+        sourceIdentity.pinnedCommit === provenance.pinnedCommit &&
+        sourceIdentity.packageName === provenance.packageName &&
+        sourceIdentity.packageVersion === provenance.packageVersion
+        ? result
+        : undefined;
+    },
     () => undefined,
   );
 
@@ -219,7 +237,7 @@ async function prepareOnce(input: {
   readonly repoRoot: string;
   readonly env: Readonly<Record<string, string | undefined>>;
 }): Promise<PreparedPiSubagentDevArtifact> {
-  const existing = await verifyCacheEntry(input.artifactDir);
+  const existing = await verifyCacheEntry(input.artifactDir, input.provenance);
   if (existing !== undefined) {
     return {
       artifactDir: input.artifactDir,
@@ -239,7 +257,7 @@ async function prepareOnce(input: {
   } catch (cause) {
     throw new PiSubagentDevArtifactCacheError(
       "alfie_repo_unresolved",
-      cause instanceof Error ? cause.message : String(cause),
+      "Could not locate the pinned Alfie checkout for the managed pi-subagents dev artifact.",
       cause,
     );
   }
@@ -253,14 +271,12 @@ async function prepareOnce(input: {
   } catch (cause) {
     throw new PiSubagentDevArtifactCacheError(
       "staging_failed",
-      `Failed to stage the managed pi-subagents dev artifact from the pinned source: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
+      "Failed to stage the managed pi-subagents dev artifact from the pinned source.",
       cause,
     );
   }
 
-  const staged = await verifyCacheEntry(input.artifactDir);
+  const staged = await verifyCacheEntry(input.artifactDir, input.provenance);
   if (staged === undefined) {
     quarantineCacheEntry(input.artifactDir);
     throw new PiSubagentDevArtifactCacheError(
@@ -284,7 +300,7 @@ async function prepareOnce(input: {
  */
 const STALE_LOCK_MS = 180_000;
 
-async function withPinLock<T>(
+export async function withPinLock<T>(
   cacheRoot: string,
   pinnedCommit: string,
   run: () => Promise<T>,
@@ -292,18 +308,21 @@ async function withPinLock<T>(
   mkdirSync(cacheRoot, { recursive: true });
   const lockPath = join(cacheRoot, `${pinnedCommit.trim().toLowerCase()}${LOCK_FILE_SUFFIX}`);
   const { open } = await import("node:fs/promises");
+  const ownerToken = randomBytes(16).toString("hex");
   const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
   for (;;) {
     try {
       const handle = await open(lockPath, "wx");
-      await handle.writeFile(`${process.pid}\n`, "utf8");
+      await handle.writeFile(`${ownerToken}\n`, "utf8");
       await handle.close();
       break;
     } catch (cause) {
       const code = (cause as { readonly code?: string }).code;
       if (code !== "EEXIST") throw cause;
       // Abandoned-lock takeover: a lock older than STALE_LOCK_MS belongs to
-      // a dead preparation and is removed so this one can proceed.
+      // a dead preparation and is removed so this one can proceed. The
+      // owner token makes release conditional: an old owner cannot remove a
+      // successor's lock after takeover.
       try {
         const stats = statSync(lockPath);
         if (Date.now() - stats.mtimeMs > STALE_LOCK_MS) {
@@ -325,7 +344,13 @@ async function withPinLock<T>(
   try {
     return await run();
   } finally {
-    rmSync(lockPath, { force: true });
+    try {
+      if (readFileSync(lockPath, "utf8").trim() === ownerToken) {
+        rmSync(lockPath, { force: true });
+      }
+    } catch {
+      // A successor may have taken over, or the lock may already be gone.
+    }
   }
 }
 

@@ -2467,6 +2467,24 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         catch: (cause) => toPiSdkRequestError(method, cause, "Failed to load Pi SDK."),
       });
 
+    const makeManagedRuntimeBinding = (
+      gateResult: PiSubagentDesktopArtifactGateResult,
+      piSdk: PiCodingAgentModule,
+    ) =>
+      gateResult.kind === "pass" && "managed" in gateResult
+        ? {
+            agentDir: gateResult.managed.agentDir,
+            userAgentDir:
+              trimToUndefined(options?.piSubagentDesktopUserAgentDir) ?? piSdk.getAgentDir(),
+            extensionPath: piSubagentDesktopManagedExtensionDir(gateResult.managed.agentDir),
+          }
+        : undefined;
+
+    const makeManagedResourceLoaderOptions = (extensionPath: string) => ({
+      noExtensions: true,
+      additionalExtensionPaths: [extensionPath],
+    });
+
     const makeEventBase = makePiRuntimeEventBase;
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
@@ -3298,8 +3316,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             // the loader resolves ONLY the explicitly provided extension
             // paths — no user-global tree, no project `.pi` auto-discovery,
             // no settings/packages injection.
-            noExtensions: true,
-            additionalExtensionPaths: [input.desktopManaged.extensionPath],
+            ...makeManagedResourceLoaderOptions(input.desktopManaged.extensionPath),
             extensionFactories: [synaraMcp.extension],
           }
         : {
@@ -3399,15 +3416,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         // isolated to the release-controlled extension directory inside it;
         // the model/auth runtime reads the USER's normal Pi agent directory
         // directly (explicit auth.json/models.json paths, never a copy).
-        const desktopManagedBinding =
-          gateResult.kind === "pass" && "managed" in gateResult
-            ? {
-                agentDir: gateResult.managed.agentDir,
-                userAgentDir:
-                  trimToUndefined(options?.piSubagentDesktopUserAgentDir) ?? piSdk.getAgentDir(),
-                extensionPath: piSubagentDesktopManagedExtensionDir(gateResult.managed.agentDir),
-              }
-            : undefined;
+        const desktopManagedBinding = makeManagedRuntimeBinding(gateResult, piSdk);
         const processSupervisor = makePiBashProcessSupervisor({
           getShellConfig: () => piSdk.getShellConfig(),
           ...(options?.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
@@ -5869,14 +5878,27 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const listModels: NonNullable<PiAdapterShape["listModels"]> = (input) =>
       Effect.tryPromise({
         try: async () => {
-          const piSdk = await loadPiSdkPromise("model/list");
-          const agentDir = makeAgentDir(input.agentDir, piSdk);
+          const gateResult = await evaluateDesktopPiArtifactGate("model/list");
+          const piSdk = await loadPiSdkPromise("model/list", gateResult);
+          const desktopManagedBinding = makeManagedRuntimeBinding(gateResult, piSdk);
+          const agentDir = desktopManagedBinding?.agentDir ?? makeAgentDir(input.agentDir, piSdk);
           const cwd = trimToUndefined(input.cwd) ?? serverConfig.cwd;
-          const modelRuntime = await createPiModelRuntime(agentDir, piSdk);
+          const modelRuntime = await createPiModelRuntime(
+            desktopManagedBinding?.userAgentDir ?? agentDir,
+            piSdk,
+          );
           const services = await piSdk.createAgentSessionServices({
             cwd,
             agentDir,
             modelRuntime,
+            ...(desktopManagedBinding
+              ? {
+                  resourceLoaderOptions: makeManagedResourceLoaderOptions(
+                    desktopManagedBinding.extensionPath,
+                  ),
+                  settingsManager: piSdk.SettingsManager.inMemory(),
+                }
+              : {}),
           });
           const registry = modelRegistryFacade(services.modelRuntime, piSdk);
           const extensionCount = services.resourceLoader.getExtensions().extensions.length;
@@ -5899,9 +5921,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const listSkills: NonNullable<PiAdapterShape["listSkills"]> = (input) =>
       Effect.tryPromise({
         try: async () => {
+          const gateResult = await evaluateDesktopPiArtifactGate("skill/list");
           const active = input.threadId
             ? sessions.get(ThreadId.makeUnsafe(input.threadId))
             : undefined;
+          const piSdk =
+            active === undefined ? await loadPiSdkPromise("skill/list", gateResult) : undefined;
           const loader = active?.runtime.session.resourceLoader;
           if (active && input.forceReload) {
             await active.runtime.session.reload();
@@ -5910,10 +5935,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             | Awaited<ReturnType<PiCodingAgentModule["createAgentSessionServices"]>>
             | undefined;
           if (!loader) {
-            const piSdk = await loadPiSdkPromise("skill/list");
-            services = await piSdk.createAgentSessionServices({
+            const discoverySdk =
+              piSdk ?? (await loadPiSdkPromise("skill/list", gateResult));
+            const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
+            const agentDir =
+              discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
+            services = await discoverySdk.createAgentSessionServices({
               cwd: input.cwd,
-              agentDir: makeAgentDir(input.agentDir, piSdk),
+              agentDir,
+              ...(discoveryBinding
+                ? {
+                    resourceLoaderOptions: makeManagedResourceLoaderOptions(
+                      discoveryBinding.extensionPath,
+                    ),
+                    settingsManager: discoverySdk.SettingsManager.inMemory(),
+                  }
+                : {}),
             });
           }
           if (services && input.forceReload) {
@@ -5953,9 +5990,12 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const listCommands: NonNullable<PiAdapterShape["listCommands"]> = (input) =>
       Effect.tryPromise({
         try: async () => {
+          const gateResult = await evaluateDesktopPiArtifactGate("command/list");
           const active = input.threadId
             ? sessions.get(ThreadId.makeUnsafe(input.threadId))
             : undefined;
+          const piSdk =
+            active === undefined ? await loadPiSdkPromise("command/list", gateResult) : undefined;
           const session = active?.runtime.session;
           const reloadCommand = {
             name: "reload",
@@ -5985,10 +6025,21 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               cached: false,
             } satisfies ProviderListCommandsResult;
           }
-          const piSdk = await loadPiSdkPromise("command/list");
-          const services = await piSdk.createAgentSessionServices({
+          const discoverySdk = piSdk ?? (await loadPiSdkPromise("command/list", gateResult));
+          const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
+          const agentDir =
+            discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
+          const services = await discoverySdk.createAgentSessionServices({
             cwd: input.cwd,
-            agentDir: makeAgentDir(input.agentDir, piSdk),
+            agentDir,
+            ...(discoveryBinding
+              ? {
+                  resourceLoaderOptions: makeManagedResourceLoaderOptions(
+                    discoveryBinding.extensionPath,
+                  ),
+                  settingsManager: discoverySdk.SettingsManager.inMemory(),
+                }
+              : {}),
           });
           if (input.forceReload) {
             await services.resourceLoader.reload();
