@@ -2,7 +2,7 @@
 // Purpose: Isolation contract for the execution-strip stacked-panel variant:
 // the default ComposerStackedPanel chrome is unchanged (rail inset, border,
 // shared translucent surface) while the execution-strip variant is full
-// width, borderless, and uses the elevated secondary surface token. The two
+// width, borderless, and uses a transparent surface token. The two
 // variants must not share styling surface so the strip cleanup cannot alter
 // plan/queue/file-change panels.
 // Layer: Web chat component tests
@@ -44,12 +44,13 @@ describe("ComposerStackedPanel variants", () => {
     expect(markup).not.toContain("--color-background-elevated-secondary");
   });
 
-  it("execution-strip variant is full width, borderless, and uses the elevated secondary surface", () => {
+  it("execution-strip variant is full width, borderless, and uses a transparent surface", () => {
     const markup = renderToStaticMarkup(
       <ComposerStackedPanelExecutionStrip>rows</ComposerStackedPanelExecutionStrip>,
     );
     expect(markup).toContain("w-full");
-    expect(markup).toContain("bg-[var(--color-background-elevated-secondary)]");
+    expect(markup).toContain("bg-transparent");
+    expect(markup).not.toContain("bg-[var(--color-background-elevated-secondary)]");
     expect(markup).toContain("rounded-t-[var(--composer-radius)]");
     // Borderless and no default panel chrome bleed.
     expect(markup).not.toContain("chat-composer-stacked-top");
