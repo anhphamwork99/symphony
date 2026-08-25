@@ -984,7 +984,9 @@ describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)",
 
     const result = await runStartSession({
       mode: "web",
-      gateEnv: desktopGateEnv("/this/locator/is/ignored/in/web/mode"),
+      // Local web/dev path: WITHOUT a locator the web server keeps the
+      // historical pass-through (no verifier call, no managed bootstrap).
+      gateEnv: desktopGateEnv(undefined),
       userAgentDir,
       observers,
       extensionFactories: [{ name: "caller-factory-allowed-in-web-mode" }],
@@ -1135,7 +1137,9 @@ describe("PiAdapter non-desktop regression — unavailable explicit model keeps 
 
     const result = await runStartSession({
       mode: "web",
-      gateEnv: desktopGateEnv("/this/locator/is/ignored/in/web/mode"),
+      // Local web/dev path: WITHOUT a locator the web server keeps the
+      // historical raw failure surface (no verifier, no managed bootstrap).
+      gateEnv: desktopGateEnv(undefined),
       userAgentDir,
       observers,
       modelSelection: { provider: "pi", model: CANARY.modelId },
@@ -1276,7 +1280,9 @@ describe("PiAdapter non-desktop regression — settings manager default preserve
 
     const result = await runStartSession({
       mode: "web",
-      gateEnv: desktopGateEnv("/this/locator/is/ignored/in/web/mode"),
+      // Local web/dev path: WITHOUT a locator the web server keeps the
+      // SDK default file-backed settings manager (no managed bootstrap).
+      gateEnv: desktopGateEnv(undefined),
       userAgentDir,
       observers,
     });
@@ -1291,5 +1297,113 @@ describe("PiAdapter non-desktop regression — settings manager default preserve
     expect(sdkHarness.settingsManagerCreates).toEqual([]);
     expect(sdkHarness.settingsManagerOverrides).toHaveLength(1);
     expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("none");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Local web/dev path — a WEB-mode server started with a NON-EMPTY
+// launcher-derived locator (dev-runner prepared cache) takes the SAME managed
+// bootstrap as desktop: verified locator → controlled <root>/agent agentDir,
+// artifact-only extension isolation, mandatory seven-capability handshake
+// (fatal on failure), and the session-scoped in-memory SettingsManager. A
+// web server WITHOUT a locator keeps the historical pass-through (covered by
+// the non-desktop regression suites above).
+// ---------------------------------------------------------------------------
+
+describe("PiAdapter web managed bootstrap — dev-runner forwarded locator (local web/dev path)", () => {
+  it("takes the controlled runtime, artifact-only extensions, and the seven-capability handshake in web mode", async () => {
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "web",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+      extensionFactories: [{ name: "caller-factory-must-not-load-in-managed-web" }],
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result.hasSession).toBe(true);
+    expect(result.listSessionCount).toBe(1);
+    // The fatal seven-capability handshake succeeded and its cached result
+    // is the session's capability truth.
+    expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
+    expect(trace).toContain("handshake");
+    // The handshake ran BEFORE publication (fatal ordering).
+    expect(trace.indexOf("onSynaraMcpSession")).toBeGreaterThan(trace.indexOf("handshake"));
+
+    // Controlled runtime: <verified-root>/agent, not the user dir and not
+    // the artifact root itself.
+    expect(sdkHarness.runtimeCreates).toHaveLength(1);
+    expect(sdkHarness.runtimeCreates[0]!.agentDir).toBe(expectedControlledAgentDir());
+    expect(sdkHarness.serviceCreations[0]!.agentDir).toBe(expectedControlledAgentDir());
+    // Artifact-only extension isolation, exactly like desktop.
+    const loaderOptions = sdkHarness.serviceCreations[0]!.resourceLoaderOptions;
+    expect(loaderOptions.noExtensions).toBe(true);
+    expect(loaderOptions.additionalExtensionPaths).toEqual([expectedExtensionPath()]);
+    expect(JSON.stringify(sdkHarness.observedExtensionFactories)).not.toContain(
+      "caller-factory-must-not-load-in-managed-web",
+    );
+    // Session-scoped in-memory settings isolation applies on the managed
+    // web path too (no artifact settings.json write vector).
+    expect(sdkHarness.settingsManagerOverrides[0]!.kind).toBe("inMemory");
+    expect(bridgeState.fileSettingsWrites).toEqual([]);
+  });
+
+  it("fails closed in web mode when the forwarded locator fails the real verifier", async () => {
+    resetScenario({ handshake: managedHandshake() });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "web",
+      // Non-existent locator: the production verifier denies with
+      // manifest_missing before any Pi SDK import.
+      gateEnv: desktopGateEnv(path.join(fixtureRoot, "no-such-artifact")),
+      userAgentDir,
+      observers,
+    });
+
+    expect(result.failure).toBeDefined();
+    const failure = result.failure!;
+    expect(failure).toMatchObject({
+      _tag: "ProviderAdapterRequestError",
+      provider: "pi",
+    });
+    expect((failure as { detail: string }).detail).toContain(
+      "Managed Pi subagents are unavailable (manifest_missing)",
+    );
+    expect(result.hasSession).toBe(false);
+    expect(observers.subagentCapability).toEqual([]);
+    expect(observers.repository.writes).toEqual([]);
+    // No runtime was ever created — the denial precedes the SDK path.
+    expect(sdkHarness.runtimeCreates).toEqual([]);
+    expect(sdkHarness.getAgentDirCalls).toBe(0);
+  });
+
+  it("fails closed in web mode when the bridge supplies only the legacy three capabilities", async () => {
+    resetScenario({ handshake: managedHandshake(LEGACY_THREE_CAPABILITIES) });
+    const observers = makeObservers();
+
+    const result = await runStartSession({
+      mode: "web",
+      gateEnv: desktopGateEnv(artifactRoot),
+      userAgentDir,
+      observers,
+    });
+
+    // The mandatory seven-capability handshake is FATAL on the managed web
+    // path — no legacy warning fallback, exactly like desktop.
+    expect(result.failure).toBeDefined();
+    const failure = result.failure!;
+    expect((failure as { detail: string }).detail).toContain(
+      "(capability_mismatch:pi_subagent_capability_mismatch)",
+    );
+    expect(result.hasSession).toBe(false);
+    expect(observers.subagentCapability).toEqual([]);
+    expect(observers.repository.writes).toEqual([]);
+    // The staged runtime was disposed before the failure surfaced.
+    expect(trace.indexOf("runtime.dispose")).toBeGreaterThan(trace.indexOf("bindExtensions"));
+    expectNoCanaryLeak(failureSurface(failure));
   });
 });

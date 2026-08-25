@@ -8,11 +8,14 @@ import { Effect } from "effect";
 import {
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  modeLaunchesServer,
   readDevRunnerBooleanEnvironment,
   resolveDevRunnerBooleanOverrides,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
+
+const SYNARA_PI_SUBAGENT_ARTIFACT_DIR = "SYNARA_PI_SUBAGENT_ARTIFACT_DIR";
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
   it("allows every generated runtime setting through Turbo", () => {
@@ -34,6 +37,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       "SYNARA_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
       "VITE_WS_URL",
       "VITE_DEV_SERVER_URL",
+      SYNARA_PI_SUBAGENT_ARTIFACT_DIR,
     ]) {
       assert.ok(globalEnv.has(name), `${name} must be declared in turbo.json globalEnv`);
     }
@@ -176,6 +180,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
+    it("modeLaunchesServer is true exactly for the server-launching modes", () => {
+      assert.equal(modeLaunchesServer("dev"), true);
+      assert.equal(modeLaunchesServer("dev:server"), true);
+      assert.equal(modeLaunchesServer("dev:web"), false);
+      assert.equal(modeLaunchesServer("dev:desktop"), false);
+    });
+
     it.effect("normalizes bracketed IPv6 hosts for listen and client URL syntax", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
@@ -291,6 +302,83 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.SYNARA_HOME, resolve("/tmp/my-synara"));
         assert.equal(env.SYNARA_HOME, resolve("/tmp/my-synara"));
         assert.equal(env.SYNARA_HOME, resolve("/tmp/my-synara"));
+      }),
+    );
+  });
+
+  describe("managed pi artifact locator policy", () => {
+    /** Base env shape shared by every locator-policy test. */
+    const baseLocatorEnvInput = {
+      serverOffset: 0,
+      webOffset: 0,
+      synaraHome: "/tmp/my-synara" as const,
+      authToken: undefined,
+      noBrowser: undefined,
+      autoBootstrapProjectFromCwd: undefined,
+      logWebSocketEvents: undefined,
+      host: undefined,
+      port: undefined,
+      devUrl: undefined,
+    };
+
+    it.effect("forwards the prepared locator exactly for server-launching modes", () =>
+      Effect.gen(function* () {
+        for (const mode of ["dev", "dev:server"] as const) {
+          const env = yield* createDevRunnerEnv({
+            ...baseLocatorEnvInput,
+            mode,
+            baseEnv: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "/inherited/foreign/locator" },
+            piSubagentArtifactDir: "/synara-home/dev-pi-subagent-artifacts/aa6fa4a8",
+          });
+
+          assert.equal(
+            env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR],
+            "/synara-home/dev-pi-subagent-artifacts/aa6fa4a8",
+          );
+        }
+      }),
+    );
+
+    it.effect("scrubs any inherited locator for dev:web and dev:desktop", () =>
+      Effect.gen(function* () {
+        for (const mode of ["dev:web", "dev:desktop"] as const) {
+          const env = yield* createDevRunnerEnv({
+            ...baseLocatorEnvInput,
+            mode,
+            baseEnv: {
+              [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "/inherited/unverified/locator",
+              PI_CODING_AGENT_DIR: "/untrusted/inherited-pi-agent-dir",
+            },
+          });
+
+          assert.equal(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR], undefined);
+        }
+      }),
+    );
+
+    it.effect("scrubs an inherited locator even for server-launching modes when nothing was prepared", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          ...baseLocatorEnvInput,
+          mode: "dev",
+          baseEnv: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "/inherited/unverified/locator" },
+        });
+
+        // Undefined preparation means "scrub any inherited value" — never
+        // "keep whatever the terminal had".
+        assert.equal(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR], undefined);
+      }),
+    );
+
+    it.effect("scrubs a whitespace-only inherited locator for non-server-launching modes", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          ...baseLocatorEnvInput,
+          mode: "dev:web",
+          baseEnv: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "   " },
+        });
+
+        assert.equal(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR], undefined);
       }),
     );
   });

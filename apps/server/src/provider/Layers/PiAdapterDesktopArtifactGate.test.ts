@@ -468,10 +468,10 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
     },
   );
 
-  it("keeps non-desktop pass-through with a real invalid expanded-closure locator present", async () => {
+  it("verifies a real invalid web-mode locator and fails closed before the SDK path", async () => {
     resetHarness();
     gateHarness.mode = "real";
-    const artifactRoot = await mkdtemp(join(fixtureRoot, "non-desktop-invalid-"));
+    const artifactRoot = await mkdtemp(join(fixtureRoot, "web-invalid-"));
     await stageClosureArtifact(artifactRoot, CLOSURE_BASE_FILES);
     await rm(join(artifactRoot, "agent/extensions/shared/durable-preferences.js"));
 
@@ -481,13 +481,18 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
       entry: entryPaths[2]!,
     });
 
-    // Non-desktop pass-through is unchanged (Decision 0004 §6): the gate
-    // returns pass WITHOUT verifying, so the (mock) SDK path is reached.
+    // Local web/dev path: a WEB-mode server started with a NON-EMPTY
+    // launcher-derived locator is verified exactly like desktop, so the
+    // same real verifier denial fail-closes the entry before any Pi SDK
+    // import or discovery.
     expect(failure).toMatchObject({
       _tag: "ProviderAdapterRequestError",
       provider: "pi",
       method: "skill/list",
-      detail: "mock Pi SDK reached",
+      detail:
+        "Managed Pi subagents are unavailable (entry_missing): " +
+        "managed pi artifact verification failed: entry_missing " +
+        "(entry: agent/extensions/shared/durable-preferences.js)",
     });
     expect(gateHarness.calls).toEqual([
       {
@@ -495,12 +500,10 @@ describe("PiAdapter desktop fail-close against real invalid expanded-closure art
         env: invalidClosureEnv(artifactRoot),
       },
     ]);
-    expect(piSdkHarness).toMatchObject({
-      // The lazy SDK module memoizes per worker, so `imports` counts the
-      // FIRST load only; proving the SDK path was reached here is done by
-      // the global agent-dir discovery and service-creation calls below.
-      getAgentDirCalls: 1,
-      serviceCreationCalls: 1,
+    expect(piSdkHarness).toEqual({
+      imports: 0,
+      getAgentDirCalls: 0,
+      serviceCreationCalls: 0,
       sessionManagerCreateCalls: 0,
       sessionManagerOpenCalls: 0,
     });
