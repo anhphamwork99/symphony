@@ -238,6 +238,30 @@ export interface UserPiHomeSnapshot {
   readonly modelsStore: UserPiHomeModelsStoreSnapshot;
 }
 
+export interface FilesystemTreeEntry {
+  readonly path: string;
+  readonly type: UserPiHomeEntryType;
+  readonly symlinkTarget: string | null;
+  readonly size: number | null;
+  readonly hash: string | null;
+}
+
+export interface IsolationPathObservation {
+  readonly path: string;
+  /** Canonical existing path, or the canonical parent plus basename when absent. */
+  readonly realpath: string;
+  readonly exists: boolean;
+  readonly type: UserPiHomeEntryType;
+  readonly symlinkTarget: string | null;
+}
+
+export interface PiAgentRuntimeSnapshot {
+  readonly authJson: UserPiHomePathSnapshot;
+  readonly modelsJson: UserPiHomePathSnapshot;
+  readonly settingsJson: UserPiHomePathSnapshot;
+  readonly modelsStore: UserPiHomeModelsStoreSnapshot;
+}
+
 const USER_PI_SENSITIVE_FILES = {
   authJson: "agent/auth.json",
   modelsJson: "agent/models.json",
@@ -328,6 +352,84 @@ function observeUserPiEntry(fullPath: string, allowAbsent = true): UserPiEntry {
     size: type === "absent" ? null : stat.size,
     mtimeMs: type === "absent" ? null : stat.mtimeMs,
     symlinkTarget: null,
+  };
+}
+
+/** Content-free, deterministic full-tree witness for controlled test roots. */
+export function snapshotFilesystemTree(rootDir: string): ReadonlyArray<FilesystemTreeEntry> {
+  const entries: FilesystemTreeEntry[] = [];
+  const visit = (dir: string, relativeDir: string) => {
+    for (const name of readdirSync(dir).toSorted()) {
+      const fullPath = path.join(dir, name);
+      const relativePath = relativeDir === "" ? name : `${relativeDir}/${name}`;
+      const entry = observeUserPiEntry(fullPath, false);
+      entries.push({
+        path: relativePath,
+        type: entry.type,
+        symlinkTarget: entry.symlinkTarget,
+        size: entry.size,
+        hash: entry.hash,
+      });
+      if (entry.type === "directory") visit(fullPath, relativePath);
+    }
+  };
+  const root = observeUserPiEntry(rootDir, false);
+  if (root.type !== "directory") {
+    throw new Error(`Isolation snapshot root '${rootDir}' is not a directory.`);
+  }
+  visit(rootDir, "");
+  return entries;
+}
+
+/** lstat/realpath inventory used to prove that isolated resources do not alias. */
+export function observeIsolationPaths(
+  paths: Readonly<Record<string, string>>,
+): Readonly<Record<string, IsolationPathObservation>> {
+  return Object.fromEntries(
+      Object.entries(paths).map(([name, fullPath]) => {
+        const entry = observeUserPiEntry(fullPath);
+        const canonicalPath =
+          entry.type === "absent"
+            ? path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath))
+            : fs.realpathSync(fullPath);
+        return [
+          name,
+          {
+            path: fullPath,
+            realpath: canonicalPath,
+            exists: entry.type !== "absent",
+            type: entry.type,
+            symlinkTarget: entry.symlinkTarget,
+          },
+      ];
+    }),
+  );
+}
+
+/** Separate bounded witness for the writable agent dir and volatile model cache. */
+export function snapshotPiAgentRuntime(agentDir: string): PiAgentRuntimeSnapshot {
+  const absent = (): UserPiHomePathSnapshot => ({
+    exists: false,
+    type: "absent",
+    hash: null,
+    size: null,
+  });
+  const observe = (name: string): UserPiEntry => observeUserPiEntry(path.join(agentDir, name));
+  const auth = observe("auth.json");
+  const models = observe("models.json");
+  const settings = observe("settings.json");
+  const modelsStore = observe("models-store.json");
+  if (modelsStore.type !== "absent" && modelsStore.type !== "regular") {
+    throw new Error(`Pi agent models-store.json must be absent or regular: '${agentDir}'.`);
+  }
+  return {
+    authJson: auth.type === "absent" ? absent() : toUserPiPathSnapshot(auth),
+    modelsJson: models.type === "absent" ? absent() : toUserPiPathSnapshot(models),
+    settingsJson: settings.type === "absent" ? absent() : toUserPiPathSnapshot(settings),
+    modelsStore: {
+      ...(modelsStore.type === "absent" ? absent() : toUserPiPathSnapshot(modelsStore)),
+      mtimeMs: modelsStore.mtimeMs,
+    },
   };
 }
 
@@ -536,12 +638,23 @@ export interface LoopbackModelServer {
   readonly baseUrl: string;
   readonly requestCount: () => number;
   readonly requests: () => ReadonlyArray<LoopbackModelRequestLogEntry>;
+  /** Number of deterministic slow-model responses held before their first byte. */
+  readonly pendingSlowResponseCount: () => number;
+  /** Releases every currently held deterministic slow-model response exactly once. */
+  readonly releaseSlowResponses: () => void;
   readonly setManualTeardownCommand: (command: string) => void;
   readonly close: () => Promise<void>;
 }
 
-export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
+export function createDeterministicModelServer(
+  options: {
+    readonly slowDelayMs?: number;
+    readonly holdSlowModelResponses?: boolean;
+  } = {},
+): Promise<LoopbackModelServer> {
   const log: LoopbackModelRequestLogEntry[] = [];
+  const pendingSlowResponses = new Set<() => void>();
+  let holdSlowResponses = options.holdSlowModelResponses === true;
   let delegatedToolCallCount = 0;
   let restartDriverDelegated = false;
   let manualBashDispatched = false;
@@ -641,12 +754,14 @@ export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
       // the Agent tool call executes, exactly like a real slow model. A
       // zero-latency driver would race the projection pipeline.
       const driverDelayMs = 2_000;
+      const slowChildDelayMs =
+        options.slowDelayMs !== undefined && !hasAgentTool ? options.slowDelayMs : 0;
       const delayMs =
         requestedModel === DETERMINISTIC_SLOW_MODEL_ID
-          ? DETERMINISTIC_SLOW_DELAY_MS
+          ? (options.slowDelayMs ?? DETERMINISTIC_SLOW_DELAY_MS)
           : shouldDelegate
             ? driverDelayMs
-            : 0;
+            : slowChildDelayMs;
 
       const respond = () => {
         res.writeHead(200, { "content-type": "text/event-stream" });
@@ -726,7 +841,13 @@ export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
         res.write("data: [DONE]\n\n");
         res.end();
       };
-      if (delayMs > 0) {
+      if (holdSlowResponses && requestedModel === DETERMINISTIC_SLOW_MODEL_ID) {
+        const release = () => {
+          if (!pendingSlowResponses.delete(release)) return;
+          respond();
+        };
+        pendingSlowResponses.add(release);
+      } else if (delayMs > 0) {
         setTimeout(respond, delayMs);
       } else {
         respond();
@@ -742,12 +863,19 @@ export function createDeterministicModelServer(): Promise<LoopbackModelServer> {
         baseUrl: `http://127.0.0.1:${port}/v1`,
         requestCount: () => log.length,
         requests: () => [...log],
+        pendingSlowResponseCount: () => pendingSlowResponses.size,
+        releaseSlowResponses: () => {
+          holdSlowResponses = false;
+          for (const release of [...pendingSlowResponses]) release();
+        },
         setManualTeardownCommand: (command) => {
           manualTeardownCommand = command;
           manualBashDispatched = false;
         },
         close: () =>
           new Promise<void>((done) => {
+            holdSlowResponses = false;
+            for (const release of [...pendingSlowResponses]) release();
             server.close(() => done());
           }),
       });
@@ -1122,6 +1250,10 @@ export interface MakeRealPiWsHarnessOptions {
   readonly dbPath?: string;
   /** Reuse an existing loopback model server across a server restart. */
   readonly modelServer?: LoopbackModelServer;
+  /** Optional slow-model delay used to hold a real child live for race setup. */
+  readonly deterministicSlowDelayMs?: number;
+  /** Hold deterministic slow-model responses until the caller explicitly releases them. */
+  readonly holdDeterministicSlowResponses?: boolean;
   /** Ticket 02: compose the desktop managed bootstrap (web mode when absent). */
   readonly desktopManaged?: RealPiWsHarnessDesktopManagedConfig;
 }
@@ -1357,7 +1489,12 @@ export async function makeRealPiWsHarness(
   fs.mkdirSync(piHomeDir, { recursive: true });
   initializeGitWorkspace(workspaceDir);
 
-  const modelServer = options.modelServer ?? (await createDeterministicModelServer());
+  const modelServer =
+    options.modelServer ??
+    (await createDeterministicModelServer({
+      slowDelayMs: options.deterministicSlowDelayMs,
+      holdSlowModelResponses: options.holdDeterministicSlowResponses,
+    }));
   writeAgentDirWithModels(parentAgentDir, modelServer.baseUrl);
   writeAgentDirWithModels(childAgentDir, modelServer.baseUrl);
 
