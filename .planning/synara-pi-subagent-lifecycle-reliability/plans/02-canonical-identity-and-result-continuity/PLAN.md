@@ -1,6 +1,6 @@
 # Ticket 02 Plan — canonical identity and durable result continuity
 
-**State:** ready-for-agent (WP-01 complete; WP-02 is the current package frontier; Ticket 02 status unchanged)
+**State:** ready-for-agent (WP-01 and WP-02 complete; WP-03 is the current package frontier; Ticket 02 status unchanged)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -122,10 +122,12 @@ This is a candidate implementation contract to be evidenced by the WPs, not a pe
 WP-01 is complete in the Alfie repository at immutable commit
 `73bc7744f` (`@alfie/pi-subagents@0.15.0-alfie.5`); its completion record and
 accepted write-set amendment are recorded in
-[WP-01](WP-01-alfie-canonical-live-routing.md). WP-02 is now the next package
-and may consume WP-01's exact tuple/binding contract. This is package routing
-only: Ticket 02 remains **ready-for-agent**, and neither Ticket 02 final
-acceptance nor the Project frontier is changed.
+[WP-01](WP-01-alfie-canonical-live-routing.md). WP-02 is complete in Symphony
+at `ad6f97e8e` and its evidence is recorded in
+[WP-02](WP-02-symphony-durable-read-contract.md). WP-03 is now the next package
+and may consume both completed contracts. This is package routing only: Ticket
+02 remains **ready-for-agent**, and neither Ticket 02 final acceptance nor the
+Project frontier is changed.
 
 ## Dependency graph and work packages
 
@@ -164,12 +166,12 @@ Stop and escalate rather than silently choosing a workaround if: no exact tuple 
 
 ## Commit and handoff
 
-Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md` and the WP-01
+Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md` and the WP-02
 planning record. It does not update `PROJECT.md`, Ticket 02 status/frontier,
 decisions, source, migrations, or any other project.
 
 Planning commit:
 
 ```text
-docs(planning): record Alfie canonical identity routing
+docs(planning): record durable subagent read contract
 ```

@@ -1,6 +1,6 @@
 # WP-02 — Symphony durable authorized read contract
 
-**State:** pending
+**State:** completed (Symphony commit `ad6f97e8e`; Ticket 02 remains unaccepted)
 
 **Owner role:** implementation worker
 
@@ -105,6 +105,81 @@ Self-review:
 - all failure diagnostics are closed, bounded, stable, and do not leak provider internals.
 
 Report SHA, changed symbols, focused test output/counts, and any contract that WP-03 must consume.
+
+## Completion record
+
+- **Outcome:** WP-02 is complete. Symphony now exposes a durable-first,
+  authorized canonical execution read contract with one coherent aggregate plus
+  terminal-evidence snapshot, current-tuple fencing, terminal precedence, an
+  exact-live supplement seam for nonterminal reads, bounded result/diagnostic
+  output, and no provider-identity leakage or lifecycle/state writes.
+- **Source/candidate:** The integrated Symphony source commit is
+  `ad6f97e8e3277937a09d879456da4a4fafcf0748` (reported as `ad6f97e8e`), with
+  source-equivalent candidate
+  `8d1f5d76a0a4ae724d50f7a3d8b0937fc4ab21b5`. Both resolve to tree
+  `fc758051b0fb469337ab8fa75b26302fd667cd9d`; the integrated commit is the
+  authoritative source pin for this WP.
+- **Changed files:** The source commit changed exactly the seven-file WP-02
+  set: `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts`,
+  `apps/server/src/persistence/Layers/PiSubagentExecutionRepository.ts`,
+  `apps/server/src/persistence/Layers/PiSubagentExecutionRepository.test.ts`,
+  `apps/server/src/provider/piSubagentExecutionReadService.ts`,
+  `apps/server/src/provider/piSubagentExecutionReadBoundary.test.ts`,
+  `packages/contracts/src/piSubagents.ts`, and
+  `packages/contracts/src/piSubagents.test.ts`. No migration or schema file
+  changed.
+- **Changed symbols/contracts:** `PiSubagentExecutionReadSnapshot` and
+  `PiSubagentExecutionRepositoryShape.getExecutionReadSnapshot` provide the
+  one-SQL aggregate/terminal-evidence read; `makePiSubagentExecutionRepository`
+  implements it. `PiSubagentExecutionReadInput` accepts canonical
+  `executionId` and only an equal-value deprecated `agent_id` alias, while
+  `PiSubagentResultReadResult` carries the bounded current tuple, optional live
+  state, and closed diagnostics. `makePiSubagentExecutionReadService`, its
+  `normalizeReadInput` boundary, authorization/current-tuple resolution, and
+  `liveSupplement` seam provide durable-first reads without provider access
+  before authorization.
+- **Diagnostics:** The shared closed vocabulary now includes
+  `pi_subagent_read_unauthorized_or_out_of_scope`,
+  `pi_subagent_read_stale_attempt_or_generation`,
+  `pi_subagent_read_durable_terminal_precedence`,
+  `pi_subagent_read_live_record_unavailable`,
+  `pi_subagent_read_missing_durable_evidence`,
+  `pi_subagent_read_payload_bounded`,
+  `pi_subagent_read_alias_deprecated`,
+  `pi_subagent_read_alias_conflict`, and
+  `pi_subagent_read_capability_unavailable`, alongside the existing bounded
+  denial/truncation diagnostics. Capability enforcement remains WP-03; this WP
+  supplies the shared vocabulary only.
+- **Test evidence:** Focused direct Vitest runs passed: repository **17/17**,
+  read boundary **13/13**, and contracts **38/38**, for **68/68** tests total.
+  Coverage includes one-SQL snapshot coherence, authorization and project/thread
+  ordering, stale attempt/generation fencing, canonical/equal-only alias and
+  alias-only behavior, provider-shaped alias rejection without a provider
+  callback, terminal precedence, live-available and live-missing supplements,
+  bounded output/diagnostics, and absence of `agentId` in public results.
+  `git diff --check` passed for the source commit.
+- **Review remediation:** An independent review of the prior candidate was
+  **PASS WITH GAPS**. Before integration, the orchestrator remediated the
+  alias-only normalization gap and the aggregate/terminal snapshot-coherence
+  gap, and added live-available and generation-fencing coverage. The resulting
+  source-equivalent candidate and integrated commit contain those repairs.
+- **Scope audit:** The source implementation stayed within the exact seven-file
+  WP-02 write set and introduced no migration, schema change, adapter/provider
+  routing, capability gate, watchdog, teardown, Resume, replay, bootstrap,
+  Project Home, or Ticket status/frontier change. Reads remain side-effect
+  free: no `agentId` is accepted or emitted, and no lifecycle/state write is
+  performed by the read contract.
+- **Verification caveat:** A worker-level `bun run test` wrapper expanded into
+  unrelated workspace runs and timed out. This does not replace or invalidate
+  the focused direct Vitest evidence above; the focused suites passed and are
+  the counted verification for WP-02. Workspace fmt/lint/typecheck were not
+  run, per this planning packet's verification envelope.
+
+WP-03 is now unblocked as the next package and must consume the durable read
+snapshot, current-tuple/authorization ordering, live supplement seam, and
+closed diagnostics recorded above. This completion does not claim WP-03
+managed-tool routing, WP-04 provenance re-pin, WP-05 real-Pi evidence, Ticket 02
+acceptance, or Project acceptance.
 
 ## Escalation
 
