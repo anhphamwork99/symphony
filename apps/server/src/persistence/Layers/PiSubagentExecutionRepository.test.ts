@@ -59,7 +59,11 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
 
       // Ticket 02: the reusable durable read snapshot resolves the same
       // current tuple and terminal evidence through the live repository layer.
-      const readSnapshot = yield* repo.getExecutionReadSnapshot("exec_test_001");
+      const getExecutionReadSnapshot = repo.getExecutionReadSnapshot;
+      if (getExecutionReadSnapshot === undefined) {
+        throw new Error("Expected the live repository to provide an execution read snapshot.");
+      }
+      const readSnapshot = yield* getExecutionReadSnapshot("exec_test_001");
       assert.isTrue(Option.isSome(readSnapshot));
       if (Option.isSome(readSnapshot)) {
         assert.equal(readSnapshot.value.execution.executionId, "exec_test_001");
@@ -102,7 +106,11 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
       });
       assert.equal(terminal.kind, "recorded");
 
-      const snapshot = yield* repo.getExecutionReadSnapshot(executionId);
+      const getExecutionReadSnapshot = repo.getExecutionReadSnapshot;
+      if (getExecutionReadSnapshot === undefined) {
+        throw new Error("Expected the live repository to provide an execution read snapshot.");
+      }
+      const snapshot = yield* getExecutionReadSnapshot(executionId);
       assert.isTrue(Option.isSome(snapshot));
       if (Option.isSome(snapshot)) {
         assert.equal(snapshot.value.execution.executionId, executionId);
