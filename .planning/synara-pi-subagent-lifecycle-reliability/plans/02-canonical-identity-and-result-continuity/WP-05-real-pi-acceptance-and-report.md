@@ -83,12 +83,15 @@ the Issue 02 report.
 - `agent/extensions/pi-subagents/src/agent-manager.ts`
 - `agent/extensions/pi-subagents/src/index.ts`
 - `agent/extensions/pi-subagents/test/canonical-steer-race-hook.test.ts`
+- `agent/extensions/pi-subagents/test/synara-bridge.test.ts`
 - `agent/extensions/pi-subagents/package.json`
 - the package lock only when it represents the package version
 
 Alfie starts clean at
 `73bc7744f8fbbd12206302de2df8230b29a49178`. The hook commit must produce
 `@alfie/pi-subagents@0.15.0-alfie.6`; do not amend the `.5` commit.
+The production bridge `EXTENSION_VERSION` and active bridge test must report
+the same `.6` version; package/bridge version skew blocks the re-pin.
 
 ### New acceptance/report artifacts
 

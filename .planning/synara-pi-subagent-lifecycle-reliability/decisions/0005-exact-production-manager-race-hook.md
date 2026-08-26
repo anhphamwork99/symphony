@@ -162,12 +162,18 @@ Before implementation, WP-05 is amended to authorize:
 - `agent/extensions/pi-subagents/src/agent-manager.ts`
 - `agent/extensions/pi-subagents/src/index.ts`
 - `agent/extensions/pi-subagents/test/canonical-steer-race-hook.test.ts`
+- `agent/extensions/pi-subagents/test/synara-bridge.test.ts`
 - `agent/extensions/pi-subagents/package.json`
 - the package lock only when its package version is represented there
 
 The clean baseline is
 `73bc7744f8fbbd12206302de2df8230b29a49178`. The resulting package version is
 `0.15.0-alfie.6`; the prior commit is not amended.
+
+The negotiated bridge `EXTENSION_VERSION` in `src/index.ts` and its active
+`synara-bridge.test.ts` assertion must move with the package version. A package
+that reports `.6` on disk but negotiates `.5` at the production bridge is not a
+valid controlled artifact and must fail re-pin verification.
 
 ### Symphony
 
