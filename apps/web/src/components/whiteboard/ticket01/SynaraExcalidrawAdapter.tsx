@@ -97,6 +97,8 @@ export interface SynaraExcalidrawHandle {
   readonly setViewModeEnabled: (enabled: boolean) => void;
   readonly captureViewport: () => SynaraViewport;
   readonly restoreViewport: (viewport: SynaraViewport) => void;
+  readonly clearNativeHistory: () => void;
+  readonly restoreScene: (snapshot: SynaraSceneSnapshot) => void;
 }
 
 export interface SynaraExcalidrawAdapterProps {
@@ -119,6 +121,16 @@ export interface SynaraExcalidrawAdapterProps {
   readonly onRawSelection?: (observation: SynaraSelectionObservation) => void;
   readonly onSettledSelection?: (observation: SynaraSelectionObservation) => void;
   readonly onViewportChange?: (viewport: SynaraViewport) => void;
+  /**
+   * Ticket 02 gate opt-in. Existing Ticket 01 consumers retain native undo
+   * semantics until they explicitly own the Synara history boundary.
+   */
+  readonly containNativeHistory?: boolean;
+  /**
+   * The adapter clears the package history before exposing this callback. The
+   * callback is intentionally scene-shaped and never receives the package API.
+   */
+  readonly onSceneChange?: (snapshot: SynaraSceneSnapshot) => void;
 }
 
 let nextMountId = 0;
@@ -580,6 +592,68 @@ export const SynaraExcalidrawAdapter = forwardRef<
     [lifecycle, report, requireApi],
   );
 
+  const clearNativeHistory = useCallback((): void => {
+    const api = requireApi({
+      code: "api-not-ready",
+      ac: "AC4",
+      phase: "clear-native-history",
+      expected: "the public history.clear API is available before exposing a settled scene change",
+      recoverable: true,
+    });
+    try {
+      api.history.clear();
+    } catch (error) {
+      report({
+        code: "native-history-clear-failed",
+        ac: "AC4",
+        phase: "clear-native-history",
+        expected: "public api.history.clear contains package-native history",
+        observed: error instanceof Error ? error.message : String(error),
+        recoverable: false,
+      });
+      throw error;
+    }
+  }, [report, requireApi]);
+
+  const restoreScene = useCallback(
+    (snapshot: SynaraSceneSnapshot): void => {
+      const api = requireApi({
+        code: "api-not-ready",
+        ac: "AC2",
+        phase: "restore-scene",
+        expected: "the mounted public editor API is available before restoring a snapshot",
+        recoverable: true,
+      });
+      try {
+        if (snapshot.files) {
+          api.addFiles(Object.values(snapshot.files) as unknown as PackageBinaryFileData[]);
+        }
+        api.updateScene({
+          elements: snapshot.elements as PackageElements,
+          appState: {
+            selectedElementIds: Object.fromEntries(
+              snapshot.selectedElementIds.map((id) => [id, true]),
+            ),
+          },
+          captureUpdate: "NEVER",
+        } as PackageSceneUpdate);
+        latestSnapshotRef.current = snapshot;
+        latestViewportRef.current = snapshot.viewport;
+      } catch (error) {
+        report({
+          code: "scene-restore-failed",
+          ac: "AC2",
+          phase: "restore-scene",
+          expected: "public addFiles and updateScene restore the complete document snapshot",
+          observed: error instanceof Error ? error.message : String(error),
+          recoverable: true,
+        });
+        throw error;
+      }
+    },
+    [report, requireApi],
+  );
+
   const setViewMode = useCallback(
     (enabled: boolean): void => {
       setViewModeEnabled(enabled);
@@ -672,6 +746,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
       setViewModeEnabled: setViewMode,
       captureViewport,
       restoreViewport,
+      clearNativeHistory,
+      restoreScene,
     }),
     [
       captureScene,
@@ -680,6 +756,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
       exportSvg,
       mountId,
       restoreViewport,
+      clearNativeHistory,
+      restoreScene,
       serializeScene,
       setViewMode,
       updateScene,
@@ -693,6 +771,11 @@ export const SynaraExcalidrawAdapter = forwardRef<
       const snapshot = toSnapshot(elements, appState, files);
       latestSnapshotRef.current = snapshot;
       latestViewportRef.current = snapshot.viewport;
+      // This is the only package-history containment point. It uses the
+      // documented imperative API and runs before any Synara observer sees
+      // the new scene.
+      if (callbacksRef.current.containNativeHistory) clearNativeHistory();
+      callbacksRef.current.onSceneChange?.(snapshot);
       callbacksRef.current.onViewportChange?.(snapshot.viewport);
 
       const observation: SynaraSelectionObservation = {
@@ -783,7 +866,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
         }, configuredTimeout);
       }
     },
-    [report],
+    [clearNativeHistory, report],
   );
 
   const onApiReady = useCallback(
