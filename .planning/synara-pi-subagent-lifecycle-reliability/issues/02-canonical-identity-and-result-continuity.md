@@ -1,6 +1,6 @@
 # Ticket 02 — canonical identity and durable result-read continuity
 
-**Status:** ready-for-agent
+**Status:** accepted
 **Authoritative decision:** [Decision 0002 — Canonical execution identity and result-read continuity](../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
 **Dependencies:** Ticket 01 accepted; the named Supervisor identity/read gate is discharged by Decision 0002.
 **Implementation:** authorized within this ticket's scope; no implementation is included in this planning update.
@@ -196,7 +196,7 @@ calls. Missing exact live steer returns
 | T02-AC3 | Authorized durable reads survive live eviction/restart; exact sequence-40 terminal truth wins over live nonterminal fallback. | Unauthorized scope, missing durable evidence, stale tuple, incoherent snapshot, and oversized diagnostics return bounded stable results before provider access. | PASS |
 | T02-AC4 | Exact live state supplements nonterminal durable state; enqueue-first steer performs exactly one synchronous SDK insertion and returns `applied`. | Terminal-first retirement before the manager guard returns bounded unavailable control with zero session call/insertion; no valid handle becomes `Agent not found`. | PASS |
 | T02-AC5 | Legacy/unmanaged bypass behavior remains covered; controlled Alfie proves cancellation fencing and post-await generation validation. | Capability absence/mismatch, stale tuple, unavailable live control, provider-ID input, oversized output, and invalid cancellation are bounded. Resume/bootstrap/reconstruction/queue-replay/new-child are source-structurally absent from the exact manager steer path, not claimed as runtime-observed counters. | PASS |
-| T02-AC6 | Deterministic, controlled-Alfie, and isolated real-Pi evidence are reported separately against the exact `.6` artifact and Pi SDK `.83.0`. | Negative fixtures remain intentional; user configuration, ambient resources, controlled artifact, paths, environment, hook/session state, and roots are checked and cleaned fail-closed. | PASS candidate; supervisor acceptance remains pending |
+| T02-AC6 | Deterministic, controlled-Alfie, and isolated real-Pi evidence are reported separately against the exact `.6` artifact and Pi SDK `.83.0`. | Negative fixtures remain intentional; user configuration, ambient resources, controlled artifact, paths, environment, hook/session state, and roots are checked and cleaned fail-closed. | PASS; project-level T06 final acceptance remains pending |
 
 ### Synchronized real-Pi F5 evidence
 
@@ -398,8 +398,10 @@ limitations. The final candidate additionally emits the already-asserted
 bounded traces, counters, and cache metadata used above; it does not change
 production behavior or race semantics.
 
-Ticket 02 remains `ready-for-agent`, WP-05 remains pending, and supervisor
-acceptance is still required.
+Ticket 02 is accepted and WP-05 is complete. The phrase “Supervisor
+acceptance” refers only to the single project-level final consultation reserved
+for the complete T06 integrated candidate; no ticket-level Supervisor final
+acceptance was invoked or required.
 
 ### Explicit non-goals preserved
 
@@ -440,7 +442,8 @@ deployment occurred.
 
 ## Status and unlock
 
-Decision 0002 is authoritative and has discharged the only Ticket 02 material
-decision gate. This ticket is **ready-for-agent**. Implementation agents must
-follow the Project Home router, preserve inherited decisions, and report both
-normal behavior and material failure/diagnostic behavior before review.
+Decision 0002 remains authoritative. Ticket 02 is **accepted** at Symphony
+`cb023e587` plus report `d77a566e0`, against controlled Alfie
+`3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+`@alfie/pi-subagents@0.15.0-alfie.6`. Project Home routes Ticket 03 as the next
+frontier; Tickets 04–06 remain blocked.

@@ -1,6 +1,6 @@
 # Ticket 02 Plan — canonical identity and durable result continuity
 
-**State:** ready-for-agent (WP-01 through WP-04 complete; WP-05 is the current package frontier; Ticket 02 status unchanged)
+**State:** completed and accepted (WP-01 through WP-05 complete)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -131,13 +131,11 @@ WP-04 is complete in Symphony through the two-commit remediation
 `29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` plus
 `14f3d2a4371a3ea4050b2e54fa026995fd81f706`; its provenance completion record,
 exact hashes, clean-tree boundary, and focused evidence are recorded in
-[WP-04](WP-04-provenance-repin.md). WP-05 is now the package frontier and may
-consume that exact pin read-only while repairing only active pin-dependent
-acceptance fixtures and producing the canonical acceptance/report artifacts.
-This is package routing only: Decision 0003 clarifies the WP-05 F5
-queue-insertion race without changing authority or scope; Ticket 02 remains
-**ready-for-agent**, and neither Ticket 02 final acceptance nor the Project
-frontier is changed.
+[WP-04](WP-04-provenance-repin.md). WP-05 completed at Symphony
+`cb023e587` with the Issue 02 report at `d77a566e0`, consuming controlled Alfie
+`3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+`@alfie/pi-subagents@0.15.0-alfie.6`. Ticket 02 is accepted; Project Home now
+routes Ticket 03 as the next frontier pending DG-3/DG-4 disposition.
 
 ## Dependency graph and work packages
 
@@ -147,7 +145,7 @@ frontier is changed.
 | 02 | [Symphony durable read contract](WP-02-symphony-durable-read-contract.md) | Symphony | WP-01 contract shape | authorized durable lookup, current-tuple/fencing, terminal precedence, bounded read result/diagnostics, repository/read tests |
 | 03 | [Symphony managed-tool routing](WP-03-symphony-managed-tool-routing.md) | Symphony | WP-02 and WP-01 | capability gate, managed adapter dispatch, live supplement/steer routing, legacy isolation, integration tests |
 | 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Symphony | WP-01 immutable Alfie commit/version and WP-03 candidate | **complete** — exact `ALFIE_T02_COMMIT`/version, provenance manifest, hashes, and bounded pin/capability fixture reconciliation |
-| 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | active pin-dependent fixture repair, isolated real-Pi proof, deterministic/controlled/real evidence split, Issue 02 Implementation Report |
+| 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | **complete** — active fixture reconciliation, isolated real-Pi F5 proof, evidence split, and Issue 02 Implementation Report |
 
 No WP may be started out of order, and no WP may modify another WP's owned files without a reported dependency repair.
 

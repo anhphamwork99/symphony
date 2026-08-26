@@ -1,6 +1,6 @@
 # WP-05 — isolated real-Pi acceptance and Ticket 02 report
 
-**State:** pending
+**State:** completed (Symphony `cb023e587`; report `d77a566e0`; controlled Alfie `3fe340b401ca86bcbe8b55abd4de107e1d93482e` / `0.15.0-alfie.6`)
 
 **Owner role:** implementation/evidence worker
 
