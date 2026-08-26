@@ -314,7 +314,7 @@ function makeMarkdown(baseline) {
     "See `incompatibilities.md` for the complete classification of observed findings. The suite found no blocking incompatibility and introduced no product budget.",
     "",
   );
-  return `${lines.join("\n")}\n`;
+  return lines.join("\n");
 }
 
 function makeIncompatibilityReport(baseline) {
