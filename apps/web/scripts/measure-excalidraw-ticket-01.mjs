@@ -2,6 +2,8 @@
 // FILE: measure-excalidraw-ticket-01.mjs
 // Purpose: Run the Ticket 01 Chromium performance suite and publish validated AC6 artifacts.
 // Layer: Evidence runner (does not alter production wiring or package configuration)
+// Validation: --validate-only <generated-baseline.json> validates a report;
+//             --validate-raw-marker <raw-marker.json> validates browser marker evidence.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -19,6 +21,16 @@ const marker = "SYNARA_TICKET01_PERF_RESULT:";
 const schemaVersion = "ticket01-excalidraw-baseline.v1";
 const browserApiPort = process.env.VITEST_BROWSER_API_PORT ?? "51101";
 const runtimeCommand = process.env.BUN_BIN ?? "bun";
+const requiredMeasurementIds = [
+  "hydrate-empty",
+  "hydrate-normal",
+  "hydrate-image",
+  "serialize-normal",
+  "update-progressive",
+  "serialize-image",
+  "export-svg-image",
+  "export-png-image",
+];
 
 const suiteArgs = [
   "run",
@@ -47,6 +59,17 @@ function readRevision() {
       { cause: error },
     );
   }
+}
+
+function readSourceState() {
+  return {
+    revision: readRevision(),
+    dirty:
+      execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+      }).trim().length > 0,
+  };
 }
 
 function isRecord(value) {
@@ -78,7 +101,7 @@ function validateMeasurement(value, index) {
   );
 }
 
-function validateEvidence(value) {
+function validateRawMarker(value) {
   if (!isRecord(value)) throw new Error("measurement marker must be an object");
   if (value.schemaVersion !== schemaVersion)
     throw new Error(`schemaVersion must be ${schemaVersion}`);
@@ -87,12 +110,26 @@ function validateEvidence(value) {
   requireString(value.browser.userAgent, "browser.userAgent");
   requireString(value.browser.platform, "browser.platform");
   if (!isRecord(value.protocol)) throw new Error("protocol metadata is missing");
-  if (value.protocol.warmupCount < 1)
+  if (!Number.isSafeInteger(value.protocol.warmupCount) || value.protocol.warmupCount < 1)
     throw new Error("protocol.warmupCount must be declared and positive");
-  if (value.protocol.sampleCount < 10) throw new Error("protocol.sampleCount must be at least 10");
+  if (!Number.isSafeInteger(value.protocol.sampleCount) || value.protocol.sampleCount < 10)
+    throw new Error("protocol.sampleCount must be an integer of at least 10");
   requireString(value.protocol.timer, "protocol.timer");
   requireString(value.protocol.gc, "protocol.gc");
   requireString(value.protocol.memory, "protocol.memory");
+  if (!isRecord(value.protocol.warmupCountByScenario))
+    throw new Error("protocol.warmupCountByScenario is missing");
+  for (const id of requiredMeasurementIds) {
+    if (
+      !Number.isSafeInteger(value.protocol.warmupCountByScenario[id]) ||
+      value.protocol.warmupCountByScenario[id] < 1
+    ) {
+      throw new Error(`protocol.warmupCountByScenario.${id} must be a positive integer`);
+    }
+    if (value.protocol.warmupCountByScenario[id] !== value.protocol.warmupCount) {
+      throw new Error(`protocol.warmupCountByScenario.${id} must match protocol.warmupCount`);
+    }
+  }
   if (!isRecord(value.fixtures)) throw new Error("fixture size metadata is missing");
   for (const category of ["empty", "normal", "image"]) {
     if (!isRecord(value.fixtures[category])) throw new Error(`fixtures.${category} is missing`);
@@ -100,16 +137,6 @@ function validateEvidence(value) {
       requireNumber(value.fixtures[category][field], `fixtures.${category}.${field}`);
   }
   if (!Array.isArray(value.measurements)) throw new Error("measurements must be an array");
-  const requiredMeasurementIds = [
-    "hydrate-empty",
-    "hydrate-normal",
-    "hydrate-image",
-    "serialize-normal",
-    "update-progressive",
-    "serialize-image",
-    "export-svg-image",
-    "export-png-image",
-  ];
   for (const [index, measurement] of value.measurements.entries())
     validateMeasurement(measurement, index);
   const actualIds = new Set(value.measurements.map((measurement) => measurement.id));
@@ -144,7 +171,10 @@ function validateEvidence(value) {
     "imagePngExport",
   ])
     requireBoolean(value.proofs[key], `proofs.${key}`);
-  if (value.proofs.repeatedVisibilityCycles < 1)
+  if (
+    !Number.isSafeInteger(value.proofs.repeatedVisibilityCycles) ||
+    value.proofs.repeatedVisibilityCycles < 1
+  )
     throw new Error("repeatedVisibilityCycles must be positive");
   for (const key of [
     "orderedProgressiveUpdates",
@@ -178,6 +208,75 @@ function validateEvidence(value) {
   }
 }
 
+function validateGeneratedBaseline(value) {
+  validateRawMarker({
+    schemaVersion: value.schemaVersion,
+    packageVersion: value.package?.version,
+    browser: value.environment?.browser,
+    protocol: value.protocol,
+    fixtures: value.fixtures,
+    measurements: value.measurements,
+    memoryObservation: value.memoryObservation,
+    proofs: value.proofs,
+    findings: value.findings,
+  });
+  if (value.ticket !== "01") throw new Error("ticket must be 01");
+  if (value.ac !== "AC6") throw new Error("ac must be AC6");
+  if (!isRecord(value.package)) throw new Error("package metadata is missing");
+  requireString(value.package.name, "package.name");
+  if (value.package.name !== "@excalidraw/excalidraw")
+    throw new Error("package.name must be @excalidraw/excalidraw");
+  if (value.package.version !== "0.18.1") throw new Error("package.version must be exactly 0.18.1");
+  requireString(value.package.resolution, "package.resolution");
+
+  if (!isRecord(value.environment)) throw new Error("environment metadata is missing");
+  requireString(value.environment.synaraRevision, "environment.synaraRevision");
+  if (!isRecord(value.environment.browser))
+    throw new Error("environment.browser metadata is missing");
+  if (!isRecord(value.environment.operatingSystem))
+    throw new Error("environment.operatingSystem metadata is missing");
+  for (const key of ["platform", "release", "architecture"])
+    requireString(value.environment.operatingSystem[key], `environment.operatingSystem.${key}`);
+  requireString(value.environment.buildMode, "environment.buildMode");
+  requireString(value.environment.focusedCommand, "environment.focusedCommand");
+
+  if (!isRecord(value.provenance)) throw new Error("provenance metadata is missing");
+  requireString(value.provenance.measuredSourceRevision, "provenance.measuredSourceRevision");
+  if (value.environment.synaraRevision !== value.provenance.measuredSourceRevision) {
+    throw new Error("environment.synaraRevision must match provenance.measuredSourceRevision");
+  }
+  requireBoolean(
+    value.provenance.measuredSourceRevisionDirty,
+    "provenance.measuredSourceRevisionDirty",
+  );
+  if (value.provenance.evidenceCommit !== null) {
+    requireString(value.provenance.evidenceCommit, "provenance.evidenceCommit");
+  }
+  requireString(value.provenance.evidenceCommitPolicy, "provenance.evidenceCommitPolicy");
+
+  for (const [index, measurement] of value.measurements.entries()) {
+    if (measurement.unit !== "ms") throw new Error(`measurements[${index}].unit must be ms`);
+    if (!isRecord(measurement.summary))
+      throw new Error(`measurements[${index}].summary is missing`);
+    if (measurement.summary.count !== measurement.samplesMs.length)
+      throw new Error(`measurements[${index}].summary.count does not match raw samples`);
+    requireNumber(measurement.summary.medianMs, `measurements[${index}].summary.medianMs`);
+    requireNumber(measurement.summary.p95Ms, `measurements[${index}].summary.p95Ms`);
+    requireString(
+      measurement.summary.percentileDefinition,
+      `measurements[${index}].summary.percentileDefinition`,
+    );
+  }
+
+  if (!isRecord(value.classificationCounts)) throw new Error("classificationCounts is missing");
+  const expectedCounts = classificationCounts(value.findings);
+  for (const classification of Object.keys(expectedCounts)) {
+    if (value.classificationCounts[classification] !== expectedCounts[classification]) {
+      throw new Error(`classificationCounts.${classification} does not match findings`);
+    }
+  }
+}
+
 function percentile(samples, percentileValue) {
   const sorted = samples.toSorted((left, right) => left - right);
   const position = (sorted.length - 1) * percentileValue;
@@ -203,7 +302,7 @@ function classificationCounts(findings) {
   }, {});
 }
 
-function makeBaseline(rawEvidence, revision) {
+function makeBaseline(rawEvidence, revision, sourceRevisionDirty) {
   return {
     schemaVersion,
     ticket: "01",
@@ -224,6 +323,13 @@ function makeBaseline(rawEvidence, revision) {
       buildMode:
         "Vite browser test build using the production-compatible apps/web toolchain; not production minification",
       focusedCommand: `VITEST_BROWSER_API_PORT=${browserApiPort} bun ${suiteArgs.join(" ")}`,
+    },
+    provenance: {
+      measuredSourceRevision: revision,
+      measuredSourceRevisionDirty: sourceRevisionDirty,
+      evidenceCommit: null,
+      evidenceCommitPolicy:
+        "The measurement source revision is captured before the browser run. Evidence/report artifacts are committed separately by the integrator; this runner never claims that later commit.",
     },
     fixtures: rawEvidence.fixtures,
     protocol: rawEvidence.protocol,
@@ -253,7 +359,8 @@ function makeMarkdown(baseline) {
     "## Environment and protocol",
     "",
     `- Package: \`${baseline.package.name}@${baseline.package.version}\` (${baseline.package.resolution})`,
-    `- Synara revision: \`${baseline.environment.synaraRevision}\``,
+    `- Measured Synara source revision: \`${baseline.provenance.measuredSourceRevision}\``,
+    `- Evidence/report commit: ${baseline.provenance.evidenceCommit ?? "separate commit, not recorded by the measurement runner"}`,
     `- Browser: ${baseline.environment.browser.userAgent}`,
     `- OS/architecture: ${baseline.environment.operatingSystem.platform} ${baseline.environment.operatingSystem.release} / ${baseline.environment.operatingSystem.architecture}`,
     `- Build mode: ${baseline.environment.buildMode}`,
@@ -321,7 +428,7 @@ function makeIncompatibilityReport(baseline) {
   const lines = [
     "# Ticket 01 incompatibility report",
     "",
-    `Evidence source: \`excalidraw-baseline.json\`, schema \`${baseline.schemaVersion}\`, package \`${baseline.package.name}@${baseline.package.version}\`, Synara revision \`${baseline.environment.synaraRevision}\`.`,
+    `Evidence source: \`excalidraw-baseline.json\`, schema \`${baseline.schemaVersion}\`, package \`${baseline.package.name}@${baseline.package.version}\`, measured Synara source revision \`${baseline.provenance.measuredSourceRevision}\`.`,
     "",
     "Decision 0048 classifications are limited to: none observed, non-blocking limitation, or blocking incompatibility. A finite timing or memory observation is not a failure because Ticket 01 defines no product budget.",
     "",
@@ -364,18 +471,22 @@ function extractMarker(output) {
   }
 }
 
-function validateOnly(path) {
+function readJson(path) {
   const content = readFileSync(path, "utf8");
-  let value;
   try {
-    value = JSON.parse(content);
+    return JSON.parse(content);
   } catch (error) {
     throw new Error(
       `validation input is malformed JSON: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
-  validateEvidence(value);
+}
+
+function validateOnly(path, kind) {
+  const value = readJson(path);
+  if (kind === "raw-marker") validateRawMarker(value);
+  else validateGeneratedBaseline(value);
   console.log(`validated ${path}`);
 }
 
@@ -400,14 +511,32 @@ function runSuite() {
 function main() {
   const validateIndex = process.argv.indexOf("--validate-only");
   if (validateIndex !== -1) {
-    const path = process.argv[validateIndex + 1];
-    if (!path) throw new Error("--validate-only requires a JSON path");
-    validateOnly(resolve(path));
+    const firstArgument = process.argv[validateIndex + 1];
+    if (!firstArgument)
+      throw new Error(
+        "--validate-only requires a generated baseline JSON path; use --validate-raw-marker for marker JSON",
+      );
+    if (firstArgument === "raw-marker") {
+      const path = process.argv[validateIndex + 2];
+      if (!path) throw new Error("--validate-only raw-marker requires a JSON path");
+      validateOnly(resolve(path), "raw-marker");
+    } else {
+      validateOnly(resolve(firstArgument), "generated-baseline");
+    }
     return;
   }
+  const rawMarkerIndex = process.argv.indexOf("--validate-raw-marker");
+  if (rawMarkerIndex !== -1) {
+    const path = process.argv[rawMarkerIndex + 1];
+    if (!path) throw new Error("--validate-raw-marker requires a JSON path");
+    validateOnly(resolve(path), "raw-marker");
+    return;
+  }
+  const sourceState = readSourceState();
   const rawEvidence = runSuite();
-  validateEvidence(rawEvidence);
-  const baseline = makeBaseline(rawEvidence, readRevision());
+  validateRawMarker(rawEvidence);
+  const baseline = makeBaseline(rawEvidence, sourceState.revision, sourceState.dirty);
+  validateGeneratedBaseline(baseline);
   mkdirSync(evidenceDirectory, { recursive: true });
   writeFileSync(baselineJsonPath, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
   writeFileSync(baselineMarkdownPath, makeMarkdown(baseline), "utf8");

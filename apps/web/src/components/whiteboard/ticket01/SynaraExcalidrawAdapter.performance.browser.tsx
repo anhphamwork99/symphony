@@ -47,6 +47,7 @@ interface PerformanceEvidence {
   };
   readonly protocol: {
     readonly warmupCount: number;
+    readonly warmupCountByScenario: Readonly<Record<string, number>>;
     readonly sampleCount: number;
     readonly timer: string;
     readonly gc: string;
@@ -250,6 +251,20 @@ describe("Ticket 01 AC6 Excalidraw Chromium performance baseline", () => {
     const imageHydration = await collectHydrationSamples(imageScene, "hydrate-image");
     measurements.push({ id: "hydrate-image", samplesMs: imageHydration });
 
+    // Warm progressive updates on a disposable real editor so measured sequences remain 1..SAMPLE_COUNT.
+    const updateWarmupMount = await mountAndMeasure(normalScene, "update-progressive-warmup");
+    try {
+      const handle = updateWarmupMount.ref.current!;
+      for (let index = 0; index < WARMUP_COUNT; index += 1) {
+        handle.updateScene({
+          elements: changedScene(normalScene, index).elements,
+          sequence: index + 1,
+        });
+      }
+    } finally {
+      await updateWarmupMount.mounted.unmount();
+    }
+
     const normalMount = await mountAndMeasure(normalScene, "normal-operations");
     let normalMountIdentity: ReturnType<ExcalidrawTicket01HarnessHandle["getIdentity"]>;
     let viewportRetention = false;
@@ -259,6 +274,11 @@ describe("Ticket 01 AC6 Excalidraw Chromium performance baseline", () => {
       normalMountIdentity = handle.getIdentity();
       handle.restoreViewport({ scrollX: 137, scrollY: -83, zoom: 1.25 });
       const expectedViewport = handle.captureViewport();
+      for (let index = 0; index < WARMUP_COUNT; index += 1) {
+        const serialized = handle.serializeScene();
+        expect(serialized).toContain('"elements"');
+        expect(serialized).toContain('"files"');
+      }
       const serializationSamples: number[] = [];
       for (let index = 0; index < SAMPLE_COUNT; index += 1) {
         const startedAt = performance.now();
@@ -300,6 +320,14 @@ describe("Ticket 01 AC6 Excalidraw Chromium performance baseline", () => {
     const imageMount = await mountAndMeasure(imageScene, "image-operations");
     try {
       const handle = imageMount.ref.current!;
+      for (let index = 0; index < WARMUP_COUNT; index += 1) {
+        const serialized = handle.serializeScene();
+        expect(serialized).toContain("file-excalidraw-mark");
+        const svg = await handle.exportSvg();
+        expect(svg).toContain("<svg");
+        const png = await handle.exportPng();
+        expect(png.size).toBeGreaterThan(0);
+      }
       const serializationSamples: number[] = [];
       const svgSamples: number[] = [];
       const pngSamples: number[] = [];
@@ -410,6 +438,16 @@ describe("Ticket 01 AC6 Excalidraw Chromium performance baseline", () => {
       },
       protocol: {
         warmupCount: WARMUP_COUNT,
+        warmupCountByScenario: {
+          "hydrate-empty": WARMUP_COUNT,
+          "hydrate-normal": WARMUP_COUNT,
+          "hydrate-image": WARMUP_COUNT,
+          "serialize-normal": WARMUP_COUNT,
+          "update-progressive": WARMUP_COUNT,
+          "serialize-image": WARMUP_COUNT,
+          "export-svg-image": WARMUP_COUNT,
+          "export-png-image": WARMUP_COUNT,
+        },
         sampleCount: SAMPLE_COUNT,
         timer:
           "performance.now() in the Chromium page; operation timers exclude mount/unmount except hydration timers",
