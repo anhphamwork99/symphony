@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "ticket01-excalidraw-baseline.v1",
+  "ticket": "01",
+  "ac": "AC6",
+  "package": {
+    "name": "@excalidraw/excalidraw",
+    "version": "0.18.1",
+    "resolution": "exact package pin 0.18.1"
+  },
+  "environment": {
+    "synaraRevision": "9cac29cffbdc7ff18ac5a4002a7e4ae7ee664165",
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+      "platform": "MacIntel",
+      "language": "en-US",
+      "devicePixelRatio": 1
+    },
+    "operatingSystem": {
+      "platform": "darwin",
+      "release": "25.4.0",
+      "architecture": "arm64"
+    },
+    "buildMode": "Vite browser test build using the production-compatible apps/web toolchain; not production minification",
+    "focusedCommand": "VITEST_BROWSER_API_PORT=51101 bun run --cwd apps/web test:browser -- src/components/whiteboard/ticket01/SynaraExcalidrawAdapter.performance.browser.tsx --reporter=verbose"
+  },
+  "fixtures": {
+    "empty": {
+      "elements": 0,
+      "files": 0,
+      "jsonBytes": 26
+    },
+    "normal": {
+      "elements": 5,
+      "files": 0,
+      "jsonBytes": 1440
+    },
+    "image": {
+      "elements": 6,
+      "files": 1,
+      "jsonBytes": 1880
+    }
+  },
+  "protocol": {
+    "warmupCount": 2,
+    "sampleCount": 12,
+    "timer": "performance.now() in the Chromium page; operation timers exclude mount/unmount except hydration timers",
+    "gc": "No forced garbage collection; samples include normal browser scheduling and allocator state.",
+    "memory": "Memory API is probed after visible/hidden retained canvases and repeated visibility cycles; unavailable is retained as a reason."
+  },
+  "measurements": [
+    {
+      "id": "hydrate-empty",
+      "unit": "ms",
+      "samplesMs": [
+        23.59999990463257, 22.200000047683716, 23, 21.399999856948853, 22.399999856948853,
+        21.90000009536743, 22.09999990463257, 21.199999809265137, 21.40000009536743,
+        21.40000009536743, 21.5, 22.600000143051147
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 22,
+        "p95Ms": 23.269999957084654,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "hydrate-normal",
+      "unit": "ms",
+      "samplesMs": [
+        21.899999856948853, 21.700000047683716, 22.299999952316284, 22.09999990463257,
+        21.100000143051147, 22.600000143051147, 22.40000009536743, 21.59999990463257,
+        21.90000009536743, 22.5, 22.299999952316284, 20.899999856948853
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 22,
+        "p95Ms": 22.545000064373017,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "hydrate-image",
+      "unit": "ms",
+      "samplesMs": [
+        21.5, 21.40000009536743, 21.800000190734863, 22.59999990463257, 23, 21.799999952316284, 22,
+        22, 21.100000143051147, 22.200000047683716, 22.09999990463257, 22.700000047683716
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 22,
+        "p95Ms": 22.835000026226044,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "serialize-normal",
+      "unit": "ms",
+      "samplesMs": [
+        0.09999990463256836, 0.10000014305114746, 0, 0, 0, 0.09999990463256836, 0, 0,
+        0.09999990463256836, 0, 0, 0
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 0,
+        "p95Ms": 0.10000001192092896,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "update-progressive",
+      "unit": "ms",
+      "samplesMs": [
+        0.20000004768371582, 0.09999990463256836, 0, 0, 0.09999990463256836, 0.10000014305114746, 0,
+        0, 0.09999990463256836, 0, 0, 0
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 0,
+        "p95Ms": 0.14500010013580317,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "serialize-image",
+      "unit": "ms",
+      "samplesMs": [
+        0, 0.09999990463256836, 0.10000014305114746, 0.09999990463256836, 0, 0.09999990463256836, 0,
+        0.10000014305114746, 0, 0.10000014305114746, 0.09999990463256836, 0.09999990463256836
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 0.09999990463256836,
+        "p95Ms": 0.10000014305114746,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "export-svg-image",
+      "unit": "ms",
+      "samplesMs": [
+        14.399999856948853, 2.200000047683716, 2, 2, 1.9000000953674316, 1.5, 1.7999999523162842,
+        2.0999999046325684, 1.9000000953674316, 1.6999998092651367, 1.5, 1.4000000953674316
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 1.9000000953674316,
+        "p95Ms": 7.689999961853019,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    },
+    {
+      "id": "export-png-image",
+      "unit": "ms",
+      "samplesMs": [
+        12.600000143051147, 3.3999998569488525, 8.299999952316284, 4, 6.400000095367432,
+        6.700000047683716, 6.599999904632568, 6.200000047683716, 6.3999998569488525,
+        6.400000095367432, 6.6000001430511475, 6.8999998569488525
+      ],
+      "summary": {
+        "count": 12,
+        "medianMs": 6.5,
+        "p95Ms": 10.23500003814697,
+        "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
+      }
+    }
+  ],
+  "memoryObservation": {
+    "status": "available",
+    "api": "performance.memory.usedJSHeapSize",
+    "kind": "coarse-process",
+    "beforeBytes": 53500000,
+    "afterBytes": 53500000,
+    "limitation": "Chrome coarse process heap telemetry; it is not precise per-canvas retained memory."
+  },
+  "proofs": {
+    "orderedProgressiveUpdates": true,
+    "nonRemount": true,
+    "viewportRetention": true,
+    "visibleCanvas": true,
+    "hiddenRetainedCanvas": true,
+    "repeatedVisibilityCycles": 8,
+    "separateMountUnmount": true,
+    "imageSerialization": true,
+    "imageSvgExport": true,
+    "imagePngExport": true
+  },
+  "findings": [
+    {
+      "id": "required-public-boundaries",
+      "observation": "All required measurements completed through the lazy Synara adapter and official Excalidraw runtime in Chromium.",
+      "classification": "none observed"
+    },
+    {
+      "id": "memory-attribution",
+      "observation": "Memory readings are unavailable or coarse process-wide browser telemetry and are not precise per-canvas retained-size measurements.",
+      "classification": "non-blocking limitation"
+    },
+    {
+      "id": "undo-transaction-boundary",
+      "observation": "Ticket 01 records updateScene feasibility only; exact one-event AI Undo remains owned by Ticket 02 and no product budget is inferred here.",
+      "classification": "non-blocking limitation"
+    },
+    {
+      "id": "dot-grid",
+      "observation": "Dot-grid rendering and export policy are intentionally outside Ticket 01 scope.",
+      "classification": "non-blocking limitation"
+    },
+    {
+      "id": "blocking-incompatibilities",
+      "observation": "No build, runtime, semantic, remount, viewport, lock, or export incompatibility was observed by this complete run.",
+      "classification": "none observed"
+    }
+  ],
+  "classificationCounts": {
+    "none observed": 2,
+    "non-blocking limitation": 3
+  }
+}
