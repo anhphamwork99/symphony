@@ -10,7 +10,7 @@
 
 **Dependencies:** WP-04 complete. This is the final Ticket 02 work package; it does not accept the ticket or open Ticket 03.
 
-**Authority:** Ticket 02 acceptance criteria and evidence obligations in [`../../issues/02-canonical-identity-and-result-continuity.md`](../../issues/02-canonical-identity-and-result-continuity.md), Decision 0002, and inherited controlled-artifact/real-Pi evidence rules.
+**Authority:** Ticket 02 acceptance criteria and evidence obligations in [`../../issues/02-canonical-identity-and-result-continuity.md`](../../issues/02-canonical-identity-and-result-continuity.md), Decision 0002, binding Decision 0003 for WP-05/F5, and inherited controlled-artifact/real-Pi evidence rules.
 
 ## Objective
 
@@ -18,10 +18,16 @@ Exercise the actual controlled managed Pi composition at an isolated runtime bou
 
 ## Inherited terminal-race evidence obligation (F5)
 
-WP-03 review left F5 open by design. WP-05 must carry and close it with both
-synchronized deterministic proofs and isolated real-Pi proofs against the exact
-WP-04 artifact. This is evidence only; it does not authorize a WP-03 or other
-production-source change. The settled contract is [Decision 0003](../../decisions/0003-terminal-steer-race-linearization-contract.md), which clarifies but does not supersede Decision 0002.
+WP-03 review left F5 open by design. WP-05 must carry and close it with the
+required synchronized unit-simulation strands and isolated real-Pi proofs
+against the exact WP-04 artifact. The existing scripted `RaceState` cases are
+unit simulations only: they may preserve deterministic diagnostic coverage but
+must not be labeled Decision 0003 acceptance proof once the actual real-Pi
+strands exist. The actual F5 acceptance proof must use the staged-module
+instrumentation authorized below. This is evidence only; it does not authorize
+a WP-03 or other production-source change. The settled contract is [Decision
+0003](../../decisions/0003-terminal-steer-race-linearization-contract.md),
+which clarifies but does not supersede Decision 0002.
 
 A managed steer linearizes when the pinned Pi SDK
 `AgentSession.steer`/`_queueSteer` synchronously inserts into the exact live
@@ -57,7 +63,13 @@ the new canonical acceptance suite and the Issue 02 report:
 ### New acceptance/report artifacts
 
 - `apps/server/src/provider/piSubagentCanonicalIdentityAcceptance.test.ts` — new isolated real-Pi acceptance suite.
+- `apps/server/scripts/wallclock-tests.ts` — add only `src/provider/piSubagentCanonicalIdentityAcceptance.test.ts` to `WALLCLOCK_TESTS`; do not alter runner semantics or register unrelated suites.
 - `.planning/synara-pi-subagent-lifecycle-reliability/issues/02-canonical-identity-and-result-continuity.md` — Implementation Report section only; fill from captured evidence and do not change status/frontier/acceptance disposition.
+
+The wallclock manifest entry is required because this suite contains real-Pi
+process/model timing and synchronized F5 barriers. The shared `vitest.config.ts`
+unit exclusion and `scripts/run-tests.ts` standalone orchestration consume this
+manifest; no separate unit-config edit is authorized by WP-05.
 
 ### Active apps/server pin/capability fixtures
 
@@ -107,6 +119,7 @@ comments or shared constants mention the capability.
 - No synthetic replacement Agent, fake registry, on-disk lookalike, unpinned extension, or uncontrolled global Pi home.
 - No changes to watchdog, teardown, cancellation, lifecycle containment, Resume, provider bootstrap, automatic replay, guardian, or unrelated public API.
 - No changes to production source, contracts source, provenance manifest, or Alfie; fixture repair must stay within the exact list above.
+- F5 instrumentation is test-only and must not be extracted into production code, the provider manager, the Pi adapter, the managed-tool wrapper, or shared runtime modules. It may wrap only the exact staged artifact module and exact live child session described below, and must restore every prototype/session method in `finally`.
 - No blanket replacement of every `.4`/old-commit literal. A legacy, stale, mixed-version, wrong-hash, stripped-capability, or lookalike fixture may retain `.4` or the old commit only when it is an intentional negative/control script and the report classifies its path, test, and expected rejection. Positive active pin assertions must use the WP-04 exact pin.
 - No claim that deterministic or controlled fixtures are real-Pi evidence; no claim of Ticket 02 acceptance or downstream-ticket completion.
 - No new migration, database rewrite, or test that opens a second read-only SQLite connection while the live repository owns the WAL.
@@ -114,6 +127,42 @@ comments or shared constants mention the capability.
 ## Implementation contract
 
 Use the existing real-extension/provenance harness patterns and isolated home/runtime configuration. The test must load the registered production Agent from the exact WP-04 artifact and negotiate the canonical-routing capability.
+
+### Authorized synchronized real-Pi F5 instrumentation
+
+After staging and verifying the controlled artifact, but before loading the
+production Agent, import the exact staged module
+`<artifact>/agent/extensions/pi-subagents/src/agent-manager.ts`. The suite must
+prove same-module identity: the imported `AgentManager` constructor/prototype
+is the module instance used by the registered production Agent, not a checkout,
+global extension, or second module graph. Wrap only
+`AgentManager.prototype.steer` from that exact staged module. For the exact
+current `(executionId, attemptId, generation)` record selected by the observed
+real parent session, temporarily wrap the actual child
+`record.session.steer`, preserving the pinned SDK call and its synchronous
+queue-insertion boundary. Barriers may hold the returned promise so the suite
+can release insertion, retirement, durable commit, bookkeeping, and return in
+controlled order; they must not replace or defer the SDK's synchronous
+insertion itself.
+
+Trigger the registered production `steer_subagent` tool from the observed real
+parent session. Do not call a fabricated tool, synthetic Agent, fake provider,
+provider-local global scan, or reconstructed child. Filter every observation to
+the exact project/thread/execution/attempt/generation tuple. Observe live
+retirement and exact-index removal through `bridgeActiveExecutions`, and observe
+durable terminal settlement through the live repository journal. Capture the
+required invocation, tuple lookup, live guard, SDK insertion when present,
+retirement/index removal, durable commit, bookkeeping, and return trace,
+including insertion/send/queue/replay/Resume/bootstrap/reconstruction/new-child
+counts and bounded diagnostics. Restore the staged `AgentManager.prototype.steer`
+and exact child `record.session.steer` in `finally`, even after timeout or
+assertion failure, and assert that no active execution, wrapped method, child,
+temporary artifact/home, or journal/test resource remains leaked.
+
+The same-module proof, barrier synchronization, exact tuple filtering,
+production-tool trigger, live-bridge retirement observation, journal-terminal
+observation, and `finally` restoration are mandatory acceptance conditions;
+module-resolution coincidence or a passing simulated race is insufficient.
 
 Before implementation, perform a repository-wide census limited to tracked
 `apps/server` and `packages/contracts` tests/helpers. Classify every remaining
@@ -151,36 +200,45 @@ Required legs:
 3. **Durable-first continuity:** force/observe a nonterminal exact-live supplement, then a terminal durable result with a conflicting live nonterminal report. Prove durable terminal wins. Evict the provider record and reopen the durable repository/file as supported by the existing harness; prove the same authorized `executionId` returns bounded durable evidence rather than `Agent not found`. Missing durable evidence remains honest uncertainty.
 4. **Fencing and authorization:** exercise stale attempt and generation, wrong project/thread, and unauthorized read/control. Verify rejection occurs before provider lookup and cannot reach another execution's live record.
 5. **Exact-live control:** steer an authorized exact current tuple while live; after live-record eviction, return stable unavailable-control. Prove no queue, replay, bootstrap, reconstructed child, or new child occurs.
-6. **Terminal steer race (F5), deterministic terminal-first:** start an
-   authorized steer against a live exact current tuple, synchronize terminal/
-   live retirement and index removal before the pinned Alfie exact-live/status
-   guard can insert, and assert bounded `unavailable-control`/stale output,
-   zero SDK insertion/send, and no queue, replay, Resume/bootstrap,
-   reconstruction, or new child.
-7. **Terminal steer race (F5), deterministic enqueue-first:** synchronize the
-   pinned Pi SDK `AgentSession.steer`/`_queueSteer` insertion first, then allow
-   natural completion and durable terminal commit before the steer call returns.
-   Assert exactly one prior insertion, an allowed applied response, durable
-   terminal precedence, retired exact index, and no second provider action or
-   reconstruction path.
-8. **Terminal steer race (F5), deterministic cancellation:** exercise
-   cancellation before insertion and after insertion; invalidate the
-   generation and assert zero insertion in the cancellation-first strand and
-   no stale post-await mutation, reindex, terminal override, or provider action
-   in either strand.
-9. **Terminal steer race (F5), isolated real Pi:** run separate terminal-first
-   and enqueue-first cases through the registered production Agent, exact WP-04
-   artifact, and exact Pi SDK; capture the required ordered trace, exact
-   artifact/SDK versions, and all zero/one insertion and no-replay counters.
-10. **Evidence boundaries:** run deterministic, controlled-Alfie, and real-Pi
-    commands separately; capture command, exit code, test count, exact pins,
-    capability response, bounded diagnostics, and any timing/runtime caveat.
+6. **Terminal steer race (F5), synchronized unit simulation:** retain separate
+   terminal-first, enqueue-first, and cancellation strands for deterministic
+   service/diagnostic coverage, including the required trace and zero/one
+   insertion assertions. These scripted `RaceState` cases are explicitly unit
+   simulations, not Decision 0003 acceptance proof, and must not be relabeled
+   as real-Pi evidence.
+7. **Terminal steer race (F5), isolated real-Pi terminal-first:** after the
+   same-module proof and before the controlled artifact is loaded, install the
+   test-only staged `AgentManager.prototype.steer` and exact child-session
+   wrappers. Trigger the registered production `steer_subagent` tool from the
+   observed parent, hold the returned promise with barriers, and win
+   retirement/index removal before synchronous SDK insertion. Assert bounded
+   `unavailable-control`/stale output, zero insertion/send, and no queue,
+   replay, Resume/bootstrap, reconstruction, or new child.
+8. **Terminal steer race (F5), isolated real-Pi enqueue-first:** use the same
+   staged wrappers and barriers to release the pinned SDK
+   `AgentSession.steer`/`_queueSteer` synchronous insertion first, then allow
+   natural completion and durable journal terminal commit before the steer call
+   returns. Assert exactly one prior insertion, an allowed applied response,
+   durable terminal precedence, retired exact index, and no second provider
+   action or reconstruction path.
+9. **Terminal steer race (F5), real-Pi observations and cleanup:** for both
+   actual strands, filter to the exact project/thread/execution/attempt/generation
+   record, observe retirement through `bridgeActiveExecutions` and terminal
+   truth through the live repository journal, capture the ordered trace,
+   artifact/SDK versions, insertion/send/no-replay counters, and bounded
+   diagnostics, then assert prototype/session restoration and isolated-runtime
+   cleanup even on failure.
+10. **Evidence boundaries:** run unit simulation, controlled-Alfie, and
+    synchronized real-Pi commands separately; capture command, exit code, test
+    count, exact pins, capability response, bounded diagnostics, ordered
+    insertion/retirement/durable traces, cleanup/isolation assertions, and any
+    timing/runtime caveat.
 
 A real-Pi test may use a deterministic loopback model only as the model server, provided the registered production Pi/Agent path and controlled artifact are real. It must not replace the Agent or provider composition with a fake.
 
 ## Tests and evidence contract
 
-The acceptance suite must execute every leg in the implementation contract and preserve separate deterministic, controlled-Alfie, and real-Pi result rows. The matrix below is the report shape, not a substitute for running the tests.
+The acceptance suite must execute every leg in the implementation contract and preserve separate unit-simulation, controlled-Alfie, and synchronized real-Pi result rows. The scripted `RaceState` rows are diagnostic/unit evidence only and must be visibly excluded from Decision 0003 acceptance claims. The real-Pi rows must prove same-module staged instrumentation, barrier-controlled synchronous insertion, exact tuple filtering, production `steer_subagent` dispatch, `bridgeActiveExecutions` retirement, live-journal terminal truth, ordered traces, and cleanup/isolation assertions. The matrix below is the report shape, not a substitute for running the tests.
 
 In addition, the evidence must include a fixture reconciliation ledger with:
 
@@ -207,9 +265,9 @@ Populate the existing Issue 02 Implementation Report, without changing its statu
 | Contract version | `execution-identity-routing-v1` capability request/response and compatibility result |
 | Ownership split | Alfie exact live tuple index vs Symphony durable auth/current tuple/read boundary |
 | AC1–AC2 | public identity comparisons, no-leak scan, canonical/alias/provider-ID matrix |
-| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and F5 terminal-first plus enqueue-first traces with retirement/index removal and durable commit ordering |
-| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics; bounded terminal-first unavailable/stale result; enqueue-first applied result only after exactly one insertion; cancellation generation invalidation; and no queue/replay/Resume/bootstrap/reconstruction/new-child proof |
-| AC6 | separate deterministic terminal-first/enqueue-first/cancellation rows, controlled-Alfie capability/provenance row, and isolated real-Pi terminal-first/enqueue-first rows with exact artifact/SDK versions |
+| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and actual real-Pi F5 terminal-first plus enqueue-first traces with same-module proof, retirement/index removal, and durable commit ordering |
+| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics; bounded real-Pi terminal-first unavailable/stale result; real-Pi enqueue-first applied result only after exactly one synchronous insertion; unit-simulation cancellation generation invalidation; and no queue/replay/Resume/bootstrap/reconstruction/new-child proof |
+| AC6 | separate unit-simulation terminal-first/enqueue-first/cancellation rows (not Decision 0003 acceptance), controlled-Alfie capability/provenance row, and synchronized isolated real-Pi terminal-first/enqueue-first rows with same-module proof, exact artifact/SDK versions, ordered live/journal traces, and cleanup/isolation assertions |
 | Non-goals | explicit watchdog/teardown/Resume/bootstrap/replay/guardian exclusions |
 | Review handoff | deviations, untested cases, residual risks, and exact shortest reviewer reproductions |
 
@@ -234,6 +292,12 @@ ALFIE_REPO_DIR=/Users/anhpham99/alfie \
   bun run test src/provider/piSubagentForegroundAcceptance.test.ts
 ALFIE_REPO_DIR=/Users/anhpham99/alfie \
   bun run test src/provider/piSubagentCanonicalIdentityAcceptance.test.ts
+
+# Required standalone wallclock proof for the canonical suite. This is the
+# wallclock project invocation, not the unit project and not a multi-file run.
+ALFIE_REPO_DIR=/Users/anhpham99/alfie \
+  ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 \
+  --no-file-parallelism src/provider/piSubagentCanonicalIdentityAcceptance.test.ts
 
 # Re-run deterministic routing/read evidence.
 bun run test src/provider/piSubagentExecutionReadBoundary.test.ts \
@@ -262,17 +326,20 @@ git status --short
 
 Use an isolated Pi home and runtime configuration; never start the user's
 default Synara instance. The canonical acceptance command must run the
-synchronized deterministic terminal-first, enqueue-first, and cancellation
-strands separately, and the isolated real-Pi command must run separate
-terminal-first and enqueue-first cases. Record each command's exit code,
-elapsed time, test count, exact pin/capability output, exact artifact and Pi
-SDK versions (`@alfie/pi-subagents@0.15.0-alfie.5` and
-`@earendil-works/pi-coding-agent@0.83.0`), ordered trace, insertion/send
-counts, fixture ledger, model/runtime configuration, provenance output, and
-database reopen discipline. If the full wrapper is unavailable or blocked by
-unrelated workspace infrastructure, retain focused evidence and report the
-limitation rather than claiming full acceptance. Do not run fmt/lint/typecheck
-for this planning packet.
+synchronized unit-simulation terminal-first, enqueue-first, and cancellation
+strands separately, while the required standalone wallclock invocation above
+must run the actual real-Pi terminal-first and enqueue-first cases in the
+wallclock project and keep this suite out of unit discovery through the shared
+manifest. Record each command's exit code, elapsed time, test count, exact
+pin/capability output, exact artifact and Pi SDK versions
+(`@alfie/pi-subagents@0.15.0-alfie.5` and
+`@earendil-works/pi-coding-agent@0.83.0`), same-module proof, ordered
+live-bridge/journal trace, insertion/send/no-replay counts, prototype/session
+restoration, cleanup/isolation assertions, fixture ledger, model/runtime
+configuration, provenance output, and database reopen discipline. If the full
+wrapper is unavailable or blocked by unrelated workspace infrastructure,
+retain focused evidence and report the limitation rather than claiming full
+acceptance. Do not run fmt/lint/typecheck for this planning packet.
 
 ## Commit and self-review
 
@@ -298,8 +365,9 @@ Self-review:
   synthetic/legacy negatives;
 - no provider `agentId` leaked; no valid public handle becomes `Agent not found` solely due to live eviction;
 - durable terminal precedence, auth-before-provider, tuple fencing, exact-live steer, and both F5 terminal-first and enqueue-first race strands are demonstrated; terminal-first has zero insertion/send, enqueue-first has exactly one prior synchronous insertion, and cancellation invalidates generations and fences post-await bookkeeping;
-- every F5 trace contains invocation, tuple lookup, live guard, SDK insertion when applicable, retirement/index removal, durable commit, bookkeeping, and return, with no post-terminal second action or identity leak;
-- isolated real-Pi terminal-first and enqueue-first evidence uses the registered production Agent, exact WP-04 artifact, and exact Pi SDK version rather than a synthetic Agent;
+- every actual real-Pi F5 trace contains invocation, tuple lookup, live guard, SDK insertion when applicable, retirement/index removal, durable commit, bookkeeping, and return, with no post-terminal second action or identity leak; scripted `RaceState` traces are labeled unit simulations only and are not used as Decision 0003 acceptance;
+- isolated real-Pi terminal-first and enqueue-first evidence proves same-module staged instrumentation, uses the registered production Agent, exact WP-04 artifact, and exact Pi SDK version rather than a synthetic Agent, and records live-bridge retirement plus live-journal terminal truth;
+- the wallclock manifest registers only the canonical suite, unit discovery excludes it through shared config, and the standalone command passes with prototype/session restoration and cleanup/isolation assertions;
 - no later-ticket behavior or DB migration was introduced;
 - report states every deviation and untested limit honestly.
 
