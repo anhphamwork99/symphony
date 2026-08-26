@@ -1,12 +1,12 @@
 # WP-04 — Symphony provenance re-pin of exact Alfie commit
 
-**State:** pending
+**State:** completed
 
 **Owner role:** implementation worker
 
 **Repository:** Symphony
 
-**Baseline:** Alfie pre-WP-01 `aa6fa4a8540644d2509b10d6df854486ddc67d1d` / `0.15.0-alfie.4`; Symphony `93628e465866e9bf24610b4fca39b5c30f459221`. WP-01, WP-02, and WP-03 implementation SHAs are required inputs.
+**Baseline:** Alfie pre-WP-01 `aa6fa4a8540644d2509b10d6df854486ddc67d1d` / `0.15.0-alfie.4`; Symphony `93628e465866e9bf24610b4fca39b5c30f459221`. Completed against exact Alfie `73bc7744f8fbbd12206302de2df8230b29a49178` / `0.15.0-alfie.5` and integrated Symphony commits `29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` and `14f3d2a4371a3ea4050b2e54fa026995fd81f706`.
 
 **Required input:** `ALFIE_T02_COMMIT` is the full SHA of WP-01's single immutable Alfie commit, which must contain the runtime changes, tests, and the exact `0.15.0-alfie.5` package version.
 
@@ -42,6 +42,58 @@ No Alfie file—including `package.json`—is in this write set. No source imple
 3. Update the Symphony provenance manifest with the exact `ALFIE_T02_COMMIT`, package version, repository URL, relative manifest path, and file hashes. Keep the manifest a cryptographic assertion, not a mutable discovery mechanism.
 4. Run the existing provenance helper and tests against `ALFIE_REPO_DIR=/Users/anhpham99/alfie`. Verify production extension loading, not a synthetic tool or on-disk lookalike. Preserve tests that reject lookalikes, stripped/mixed versions, dirty trees, and hash mismatch.
 5. Record the capability equivalent to `execution-identity-routing-v1` and canonical-routing files in the provenance/evidence report. A missing capability or changed hash invalidates the pin; it must not fall back to legacy while claiming managed acceptance.
+
+## Completion record
+
+WP-04 completed on Symphony main with the required exact provenance pin and a
+bounded two-commit remediation:
+
+1. `29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` (`chore(pi): repin canonical identity extension provenance`)
+   updated the controlled manifest and the narrow real-extension/foreground
+   provenance expectations. It records Alfie origin
+   `https://github.com/anhphamwork99/alfie.git`, exact commit
+   `73bc7744f8fbbd12206302de2df8230b29a49178`, package
+   `@alfie/pi-subagents@0.15.0-alfie.5`, and these SHA-256 manifest hashes:
+
+   | Manifest-owned file | SHA-256 |
+   | --- | --- |
+   | `agent/extensions/pi-subagents/package.json` | `e10f46399233ecd2d9af4bd8ad369171a9234a88454e27b3ae96f2d7442f2289` |
+   | `agent/extensions/pi-subagents/src/index.ts` | `4e33ef5ea36b249b41e63583ecb2c1cfa23bff5ecd73a05cedfc121eb3b00855` |
+   | `agent/extensions/pi-subagents/src/agent-manager.ts` | `9c635818970b286d691fffaa0f01bb95ee0b6f9ee2a11a015036617494f29e1a` |
+   | `agent/extensions/pi-subagents/src/agent-runner.ts` | `98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2` |
+   | `agent/extensions/pi-subagents/src/child-bash-supervisor.ts` | `ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0` |
+
+2. `14f3d2a4371a3ea4050b2e54fa026995fd81f706`
+   (`test(pi): reconcile canonical capability probes`) was the necessary
+   bounded follow-up after the exact repin exposed the active stripped-capability
+   fixture and a structural capability snapshot assertion. It added
+   `execution-identity-routing-v1` to the real mixed-version probe and changed
+   the repeated capability observation from reference identity to structural
+   equality. It changed no production source and did not weaken the stale,
+   lookalike, dirty-tree, or hash-mutation rejection paths.
+
+### Scope and clean-boundary evidence
+
+The net WP-04 scope was exactly:
+
+- `apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json`
+- `apps/server/src/provider/piSubagentRealExtension.test.ts`
+- `apps/server/src/provider/piSubagentForegroundAcceptance.test.ts`
+
+The Alfie checkout was read-only, exact, and origin-bound at the pin, with
+`git status --porcelain` empty (clean tree); WP-04 made no Alfie changes. The managed capability recorded and exercised is
+`execution-identity-routing-v1`. WP-04 focused evidence was: the controlled
+Alfie suite ran **3 files / 22 tests, all passing**; the focused
+`piSubagentRealExtension.test.ts` production-extension gate ran **1 test,
+passing**; the focused `T22-AC6` foreground acceptance ran **1 test,
+passing**; and there were **no WP-04-focused failures**. These are focused
+provenance/pin results, not Ticket 02 final acceptance.
+
+The initial single provenance commit therefore remains the canonical pin
+commit, while the second commit is explicitly part of WP-04's completion
+record rather than a scope expansion. WP-05 must consume both Symphony SHAs
+and must repair any remaining active `.4`/old-commit/capability literal or
+count fixture without changing the manifest or production source.
 
 ## Tests and evidence contract
 
@@ -82,13 +134,9 @@ Use the actual Symphony checkout path for the worker command. Never use `bun tes
 
 ## Commit and self-review
 
-Create exactly one Symphony provenance commit:
-
-```text
-chore(pi): repin canonical identity extension provenance
-```
-
-Do not commit in Alfie; WP-01 owns the single Alfie runtime/version commit. Do not push.
+WP-04 was delivered in the two Symphony commits recorded above. Do not
+create another WP-04 commit. Do not commit in Alfie; WP-01 owns the single
+Alfie runtime/version commit. Do not push.
 
 Self-review:
 

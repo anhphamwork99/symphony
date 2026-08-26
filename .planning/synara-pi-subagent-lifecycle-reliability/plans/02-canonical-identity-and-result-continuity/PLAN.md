@@ -1,6 +1,6 @@
 # Ticket 02 Plan — canonical identity and durable result continuity
 
-**State:** ready-for-agent (WP-01 through WP-03 complete; WP-04 is the current package frontier; Ticket 02 status unchanged)
+**State:** ready-for-agent (WP-01 through WP-04 complete; WP-05 is the current package frontier; Ticket 02 status unchanged)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -8,7 +8,7 @@
 
 **Binding authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
 
-**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These were the clean baselines recorded before implementation. WP-01 produced the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump; WP-04 consumes that commit/version read-only while re-pinning Symphony provenance.
+**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These were the clean baselines recorded before implementation. WP-01 produced the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump. WP-04 then integrated the exact Alfie pin in Symphony through `29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` plus the bounded fixture reconciliation `14f3d2a4371a3ea4050b2e54fa026995fd81f706`; WP-05 consumes that provenance read-only.
 
 **Date:** 2026-08-26
 
@@ -120,14 +120,20 @@ This is a candidate implementation contract to be evidenced by the WPs, not a pe
 ## Current package frontier
 
 WP-01 is complete in the Alfie repository at immutable commit
-`73bc7744f` (`@alfie/pi-subagents@0.15.0-alfie.5`); its completion record and
-accepted write-set amendment are recorded in
-[WP-01](WP-01-alfie-canonical-live-routing.md). WP-02 is complete in Symphony
-at `ad6f97e8e` and its evidence is recorded in
-[WP-02](WP-02-symphony-durable-read-contract.md). WP-03 is complete in Symphony
-at integrated source commit `964d32f37` and its completion evidence is recorded
-in [WP-03](WP-03-symphony-managed-tool-routing.md). WP-04 is now the package
-frontier and may consume the exact WP-01 pin plus the WP-03 routing candidate.
+`73bc7744f8fbbd12206302de2df8230b29a49178`
+(`@alfie/pi-subagents@0.15.0-alfie.5`); its completion record and accepted
+write-set amendment are recorded in [WP-01](WP-01-alfie-canonical-live-routing.md).
+WP-02 is complete in Symphony at `ad6f97e8e` and its evidence is recorded in
+[WP-02](WP-02-symphony-durable-read-contract.md). WP-03 is complete in
+Symphony at integrated source commit `964d32f376c6bc42ec2e5f547b40d6e4f1ae8c40`
+and its completion evidence is recorded in [WP-03](WP-03-symphony-managed-tool-routing.md).
+WP-04 is complete in Symphony through the two-commit remediation
+`29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` plus
+`14f3d2a4371a3ea4050b2e54fa026995fd81f706`; its provenance completion record,
+exact hashes, clean-tree boundary, and focused evidence are recorded in
+[WP-04](WP-04-provenance-repin.md). WP-05 is now the package frontier and may
+consume that exact pin read-only while repairing only active pin-dependent
+acceptance fixtures and producing the canonical acceptance/report artifacts.
 This is package routing only: Ticket 02 remains **ready-for-agent**, and neither
 Ticket 02 final acceptance nor the Project frontier is changed.
 
@@ -138,8 +144,8 @@ Ticket 02 final acceptance nor the Project frontier is changed.
 | 01 | [Alfie canonical live routing](WP-01-alfie-canonical-live-routing.md) | `/Users/anhpham99/alfie` | none | exact tuple index, managed public shape, canonical/alias inputs, live result/control seam, extension tests, package version `0.15.0-alfie.5`, one immutable Alfie commit |
 | 02 | [Symphony durable read contract](WP-02-symphony-durable-read-contract.md) | Symphony | WP-01 contract shape | authorized durable lookup, current-tuple/fencing, terminal precedence, bounded read result/diagnostics, repository/read tests |
 | 03 | [Symphony managed-tool routing](WP-03-symphony-managed-tool-routing.md) | Symphony | WP-02 and WP-01 | capability gate, managed adapter dispatch, live supplement/steer routing, legacy isolation, integration tests |
-| 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Symphony | WP-01 immutable Alfie commit/version and WP-03 candidate | read-only verification of exact `ALFIE_T02_COMMIT`/version plus Symphony provenance manifest and pin fixtures |
-| 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | isolated real-Pi proof, deterministic/controlled/real evidence split, Issue 02 Implementation Report |
+| 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Symphony | WP-01 immutable Alfie commit/version and WP-03 candidate | **complete** — exact `ALFIE_T02_COMMIT`/version, provenance manifest, hashes, and bounded pin/capability fixture reconciliation |
+| 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | active pin-dependent fixture repair, isolated real-Pi proof, deterministic/controlled/real evidence split, Issue 02 Implementation Report |
 
 No WP may be started out of order, and no WP may modify another WP's owned files without a reported dependency repair.
 
@@ -168,10 +174,10 @@ Stop and escalate rather than silently choosing a workaround if: no exact tuple 
 
 ## Commit and handoff
 
-Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md`, the WP-03 completion record, and the WP-05 evidence obligation. It does not update `PROJECT.md`, Ticket 02 status/frontier, decisions, source, migrations, or any other project.
+Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md`, the WP-04 completion record, and the repaired WP-05 write/evidence contract. It does not update `PROJECT.md`, Ticket 02 status/frontier, decisions, source, migrations, or any other project.
 
 Planning commit:
 
 ```text
-docs(planning): record managed canonical tool routing
+docs(planning): record canonical extension provenance repin
 ```
