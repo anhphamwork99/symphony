@@ -82,3 +82,56 @@ Failure screenshot:
    Duration  3.11s (transform 0ms, setup 0ms, import 521ms, tests 1.67s, environment 0ms)
 
 error: script "test:browser:stable" exited with code 1
+
+
+===== Decision 0052 bounded timing probe — clean source 49c679888, port 51223 =====
+
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx" -t "runs the one bounded public post-commit Delete timing probe" "--reporter=verbose"
+
+ RUN  v4.1.10 /private/tmp/synara-whiteboard-ticket02-timing-final.q8WMp7/apps/web
+
+11:09:04 PM [vite] (client) [optimizer] bundling dependencies...
+ × |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > runs the one bounded public post-commit Delete timing probe 2163ms
+   → before:Undo:true:null
+before:Redo:true:null
+mutation:Undo:false:null
+mutation:Redo:true:null: expected [ 'mutation:Undo:false:null' ] to deeply equal []
+ ↓ |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > proves one completed three-progress batch and one Synara route
+ ↓ |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > consumes platform Redo from canvas and text-edit focus without package competition
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > runs the one bounded public post-commit Delete timing probe
+AssertionError: before:Undo:true:null
+before:Redo:true:null
+mutation:Undo:false:null
+mutation:Redo:true:null: expected [ 'mutation:Undo:false:null' ] to deeply equal []
+
+Failure screenshot:
+  - src/components/whiteboard/ticket02/__screenshots__/SynaraHistoryGate.acceptance.browser.tsx/Ticket-02-real-Chromium-public-only-history-gate-runs-the-one-bounded-public-post-commit-Delete-timing-probe-1.png
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [][39m
+[31m+ [[39m
+[31m+   "mutation:Undo:false:null",[39m
+[31m+ ][39m
+
+ ❯ src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx:140:6
+    138|       observation.trace.filter((entry) => entry.endsWith(":false:null"…
+    139|       observation.trace.join("\n"),
+    140|     ).toEqual([]);
+       |      ^
+    141|     expect(handle.getHistory().events).toHaveLength(2);
+    142|     expect(handle.getAdapter().captureScene().elements.length).toBeLes…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  23:09:02
+   Duration  4.56s (transform 0ms, setup 0ms, import 487ms, tests 2.17s, environment 0ms)
+
+error: script "test:browser:stable" exited with code 1

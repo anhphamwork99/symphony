@@ -31,16 +31,16 @@ Browser Gate runs both reached the completed batch and the second keyboard-conta
 
 ## Activation/containment matrix
 
-| Scenario | Result | Evidence |
-| --- | --- | --- |
-| Initial native Undo/Redo accessible observation | PASS at the tested initial state | Browser test reaches `assertNativeControlsDisabledAndInert()` before the batch. |
-| Three progressive AI updates | PASS | Native controls remained disabled at each checked progress boundary; event list stayed empty. |
-| Synara toolbar Undo | PASS before containment failure | One toolbar input reached the Synara dispatcher and exact pre-state. |
-| Synara toolbar Redo | PASS before containment failure | One toolbar input restored exact final state. |
-| `Meta+Z` from canvas focus | PASS | Same dispatcher restored exact pre-state; no package intermediate checkpoint was observed. |
-| `Meta+Shift+Z` from canvas focus | PASS in the second test | Same dispatcher restored exact final state. |
-| Native pointer/focus/keyboard/accessibility matrix after human mutation | BLOCKED by first hard containment failure | The required disabled/inert assertion failed before continuing the matrix, as required by Decision 0051 D2/D8. |
-| Native enabled-window check after real Delete | FAIL | Accessible native `Undo` was enabled (`disabled === false`, no `aria-disabled="true"`) after the adapter's public `history.clear()` containment point. |
+| Scenario                                                                | Result                                    | Evidence                                                                                                                                               |
+| ----------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Initial native Undo/Redo accessible observation                         | PASS at the tested initial state          | Browser test reaches `assertNativeControlsDisabledAndInert()` before the batch.                                                                        |
+| Three progressive AI updates                                            | PASS                                      | Native controls remained disabled at each checked progress boundary; event list stayed empty.                                                          |
+| Synara toolbar Undo                                                     | PASS before containment failure           | One toolbar input reached the Synara dispatcher and exact pre-state.                                                                                   |
+| Synara toolbar Redo                                                     | PASS before containment failure           | One toolbar input restored exact final state.                                                                                                          |
+| `Meta+Z` from canvas focus                                              | PASS                                      | Same dispatcher restored exact pre-state; no package intermediate checkpoint was observed.                                                             |
+| `Meta+Shift+Z` from canvas focus                                        | PASS in the second test                   | Same dispatcher restored exact final state.                                                                                                            |
+| Native pointer/focus/keyboard/accessibility matrix after human mutation | BLOCKED by first hard containment failure | The required disabled/inert assertion failed before continuing the matrix, as required by Decision 0051 D2/D8.                                         |
+| Native enabled-window check after real Delete                           | FAIL                                      | Accessible native `Undo` was enabled (`disabled === false`, no `aria-disabled="true"`) after the adapter's public `history.clear()` containment point. |
 
 ## Cursor/fingerprint and human-capture result
 
@@ -61,3 +61,35 @@ AC4 containment: FAIL
 Completed three-progress batch: PASS
 Broad Ticket 02 work: BLOCKED
 Required next action: Supervisor bounded reassessment of Decision 0051 boundary
+
+## Decision 0052 bounded timing probe
+
+Decision 0052 authorized exactly one public-only post-commit timing probe. Source candidate `49c67988823efd5f71e3a1a7fb396df866de9a3d` added:
+
+- the existing synchronous public `api.history.clear()`;
+- one `queueMicrotask` post-commit clear for the same human mutation;
+- deferred settled-scene exposure;
+- command consumption while settlement remains pending;
+- test-only `MutationObserver` evidence covering the Delete mutation through later task/frame opportunities.
+
+The probe was measured from a clean detached source worktree. Unit Gate tests passed 3/3, targeted formatting and lint passed, and the decisive real-Chromium run used isolated port `51223`.
+
+The observer recorded:
+
+```text
+before:Undo:true:null
+before:Redo:true:null
+mutation:Undo:false:null
+mutation:Redo:true:null
+```
+
+Package-native Undo therefore became enabled during the required observation window. The final disabled state, if any, cannot satisfy Decision 0051/0052 because transient enabled or invokable native history is itself a hard failure.
+
+The complete timing evidence is in `gate-timing-probe.md`; raw output is appended to `gate-browser.log`.
+
+GATE VERDICT: FAIL
+AC4 containment: FAIL
+Completed three-progress batch: PASS as partial evidence only
+Broad Ticket 02 work: BLOCKED
+Public timing remediation: EXHAUSTED
+Required next action: human-owner boundary decision
