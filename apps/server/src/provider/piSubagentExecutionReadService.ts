@@ -1,5 +1,8 @@
 import type {
   PiSubagentDiagnosticCode,
+  PiSubagentExecutionReadInput,
+  PiSubagentExecutionRecord,
+  PiSubagentLifecycleState,
   PiSubagentResultReadResult,
   PiSubagentTranscriptReadResult,
 } from "@synara/contracts";
@@ -100,18 +103,73 @@ export interface PiSubagentExecutionReadServiceInput {
    * continuation (T12-AC4). Falls back to the config default when absent.
    */
   readonly summaryMaxChars?: number | undefined;
+  /**
+   * Optional exact-live supplement seam. The durable snapshot is always
+   * resolved first; this callback is never invoked for a durable terminal.
+   */
+  readonly liveSupplement?:
+    | ((input: {
+        readonly executionId: string;
+        readonly attemptId: string;
+        readonly generation: number;
+      }) => Effect.Effect<
+        | { readonly kind: "available"; readonly observedState: PiSubagentLifecycleState }
+        | { readonly kind: "unavailable" },
+        never
+      >)
+    | undefined;
 }
 
 export interface PiSubagentExecutionReadService {
-  readonly readResult: (input: {
-    readonly executionId: string;
-  }) => Effect.Effect<PiSubagentResultReadResult, PiSubagentReadDenied>;
-  readonly readTranscriptPage: (input: {
-    readonly executionId: string;
+  readonly readResult: (
+    input: PiSubagentExecutionReadInput,
+  ) => Effect.Effect<PiSubagentResultReadResult, PiSubagentReadDenied>;
+  readonly readTranscriptPage: (input: PiSubagentExecutionReadInput & {
     readonly cursor?: number | undefined;
     readonly limit?: number | undefined;
   }) => Effect.Effect<PiSubagentTranscriptReadResult, PiSubagentReadDenied>;
 }
+
+const MAX_PUBLIC_EXECUTION_ID_CHARS = 256;
+
+type NormalizedReadInput = {
+  readonly executionId: string;
+  readonly attemptId?: string | undefined;
+  readonly generation?: number | undefined;
+  readonly aliasUsed: boolean;
+};
+
+const normalizeReadInput = (
+  input: PiSubagentExecutionReadInput,
+): Effect.Effect<NormalizedReadInput, PiSubagentReadDenied> => {
+  const executionId = input.executionId?.trim() ?? "";
+  const alias = input.agent_id?.trim() ?? "";
+  if (executionId.length === 0 && alias.length === 0) {
+    return Effect.fail({
+      kind: "denied",
+      diagnosticCode: "pi_subagent_read_missing_durable_evidence",
+    });
+  }
+  // A deprecated alias-only request is treated as the public executionId.
+  // Provider-local ids therefore resolve only if they happen to equal a
+  // durable public identity; an unknown provider-like value remains a normal
+  // not-found result without provider access or metadata leakage.
+  if (executionId.length > MAX_PUBLIC_EXECUTION_ID_CHARS || alias.length > MAX_PUBLIC_EXECUTION_ID_CHARS) {
+    return Effect.fail({
+      kind: "denied",
+      diagnosticCode: "pi_subagent_read_payload_bounded",
+    });
+  }
+  if (executionId.length > 0 && alias.length > 0 && executionId !== alias) {
+    return Effect.fail({ kind: "denied", diagnosticCode: "pi_subagent_read_alias_conflict" });
+  }
+  return Effect.succeed({
+    executionId: executionId || alias,
+    ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
+    ...(input.generation === undefined ? {} : { generation: input.generation }),
+    aliasUsed: alias.length > 0,
+  });
+};
 
 const summaryExcerpt = (summary: string): string =>
   truncateWithEllipsis(summary, PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS);
@@ -130,20 +188,45 @@ export const makePiSubagentExecutionReadService = (
       ? input.summaryMaxChars
       : DEFAULT_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS;
 
-  const resolveAuthorized = (executionId: string) =>
+  const resolveAuthorized = (rawInput: PiSubagentExecutionReadInput) =>
     Effect.gen(function* () {
-      const executionOption = yield* input.repository.getById(executionId).pipe(
-        Effect.mapError(
-          (): PiSubagentReadDenied => ({
-            kind: "denied",
-            diagnosticCode: "pi_subagent_read_denied",
-          }),
-        ),
-      );
+      const normalized = yield* normalizeReadInput(rawInput);
+      const snapshotOption = input.repository.getExecutionReadSnapshot
+        ? yield* input.repository.getExecutionReadSnapshot(normalized.executionId).pipe(
+            Effect.mapError(
+              (): PiSubagentReadDenied => ({
+                kind: "denied",
+                diagnosticCode: "pi_subagent_read_denied",
+              }),
+            ),
+          )
+        : Option.none();
+      let executionOption: Option.Option<PiSubagentExecutionRecord>;
+      if (Option.isSome(snapshotOption)) {
+        executionOption = Option.some(snapshotOption.value.execution);
+      } else {
+        executionOption = yield* input.repository.getById(normalized.executionId).pipe(
+          Effect.mapError(
+            (): PiSubagentReadDenied => ({
+              kind: "denied",
+              diagnosticCode: "pi_subagent_read_denied",
+            }),
+          ),
+        );
+      }
       if (Option.isNone(executionOption)) {
         return yield* Effect.fail<PiSubagentReadDenied>({ kind: "not_found" });
       }
       const execution = executionOption.value;
+      if (
+        (normalized.attemptId !== undefined && normalized.attemptId !== execution.attemptId) ||
+        (normalized.generation !== undefined && normalized.generation !== execution.generation)
+      ) {
+        return yield* Effect.fail<PiSubagentReadDenied>({
+          kind: "denied",
+          diagnosticCode: "pi_subagent_read_stale_attempt_or_generation",
+        });
+      }
       // Project/thread authority: the parent thread must exist in the
       // server's read model AND its trusted projectId must match the
       // execution row. Any mismatch denies exactly like an unknown id —
@@ -161,7 +244,7 @@ export const makePiSubagentExecutionReadService = (
       if (Option.isNone(threadOption) || threadOption.value.projectId !== execution.projectId) {
         return yield* Effect.fail<PiSubagentReadDenied>({
           kind: "denied",
-          diagnosticCode: "pi_subagent_read_denied",
+          diagnosticCode: "pi_subagent_read_unauthorized_or_out_of_scope",
         });
       }
       // Caller authorization (T12-AC1): after the durable binding verifies,
@@ -179,24 +262,34 @@ export const makePiSubagentExecutionReadService = (
           });
         }
       }
-      return { execution };
+      let evidence: {
+        readonly terminalSummary: string | null;
+        readonly terminalTranscriptRef: string | null;
+        readonly staleTerminalEvents: number;
+      };
+      if (Option.isSome(snapshotOption)) {
+        evidence = snapshotOption.value.terminalEvidence;
+      } else {
+        const evidenceOption = yield* input.repository.getTerminalEvidence(normalized.executionId).pipe(
+          Effect.mapError(
+            (): PiSubagentReadDenied => ({
+              kind: "denied",
+              diagnosticCode: "pi_subagent_read_denied",
+            }),
+          ),
+        );
+        evidence = Option.isSome(evidenceOption)
+          ? evidenceOption.value
+          : { terminalSummary: null, terminalTranscriptRef: null, staleTerminalEvents: 0 };
+      }
+      return { execution, evidence, normalized };
     });
 
-  const readResult: PiSubagentExecutionReadService["readResult"] = ({ executionId }) =>
+  const readResult: PiSubagentExecutionReadService["readResult"] = (rawInput) =>
     Effect.gen(function* () {
-      const { execution } = yield* resolveAuthorized(executionId);
-      const evidence = yield* input.repository.getTerminalEvidence(executionId).pipe(
-        Effect.mapError(
-          (): PiSubagentReadDenied => ({
-            kind: "denied",
-            diagnosticCode: "pi_subagent_read_denied",
-          }),
-        ),
-      );
-      const storedSummary = Option.isSome(evidence) ? evidence.value.terminalSummary : null;
-      const transcriptRefStored = Option.isSome(evidence)
-        ? evidence.value.terminalTranscriptRef
-        : null;
+      const { execution, evidence, normalized } = yield* resolveAuthorized(rawInput);
+      const storedSummary = evidence.terminalSummary;
+      const transcriptRefStored = evidence.terminalTranscriptRef;
       // The stored summary was bounded at ingest by the SAME config knob; the
       // ingest path appends an ellipsis marker when it truncates, so "at the
       // cap AND ending in the marker" is the honest truncation signal for
@@ -215,9 +308,37 @@ export const makePiSubagentExecutionReadService = (
         execution.observedState === "cancelled"
           ? execution.observedState
           : null;
+      const durableTerminal = terminalState !== null;
+      const diagnostics: PiSubagentDiagnosticCode[] = [];
+      if (normalized.aliasUsed) diagnostics.push("pi_subagent_read_alias_deprecated");
+      if (durableTerminal && input.liveSupplement !== undefined) {
+        diagnostics.push("pi_subagent_read_durable_terminal_precedence");
+      }
+      if (durableTerminal && storedSummary === null && transcriptRefStored === null) {
+        diagnostics.push("pi_subagent_read_missing_durable_evidence");
+      }
+      if (summaryTruncated) {
+        diagnostics.push("pi_subagent_result_truncated", "pi_subagent_read_payload_bounded");
+      }
+      let liveObservedState: PiSubagentLifecycleState | null = null;
+      if (!durableTerminal && input.liveSupplement !== undefined) {
+        const live = yield* input.liveSupplement({
+          executionId: execution.executionId,
+          attemptId: execution.attemptId,
+          generation: execution.generation,
+        });
+        if (live.kind === "available") {
+          liveObservedState = live.observedState;
+        } else {
+          diagnostics.push("pi_subagent_read_live_record_unavailable");
+        }
+      }
       const result: PiSubagentResultReadResult = {
         executionId: execution.executionId,
+        attemptId: execution.attemptId,
+        generation: execution.generation,
         observedState: execution.observedState,
+        liveObservedState,
         terminalState,
         summary:
           storedSummary !== null && storedSummary.trim().length > 0
@@ -226,28 +347,20 @@ export const makePiSubagentExecutionReadService = (
         summaryTruncated,
         ...(summaryTruncated
           ? { diagnosticCode: "pi_subagent_result_truncated" as PiSubagentDiagnosticCode }
-          : {}),
+          : diagnostics.length > 0
+            ? { diagnosticCode: diagnostics[0]! }
+            : {}),
         transcriptRef: transcriptRefStored,
+        ...(diagnostics.length > 0 ? { diagnostics } : {}),
       };
       return result;
     });
 
-  const readTranscriptPage: PiSubagentExecutionReadService["readTranscriptPage"] = ({
-    executionId,
-    cursor,
-    limit,
-  }) =>
+  const readTranscriptPage: PiSubagentExecutionReadService["readTranscriptPage"] = (rawInput) =>
     Effect.gen(function* () {
-      const { execution } = yield* resolveAuthorized(executionId);
-      const evidence = yield* input.repository.getTerminalEvidence(executionId).pipe(
-        Effect.mapError(
-          (): PiSubagentReadDenied => ({
-            kind: "denied",
-            diagnosticCode: "pi_subagent_read_denied",
-          }),
-        ),
-      );
-      const transcriptRef = Option.isSome(evidence) ? evidence.value.terminalTranscriptRef : null;
+      const { execution, evidence } = yield* resolveAuthorized(rawInput);
+      const transcriptRef = evidence.terminalTranscriptRef;
+      const { cursor, limit } = rawInput;
       // Artifact read failures are STABLE READ DIAGNOSTICS, never execution
       // outcome changes and never denials: a missing/expired artifact reports
       // `pi_subagent_transcript_missing`/`_unavailable` on an empty page so

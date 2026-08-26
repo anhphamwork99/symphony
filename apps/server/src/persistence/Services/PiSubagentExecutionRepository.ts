@@ -121,6 +121,20 @@ export interface PiSubagentExecutionObservation {
 }
 
 /**
+ * Durable-first read snapshot. The aggregate and terminal evidence are read
+ * through the same repository layer so callers never need a second SQLite
+ * connection (important while the live repository owns a WAL writer).
+ */
+export interface PiSubagentExecutionReadSnapshot {
+  readonly execution: PiSubagentExecutionRecord;
+  readonly terminalEvidence: {
+    readonly terminalSummary: string | null;
+    readonly terminalTranscriptRef: string | null;
+    readonly staleTerminalEvents: number;
+  };
+}
+
+/**
  * Ticket 06 durable cancellation outcome for one execution in a parent-turn
  * scope. The state machine reports `cancelled` only from termination
  * evidence: a child terminal acknowledgement carrying the expected
@@ -742,6 +756,10 @@ export interface PiSubagentExecutionRepositoryShape {
   readonly getById: (
     executionId: string,
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;
+  /** Ticket 02 durable aggregate + terminal evidence read, side-effect free. */
+  readonly getExecutionReadSnapshot?: (
+    executionId: string,
+  ) => Effect.Effect<Option.Option<PiSubagentExecutionReadSnapshot>, PiSubagentExecutionRepositoryError>;
   readonly getByCommandId: (
     commandId: string,
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;

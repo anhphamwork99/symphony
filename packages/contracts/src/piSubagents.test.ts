@@ -11,6 +11,7 @@ import {
   PiSubagentCompletionOutboxEntry,
   PiSubagentDiagnosticCode,
   PiSubagentExecutionCard,
+  PiSubagentExecutionReadInput,
   PiSubagentExecutionRecord,
   PiSubagentHandshakeFailureResponse,
   PiSubagentHandshakeRequest,
@@ -26,6 +27,50 @@ import {
   PiSubagentTranscriptEntry,
   PiSubagentTranscriptReadResult,
 } from "./piSubagents";
+
+describe("Pi subagent durable read contract (Ticket 02)", () => {
+  it("accepts canonical identity plus an equal-only deprecated alias and keeps output bounded", () => {
+    const input = Schema.decodeSync(PiSubagentExecutionReadInput)({
+      executionId: "exec_read_1",
+      agent_id: "exec_read_1",
+      attemptId: "attempt_1",
+      generation: 1,
+    });
+    expect(input.executionId).toBe("exec_read_1");
+    expect(input.agent_id).toBe("exec_read_1");
+
+    expect(() =>
+      Schema.decodeSync(PiSubagentExecutionReadInput)({
+        executionId: "x".repeat(257),
+      }),
+    ).toThrow();
+  });
+
+  it("accepts deprecated alias-only input as a bounded durable lookup identity", () => {
+    const input = Schema.decodeSync(PiSubagentExecutionReadInput)({
+      agent_id: "exec_read_alias_only",
+    });
+    expect(input.executionId).toBeUndefined();
+    expect(input.agent_id).toBe("exec_read_alias_only");
+  });
+
+  it("encodes a durable result with the current tuple and closed diagnostics but no provider id", () => {
+    const decoded = Schema.decodeSync(PiSubagentResultReadResult)({
+      executionId: "exec_read_1",
+      attemptId: "attempt_1",
+      generation: 1,
+      observedState: "running",
+      liveObservedState: null,
+      summary: null,
+      summaryTruncated: false,
+      diagnostics: ["pi_subagent_read_live_record_unavailable"],
+      transcriptRef: null,
+    });
+    expect(decoded.generation).toBe(1);
+    expect(decoded.diagnostics).toEqual(["pi_subagent_read_live_record_unavailable"]);
+    expect("agentId" in decoded).toBe(false);
+  });
+});
 
 describe("Pi subagent handshake contract schemas (Issue 19)", () => {
   it("encodes and decodes valid handshake request", () => {

@@ -229,7 +229,7 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
           .pipe(Effect.flip);
         expect(mismatch.kind).toBe("denied");
         if (mismatch.kind === "denied") {
-          expect(mismatch.diagnosticCode).toBe("pi_subagent_read_denied");
+          expect(mismatch.diagnosticCode).toBe("pi_subagent_read_unauthorized_or_out_of_scope");
         }
       }).pipe(Effect.provide(repositoryLayer)),
     );
@@ -506,6 +506,176 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
           })
           .pipe(Effect.flip);
         expect(foreign.kind).toBe("denied");
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T02: canonical identity, equal-only alias, and stale tuple fencing are durable-first", async () => {
+    const harness = makeSnapshotHarness();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+        const service = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+        });
+
+        const canonical = yield* service.readResult({
+          executionId: "exec_t12_1",
+          attemptId: "att_t12_1",
+          generation: 1,
+        });
+        expect(canonical.executionId).toBe("exec_t12_1");
+        expect(canonical.attemptId).toBe("att_t12_1");
+        expect(canonical.generation).toBe(1);
+        expect("agentId" in canonical).toBe(false);
+
+        const alias = yield* service.readResult({
+          executionId: "exec_t12_1",
+          agent_id: "exec_t12_1",
+        });
+        expect(alias.executionId).toBe("exec_t12_1");
+        expect(alias.diagnostics).toContain("pi_subagent_read_alias_deprecated");
+
+        const stale = yield* service
+          .readResult({ executionId: "exec_t12_1", attemptId: "att_old", generation: 1 })
+          .pipe(Effect.flip);
+        expect(stale.kind).toBe("denied");
+        if (stale.kind === "denied") {
+          expect(stale.diagnosticCode).toBe("pi_subagent_read_stale_attempt_or_generation");
+        }
+
+        const conflictingAlias = yield* service
+          .readResult({ executionId: "exec_t12_1", agent_id: "provider-agent-1" })
+          .pipe(Effect.flip);
+        expect(conflictingAlias.kind).toBe("denied");
+        if (conflictingAlias.kind === "denied") {
+          expect(conflictingAlias.diagnosticCode).toBe("pi_subagent_read_alias_conflict");
+        }
+
+        const aliasOnly = yield* service.readResult({ agent_id: "exec_t12_1" });
+        expect(aliasOnly.executionId).toBe("exec_t12_1");
+        expect(aliasOnly.diagnostics).toContain("pi_subagent_read_alias_deprecated");
+
+        // A provider-shaped alias is only a durable lookup key; an unknown
+        // value must not invoke a provider or leak any execution metadata.
+        let providerCalls = 0;
+        const providerLikeService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          liveSupplement: () => {
+            providerCalls += 1;
+            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+          },
+        });
+        const providerLikeUnknown = yield* providerLikeService
+          .readResult({ agent_id: "provider-agent-unknown" })
+          .pipe(Effect.flip);
+        expect(providerLikeUnknown).toEqual({ kind: "not_found" });
+        expect(providerCalls).toBe(0);
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T02: generation-only fencing rejects a stale durable snapshot", async () => {
+    const harness = makeSnapshotHarness();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+        const service = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+        });
+
+        const stale = yield* service
+          .readResult({ executionId: "exec_t12_1", generation: 2 })
+          .pipe(Effect.flip);
+        expect(stale).toEqual({
+          kind: "denied",
+          diagnosticCode: "pi_subagent_read_stale_attempt_or_generation",
+        });
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
+  it("T02: durable terminal precedence and missing live state are bounded diagnostics", async () => {
+    const harness = makeSnapshotHarness();
+    let liveCalls = 0;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+        yield* ingestPiSubagentTerminal({
+          repository,
+          observation: terminal({ summary: "durable success" }),
+        });
+        const terminalService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+          liveSupplement: () => {
+            liveCalls += 1;
+            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+          },
+        });
+        const terminalResult = yield* terminalService.readResult({ executionId: "exec_t12_1" });
+        expect(terminalResult.observedState).toBe("succeeded");
+        expect(terminalResult.liveObservedState).toBeNull();
+        expect(terminalResult.diagnostics).toContain(
+          "pi_subagent_read_durable_terminal_precedence",
+        );
+        expect(liveCalls).toBe(0);
+
+        // A live supplement is exposed only alongside the durable tuple; it
+        // does not replace or mutate the durable observed state.
+        yield* admit(
+          makeExecution({
+            executionId: "exec_t12_live_available",
+            attemptId: "att_t12_live_available",
+            commandId: "cmd_t12_live_available",
+          }),
+        );
+        const availableService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          liveSupplement: (input) => {
+            expect(input.executionId).toBe("exec_t12_live_available");
+            expect(input.attemptId).toBe("att_t12_live_available");
+            expect(input.generation).toBe(1);
+            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+          },
+        });
+        const available = yield* availableService.readResult({
+          executionId: "exec_t12_live_available",
+        });
+        expect(available.observedState).toBe("accepted");
+        expect(available.liveObservedState).toBe("running");
+        expect(available.diagnostics ?? []).not.toContain("pi_subagent_read_live_record_unavailable");
+
+        const nonterminalService = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: harness.snapshotQuery,
+          liveSupplement: () => Effect.succeed({ kind: "unavailable" as const }),
+        });
+        // A separate durable execution proves that valid nonterminal state
+        // remains readable after the live record disappears.
+        yield* admit(
+          makeExecution({
+            executionId: "exec_t12_live_missing",
+            attemptId: "att_t12_live_missing",
+            commandId: "cmd_t12_live_missing",
+          }),
+        );
+        const fallback = yield* nonterminalService.readResult({
+          executionId: "exec_t12_live_missing",
+        });
+        expect(fallback.observedState).toBe("accepted");
+        expect(fallback.liveObservedState).toBeNull();
+        expect(fallback.diagnostics).toContain("pi_subagent_read_live_record_unavailable");
       }).pipe(Effect.provide(repositoryLayer)),
     );
   });

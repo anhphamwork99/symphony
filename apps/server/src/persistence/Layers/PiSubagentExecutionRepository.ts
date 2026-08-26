@@ -23,6 +23,7 @@ import {
   PiSubagentExecutionRepository,
   type PiSubagentExecutionRepositoryShape,
   type PiSubagentExecutionObservation,
+  type PiSubagentExecutionReadSnapshot,
   type PiSubagentCompletionOutboxEntry,
   type PiSubagentExecutionLifecycleNotification,
   type PiSubagentCompletionDispatchBatch,
@@ -60,6 +61,12 @@ interface ExecutionRow {
   readonly firstAttemptGeneration: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+interface ExecutionReadSnapshotRow extends ExecutionRow {
+  readonly terminalSummary: string | null;
+  readonly terminalTranscriptRef: string | null;
+  readonly staleTerminalEvents: number;
 }
 
 interface JournalRow {
@@ -1217,6 +1224,43 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
         Effect.mapError(toPersistenceSqlError("PiSubagentExecutionRepository.getById:query")),
       );
       return rows.length > 0 ? Option.some(rowToExecutionRecord(rows[0]!)) : Option.none();
+    });
+
+  const getExecutionReadSnapshot: PiSubagentExecutionRepositoryShape["getExecutionReadSnapshot"] = (
+    executionId,
+  ) =>
+    Effect.gen(function* () {
+      // Read the aggregate and its terminal evidence from one row and one
+      // statement. This keeps the tuple/evidence coherent without opening a
+      // second DatabaseSync against the live WAL repository.
+      const rows = yield* sql<ExecutionReadSnapshotRow>`
+        SELECT
+          ${executionColumns(sql)},
+          terminal_summary AS "terminalSummary",
+          terminal_transcript_ref AS "terminalTranscriptRef",
+          stale_terminal_events AS "staleTerminalEvents"
+        FROM pi_subagent_executions
+        WHERE execution_id = ${executionId}
+        LIMIT 1
+      `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("PiSubagentExecutionRepository.getExecutionReadSnapshot:query"),
+        ),
+      );
+      const row = rows[0];
+      if (row === undefined) {
+        return Option.none();
+      }
+      const snapshot: PiSubagentExecutionReadSnapshot = {
+        execution: rowToExecutionRecord(row),
+        terminalEvidence: {
+          terminalSummary: row.terminalSummary ?? null,
+          terminalTranscriptRef: row.terminalTranscriptRef ?? null,
+          staleTerminalEvents:
+            typeof row.staleTerminalEvents === "number" ? row.staleTerminalEvents : 0,
+        },
+      };
+      return Option.some(snapshot);
     });
 
   const getByCommandId: PiSubagentExecutionRepositoryShape["getByCommandId"] = (commandId) =>
@@ -4245,6 +4289,7 @@ export const makePiSubagentExecutionRepository = Effect.gen(function* () {
     recordHeartbeatObservation,
     getObservation,
     getById,
+    getExecutionReadSnapshot,
     getByCommandId,
     listByThreadId,
     listExecutionCardsByThreadId,

@@ -57,12 +57,62 @@ layer("PiSubagentExecutionRepository (T20-AC1, T20-AC2, T20-AC3, T20-AC4, T20-AC
         assert.equal(fetched.value.parentThreadId, "thread_main");
       }
 
+      // Ticket 02: the reusable durable read snapshot resolves the same
+      // current tuple and terminal evidence through the live repository layer.
+      const readSnapshot = yield* repo.getExecutionReadSnapshot("exec_test_001");
+      assert.isTrue(Option.isSome(readSnapshot));
+      if (Option.isSome(readSnapshot)) {
+        assert.equal(readSnapshot.value.execution.executionId, "exec_test_001");
+        assert.equal(readSnapshot.value.execution.attemptId, "att_001");
+        assert.equal(readSnapshot.value.execution.generation, 1);
+        assert.isNull(readSnapshot.value.terminalEvidence.terminalSummary);
+      }
+
       // Verify journal events
       const journalEvents = yield* repo.listJournalEvents("exec_test_001");
       assert.equal(journalEvents.length, 1);
       assert.equal(journalEvents[0]!.sequence, 1);
       assert.equal(journalEvents[0]!.state, "accepted");
       assert.equal(journalEvents[0]!.diagnosticCode, "pi_subagent_managed_enabled");
+    }),
+  );
+
+  it.effect("T02: returns one coherent aggregate and terminal-evidence snapshot", () =>
+    Effect.gen(function* () {
+      const repo = yield* PiSubagentExecutionRepository;
+      const executionId = "exec_snapshot_coherent";
+      const admission = yield* repo.recordAdmission({
+        ...baseAdmission,
+        executionId,
+        attemptId: "att_snapshot_coherent",
+        commandId: "cmd_snapshot_coherent",
+        now: "2026-08-16T12:00:00.000Z",
+      });
+      assert(admission.kind === "admitted");
+
+      const terminal = yield* repo.recordTerminalEvent({
+        executionId,
+        attemptId: "att_snapshot_coherent",
+        generation: 1,
+        sequence: 40,
+        state: "succeeded",
+        occurredAt: "2026-08-16T12:00:01.000Z",
+        summary: "coherent terminal summary",
+        transcriptRef: "/tmp/coherent.output",
+      });
+      assert.equal(terminal.kind, "recorded");
+
+      const snapshot = yield* repo.getExecutionReadSnapshot(executionId);
+      assert.isTrue(Option.isSome(snapshot));
+      if (Option.isSome(snapshot)) {
+        assert.equal(snapshot.value.execution.executionId, executionId);
+        assert.equal(snapshot.value.execution.attemptId, "att_snapshot_coherent");
+        assert.equal(snapshot.value.execution.generation, 1);
+        assert.equal(snapshot.value.execution.observedState, "succeeded");
+        assert.equal(snapshot.value.terminalEvidence.terminalSummary, "coherent terminal summary");
+        assert.equal(snapshot.value.terminalEvidence.terminalTranscriptRef, "/tmp/coherent.output");
+        assert.equal(snapshot.value.terminalEvidence.staleTerminalEvents, 0);
+      }
     }),
   );
 

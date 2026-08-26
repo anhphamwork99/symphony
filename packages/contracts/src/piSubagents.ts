@@ -88,6 +88,15 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_resume_unavailable",
   "pi_subagent_resume_persistence_failed",
   "pi_subagent_read_denied",
+  "pi_subagent_read_unauthorized_or_out_of_scope",
+  "pi_subagent_read_stale_attempt_or_generation",
+  "pi_subagent_read_durable_terminal_precedence",
+  "pi_subagent_read_live_record_unavailable",
+  "pi_subagent_read_missing_durable_evidence",
+  "pi_subagent_read_payload_bounded",
+  "pi_subagent_read_alias_deprecated",
+  "pi_subagent_read_alias_conflict",
+  "pi_subagent_read_capability_unavailable",
   "pi_subagent_result_truncated",
   "pi_subagent_transcript_missing",
   "pi_subagent_transcript_unavailable",
@@ -677,10 +686,31 @@ export const PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS = 4000;
 export const PI_SUBAGENT_TRANSCRIPT_PAGE_DEFAULT_ENTRIES = 50;
 export const PI_SUBAGENT_TRANSCRIPT_PAGE_MAX_ENTRIES = 200;
 
+/**
+ * Canonical durable read input. `agent_id` is retained only as a deprecated
+ * syntactic alias for the public `executionId`; providers must never put a
+ * provider-local id in this shape.
+ */
+const PiSubagentBoundedReadExecutionId = PiSubagentExecutionId.check(Schema.isMaxLength(256));
+
+export const PiSubagentExecutionReadInput = Schema.Struct({
+  executionId: Schema.optional(PiSubagentBoundedReadExecutionId),
+  agent_id: Schema.optional(PiSubagentBoundedReadExecutionId),
+  /** Optional fencing assertions; the durable aggregate remains authoritative. */
+  attemptId: Schema.optional(PiSubagentAttemptId),
+  generation: Schema.optional(PositiveInt),
+});
+export type PiSubagentExecutionReadInput = typeof PiSubagentExecutionReadInput.Type;
+
 export const PiSubagentResultReadResult = Schema.Struct({
   executionId: PiSubagentExecutionId,
+  /** Durable current tuple, when the read resolved an execution aggregate. */
+  attemptId: Schema.optional(PiSubagentAttemptId),
+  generation: Schema.optional(PositiveInt),
   /** Durable observed state at read time; a read is never liveness proof. */
   observedState: PiSubagentLifecycleState,
+  /** Exact-live supplement, never used as durable identity or precedence. */
+  liveObservedState: Schema.optional(Schema.NullOr(PiSubagentLifecycleState)),
   /** Terminal label when the execution is terminal (null otherwise). */
   terminalState: Schema.optional(
     Schema.NullOr(Schema.Literals(["succeeded", "failed", "cancelled"])),
@@ -693,6 +723,10 @@ export const PiSubagentResultReadResult = Schema.Struct({
   diagnosticCode: Schema.optional(PiSubagentDiagnosticCode),
   /** Continuation pointer when transcript evidence exists (T12-AC4). */
   transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Stable, closed diagnostics emitted by the durable read boundary. */
+  diagnostics: Schema.optional(
+    Schema.Array(PiSubagentDiagnosticCode).check(Schema.isMaxLength(8)),
+  ),
 });
 export type PiSubagentResultReadResult = typeof PiSubagentResultReadResult.Type;
 
