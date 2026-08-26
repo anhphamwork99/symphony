@@ -285,10 +285,7 @@ export function piSubagentExecutionCardIsRetainedInActiveStrip(
 ): boolean {
   // These observed outcomes are committed even if a stale desired state or
   // attachment field would otherwise make the presentation look live.
-  if (
-    card.observedState === "cancelled" ||
-    card.observedState === "rejected"
-  ) {
+  if (card.observedState === "cancelled" || card.observedState === "rejected") {
     return false;
   }
 
@@ -299,7 +296,7 @@ export function piSubagentExecutionCardIsRetainedInActiveStrip(
   if (presentation.kind !== "observed") {
     return true;
   }
-  return card.observedState !== "cancelled" && card.observedState !== "rejected";
+  return true;
 }
 
 /** Elapsed whole seconds since card creation, clamped for bad/future timestamps. */
