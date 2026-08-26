@@ -4171,7 +4171,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               ...thread,
               latestTurn: {
                 turnId: runningTurnId,
-                state: "running",
+                state: "running" as const,
                 requestedAt: isoAt(3_100),
                 startedAt: isoAt(3_101),
                 completedAt: null,
