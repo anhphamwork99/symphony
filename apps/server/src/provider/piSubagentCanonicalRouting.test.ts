@@ -1,22 +1,15 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
+import type { PiSubagentResultReadResult } from "@synara/contracts";
+
 import {
   PI_SUBAGENT_EXECUTION_IDENTITY_ROUTING_CAPABILITY,
   createPiSubagentManagedHandshakeRequest,
   wrapPiSubagentManagedTool,
 } from "./piSubagentManagedRuntimeBinding.ts";
 
-type ReadResult = {
-  executionId: string;
-  attemptId: string;
-  generation: number;
-  observedState: "accepted" | "running" | "succeeded" | "failed";
-  terminalState: "succeeded" | "failed" | null;
-  summary: string | null;
-  summaryTruncated: boolean;
-  diagnostics?: string[];
-};
+type ReadResult = PiSubagentResultReadResult;
 
 const read = (result: ReadResult, trace: string[]) => ({
   readResult: (input: unknown) =>

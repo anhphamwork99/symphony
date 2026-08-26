@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { CommandId, MessageId, ProjectId, ThreadId } from "@synara/contracts";
+import {
+  CommandId,
+  MessageId,
+  PiSubagentResultReadResult,
+  ProjectId,
+  ThreadId,
+} from "@synara/contracts";
 
 import {
   buildPiSubagentArtifact,
@@ -46,16 +52,7 @@ function assertNoProviderIdentity(value: unknown): void {
   }
 }
 
-type DurableRead = {
-  executionId: string;
-  attemptId: string;
-  generation: number;
-  observedState: "accepted" | "running" | "succeeded" | "failed";
-  terminalState: "succeeded" | "failed" | null;
-  summary: string | null;
-  summaryTruncated: boolean;
-  diagnostics?: string[];
-};
+type DurableRead = PiSubagentResultReadResult;
 
 const runningRead: DurableRead = {
   executionId: "exec_canonical_race",
@@ -232,7 +229,9 @@ describe("Ticket 02 canonical identity and synchronized race acceptance", () => 
       readService: { readResult: () => Effect.succeed(runningRead) },
       isCapabilityBound: () => false,
     });
-    const capabilityDenied = await invoke(capabilityTool, { execution_id: runningRead.executionId });
+    const capabilityDenied = await invoke(capabilityTool, {
+      execution_id: runningRead.executionId,
+    });
     expect(capabilityDenied.diagnosticCode).toBe("pi_subagent_read_capability_unavailable");
     assertNoProviderIdentity(JSON.parse(JSON.stringify(capabilityDenied)));
   });
@@ -302,7 +301,9 @@ describe("Ticket 02 canonical identity and synchronized race acceptance", () => 
     ]);
     expect(state.inserted).toBe(0);
     expect(state.sent).toBe(0);
-    expect(state.queue + state.replay + state.resume + state.bootstrap + state.reconstruction).toBe(0);
+    expect(state.queue + state.replay + state.resume + state.bootstrap + state.reconstruction).toBe(
+      0,
+    );
     expect(state.children).toBe(0);
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
@@ -333,7 +334,9 @@ describe("Ticket 02 canonical identity and synchronized race acceptance", () => 
     expect(state.sent).toBe(1);
     expect(state.bookkeepingCommits).toBe(1);
     expect(state.retired).toBe(true);
-    expect(state.queue + state.replay + state.resume + state.bootstrap + state.reconstruction).toBe(0);
+    expect(state.queue + state.replay + state.resume + state.bootstrap + state.reconstruction).toBe(
+      0,
+    );
     expect(state.children).toBe(0);
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
@@ -376,7 +379,9 @@ describe("Ticket 02 canonical identity and synchronized race acceptance", () => 
       "bookkeeping",
       "return",
     ]);
-    expect(after.queue + after.replay + after.resume + after.bootstrap + after.reconstruction).toBe(0);
+    expect(after.queue + after.replay + after.resume + after.bootstrap + after.reconstruction).toBe(
+      0,
+    );
     expect(after.children).toBe(0);
     assertNoProviderIdentity(JSON.parse(JSON.stringify(afterResult)));
   });
@@ -411,13 +416,13 @@ describe("Ticket 02 canonical identity and synchronized race acceptance", () => 
 });
 
 describe("Ticket 02 isolated controlled real-Pi composition boundary", () => {
-    it("loads the registered production Agent from the exact pinned artifact and negotiates canonical routing", async () => {
-      const provenance = verifyRealPiExtensionProvenance();
-      const alfieRepoDir = process.env.ALFIE_REPO_DIR;
-      if (!alfieRepoDir) {
-        throw new Error("ALFIE_REPO_DIR is required for controlled real-Pi acceptance.");
-      }
-      expect(provenance.isVerified).toBe(true);
+  it("loads the registered production Agent from the exact pinned artifact and negotiates canonical routing", async () => {
+    const provenance = verifyRealPiExtensionProvenance();
+    const alfieRepoDir = process.env.ALFIE_REPO_DIR;
+    if (!alfieRepoDir) {
+      throw new Error("ALFIE_REPO_DIR is required for controlled real-Pi acceptance.");
+    }
+    expect(provenance.isVerified).toBe(true);
     expect(provenance.pinnedCommit).toBe(PINNED_ALFIE_COMMIT);
     expect(provenance.packageVersion).toBe(PINNED_ALFIE_VERSION);
     expect(PINNED_PI_SDK_VERSION).toBe("0.83.0");
@@ -427,11 +432,14 @@ describe("Ticket 02 isolated controlled real-Pi composition boundary", () => {
     const userAgentDir = join(root, "user-agent");
     let harness: Awaited<ReturnType<typeof makeRealPiWsHarness>> | undefined;
     try {
-        buildPiSubagentArtifact({
-          repoDir: alfieRepoDir,
+      buildPiSubagentArtifact({
+        repoDir: alfieRepoDir,
         artifactDir,
         provenance: loadPiSubagentExtensionProvenance(
-          join(REPO_ROOT, "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json"),
+          join(
+            REPO_ROOT,
+            "apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json",
+          ),
         ),
       });
       const verification = await verifyPiSubagentArtifact(artifactDir);
@@ -504,7 +512,8 @@ async function waitForCapability(
   for (;;) {
     const capability = harness.observedCapabilities().get(threadId);
     if (capability !== undefined) return capability;
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for real-Pi capability negotiation.");
+    if (Date.now() >= deadline)
+      throw new Error("Timed out waiting for real-Pi capability negotiation.");
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
