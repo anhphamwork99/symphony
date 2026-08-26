@@ -61,6 +61,12 @@ const render = (cards: ReadonlyArray<PiSubagentExecutionCard>) =>
     />,
   );
 
+function dotGridOpeningTag(markup: string, state: "animated" | "static"): string {
+  return markup.match(
+    new RegExp(`<span class="[^"]*"[^>]*data-pi-subagent-dot-grid="${state}"[^>]*>`),
+  )?.[0] ?? "";
+}
+
 describe("PiSubagentExecutionCardStrip", () => {
   it("hides every committed terminal outcome and returns null when none are retained", () => {
     for (const observedState of ["succeeded", "failed", "cancelled", "rejected"] as const) {
@@ -103,6 +109,10 @@ describe("PiSubagentExecutionCardStrip", () => {
     ]);
 
     expect(markup).toContain('data-pi-subagent-dot-grid="animated"');
+    const animatedGrid = dotGridOpeningTag(markup, "animated");
+    expect(animatedGrid).toContain("text-muted-foreground/55");
+    expect(animatedGrid).not.toMatch(/text-(?:sky|cyan)/);
+    expect(markup).toContain('class="sr-only text-sky-300/85"');
     expect(markup.match(/animate-pulse/g)).toHaveLength(9);
     expect(markup).toContain("[animation-duration:1.2s]");
     expect(markup).toContain("motion-reduce:animate-none");
@@ -110,6 +120,24 @@ describe("PiSubagentExecutionCardStrip", () => {
     expect(markup).toContain("Working");
     expect(markup).not.toContain("Working…");
     expect(markup).toContain("2/4 turns");
+  });
+
+  it("uses neutral, amber, and restrained static grid tones without changing state text", () => {
+    const runningMarkup = render([makeCard({ observedState: "running" })]);
+    const cancellingMarkup = render([
+      makeCard({ observedState: "running", desiredState: "cancelling" }),
+    ]);
+    const unverifiedMarkup = render([
+      makeCard({ observedState: "running", currentTeardownEvidence: "survivors" }),
+    ]);
+    const orphanedMarkup = render([makeCard({ observedState: "orphaned" })]);
+
+    expect(dotGridOpeningTag(runningMarkup, "animated")).toContain("text-muted-foreground/55");
+    expect(dotGridOpeningTag(runningMarkup, "animated")).not.toMatch(/text-(?:sky|cyan)/);
+    expect(dotGridOpeningTag(cancellingMarkup, "animated")).toContain("text-amber-300/85");
+    expect(dotGridOpeningTag(unverifiedMarkup, "static")).toContain("text-amber-300/85");
+    expect(dotGridOpeningTag(orphanedMarkup, "static")).toContain("text-muted-foreground/45");
+    expect(orphanedMarkup).toContain('class="sr-only text-amber-300/85"');
   });
 
   it("uses state-specific fallback copy when a spinner has no progress summary", () => {

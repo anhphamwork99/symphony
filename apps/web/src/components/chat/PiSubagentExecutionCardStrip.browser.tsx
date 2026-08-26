@@ -68,6 +68,29 @@ function RailHarness() {
   );
 }
 
+function ToneHarness() {
+  const cards = [
+    makeCard("exec-running"),
+    makeCard("exec-cancelling", { desiredState: "cancelling" }),
+    makeCard("exec-unverified", { currentTeardownEvidence: "survivors" }),
+    makeCard("exec-orphaned", { observedState: "orphaned" }),
+  ];
+
+  return (
+    <ComposerColumnFrame>
+      <div style={{ width: "620px" }}>
+        <PiSubagentExecutionCardStrip
+          cards={cards}
+          onCancelExecution={vi.fn()}
+          cancelPendingExecutionId={null}
+          onResumeExecution={vi.fn()}
+          resumePendingExecutionId={null}
+        />
+      </div>
+    </ComposerColumnFrame>
+  );
+}
+
 describe("PiSubagentExecutionCardStrip browser rail", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -87,6 +110,11 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     expect(progress!.scrollWidth).toBeGreaterThan(progress!.clientWidth);
     expect(document.querySelectorAll('[data-pi-subagent-dot-grid="animated"]')).toHaveLength(1);
     expect(document.querySelectorAll('[data-pi-subagent-dot-grid="static"]')).toHaveLength(1);
+    for (const row of document.querySelectorAll<HTMLElement>(
+      "[data-pi-subagent-execution-row='true']",
+    )) {
+      expect(row.getBoundingClientRect().height).toBe(28);
+    }
     expect(document.body.textContent).toContain("2/4 turns");
     expect(document.body.textContent).toContain("Owner lost after restart");
 
@@ -104,6 +132,28 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     await page.getByRole("button", { name: "Cancel execution" }).click();
     await page.getByRole("button", { name: /Resume execution exec-orphaned/u }).click();
     expect(document.querySelectorAll("button")).toHaveLength(2);
+
+    await screen.unmount();
+  });
+
+  it("uses neutral live/orphaned dots and restrained amber uncertainty dots", async () => {
+    await page.viewport(VIEWPORT.width, VIEWPORT.height);
+    const screen = await render(<ToneHarness />);
+
+    const gridFor = (executionId: string) =>
+      document.querySelector<HTMLElement>(
+        `[data-pi-subagent-execution-id="${executionId}"] [data-pi-subagent-dot-grid]`,
+      );
+    const runningGrid = gridFor("exec-running");
+    const cancellingGrid = gridFor("exec-cancelling");
+    const unverifiedGrid = gridFor("exec-unverified");
+    const orphanedGrid = gridFor("exec-orphaned");
+
+    expect(runningGrid?.className).toContain("text-muted-foreground/55");
+    expect(runningGrid?.className).not.toMatch(/text-(?:sky|cyan)/u);
+    expect(cancellingGrid?.className).toContain("text-amber-300/85");
+    expect(unverifiedGrid?.className).toContain("text-amber-300/85");
+    expect(orphanedGrid?.className).toContain("text-muted-foreground/45");
 
     await screen.unmount();
   });

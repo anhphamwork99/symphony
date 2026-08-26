@@ -107,14 +107,20 @@ function ExecutionRow({
   const cancelVisible = presentation.showCancel;
   const cancelling = presentation.cancelDisabled;
   const resumeVisible = presentation.showResume && onResume !== undefined;
+  const dotToneClassName =
+    presentation.kind === "cancelling" || presentation.kind === "unverified"
+      ? "text-amber-300/85"
+      : presentation.kind === "orphaned"
+        ? "text-muted-foreground/45"
+        : "text-muted-foreground/55";
 
   return (
     <div
-      className="flex min-h-7 min-w-0 items-center gap-2 px-3 py-1 text-xs"
+      className="flex min-h-7 min-w-0 items-center gap-2 px-3 py-0.5 text-xs"
       data-pi-subagent-execution-id={card.executionId}
       data-pi-subagent-execution-row="true"
     >
-      <DotGrid animated={spinnerEligible} className={presentation.textToneClassName} />
+      <DotGrid animated={spinnerEligible} className={dotToneClassName} />
       <span className={cn("sr-only", presentation.textToneClassName)}>{presentation.label}</span>
       <span className="max-w-36 shrink-0 truncate font-medium text-foreground/85" title={card.agentType}>
         {card.agentType}
