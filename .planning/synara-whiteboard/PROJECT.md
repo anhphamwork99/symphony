@@ -1,7 +1,7 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: specification
+Lifecycle: implementation
 Triage: ready-for-agent
 Tracker: Local Markdown
 
@@ -18,4 +18,6 @@ Tracker: Local Markdown
 
 Owner-confirmed product discovery and targeted risk grilling completed on 2026-08-26. The refreshed spec and accepted Testing Strategy Governance Reassessment are the normative implementation handoff.
 
-Current frontier: [01 — Prove the Excalidraw integration boundary](./issues/01-prove-excalidraw-integration-boundary.md).
+Accepted: [01 — Prove the Excalidraw integration boundary](./issues/01-prove-excalidraw-integration-boundary.md), finalized by [Decision 0050](./decisions/0050-ticket-01-final-acceptance-hold-removed.md).
+
+Current frontier: [02 — Prove exact AI edit-batch Undo and Redo](./issues/02-prove-ai-batch-undo-redo.md).

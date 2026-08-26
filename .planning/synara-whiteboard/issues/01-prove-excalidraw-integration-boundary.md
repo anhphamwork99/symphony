@@ -4,14 +4,14 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** accepted — Decision 0050
 
-- [ ] **AC1:** A pinned official `@excalidraw/excalidraw` release loads and operates in Synara’s actual browser build and runtime environment without a fork.
-- [ ] **AC2:** A representative scene containing bindings, bound text, groups, frames, images, and custom data survives import, normalization, persistence-shaped serialization, hydration, and export without semantic loss.
-- [ ] **AC3:** Ordered imperative scene updates render progressively without remounting the editor or losing viewport state.
-- [ ] **AC4:** Host-controlled edit lock prevents element mutations while pan and zoom remain available.
-- [ ] **AC5:** Selection settlement and viewport capture/restoration are observable through the real embedded package.
-- [ ] **AC6:** Baseline measurements cover hydration, serialization, progressive updates, hidden-canvas memory, and image-bearing scenes, with blocking incompatibilities reported explicitly.
+- [x] **AC1:** A pinned official `@excalidraw/excalidraw` release loads and operates in Synara’s actual browser build and runtime environment without a fork.
+- [x] **AC2:** A representative scene containing bindings, bound text, groups, frames, images, and custom data survives import, normalization, persistence-shaped serialization, hydration, and export without semantic loss.
+- [x] **AC3:** Ordered imperative scene updates render progressively without remounting the editor or losing viewport state.
+- [x] **AC4:** Host-controlled edit lock prevents element mutations while pan and zoom remain available.
+- [x] **AC5:** Selection settlement and viewport capture/restoration are observable through the real embedded package.
+- [x] **AC6:** Baseline measurements cover hydration, serialization, progressive updates, hidden-canvas memory, and image-bearing scenes, with blocking incompatibilities reported explicitly.
 
 ## Testing Seams
 
@@ -22,3 +22,11 @@ Feature governance: [Decision 0047](../decisions/0047-testing-strategy-governanc
 - **AC1, AC3–AC5:** Actual embedded Excalidraw browser boundary — prove package loading, non-remounting updates, lock/navigation, selection settlement, and viewport behavior.
 - **AC2:** Official Excalidraw restore/serialize/export boundary — prove representative real-scene round-trip fidelity.
 - **AC6:** Browser performance instrumentation — record empty, normal, image-bearing, progressive-update, and multi-canvas evidence.
+
+## Acceptance
+
+- Final acceptance: [Decision 0050](../decisions/0050-ticket-01-final-acceptance-hold-removed.md).
+- Historical repository-gate hold: [Decision 0049](../decisions/0049-ticket-01-final-acceptance-held.md).
+- Consolidated independent review: [Ticket 01 final review](../reviews/0001-ticket-01-final-review.md).
+- Accepted Whiteboard source baseline: `87b86fb57`.
+- Reassessment candidate with restored repository completion gate: `f9f73f2a5`.

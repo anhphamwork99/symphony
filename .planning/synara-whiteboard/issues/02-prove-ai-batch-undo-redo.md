@@ -2,7 +2,7 @@
 
 **What to build:** Prove with the pinned real Excalidraw embed that one completed, interrupted, or failed partial AI edit batch can be recovered as exactly one user-visible Undo/Redo event without exposing individual streamed updates.
 
-**Blocked by:** 01 — Prove the Excalidraw integration boundary.
+**Blocked by:** None — Ticket 01 was accepted by Decision 0050.
 
 **Status:** ready-for-agent
 
