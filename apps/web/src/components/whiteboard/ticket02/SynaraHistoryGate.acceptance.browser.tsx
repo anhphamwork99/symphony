@@ -67,9 +67,82 @@ function assertNativeControlsDisabledAndInert(): void {
   }
 }
 
+function observeNativeHistoryControls(): {
+  readonly trace: readonly string[];
+  readonly stop: () => void;
+} {
+  const trace: string[] = [];
+  const sample = (label: string) => {
+    for (const control of nativeHistoryControls()) {
+      trace.push(
+        `${label}:${control.getAttribute("aria-label") ?? control.textContent}:${String(control.disabled)}:${control.getAttribute("aria-disabled")}`,
+      );
+    }
+  };
+  sample("before");
+  const observer = new MutationObserver(() => sample("mutation"));
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["disabled", "aria-disabled"],
+    childList: true,
+    subtree: true,
+  });
+  return { trace, stop: () => observer.disconnect() };
+}
+
 describe("Ticket 02 real Chromium public-only history gate", () => {
   beforeAll(async () => {
     await page.viewport(1280, 860);
+  });
+
+  it("runs the one bounded public post-commit Delete timing probe", async () => {
+    const ref = createRef<ExcalidrawTicket02HarnessHandle>();
+    const mounted = await render(
+      <Shell>
+        <ExcalidrawTicket02Harness
+          ref={ref}
+          initialScene={makeExcalidrawTicket01Fixture() as unknown as SynaraSceneInput}
+          scenario="ticket-02-timing-probe"
+        />
+      </Shell>,
+    );
+    const handle = await waitForAdapter(ref);
+    const identity = handle.getAdapter().getIdentity();
+    handle.beginAiBatch("timing-probe-batch");
+    handle.applyAiProgress("timing-probe-batch", { sequence: 1, ...progressScene(1) });
+    handle.applyAiProgress("timing-probe-batch", { sequence: 2, ...progressScene(2) });
+    handle.applyAiProgress("timing-probe-batch", { sequence: 3, ...progressScene(3) });
+    handle.completeAiBatch("timing-probe-batch");
+    const before = captureDocumentSnapshot(handle.getAdapter().captureScene());
+    assertNativeControlsDisabledAndInert();
+
+    handle.getAdapter().updateScene({
+      sequence: 4,
+      appState: { selectedElementIds: { [TICKET01_CARD_ID]: true } },
+    });
+    await vi.waitFor(() =>
+      expect(handle.getAdapter().captureScene().selectedElementIds).toContain(TICKET01_CARD_ID),
+    );
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    const observation = observeNativeHistoryControls();
+    (document.querySelector(".excalidraw") as HTMLElement).focus();
+    await userEvent.keyboard("{Delete}");
+    await vi.waitFor(() => expect(handle.getHistory().events).toHaveLength(2));
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    observation.stop();
+
+    expect(
+      observation.trace.filter((entry) => entry.endsWith(":false:null")),
+      observation.trace.join("\n"),
+    ).toEqual([]);
+    expect(handle.getHistory().events).toHaveLength(2);
+    expect(handle.getAdapter().captureScene().elements.length).toBeLessThan(before.elements.length);
+    expect(handle.getAdapter().getIdentity()).toEqual(identity);
+    assertNativeControlsDisabledAndInert();
+    await mounted.unmount();
   });
 
   it("proves one completed three-progress batch and one Synara route", async () => {

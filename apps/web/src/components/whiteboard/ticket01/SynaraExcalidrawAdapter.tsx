@@ -98,6 +98,7 @@ export interface SynaraExcalidrawHandle {
   readonly captureViewport: () => SynaraViewport;
   readonly restoreViewport: (viewport: SynaraViewport) => void;
   readonly clearNativeHistory: () => void;
+  readonly isNativeHistorySettlementPending?: () => boolean;
   readonly restoreScene: (snapshot: SynaraSceneSnapshot) => void;
 }
 
@@ -321,6 +322,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
   const lastSettledSelectionKeyRef = useRef<string | null>(null);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingNativeSettlementRef = useRef<SynaraSceneSnapshot | null>(null);
+  const nativeSettlementScheduledRef = useRef(false);
   const lastUpdateSequenceRef = useRef(0);
   const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
   const [apiReady, setApiReady] = useState(false);
@@ -370,6 +373,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
     return () => {
       if (selectionTimerRef.current !== null) clearTimeout(selectionTimerRef.current);
       if (selectionTimeoutRef.current !== null) clearTimeout(selectionTimeoutRef.current);
+      pendingNativeSettlementRef.current = null;
+      nativeSettlementScheduledRef.current = false;
       lifecycle({ kind: "unmounted", ...(apiIdRef.current ? { apiId: apiIdRef.current } : {}) });
     };
   }, [lifecycle]);
@@ -747,6 +752,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
       captureViewport,
       restoreViewport,
       clearNativeHistory,
+      isNativeHistorySettlementPending: () => pendingNativeSettlementRef.current !== null,
       restoreScene,
     }),
     [
@@ -766,15 +772,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
 
   useImperativeHandle(ref, () => handle, [handle]);
 
-  const onChange = useCallback<PackageOnChange>(
-    (elements, appState, files) => {
-      const snapshot = toSnapshot(elements, appState, files);
-      latestSnapshotRef.current = snapshot;
-      latestViewportRef.current = snapshot.viewport;
-      // This is the only package-history containment point. It uses the
-      // documented imperative API and runs before any Synara observer sees
-      // the new scene.
-      if (callbacksRef.current.containNativeHistory) clearNativeHistory();
+  const exposeSceneChange = useCallback(
+    (snapshot: SynaraSceneSnapshot): void => {
       callbacksRef.current.onSceneChange?.(snapshot);
       callbacksRef.current.onViewportChange?.(snapshot.viewport);
 
@@ -866,7 +865,32 @@ export const SynaraExcalidrawAdapter = forwardRef<
         }, configuredTimeout);
       }
     },
-    [clearNativeHistory, report],
+    [report],
+  );
+
+  const onChange = useCallback<PackageOnChange>(
+    (elements, appState, files) => {
+      const snapshot = toSnapshot(elements, appState, files);
+      latestSnapshotRef.current = snapshot;
+      latestViewportRef.current = snapshot.viewport;
+      if (!callbacksRef.current.containNativeHistory) {
+        exposeSceneChange(snapshot);
+        return;
+      }
+      clearNativeHistory();
+      pendingNativeSettlementRef.current = snapshot;
+      if (nativeSettlementScheduledRef.current) return;
+      nativeSettlementScheduledRef.current = true;
+      queueMicrotask(() => {
+        nativeSettlementScheduledRef.current = false;
+        const settledSnapshot = pendingNativeSettlementRef.current;
+        pendingNativeSettlementRef.current = null;
+        if (settledSnapshot === null) return;
+        clearNativeHistory();
+        exposeSceneChange(settledSnapshot);
+      });
+    },
+    [clearNativeHistory, exposeSceneChange],
   );
 
   const onApiReady = useCallback(

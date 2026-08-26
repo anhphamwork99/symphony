@@ -135,6 +135,7 @@ export const ExcalidrawTicket02Harness = forwardRef<
   }, []);
 
   const dispatch = useCallback((command: SynaraHistoryCommand): boolean => {
+    if (adapterRef.current?.isNativeHistorySettlementPending?.()) return false;
     return commandsRef.current?.dispatch(command) ?? false;
   }, []);
 
