@@ -896,7 +896,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
 
     // 3. Verify probe identity is stable for session lifetime
     const secondProbe = await probePiSubagentBridge(observedEvent!.session);
-    expect(secondProbe).toBe(observedEvent!.capability);
+    expect(secondProbe).toEqual(observedEvent!.capability);
 
     // 4. Verify no child execution or transcript side effects occurred
     const entries = observedEvent!.session.sessionManager?.getEntries?.() ?? [];

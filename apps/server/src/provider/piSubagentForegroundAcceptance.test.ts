@@ -641,6 +641,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
     // capability. Additive: an old host simply never requires it.
     "child-bash-process-ownership",
+    "execution-identity-routing-v1",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
