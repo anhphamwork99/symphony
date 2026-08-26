@@ -709,10 +709,23 @@ export function writeStrippedCapabilityAgentDir(tempAgentDir: string, baseUrl: s
     // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
     // capability. Additive: an old host simply never requires it.
     "child-bash-process-ownership",
+    "execution-identity-routing-v1",
   ] as const;`;
+  // This real-provider negative removes only canonical identity routing. All
+  // other managed capabilities remain present so the failure is attributable
+  // to the required Ticket 02 capability rather than an unrelated profile.
   const legacyReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
     "abort-propagation",
+    "bounded-foreground-attachment",
+    "coalesced-progress",
+    "durable-cancellation",
+    "journal-terminal-lifecycle",
+    "completion-delivery-ownership",
+    // Decision 0033 point 3: the opaque, identity-fenced child-owner teardown
+    // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
+    // capability. Additive: an old host simply never requires it.
+    "child-bash-process-ownership",
   ] as const;`;
   if (!source.includes(capabilityLiteral)) {
     throw new Error(

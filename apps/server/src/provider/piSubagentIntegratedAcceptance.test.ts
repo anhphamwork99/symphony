@@ -395,6 +395,7 @@ function createStrippedCapabilityExtensionCopy(targetDir: string): void {
     // endpoint \`teardownOwnedProcesses\` is advertised and gated by this
     // capability. Additive: an old host simply never requires it.
     "child-bash-process-ownership",
+    "execution-identity-routing-v1",
   ] as const;`;
   const strippedReplacement = `  const PI_SUBAGENT_CAPABILITIES = [
     "managed-spawn",
@@ -639,7 +640,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
     // any leg of this file.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
 
     const rootDir = mkdtempSync(join(tmpdir(), "synara-t24-integrated-"));
     createdDirs.push(rootDir);
@@ -1001,10 +1002,9 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
       expect(compatible?.capabilities).toContain("abort-propagation");
       expect(compatible?.capabilities).toContain("bounded-foreground-attachment");
       expect(compatible?.capabilities).toContain("coalesced-progress");
-      const compatibleSession = observedSessions.get("th_t24_hs_ok");
-      const negotiated = (compatibleSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
-      expect(negotiated?.isManaged).toBe(true);
-      expect(negotiated?.capabilities).toContain("coalesced-progress");
+      // The production adapter publishes the negotiated result through its
+      // observation hook; it does not promise the bridge probe cache on the
+      // SDK session object as a public composition seam.
 
       // ── Partial/unsupported: stripped-capability copy of the REAL tree ──
       yield* adapter.startSession({
@@ -1777,8 +1777,9 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         "abort-propagation",
         "bounded-foreground-attachment",
         "coalesced-progress",
+        "execution-identity-routing-v1",
       ],
-      extensionVersion: "0.15.0-alfie.4",
+      extensionVersion: "0.15.0-alfie.5",
     });
     const capturingFloodExtension = {
       name: "pi-subagents-t24-flood",

@@ -18,14 +18,14 @@ import {
  * 0003).
  *
  * These helpers are pure: no fs, no Pi SDK import, no side effects. The
- * tests prove (1) the mandatory seven-capability profile, (2) that the
+ * tests prove (1) the mandatory eight-capability profile, (2) that the
  * desktop negotiation is FATAL-shaped (absent / mismatched / malformed
  * bridges return a non-managed result that the bootstrap boundary must
  * treat as fatal — never a legacy fallback), and (3) that the failure
  * detail builder emits only closed-vocabulary, bounded, redacted text.
  */
 
-const SEVEN_REQUIRED = [
+const REQUIRED_CAPABILITIES = [
   "managed-spawn",
   "abort-propagation",
   "bounded-foreground-attachment",
@@ -42,7 +42,7 @@ const bridgeWith = (handshake: (request: PiSubagentHandshakeRequest) => unknown)
 
 describe("PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES", () => {
   it("is exactly the mandatory desktop profile in spec order", () => {
-    expect([...PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES]).toEqual([...SEVEN_REQUIRED]);
+    expect([...PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES]).toEqual([...REQUIRED_CAPABILITIES]);
   });
 
   it("contains only closed-vocabulary capabilities", () => {
@@ -62,9 +62,9 @@ describe("piSubagentDesktopManagedExtensionDir", () => {
 });
 
 describe("createPiSubagentDesktopManagedHandshakeRequest", () => {
-  it("widens the default 3-required probe to the full mandatory seven", () => {
+  it("widens the default 3-required probe to the full mandatory eight", () => {
     const request = createPiSubagentDesktopManagedHandshakeRequest();
-    expect(request.requiredCapabilities).toEqual([...SEVEN_REQUIRED]);
+    expect(request.requiredCapabilities).toEqual([...REQUIRED_CAPABILITIES]);
   });
 
   it("keeps the default request's other fields", () => {
@@ -89,22 +89,22 @@ describe("createPiSubagentDesktopManagedHandshakeRequest", () => {
 });
 
 describe("negotiatePiSubagentDesktopManagedBridge", () => {
-  it("succeeds when the bridge supplies all seven required capabilities", async () => {
+  it("succeeds when the bridge supplies all eight required capabilities", async () => {
     const requests: PiSubagentHandshakeRequest[] = [];
     const target = bridgeWith(async (request) => {
       requests.push(request);
       return {
         ok: true,
         protocolVersion: request.protocolVersion,
-        extensionVersion: "0.15.0-alfie.4",
-        capabilities: [...SEVEN_REQUIRED, "terminal-outbox"],
+        extensionVersion: "0.15.0-alfie.5",
+        capabilities: [...REQUIRED_CAPABILITIES, "terminal-outbox"],
       };
     });
     const capability = await negotiatePiSubagentDesktopManagedBridge(target);
     expect(capability).toMatchObject({ status: "managed_enabled", isManaged: true });
     // The negotiation actually demanded the mandatory seven.
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.requiredCapabilities).toEqual([...SEVEN_REQUIRED]);
+    expect(requests[0]!.requiredCapabilities).toEqual([...REQUIRED_CAPABILITIES]);
   });
 
   it("is fatal-shaped when a required capability is missing", async () => {
@@ -165,7 +165,7 @@ describe("negotiatePiSubagentDesktopManagedBridge", () => {
       ok: true,
       protocolVersion: 99,
       extensionVersion: "0.99.0",
-      capabilities: [...SEVEN_REQUIRED],
+      capabilities: [...REQUIRED_CAPABILITIES],
     }));
     const capability = await negotiatePiSubagentDesktopManagedBridge(target);
     expect(capability).toMatchObject({ status: "unsupported_version", isManaged: false });

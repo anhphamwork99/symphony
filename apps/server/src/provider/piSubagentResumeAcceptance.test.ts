@@ -349,7 +349,7 @@ describe("Pi Subagent Explicit Resume Real-Pi Acceptance (Issue 14)", () => {
     // Real Git provenance first: no synthetic bridge may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
 
     const modelServer = await startDeterministicModelServer();
 
@@ -381,10 +381,12 @@ describe("Pi Subagent Explicit Resume Real-Pi Acceptance (Issue 14)", () => {
     const { authorityService, binding } = makeAuthorityFixture("th_t14_real_1");
 
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
@@ -435,7 +437,7 @@ describe("Pi Subagent Explicit Resume Real-Pi Acceptance (Issue 14)", () => {
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
 
       const loadedExt = observedSession.resourceLoader

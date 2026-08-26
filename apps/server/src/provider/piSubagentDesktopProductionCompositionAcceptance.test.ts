@@ -703,7 +703,7 @@ describe("Ticket 04 WP2 packaged desktop production composition", () => {
         45_000,
         "seven-capability handshake before first admission",
       );
-      expect(PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES).toHaveLength(7);
+      expect(PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES).toHaveLength(8);
       expect(capability.isManaged).toBe(true);
       for (const required of PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES) {
         expect(capability.capabilities).toContain(required);

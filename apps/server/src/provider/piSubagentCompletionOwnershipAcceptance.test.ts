@@ -539,7 +539,7 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
 
     const modelServer = await startDeterministicModelServer();
 
@@ -570,10 +570,12 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
     const ownershipEngine = await createOwnershipEngine(serverConfig);
 
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
       completionDispatchBridge: ownershipEngine.bridged,
     }).pipe(
@@ -638,7 +640,7 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
       // The ownership capability must be negotiated on this boundary.
       expect(negotiated?.capabilities).toContain("completion-delivery-ownership");
@@ -791,10 +793,12 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
     const { authorityService, binding } = makeAuthorityFixture("th_t09_legacy_1");
 
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
@@ -824,7 +828,7 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
       // Mixed-version boundary: the legacy extension negotiates managed
       // execution and terminal reporting but NOT completion-delivery-ownership.

@@ -30,7 +30,7 @@ import {
 const sha256 = (content: string | Uint8Array): string =>
   createHash("sha256").update(content).digest("hex");
 
-const PINNED_COMMIT = "aa6fa4a8540644d2509b10d6df854486ddc67d1d";
+const PINNED_COMMIT = "73bc7744f8fbbd12206302de2df8230b29a49178";
 
 interface ArtifactFileSpec {
   readonly path: string;
@@ -46,7 +46,7 @@ const VALID_SOURCE_IDENTITY = {
   repositoryUrl: "https://github.com/anhphamwork99/alfie.git",
   pinnedCommit: PINNED_COMMIT,
   packageName: "@alfie/pi-subagents",
-  packageVersion: "0.15.0-alfie.4",
+  packageVersion: "0.15.0-alfie.5",
 };
 
 const VALID_CAPABILITY_PROFILE = {
@@ -58,7 +58,7 @@ const VALID_CAPABILITY_PROFILE = {
 const BASE_FILES: ReadonlyArray<ArtifactFileSpec> = [
   {
     path: "agent/extensions/pi-subagents/package.json",
-    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.4" }),
+    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.5" }),
   },
   {
     path: "agent/extensions/pi-subagents/src/index.ts",

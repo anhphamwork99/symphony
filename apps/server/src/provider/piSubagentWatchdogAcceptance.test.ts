@@ -325,7 +325,7 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
   it("T15-AC1/AC4: wall-time expiry escalates a real background child through stage-1 abort and settles exactly once on child acknowledgement", async () => {
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
 
     const modelServer = await startDeterministicModelServer();
 
@@ -351,10 +351,12 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
     const { authorityService, binding } = makeAuthorityFixture("th_t15_real_1");
 
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
@@ -405,7 +407,7 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
       expect(negotiated?.capabilities).toContain("durable-cancellation");
 
@@ -574,12 +576,14 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
     const { authorityService, binding } = makeAuthorityFixture("th_t15_real_2");
 
     let observedSession: any;
+    let observedCapability: any;
     let interruptDispatched = 0;
     let sessionStopDispatched = 0;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
@@ -632,7 +636,7 @@ describe("Pi Subagent Watchdog Escalation Real-Pi Acceptance (Issue 15)", () => 
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
 
       const loadedExt = observedSession.resourceLoader

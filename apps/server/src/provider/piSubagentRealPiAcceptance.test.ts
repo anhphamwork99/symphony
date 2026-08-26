@@ -164,8 +164,8 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
     const provenance = verifyRealPiExtensionProvenance();
     expect(provenance.isVerified).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
-    expect(provenance.pinnedCommit).toBe("aa6fa4a8540644d2509b10d6df854486ddc67d1d");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
+    expect(provenance.pinnedCommit).toBe("73bc7744f8fbbd12206302de2df8230b29a49178");
 
     // Snapshot the user's real Pi home BEFORE the harness exists so the
     // post-run comparison proves no read-modify-write escaped isolation.
@@ -591,7 +591,7 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
       expect(strippedCapability.isManaged).toBe(false);
       expect(strippedCapability.status).toBe("capability_mismatch");
       expect(strippedCapability.diagnosticCode).toBe("pi_subagent_capability_mismatch");
-      expect(strippedCapability.missingCapabilities).toContain("bounded-foreground-attachment");
+      expect(strippedCapability.missingCapabilities).toContain("execution-identity-routing-v1");
       await waitFor(
         () =>
           harness.modelServer

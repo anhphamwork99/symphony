@@ -360,7 +360,7 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
 
     const modelServer = await startDeterministicModelServer();
 
@@ -391,10 +391,12 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
     const { authorityService, binding } = makeAuthorityFixture("th_t07_real_1");
 
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
@@ -445,7 +447,7 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
         mcpAuthority: binding,
       });
 
-      const negotiated = (observedSession as any)[Symbol.for("synara.pi.subagents.probe_cache")];
+      const negotiated = observedCapability;
       expect(negotiated?.isManaged).toBe(true);
       expect(negotiated?.capabilities).toContain("journal-terminal-lifecycle");
 
@@ -574,10 +576,12 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
 
     const runtimeEvents: any[] = [];
     let observedSession: any;
+    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
+        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),
