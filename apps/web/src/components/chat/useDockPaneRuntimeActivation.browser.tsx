@@ -131,13 +131,17 @@ describe("useDockPaneRuntimeActivation", () => {
     let nextFrameId = 1;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => nextFrameId++);
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const initialProps: RuntimeActivationProps = {
+      projectId: null,
+      activePane: BROWSER_PANE,
+    };
     const hook = await renderHook(
       (props?: RuntimeActivationProps) =>
         useDockPaneRuntimeActivation({
           projectId: props?.projectId ?? null,
           activePane: props?.activePane ?? null,
         }),
-      { initialProps: { projectId: null, activePane: BROWSER_PANE } },
+      { initialProps },
     );
 
     // A Project-less surface owns no dock slice, so there is no key to hydrate:
