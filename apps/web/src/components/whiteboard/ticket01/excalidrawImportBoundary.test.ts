@@ -59,12 +59,19 @@ describe("Ticket 01 Excalidraw import boundary", () => {
     expect(adapter).toContain("update-order-mismatch");
   });
 
-  it("keeps the isolated directory limited to the three Ticket 01 files", async () => {
+  it("keeps the Ticket 01 boundary isolated without a production barrel", async () => {
     const entries = await (await import("node:fs/promises")).readdir(directory);
-    expect(entries.toSorted()).toEqual([
-      "ExcalidrawTicket01Harness.tsx",
-      "SynaraExcalidrawAdapter.tsx",
-      "excalidrawImportBoundary.test.ts",
-    ]);
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        "ExcalidrawTicket01Harness.tsx",
+        "SynaraExcalidrawAdapter.tsx",
+        "excalidrawImportBoundary.test.ts",
+        "excalidrawTicket01Fixture.test.ts",
+        "excalidrawTicket01Fixture.ts",
+        "excalidrawTicket01Semantics.ts",
+      ]),
+    );
+    expect(entries).not.toContain("index.ts");
+    expect(entries).not.toContain("index.tsx");
   });
 });
