@@ -113,7 +113,7 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     for (const row of document.querySelectorAll<HTMLElement>(
       "[data-pi-subagent-execution-row='true']",
     )) {
-      expect(row.getBoundingClientRect().height).toBe(28);
+      expect(row.getBoundingClientRect().height).toBe(32);
     }
     expect(document.body.textContent).toContain("2/4 turns");
     expect(document.body.textContent).toContain("Owner lost after restart");

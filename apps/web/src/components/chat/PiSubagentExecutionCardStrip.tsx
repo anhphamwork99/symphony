@@ -116,7 +116,7 @@ function ExecutionRow({
 
   return (
     <div
-      className="flex min-h-7 min-w-0 items-center gap-2 px-3 py-0.5 text-xs"
+      className="flex min-h-7 min-w-0 items-center gap-2 px-3 py-1 text-xs"
       data-pi-subagent-execution-id={card.executionId}
       data-pi-subagent-execution-row="true"
     >
