@@ -8,7 +8,7 @@
 
 **Binding authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
 
-**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These are the clean baselines to record before implementation; a later implementation may advance Alfie only through WP-04 provenance re-pin.
+**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These are the clean baselines to record before implementation. WP-01 owns the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump; WP-04 consumes that commit/version read-only while re-pinning Symphony provenance.
 
 **Date:** 2026-08-26
 
@@ -22,7 +22,7 @@ The implementation is deliberately sequential:
 WP-01 Alfie canonical live routing
   -> WP-02 Symphony durable authorized read contract
     -> WP-03 Symphony managed-tool routing and capability gate
-      -> WP-04 exact Alfie provenance re-pin
+      -> WP-04 Symphony provenance re-pin of exact Alfie commit
         -> WP-05 isolated real-Pi acceptance and report
 ```
 
@@ -88,7 +88,7 @@ Locators are implementation anchors, not permission to widen scope. Workers must
 
 - **Alfie first:** make the provider boundary capable of accepting the server-owned tuple without changing the durable authority. This prevents Symphony from depending on an unproven provider-only identity alias.
 - **Durable read before live supplement:** use the existing repository/read-service seams and return a bounded durable result/card plus explicit state/diagnostic. Live lookup is an optional supplement after authorization and tuple resolution, never the source of identity truth.
-- **Separate routing from pinning:** WP-01 changes the runtime seam; WP-04 records the resulting exact Alfie commit/version, hashes, clean tree, and controlled artifact. A mutable checkout is never evidence.
+- **Separate routing from pinning:** WP-01 changes the runtime seam, bumps the package version, and commits the runtime plus version together; WP-04 records that exact immutable Alfie commit/version, hashes, clean tree, and controlled artifact in Symphony. A mutable checkout is never evidence.
 - **One Symphony routing seam:** WP-03 binds the durable read service and exact provider mapping at the managed adapter boundary, rather than adding a second public tool or global provider registry.
 - **Layered evidence:** deterministic repository/read tests prove ordering, fencing, precedence, bounds, and diagnostics; controlled Alfie tests prove the tuple index; real-Pi tests prove production composition. No fixture result is relabeled as real-Pi.
 
@@ -121,10 +121,10 @@ This is a candidate implementation contract to be evidenced by the WPs, not a pe
 
 | Order | Work package | Repository | Depends on | Owns |
 | --- | --- | --- | --- | --- |
-| 01 | [Alfie canonical live routing](WP-01-alfie-canonical-live-routing.md) | `/Users/anhpham99/alfie` | none | exact tuple index, managed public shape, canonical/alias inputs, live result/control seam, extension tests |
+| 01 | [Alfie canonical live routing](WP-01-alfie-canonical-live-routing.md) | `/Users/anhpham99/alfie` | none | exact tuple index, managed public shape, canonical/alias inputs, live result/control seam, extension tests, package version `0.15.0-alfie.5`, one immutable Alfie commit |
 | 02 | [Symphony durable read contract](WP-02-symphony-durable-read-contract.md) | Symphony | WP-01 contract shape | authorized durable lookup, current-tuple/fencing, terminal precedence, bounded read result/diagnostics, repository/read tests |
 | 03 | [Symphony managed-tool routing](WP-03-symphony-managed-tool-routing.md) | Symphony | WP-02 and WP-01 | capability gate, managed adapter dispatch, live supplement/steer routing, legacy isolation, integration tests |
-| 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Alfie + Symphony | WP-03 candidate | exact Alfie version/commit/hash/clean-tree and controlled artifact manifest, paired provenance evidence |
+| 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Symphony | WP-01 immutable Alfie commit/version and WP-03 candidate | read-only verification of exact `ALFIE_T02_COMMIT`/version plus Symphony provenance manifest and pin fixtures |
 | 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | isolated real-Pi proof, deterministic/controlled/real evidence split, Issue 02 Implementation Report |
 
 No WP may be started out of order, and no WP may modify another WP's owned files without a reported dependency repair.
@@ -157,7 +157,7 @@ Stop and escalate rather than silently choosing a workaround if: no exact tuple 
 Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update itself is one planning-only commit:
 
 ```text
-docs(planning): add canonical subagent identity work packages
+docs(planning): repair Alfie version ownership in ticket 02 plan
 ```
 
 The plan does not update `PROJECT.md`, ticket status/frontier, decisions, source, migrations, or any other project.

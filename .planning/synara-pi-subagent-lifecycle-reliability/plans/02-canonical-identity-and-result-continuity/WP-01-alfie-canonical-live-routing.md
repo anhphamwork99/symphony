@@ -8,13 +8,13 @@
 
 **Baseline:** `aa6fa4a8540644d2509b10d6df854486ddc67d1d` / `@alfie/pi-subagents@0.15.0-alfie.4`; confirm clean status before editing.
 
-**Dependencies:** none. WP-02 consumes this contract; do not wait for or edit Symphony.
+**Dependencies:** none. WP-02 consumes this contract; WP-04 later consumes the immutable WP-01 Alfie commit/version read-only. Do not wait for or edit Symphony.
 
 **Authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md), especially §§1–2 and §4. Ticket 02 is the only implementation frontier.
 
 ## Objective
 
-Make the pinned extension's managed result/control boundary use the server-owned public `executionId` and exact current tuple while retaining Alfie `agentId` solely as private in-memory correlation. Remove provider identity leakage from managed output/details, support canonical `execution_id`, retain only a bounded equal-value deprecated `agent_id` alias, and make exact-live-only result/control resolution possible for Symphony's durable-first routing.
+Make the pinned extension's managed result/control boundary use the server-owned public `executionId` and exact current tuple while retaining Alfie `agentId` solely as private in-memory correlation. Remove provider identity leakage from managed output/details, support canonical `execution_id`, retain only a bounded equal-value deprecated `agent_id` alias, and make exact-live-only result/control resolution possible for Symphony's durable-first routing. WP-01 also owns the exact `0.15.0-alfie.4` → `0.15.0-alfie.5` package version bump, committed together with this runtime change.
 
 ## Exact write set
 
@@ -24,9 +24,10 @@ Make the pinned extension's managed result/control boundary use the server-owned
 - `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/agent-tool-execute.test.ts`
 - `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/extension-capabilities.test.ts`
 - `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/synara-bridge.test.ts`
+- `/Users/anhpham99/alfie/agent/extensions/pi-subagents/package.json` — only the package `version` field; bump exactly from `0.15.0-alfie.4` to `0.15.0-alfie.5`
 - one new focused test under `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/` named `canonical-identity-routing.test.ts`
 
-Do not edit `package.json` or dependencies in this WP; WP-04 owns version/provenance repinning.
+No dependencies or scripts may change. WP-01 owns the package version bump and must commit it together with the runtime implementation; WP-04 consumes the resulting immutable Alfie commit/version read-only.
 
 ## Prohibited changes
 
@@ -38,13 +39,14 @@ Do not edit `package.json` or dependencies in this WP; WP-04 owns version/proven
 
 ## Implementation contract
 
-1. Carry and validate the managed identity `{ executionId, attemptId, generation }` at the actual Agent result/control seam. Treat all three fields as one immutable tuple; do not resolve a record by `executionId` alone when a current tuple is available.
-2. Add an exact session-scoped index keyed by `(executionId, attemptId, generation)` whose value is the private provider `agentId`/record reference. Register and remove entries with the existing managed record lifecycle. Bound the index to live managed records and ensure duplicate or stale tuples cannot resolve another record.
-3. Change managed `get_subagent_result` and `steer_subagent` schemas to prefer `execution_id`. Keep `agent_id` only as a deprecated syntactic alias: normalize it to the public `executionId`, reject a value that is not the same public ID, and make alias use observable through a bounded deprecation marker/diagnostic. Never interpret an Alfie provider `agentId` as the alias value.
-4. Keep provider lookup private and exact: after Symphony has authorized the tuple, Alfie may use the tuple index to obtain its local record. Missing exact live state returns a stable unavailable-live result/control outcome to the host, not a public `Agent not found` identity failure.
-5. Ensure managed detached output, result payloads, details, and diagnostics expose `executionId` only as logical identity. `attemptId`/generation may be present where needed for fencing; `agentId` must not be serialized. Preserve existing bounded result/output limits.
-6. Advertise the capability equivalent to `execution-identity-routing-v1` only when the implemented routing surface is complete. A malformed/incompatible managed binding must fail closed; absence of managed binding preserves legacy behavior.
-7. Preserve existing exact-live-only steer behavior. Do not queue, reconstruct, bootstrap, replay, or create a child when the exact tuple is missing or non-live.
+1. Update only the package `version` field from `0.15.0-alfie.4` to the exact required `0.15.0-alfie.5`. If that version is already present, reserved, or otherwise collides, stop and return `challenge`; do not select another version. Commit this manifest change in the same Alfie commit as the runtime implementation and tests.
+2. Carry and validate the managed identity `{ executionId, attemptId, generation }` at the actual Agent result/control seam. Treat all three fields as one immutable tuple; do not resolve a record by `executionId` alone when a current tuple is available.
+3. Add an exact session-scoped index keyed by `(executionId, attemptId, generation)` whose value is the private provider `agentId`/record reference. Register and remove entries with the existing managed record lifecycle. Bound the index to live managed records and ensure duplicate or stale tuples cannot resolve another record.
+4. Change managed `get_subagent_result` and `steer_subagent` schemas to prefer `execution_id`. Keep `agent_id` only as a deprecated syntactic alias: normalize it to the public `executionId`, reject a value that is not the same public ID, and make alias use observable through a bounded deprecation marker/diagnostic. Never interpret an Alfie provider `agentId` as the alias value.
+5. Keep provider lookup private and exact: after Symphony has authorized the tuple, Alfie may use the tuple index to obtain its local record. Missing exact live state returns a stable unavailable-live result/control outcome to the host, not a public `Agent not found` identity failure.
+6. Ensure managed detached output, result payloads, details, and diagnostics expose `executionId` only as logical identity. `attemptId`/generation may be present where needed for fencing; `agentId` must not be serialized. Preserve existing bounded result/output limits.
+7. Advertise the capability equivalent to `execution-identity-routing-v1` only when the implemented routing surface is complete. A malformed/incompatible managed binding must fail closed; absence of managed binding preserves legacy behavior.
+8. Preserve existing exact-live-only steer behavior. Do not queue, reconstruct, bootstrap, replay, or create a child when the exact tuple is missing or non-live.
 
 ## Tests and evidence contract
 
@@ -92,7 +94,8 @@ feat(pi-subagents): route managed identity by execution tuple
 Self-review checklist:
 
 - `git diff --name-only` is a subset of the exact write set;
-- no package/version/provenance change slipped into WP-01;
+- `package.json` contains only the exact `0.15.0-alfie.5` version bump, with no dependency, script, or provenance change;
+- the runtime implementation, tests, and package version are committed together in the one required Alfie commit;
 - no managed public field contains `agentId` or raw provider errors;
 - all provider accesses follow exact tuple resolution and never authorize identity;
 - legacy tests remain green and the capability is not advertised on partial binding;
@@ -102,4 +105,4 @@ Report the full commit SHA, focused/full test exit codes and counts, tuple/index
 
 ## Escalation
 
-Return `challenge` if the existing Alfie record lifecycle cannot maintain an exact tuple index without a global scan or if the host binding cannot carry the tuple without changing an unapproved protocol. Return `partial` only if the bounded Alfie seam is complete but a separately owned capability/version or Symphony contract is genuinely pending.
+Return `challenge` if `0.15.0-alfie.5` is already present, reserved, or otherwise collides; if the existing Alfie record lifecycle cannot maintain an exact tuple index without a global scan; or if the host binding cannot carry the tuple without changing an unapproved protocol. Return `partial` only if the bounded Alfie seam is complete but a separately owned Symphony contract is genuinely pending.
