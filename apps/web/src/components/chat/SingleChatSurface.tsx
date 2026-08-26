@@ -1143,7 +1143,7 @@ export function SingleChatSurface(props: {
           mainTransitionTargetRef={mainSurfaceRef}
           addMenuKinds={availableDockPaneKinds}
           launcherItems={dockLauncherItems}
-          motionKey={dockOwnerProjectId ?? undefined}
+          {...(dockOwnerProjectId ? { motionKey: dockOwnerProjectId } : {})}
           activePaneRuntimeMode={activePaneRuntimeMode}
           preferredWidthPx={dockState.preferredWidthPx}
           onPreferredWidthChange={

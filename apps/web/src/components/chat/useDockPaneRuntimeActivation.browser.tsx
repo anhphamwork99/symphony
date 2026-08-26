@@ -77,8 +77,11 @@ describe("useDockPaneRuntimeActivation", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => nextFrameId++);
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
     const hook = await renderHook(
-      (props: RuntimeActivationProps) =>
-        useDockPaneRuntimeActivation({ projectId: props.projectId, activePane: props.activePane }),
+      (props?: RuntimeActivationProps) =>
+        useDockPaneRuntimeActivation({
+          projectId: props?.projectId ?? null,
+          activePane: props?.activePane ?? null,
+        }),
       { initialProps: { projectId: PROJECT_A, activePane: BROWSER_PANE } },
     );
 
@@ -100,8 +103,11 @@ describe("useDockPaneRuntimeActivation", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => nextFrameId++);
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
     const hook = await renderHook(
-      (props: RuntimeActivationProps) =>
-        useDockPaneRuntimeActivation({ projectId: props.projectId, activePane: props.activePane }),
+      (props?: RuntimeActivationProps) =>
+        useDockPaneRuntimeActivation({
+          projectId: props?.projectId ?? null,
+          activePane: props?.activePane ?? null,
+        }),
       { initialProps: { projectId: PROJECT_A, activePane: BROWSER_PANE } },
     );
 
@@ -126,8 +132,11 @@ describe("useDockPaneRuntimeActivation", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => nextFrameId++);
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
     const hook = await renderHook(
-      (props: RuntimeActivationProps) =>
-        useDockPaneRuntimeActivation({ projectId: props.projectId, activePane: props.activePane }),
+      (props?: RuntimeActivationProps) =>
+        useDockPaneRuntimeActivation({
+          projectId: props?.projectId ?? null,
+          activePane: props?.activePane ?? null,
+        }),
       { initialProps: { projectId: null, activePane: BROWSER_PANE } },
     );
 
