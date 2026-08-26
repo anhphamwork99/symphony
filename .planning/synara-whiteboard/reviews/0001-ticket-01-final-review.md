@@ -103,3 +103,47 @@ Memory is explicitly coarse process-level `performance.memory.usedJSHeapSize`, n
 ## Workspace checks outside Ticket acceptance
 
 Workspace `fmt`, `lint` and `typecheck` were not run because repository policy requires explicit owner authorization. This is an authorized non-run, not evidence of pass and not a Ticket 01 code defect. Unrelated Pi/main baseline changes were excluded from the exact-candidate review.
+
+## Authorized final-check addendum
+
+Date: 2026-08-26
+Final formatted candidate: `87b86fb57e1797c516c3a94f3ea141d266a30468`
+
+The owner subsequently authorized the bundled final workspace checks. An independent format-only addendum review audited exactly `7c4d1531c..87b86fb57` and retained the feature-level **PASS** verdict.
+
+### Format-only integrity
+
+- Exactly six expected Ticket files changed: three AC6 reports, this consolidated review, the browser acceptance test, and the adapter.
+- Adapter and browser-test deltas are whitespace/indentation only.
+- `excalidraw-baseline.json` is parse/deep-equal to its parent; samples, summaries, provenance, classifications, and proofs are unchanged.
+- Markdown evidence is semantically equal after canonical table alignment and escaping.
+- `git diff --check` passes and the exact-candidate worktree is clean.
+- A fresh root `bun run fmt` changes 34 unrelated repository paths and **zero Ticket 01 paths**.
+
+### Final command evidence
+
+| Check                      | Result                                 |
+| -------------------------- | -------------------------------------- |
+| Frozen install             | PASS                                   |
+| `bun run fmt`              | PASS; zero Ticket paths changed        |
+| `bun run lint`             | PASS; 0 errors and 21 warnings         |
+| Baseline validation        | PASS                                   |
+| Focused Vitest             | PASS; 2 files and 16 tests             |
+| Fresh Chromium acceptance  | PASS; 1 file and 9 tests               |
+| Final worktree cleanliness | PASS                                   |
+| `bun run typecheck`        | Repository-wide FAIL outside Ticket 01 |
+
+### Typecheck causal classification
+
+Global typecheck reports TS6307 in `scripts/lib/piSubagentDevArtifactCache.ts` because `scripts/tsconfig.json` does not list the imported server-side `piSubagentArtifactVerifier.ts`.
+
+Direct web typecheck reports eight diagnostics, all outside `apps/web/src/components/whiteboard/ticket01/**`:
+
+- `apps/web/src/components/chat/SingleChatSurface.tsx`
+- `apps/web/src/components/chat/useDockPaneRuntimeActivation.browser.tsx`
+- `apps/web/src/components/ChatView.browser.tsx`
+- `apps/web/src/lib/piSubagentExecutionCardPresentation.ts`
+
+The failures belong to unrelated RightDock, ChatView, Pi execution-card, and Pi artifact-tooling work. No Ticket 01 source or test path appears in the diagnostics, and the format-only candidate changes none of those files.
+
+Ticket 01 correctness and AC1–AC6 remain **PASS**. Repository-wide typecheck completion remains separately non-green and must not be represented as passing.
