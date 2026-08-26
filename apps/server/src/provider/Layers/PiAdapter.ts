@@ -118,9 +118,12 @@ import {
 } from "../piSubagentDesktopArtifactGate.ts";
 import {
   negotiatePiSubagentDesktopManagedBridge,
+  negotiatePiSubagentManagedBridge,
   PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL,
   piSubagentDesktopManagedBootstrapFailureDetail,
   piSubagentDesktopManagedExtensionDir,
+  wrapPiSubagentManagedTool,
+  type PiSubagentManagedToolReadService,
 } from "../piSubagentManagedRuntimeBinding.ts";
 import {
   enablePiSynaraMcpSession,
@@ -139,7 +142,6 @@ import {
   attachPiSubagentManagedForegroundBinding,
   dispatchPiSubagentTeardownOwnedProcesses,
   PI_SUBAGENT_TEARDOWN_OWNED_PROCESSES_CAPABILITY,
-  probePiSubagentBridge,
   type PiSubagentManagedForegroundBinding,
   type PiSubagentObservationInput,
 } from "../piSubagentBridge.ts";
@@ -193,6 +195,7 @@ import { ProviderProcessExitUnprovenError } from "../supervisedProcessTeardown.t
 import { makePiSubagentSafeCorrelation } from "../piSubagentTelemetrySafety.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { McpSessionAuthority } from "../../agentGateway/Services/McpSessionAuthority.ts";
+import { makePiSubagentExecutionReadService } from "../piSubagentExecutionReadService.ts";
 
 import {
   teardownChildProcessTree,
@@ -2113,9 +2116,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     // Genuine server read service (projection snapshot) resolved once at
     // adapter build, or the injected test seam. The admission boundary never
     // fabricates a snapshot from extension params.
-    const adapterSnapshotQuery =
-      options?.snapshotQuery ??
-      Option.getOrUndefined(yield* Effect.serviceOption(ProjectionSnapshotQuery));
+    const adapterProjectionQuery = Option.getOrUndefined(
+      yield* Effect.serviceOption(ProjectionSnapshotQuery),
+    );
+    const adapterSnapshotQuery = options?.snapshotQuery ?? adapterProjectionQuery;
     const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
@@ -3694,7 +3698,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               ),
             )))
           : yield* Effect.tryPromise({
-              try: () => probePiSubagentBridge(runtime.session),
+              try: () => negotiatePiSubagentManagedBridge(runtime.session),
               catch: (cause): PiSubagentNegotiatedCapability => ({
                 status: "bridge_error",
                 diagnosticCode: "pi_subagent_bridge_error",
@@ -3777,6 +3781,43 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // and the repository additionally validates the ownership fingerprint
           // before any already_applied answer.
           const mintedCommandIds = new Map<string, string>();
+
+          // Ticket 02 durable-first managed result/control routing. The read
+          // service is session-scoped: its caller authorization is bound to
+          // this exact parent thread, while the capability closure below is
+          // additionally bound to this exact runtime object. No provider
+          // callback can run before the durable resolver completes.
+          const managedReadSnapshotQuery =
+            adapterProjectionQuery ??
+            (adapterSnapshotQuery === undefined
+              ? undefined
+              : {
+                  getThreadShellById: (threadId: ThreadId) =>
+                    adapterSnapshotQuery.getSnapshot().pipe(
+                      Effect.map((snapshot: any) =>
+                        Option.fromNullable(
+                          snapshot.threads?.find((candidate: any) => candidate.id === threadId),
+                        ),
+                      ),
+                    ),
+                });
+          const managedReadService: PiSubagentManagedToolReadService | undefined =
+            managedReadSnapshotQuery === undefined
+              ? undefined
+              : makePiSubagentExecutionReadService({
+                  repository: piSubagentRepository,
+                  snapshotQuery: managedReadSnapshotQuery,
+                  authorizeCaller: ({ parentThreadId }) =>
+                    Effect.succeed(
+                      parentThreadId === String(input.threadId)
+                        ? ({ kind: "authorized" } as const)
+                        : ({
+                            kind: "denied",
+                            diagnosticCode: "pi_subagent_read_unauthorized_or_out_of_scope",
+                          } as const),
+                    ),
+                });
+          const canonicalRoutingBound = { value: false };
 
           // Ticket 23 server-side progress coalescer: one session-scoped
           // registry, one latest-slot + trailing-edge timer per execution
@@ -4606,6 +4647,51 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           const sessionAgentTool = allTools.find((t: any) => t.name === "Agent");
           if (sessionAgentTool) {
             wrapAgentTool(sessionAgentTool);
+          }
+
+          // Ticket 02: result and steer tools are the only managed provider
+          // callbacks exposed through this route. Their original Alfie
+          // implementation remains the exact-live tuple consumer, but it is
+          // unreachable until the durable read service has authorized and
+          // resolved the current tuple. Missing either endpoint never enables
+          // a partial managed routing claim. When the durable seam itself is
+          // unavailable, install a fail-closed wrapper rather than exposing
+          // Alfie's provider-local legacy lookup.
+          {
+            const routingReadService: PiSubagentManagedToolReadService =
+              managedReadService ?? {
+                readResult: () =>
+                  Effect.fail({
+                    kind: "denied" as const,
+                    diagnosticCode: "pi_subagent_read_capability_unavailable" as const,
+                  }),
+              };
+            for (const ext of loadedExtensions) {
+              if (!(ext && ext.tools instanceof Map)) continue;
+              for (const [name, entry] of ext.tools.entries()) {
+                if (name !== "get_subagent_result" && name !== "steer_subagent") continue;
+                const target = entry?.definition ?? entry;
+                wrapPiSubagentManagedTool(target, name, {
+                  readService: routingReadService,
+                  isCapabilityBound: () =>
+                    canonicalRoutingBound.value &&
+                    context.subagentCapability === subagentCapability &&
+                    context.runtime.session === runtime.session &&
+                    !context.stopped,
+                });
+              }
+            }
+            // A managed capability is not considered bound until both
+            // canonical endpoints were found and wrapped on this session.
+            const managedToolNames = new Set(
+              loadedExtensions.flatMap((ext: any) =>
+                ext && ext.tools instanceof Map ? [...ext.tools.keys()] : [],
+              ),
+            );
+            canonicalRoutingBound.value =
+              managedReadService !== undefined &&
+              managedToolNames.has("get_subagent_result") &&
+              managedToolNames.has("steer_subagent");
           }
 
           // Ticket 14 (T14-AC1/AC6): capture the ORIGINAL (unwrapped) Agent

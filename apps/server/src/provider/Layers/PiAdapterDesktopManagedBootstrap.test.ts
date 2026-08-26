@@ -54,7 +54,7 @@ import { PI_SUBAGENT_DESKTOP_MANAGED_RUNTIME_CONFIG_FAILURE_DETAIL } from "../pi
 // Deterministic Pi SDK mock
 // ---------------------------------------------------------------------------
 
-const SEVEN_REQUIRED = [
+const DESKTOP_REQUIRED_CAPABILITIES = [
   "managed-spawn",
   "abort-propagation",
   "bounded-foreground-attachment",
@@ -62,6 +62,7 @@ const SEVEN_REQUIRED = [
   "durable-cancellation",
   "journal-terminal-lifecycle",
   "child-bash-process-ownership",
+  "execution-identity-routing-v1",
 ] as const;
 
 /** Legacy 3-capability surface: satisfies the old default probe only. */
@@ -208,7 +209,7 @@ const resetScenario = (input?: {
 
 /** A bridge object answering the desktop profile handshake successfully. */
 const managedHandshake =
-  (capabilities: readonly string[] = SEVEN_REQUIRED) =>
+  (capabilities: readonly string[] = DESKTOP_REQUIRED_CAPABILITIES) =>
   async (request: PiSubagentHandshakeRequest) => {
     trace.push("handshake");
     if (!request.requiredCapabilities.every((capability) => capabilities.includes(capability))) {
@@ -830,7 +831,7 @@ describe("PiAdapter desktop managed bootstrap — controlled runtime (T02-AC1)",
 // ---------------------------------------------------------------------------
 
 describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)", () => {
-  it("binds extensions before the seven-capability handshake and publishes only after success", async () => {
+  it("binds extensions before the eight-capability handshake and publishes only after success", async () => {
     resetScenario({ handshake: managedHandshake() });
     const observers = makeObservers();
 
@@ -844,7 +845,7 @@ describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)",
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
 
-    // The seven-capability handshake runs EXACTLY ONCE — the successful
+    // The eight-capability handshake runs EXACTLY ONCE — the successful
     // pre-publication negotiation is cached as the session's capability
     // truth; no second negotiation happens after `sessions.set` (a second
     // attempt could fail after publication and undermine fail-closed
@@ -863,7 +864,7 @@ describe("PiAdapter desktop managed bootstrap — handshake ordering (T02-AC2)",
     // completed bootstrap; no disposal occurs before capability publication.
     const disposeIndex = trace.indexOf("runtime.dispose");
     expect(disposeIndex).toBeGreaterThan(capabilityIndex);
-    // The published capability is the managed seven-capability truth.
+    // The published capability is the managed eight-capability truth.
     expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
   });
 });
@@ -896,7 +897,7 @@ describe("PiAdapter desktop managed bootstrap — fatal denial matrix (T02-AC2/A
             ok: true,
             protocolVersion: 99,
             extensionVersion: "0.99.0-hostile",
-            capabilities: [...SEVEN_REQUIRED],
+            capabilities: [...DESKTOP_REQUIRED_CAPABILITIES],
           } as unknown as Record<string, unknown>;
         },
       },
@@ -978,7 +979,7 @@ describe("PiAdapter desktop managed bootstrap — fatal denial matrix (T02-AC2/A
 // ---------------------------------------------------------------------------
 
 describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)", () => {
-  it("keeps web mode nonfatal with the historical 3-capability baseline and loads caller extension factories", async () => {
+  it("keeps web mode nonfatal while failing managed capability closed for the historical 3-capability bridge", async () => {
     resetScenario({ handshake: managedHandshake(LEGACY_THREE_CAPABILITIES) });
     const observers = makeObservers();
 
@@ -992,12 +993,15 @@ describe("PiAdapter non-desktop regression — legacy baseline probe (T02-AC5)",
       extensionFactories: [{ name: "caller-factory-allowed-in-web-mode" }],
     });
 
-    // Nonfatal: outside desktop mode the historical 3-capability request is
-    // unchanged, so this bridge remains managed-enabled and publishable.
+    // Nonfatal: outside desktop mode the session still publishes, but the
+    // canonical identity capability is mandatory for managed behavior. The
+    // historical 3-capability bridge therefore fails closed as unmanaged.
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
     expect(result.listSessionCount).toBe(1);
-    expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
+    expect(observers.subagentCapability).toEqual([
+      { status: "capability_mismatch", isManaged: false },
+    ]);
 
     // The historical non-desktop loader shape is preserved (no noExtensions
     // isolation; caller factories are an alternate Agent path).
@@ -1304,14 +1308,14 @@ describe("PiAdapter non-desktop regression — settings manager default preserve
 // Local web/dev path — a WEB-mode server started with a NON-EMPTY
 // launcher-derived locator (dev-runner prepared cache) takes the SAME managed
 // bootstrap as desktop: verified locator → controlled <root>/agent agentDir,
-// artifact-only extension isolation, mandatory seven-capability handshake
+// artifact-only extension isolation, mandatory eight-capability handshake
 // (fatal on failure), and the session-scoped in-memory SettingsManager. A
 // web server WITHOUT a locator keeps the historical pass-through (covered by
 // the non-desktop regression suites above).
 // ---------------------------------------------------------------------------
 
 describe("PiAdapter web managed bootstrap — dev-runner forwarded locator (local web/dev path)", () => {
-  it("takes the controlled runtime, artifact-only extensions, and the seven-capability handshake in web mode", async () => {
+  it("takes the controlled runtime, artifact-only extensions, and the eight-capability handshake in web mode", async () => {
     resetScenario({ handshake: managedHandshake() });
     const observers = makeObservers();
 
@@ -1326,7 +1330,7 @@ describe("PiAdapter web managed bootstrap — dev-runner forwarded locator (loca
     expect(result.failure).toBeUndefined();
     expect(result.hasSession).toBe(true);
     expect(result.listSessionCount).toBe(1);
-    // The fatal seven-capability handshake succeeded and its cached result
+    // The fatal eight-capability handshake succeeded and its cached result
     // is the session's capability truth.
     expect(observers.subagentCapability).toEqual([{ status: "managed_enabled", isManaged: true }]);
     expect(trace).toContain("handshake");
@@ -1392,7 +1396,7 @@ describe("PiAdapter web managed bootstrap — dev-runner forwarded locator (loca
       observers,
     });
 
-    // The mandatory seven-capability handshake is FATAL on the managed web
+    // The mandatory eight-capability handshake is FATAL on the managed web
     // path — no legacy warning fallback, exactly like desktop.
     expect(result.failure).toBeDefined();
     const failure = result.failure!;

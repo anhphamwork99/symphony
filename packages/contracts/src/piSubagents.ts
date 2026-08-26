@@ -26,6 +26,7 @@ export const PI_SUBAGENT_CAPABILITIES = [
   "restart-reconciliation",
   "paginated-transcripts",
   "child-bash-process-ownership",
+  "execution-identity-routing-v1",
 ] as const;
 
 export const PiSubagentCapability = Schema.Literals(PI_SUBAGENT_CAPABILITIES);

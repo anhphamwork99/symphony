@@ -33,6 +33,7 @@ const SEVEN_REQUIRED = [
   "durable-cancellation",
   "journal-terminal-lifecycle",
   "child-bash-process-ownership",
+  "execution-identity-routing-v1",
 ] as const;
 
 const bridgeWith = (handshake: (request: PiSubagentHandshakeRequest) => unknown) => ({
@@ -124,6 +125,7 @@ describe("negotiatePiSubagentDesktopManagedBridge", () => {
         "coalesced-progress",
         "durable-cancellation",
         "journal-terminal-lifecycle",
+        "execution-identity-routing-v1",
         "child-bash-process-ownership",
       ]),
     );
