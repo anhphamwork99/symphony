@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** grounding
+- **Triage status:** accepted grounding
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -146,18 +146,24 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Exact initial frontier: Ticket 01 only.** Ticket 01 is `ready-for-agent` and
-is a read-only grounding/delegation ticket. Tickets 02–06 are `blocked` and
-must not invent implementation while blocked.
+**Current frontier: no source implementation ticket is open.** Ticket 01 is
+accepted as the read-only grounding report. Ticket 02 remains blocked pending
+a named Supervisor consultation on the canonical public identity and durable
+result-read boundary; Tickets 03–06 remain serially blocked behind that gate.
+No ticket may invent implementation while blocked.
 
 | Ticket | Status | Dependency / unlock |
 | --- | --- | --- |
-| [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **ready-for-agent** | none; read-only grounding |
-| [02](issues/02-canonical-identity-and-result-continuity.md) | blocked | 01 accepted; identity decision gate |
-| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | blocked | 01 accepted; 02 contract settled |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | 01 accepted; 03 lifecycle boundary settled |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | 01 accepted; 02–04 accepted seams |
+| [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **accepted** | grounding report accepted; no source edits |
+| [02](issues/02-canonical-identity-and-result-continuity.md) | **blocked** | Supervisor decision gate: canonical public identity and durable result-read semantics |
+| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | blocked | 02 contract settled and accepted |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | 03 lifecycle boundary settled |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | 02–04 accepted seams |
 | [06](issues/06-integrated-real-pi-acceptance.md) | blocked | 01–05 accepted; all provenance and evidence gates |
+
+**Named next consultation:** [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md).
+It must choose or reject the documented alternatives before Ticket 02 can
+become ready. This is a planning gate, not source-implementation authority.
 
 Dependency graph:
 
@@ -259,8 +265,11 @@ and [research/002](research/002-candidate-solution-contract.md).
 
 ## Handoff note
 
-Ticket 01 is the only agent-spawnable work at project creation. Its agent must
-not edit source or propose an implementation. It must return a reproducible
-incident matrix, seam map, authority check, and downstream delegation packet
-inputs. Main-agent or Supervisor acceptance is required before Ticket 02 can
-become ready.
+Ticket 01 is accepted as grounding only. Its criterion-level report, evidence
+locators, failure matrix, and scope audit are recorded in [Ticket 01](issues/01-baseline-reproduction-and-decision-matrix.md).
+The only remaining routing action is the named Supervisor consultation in
+[handoffs/01-canonical-identity-decision-gate.md](handoffs/01-canonical-identity-decision-gate.md).
+That consultation must bind the Ticket-02 public identity/read contract;
+acceptance of Ticket 01 does not select an implementation or open a source
+frontier. Review governance remains one integrated feature review followed by
+exactly one Supervisor final acceptance.
