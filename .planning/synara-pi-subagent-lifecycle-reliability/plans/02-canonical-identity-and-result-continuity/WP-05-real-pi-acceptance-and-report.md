@@ -18,20 +18,35 @@ Exercise the actual controlled managed Pi composition at an isolated runtime bou
 
 ## Inherited terminal-race evidence obligation (F5)
 
-WP-03 review left F5 open by design. WP-05 must carry and close it with both a
-deterministic race proof and the isolated real-Pi proof against the exact WP-04
-artifact. This is evidence only; it does not authorize a WP-03 or other
-production-source change.
+WP-03 review left F5 open by design. WP-05 must carry and close it with both
+synchronized deterministic proofs and isolated real-Pi proofs against the exact
+WP-04 artifact. This is evidence only; it does not authorize a WP-03 or other
+production-source change. The settled contract is [Decision 0003](../../decisions/0003-terminal-steer-race-linearization-contract.md), which clarifies but does not supersede Decision 0002.
 
-A steer that is already in flight when durable terminal evidence commits must
-re-check the exact current tuple and the pinned Alfie exact-live/status guard.
-The evidence must assert that the racing request cannot mutate or target a
-stale, terminal, or non-live child, and returns a bounded
-`unavailable-control`/stale result. The race must produce no queued work,
-replay, Resume/bootstrap, reconstruction, or new child, and must not leak a
-provider-local identity. Capture the ordering trace, terminal/current-tuple
-state, provider mutation/target observation, bounded diagnostic/result, and
-post-race child/queue/replay counters.
+A managed steer linearizes when the pinned Pi SDK
+`AgentSession.steer`/`_queueSteer` synchronously inserts into the exact live
+session queue. F5 must prove all three deterministic strands: terminal/live
+retirement wins before insertion and returns bounded `unavailable-control` or
+stale with zero provider insertion/send; synchronous queue insertion wins and
+the request may be applied even when natural completion and durable terminal
+commit happen before the call returns; and cancellation invalidates the
+generation so post-await bookkeeping cannot mutate lifecycle truth. The
+isolated real-Pi proof must separately exercise terminal-first and
+enqueue-first
+against the exact controlled artifact and SDK path.
+
+Every strand must capture the ordered trace
+`invocation -> tuple lookup -> live guard -> SDK insertion (when it occurs) ->
+retirement/index removal -> durable commit -> bookkeeping -> return`, exact
+current-tuple/terminal state, provider mutation and target observations, bounded
+response/diagnostic, and post-race child/queue/replay/Resume/bootstrap/
+reconstruction counters. Terminal truth remains durable authority; the exact
+index stays retired; no post-terminal second send/requeue/replay/Resume/
+bootstrap/reconstruction/new child is allowed; and no provider-local identity
+may leak. An applied response is valid only with exactly one prior synchronous
+SDK insertion. Late `activeDelegation` bookkeeping is acceptable only when it
+cannot reopen status/index, override terminal truth, cause provider action, or
+leak identity.
 
 ## Exact write set
 
@@ -136,13 +151,30 @@ Required legs:
 3. **Durable-first continuity:** force/observe a nonterminal exact-live supplement, then a terminal durable result with a conflicting live nonterminal report. Prove durable terminal wins. Evict the provider record and reopen the durable repository/file as supported by the existing harness; prove the same authorized `executionId` returns bounded durable evidence rather than `Agent not found`. Missing durable evidence remains honest uncertainty.
 4. **Fencing and authorization:** exercise stale attempt and generation, wrong project/thread, and unauthorized read/control. Verify rejection occurs before provider lookup and cannot reach another execution's live record.
 5. **Exact-live control:** steer an authorized exact current tuple while live; after live-record eviction, return stable unavailable-control. Prove no queue, replay, bootstrap, reconstructed child, or new child occurs.
-6. **Terminal-during-flight steer race (F5):** start an authorized steer against a
-   live exact current tuple, commit durable terminal evidence while the steer is
-   in flight, and synchronize the completion at the pinned Alfie exact-live/status
-   guard. Assert the request cannot mutate or target the now-terminal/stale or
-   non-live child, returns bounded `unavailable-control`/stale output, and
-   produces no queue, replay, Resume/bootstrap, reconstruction, or new child.
-7. **Evidence boundaries:** run deterministic, controlled-Alfie, and real-Pi commands separately; capture command, exit code, test count, exact pins, capability response, bounded diagnostics, and any timing/runtime caveat.
+6. **Terminal steer race (F5), deterministic terminal-first:** start an
+   authorized steer against a live exact current tuple, synchronize terminal/
+   live retirement and index removal before the pinned Alfie exact-live/status
+   guard can insert, and assert bounded `unavailable-control`/stale output,
+   zero SDK insertion/send, and no queue, replay, Resume/bootstrap,
+   reconstruction, or new child.
+7. **Terminal steer race (F5), deterministic enqueue-first:** synchronize the
+   pinned Pi SDK `AgentSession.steer`/`_queueSteer` insertion first, then allow
+   natural completion and durable terminal commit before the steer call returns.
+   Assert exactly one prior insertion, an allowed applied response, durable
+   terminal precedence, retired exact index, and no second provider action or
+   reconstruction path.
+8. **Terminal steer race (F5), deterministic cancellation:** exercise
+   cancellation before insertion and after insertion; invalidate the
+   generation and assert zero insertion in the cancellation-first strand and
+   no stale post-await mutation, reindex, terminal override, or provider action
+   in either strand.
+9. **Terminal steer race (F5), isolated real Pi:** run separate terminal-first
+   and enqueue-first cases through the registered production Agent, exact WP-04
+   artifact, and exact Pi SDK; capture the required ordered trace, exact
+   artifact/SDK versions, and all zero/one insertion and no-replay counters.
+10. **Evidence boundaries:** run deterministic, controlled-Alfie, and real-Pi
+    commands separately; capture command, exit code, test count, exact pins,
+    capability response, bounded diagnostics, and any timing/runtime caveat.
 
 A real-Pi test may use a deterministic loopback model only as the model server, provided the registered production Pi/Agent path and controlled artifact are real. It must not replace the Agent or provider composition with a fake.
 
@@ -175,9 +207,9 @@ Populate the existing Issue 02 Implementation Report, without changing its statu
 | Contract version | `execution-identity-routing-v1` capability request/response and compatibility result |
 | Ownership split | Alfie exact live tuple index vs Symphony durable auth/current tuple/read boundary |
 | AC1–AC2 | public identity comparisons, no-leak scan, canonical/alias/provider-ID matrix |
-| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and the F5 terminal-during-flight steer race |
-| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics, bounded unavailable/stale F5 race result, and no queue/replay/Resume/bootstrap proof |
-| AC6 | separate deterministic, controlled-Alfie, and isolated real-Pi command/result rows |
+| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and F5 terminal-first plus enqueue-first traces with retirement/index removal and durable commit ordering |
+| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics; bounded terminal-first unavailable/stale result; enqueue-first applied result only after exactly one insertion; cancellation generation invalidation; and no queue/replay/Resume/bootstrap/reconstruction/new-child proof |
+| AC6 | separate deterministic terminal-first/enqueue-first/cancellation rows, controlled-Alfie capability/provenance row, and isolated real-Pi terminal-first/enqueue-first rows with exact artifact/SDK versions |
 | Non-goals | explicit watchdog/teardown/Resume/bootstrap/replay/guardian exclusions |
 | Review handoff | deviations, untested cases, residual risks, and exact shortest reviewer reproductions |
 
@@ -229,12 +261,18 @@ git status --short
 ```
 
 Use an isolated Pi home and runtime configuration; never start the user's
-default Synara instance. Record each command's exit code, elapsed time, test
-count, exact pin/capability output, fixture ledger, model/runtime
-configuration, provenance output, and database reopen discipline. If the full
-wrapper is unavailable or blocked by unrelated workspace infrastructure, retain
-focused evidence and report the limitation rather than claiming full
-acceptance. Do not run fmt/lint/typecheck for this planning packet.
+default Synara instance. The canonical acceptance command must run the
+synchronized deterministic terminal-first, enqueue-first, and cancellation
+strands separately, and the isolated real-Pi command must run separate
+terminal-first and enqueue-first cases. Record each command's exit code,
+elapsed time, test count, exact pin/capability output, exact artifact and Pi
+SDK versions (`@alfie/pi-subagents@0.15.0-alfie.5` and
+`@earendil-works/pi-coding-agent@0.83.0`), ordered trace, insertion/send
+counts, fixture ledger, model/runtime configuration, provenance output, and
+database reopen discipline. If the full wrapper is unavailable or blocked by
+unrelated workspace infrastructure, retain focused evidence and report the
+limitation rather than claiming full acceptance. Do not run fmt/lint/typecheck
+for this planning packet.
 
 ## Commit and self-review
 
@@ -259,7 +297,9 @@ Self-review:
   assertions, capability literal/count consistency, and explicit retained
   synthetic/legacy negatives;
 - no provider `agentId` leaked; no valid public handle becomes `Agent not found` solely due to live eviction;
-- durable terminal precedence, auth-before-provider, tuple fencing, exact-live steer, the F5 terminal-during-flight race, capability fail-closed, and legacy isolation are all demonstrated;
+- durable terminal precedence, auth-before-provider, tuple fencing, exact-live steer, and both F5 terminal-first and enqueue-first race strands are demonstrated; terminal-first has zero insertion/send, enqueue-first has exactly one prior synchronous insertion, and cancellation invalidates generations and fences post-await bookkeeping;
+- every F5 trace contains invocation, tuple lookup, live guard, SDK insertion when applicable, retirement/index removal, durable commit, bookkeeping, and return, with no post-terminal second action or identity leak;
+- isolated real-Pi terminal-first and enqueue-first evidence uses the registered production Agent, exact WP-04 artifact, and exact Pi SDK version rather than a synthetic Agent;
 - no later-ticket behavior or DB migration was introduced;
 - report states every deviation and untested limit honestly.
 

@@ -6,7 +6,7 @@
 
 **Issue:** [`../../issues/02-canonical-identity-and-result-continuity.md`](../../issues/02-canonical-identity-and-result-continuity.md)
 
-**Binding authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
+**Binding authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md), clarified for WP-05 F5 by [`../../decisions/0003-terminal-steer-race-linearization-contract.md`](../../decisions/0003-terminal-steer-race-linearization-contract.md)
 
 **Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These were the clean baselines recorded before implementation. WP-01 produced the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump. WP-04 then integrated the exact Alfie pin in Symphony through `29b41689c2ea74dfc45ca6c0c1e2deea05a8f964` plus the bounded fixture reconciliation `14f3d2a4371a3ea4050b2e54fa026995fd81f706`; WP-05 consumes that provenance read-only.
 
@@ -134,8 +134,10 @@ exact hashes, clean-tree boundary, and focused evidence are recorded in
 [WP-04](WP-04-provenance-repin.md). WP-05 is now the package frontier and may
 consume that exact pin read-only while repairing only active pin-dependent
 acceptance fixtures and producing the canonical acceptance/report artifacts.
-This is package routing only: Ticket 02 remains **ready-for-agent**, and neither
-Ticket 02 final acceptance nor the Project frontier is changed.
+This is package routing only: Decision 0003 clarifies the WP-05 F5
+queue-insertion race without changing authority or scope; Ticket 02 remains
+**ready-for-agent**, and neither Ticket 02 final acceptance nor the Project
+frontier is changed.
 
 ## Dependency graph and work packages
 
