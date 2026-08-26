@@ -32,6 +32,12 @@ Research date: 2026-08-26
 - Official utilities support `.excalidraw` serialization and PNG/SVG export.
 - Excalidraw does not provide durable Version history; Synara owns canonical persistence.
 
+## Ticket 02 public-history boundary reassessment — 2026-08-27
+
+Decision 0053's bounded package/public-API research examined stable npm `latest` `@excalidraw/excalidraw@0.18.1`, the npm `next` dist-tag `0.18.0-abeeaeb`, and the upstream unreleased/current public surface. The official API docs and published declarations for `0.18.1` and `next` expose `history.clear()` plus `updateScene`'s `captureUpdate` modes (`IMMEDIATELY`, `EVENTUALLY`, and `NEVER`), but no documented history disable/pause/delegation, transaction begin/end, native-route control, stack inspection, or stack-cap API ([ExcalidrawAPI](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/api/props/excalidraw-api), [0.18.1 types](https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw@0.18.1/dist/types/excalidraw/types.d.ts), [next types](https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw@next/dist/types/excalidraw/types.d.ts), [npm dist-tags](https://registry.npmjs.org/@excalidraw%2fexcalidraw)).
+
+The current public interaction surface does not close the boundary: `ui={false}` hides default UI while leaving the editor interactive, including native history/keyboard behavior; `interaction={false}` disables human editing and keyboard interaction, so it cannot preserve human capture ([UI options](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/api/props/ui-options), [props and interaction](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/api/props), [upstream changelog](https://github.com/excalidraw/excalidraw/blob/master/packages/excalidraw/CHANGELOG.md)). No examined supported version/public-API combination satisfies the host-owned single-route, no-transient-native, human-capture, exact AI-batch, and bounded-history criteria. The research gate is **FAIL**; per [Decision 0054](./decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), fallback direction 4 is active and Ticket 02 is routed to `designing-fallback-history-contract`. No package upgrade or source implementation is authorized.
+
 ## Recommended performance contract
 
 1. Keep Excalidraw mounted while its pane is hidden; suspend unnecessary visible-only work rather than rebuilding the canvas.
