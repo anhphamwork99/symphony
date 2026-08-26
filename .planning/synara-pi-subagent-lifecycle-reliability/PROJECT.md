@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** accepted grounding
+- **Triage status:** Decision 0002 bound; Ticket 02 ready-for-agent
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -91,11 +91,15 @@ or resumed through one durable identity.
 3. **Inherited accepted decisions** remain authoritative by aspect and are
    linked rather than copied or superseded: [durable-subagents Project Home](../synara-pi-durable-subagents/PROJECT.md)
    and [handshake-first Project Home](../synara-pi-subagent-handshake-first/PROJECT.md).
-4. **Ticket-level decisions** may refine a ticket only within those boundaries;
+4. **Binding Supervisor decisions** persisted in this project's `decisions/`
+   directory are authoritative for their named ticket and material question.
+   [Decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md)
+   governs Ticket 02's canonical identity and result-read boundary.
+5. **Ticket-level decisions** may refine a ticket only within those boundaries;
    material changes require a new decision record and owner/Supervisor route.
-5. **Research records** in this project are supporting evidence only. They are
+6. **Research records** in this project are supporting evidence only. They are
    not authority and cannot advance a status or frontier.
-6. **Source and runtime evidence** can falsify a proposal or reopen a decision,
+7. **Source and runtime evidence** can falsify a proposal or reopen a decision,
    but cannot itself accept architecture.
 
 No artifact in this project authorizes a release, push, deploy, production
@@ -146,24 +150,26 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Current frontier: no source implementation ticket is open.** Ticket 01 is
-accepted as the read-only grounding report. Ticket 02 remains blocked pending
-a named Supervisor consultation on the canonical public identity and durable
-result-read boundary; Tickets 03–06 remain serially blocked behind that gate.
-No ticket may invent implementation while blocked.
+**Current frontier: Ticket 02 is the sole source implementation frontier.**
+Ticket 01 is accepted as the read-only grounding report. Binding [Decision
+0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md)
+has discharged the canonical identity and durable result-read decision gate;
+Ticket 02 is ready for an implementation agent. Tickets 03–06 remain serially
+blocked behind Ticket 02 and their listed dependency gates. This routing opens
+no other ticket and does not imply implementation or final acceptance.
 
 | Ticket | Status | Dependency / unlock |
 | --- | --- | --- |
 | [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **accepted** | grounding report accepted; no source edits |
-| [02](issues/02-canonical-identity-and-result-continuity.md) | **blocked** | Supervisor decision gate: canonical public identity and durable result-read semantics |
-| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | blocked | 02 contract settled and accepted |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | 03 lifecycle boundary settled |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | 02–04 accepted seams |
-| [06](issues/06-integrated-real-pi-acceptance.md) | blocked | 01–05 accepted; all provenance and evidence gates |
+| [02](issues/02-canonical-identity-and-result-continuity.md) | **ready-for-agent** | Decision 0002 authoritative; implement and evidence the bound identity/read contract |
+| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | blocked | Ticket 02 contract implemented and accepted |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | Ticket 03 lifecycle boundary settled |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | Tickets 02–04 accepted seams |
+| [06](issues/06-integrated-real-pi-acceptance.md) | blocked | Tickets 01–05 accepted; all provenance and evidence gates |
 
-**Named next consultation:** [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md).
-It must choose or reject the documented alternatives before Ticket 02 can
-become ready. This is a planning gate, not source-implementation authority.
+The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
+is discharged by Decision 0002. It remains a historical consultation link;
+the decision record is now the authoritative contract for Ticket 02.
 
 Dependency graph:
 
@@ -183,8 +189,10 @@ this serial frontier.
 
 Settled and inherited:
 
-- `executionId` is the intended durable public identity.
-- `attemptId` and generation provide stale-event fencing.
+- `executionId` is the only managed public identity; `agentId` is provider-local
+  and absent from managed public output/details, as bound by [Decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md).
+- `attemptId` and generation provide stale-event fencing and form the durable
+  current tuple with `executionId`.
 - proof-before-fence; no PID guessing or Symphony PID kill authority.
 - terminal outcome and cleanup proof are separate.
 - journal-first terminal/outbox truth.
@@ -197,10 +205,6 @@ Settled and inherited:
 
 Open, material design points:
 
-- whether canonical identity is bridged by a compatibility alias, a protocol
-  migration, or an Alfie-side output change;
-- the exact durable result-read continuity contract after provider record
-  eviction;
 - how live lifecycle containment handles provider runtime inactivity without
   inventing owner proof;
 - the truthful Resume eligibility and provider-bootstrap boundary;
@@ -260,6 +264,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [terms.md](terms.md) — project vocabulary and evidence language.
 - [design-tree.md](design-tree.md) — decision tree, gates, and evidence map.
 - [decision 0001](decisions/0001-project-charter-and-inherited-authority.md) — project charter and inherited authority.
+- [decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md) — binding canonical identity and durable result-read contract for Ticket 02.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
@@ -267,9 +272,9 @@ and [research/002](research/002-candidate-solution-contract.md).
 
 Ticket 01 is accepted as grounding only. Its criterion-level report, evidence
 locators, failure matrix, and scope audit are recorded in [Ticket 01](issues/01-baseline-reproduction-and-decision-matrix.md).
-The only remaining routing action is the named Supervisor consultation in
-[handoffs/01-canonical-identity-decision-gate.md](handoffs/01-canonical-identity-decision-gate.md).
-That consultation must bind the Ticket-02 public identity/read contract;
-acceptance of Ticket 01 does not select an implementation or open a source
-frontier. Review governance remains one integrated feature review followed by
-exactly one Supervisor final acceptance.
+[Decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md)
+now binds the Ticket-02 public identity/read contract and routes Ticket 02 as
+the sole source frontier. This planning update does not claim implementation,
+feature review, or final acceptance. Review governance remains one integrated
+feature review followed by exactly one Supervisor final-acceptance
+consultation.
