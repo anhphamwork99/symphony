@@ -4,13 +4,13 @@ Evidence source: `excalidraw-baseline.json`, schema `ticket01-excalidraw-baselin
 
 Decision 0048 classifications are limited to: none observed, non-blocking limitation, or blocking incompatibility. A finite timing or memory observation is not a failure because Ticket 01 defines no product budget.
 
-| Finding | Classification | Observation |
-| --- | --- | --- |
-| required-public-boundaries | **none observed** | All required measurements completed through the lazy Synara adapter and official Excalidraw runtime in Chromium. |
-| memory-attribution | **non-blocking limitation** | Memory readings are unavailable or coarse process-wide browser telemetry and are not precise per-canvas retained-size measurements. |
-| undo-transaction-boundary | **non-blocking limitation** | Ticket 01 records updateScene feasibility only; exact one-event AI Undo remains owned by Ticket 02 and no product budget is inferred here. |
-| dot-grid | **non-blocking limitation** | Dot-grid rendering and export policy are intentionally outside Ticket 01 scope. |
-| blocking-incompatibilities | **none observed** | No build, runtime, semantic, remount, viewport, lock, or export incompatibility was observed by this complete run. |
+| Finding                    | Classification              | Observation                                                                                                                                |
+| -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| required-public-boundaries | **none observed**           | All required measurements completed through the lazy Synara adapter and official Excalidraw runtime in Chromium.                           |
+| memory-attribution         | **non-blocking limitation** | Memory readings are unavailable or coarse process-wide browser telemetry and are not precise per-canvas retained-size measurements.        |
+| undo-transaction-boundary  | **non-blocking limitation** | Ticket 01 records updateScene feasibility only; exact one-event AI Undo remains owned by Ticket 02 and no product budget is inferred here. |
+| dot-grid                   | **non-blocking limitation** | Dot-grid rendering and export policy are intentionally outside Ticket 01 scope.                                                            |
+| blocking-incompatibilities | **none observed**           | No build, runtime, semantic, remount, viewport, lock, or export incompatibility was observed by this complete run.                         |
 
 ## Required-boundary disposition
 

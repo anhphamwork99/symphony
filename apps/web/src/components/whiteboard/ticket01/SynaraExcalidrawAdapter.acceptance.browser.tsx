@@ -528,12 +528,12 @@ describe("Synara Excalidraw Ticket 01 real-Chromium acceptance", () => {
           scenario="negative-api-not-ready"
         />
       </BrowserShell>,
-      );
-      expect(notReadyRef.current).not.toBeNull();
-      expect(() => notReadyRef.current!.serializeScene()).toThrow();
-      expect(() => notReadyRef.current!.exportSvg()).toThrow();
-      expect(() => notReadyRef.current!.exportPng()).toThrow();
-      expect(() => notReadyRef.current!.updateScene(selectionUpdate(1, []))).toThrow();
+    );
+    expect(notReadyRef.current).not.toBeNull();
+    expect(() => notReadyRef.current!.serializeScene()).toThrow();
+    expect(() => notReadyRef.current!.exportSvg()).toThrow();
+    expect(() => notReadyRef.current!.exportPng()).toThrow();
+    expect(() => notReadyRef.current!.updateScene(selectionUpdate(1, []))).toThrow();
     expect(() =>
       notReadyRef.current!.restoreViewport({ scrollX: 0, scrollY: 0, zoom: 1 }),
     ).toThrow();

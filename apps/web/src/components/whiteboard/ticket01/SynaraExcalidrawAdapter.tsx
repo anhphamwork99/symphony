@@ -307,11 +307,11 @@ export const SynaraExcalidrawAdapter = forwardRef<
   const latestSnapshotRef = useRef<SynaraSceneSnapshot | null>(null);
   const latestViewportRef = useRef<SynaraViewport | null>(null);
   const lastSettledSelectionKeyRef = useRef<string | null>(null);
-    const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const lastUpdateSequenceRef = useRef(0);
-    const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
-    const [apiReady, setApiReady] = useState(false);
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastUpdateSequenceRef = useRef(0);
+  const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
+  const [apiReady, setApiReady] = useState(false);
 
   const report = useCallback(
     (details: Omit<SynaraExcalidrawDiagnostic, "packageVersion" | "scenario">) => {
@@ -362,8 +362,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
     };
   }, [lifecycle]);
 
-    useEffect(() => {
-      const enabled = props.viewModeEnabled;
+  useEffect(() => {
+    const enabled = props.viewModeEnabled;
     if (enabled === undefined) return;
     setViewModeEnabled(enabled);
     if (apiRef.current) {
@@ -372,30 +372,30 @@ export const SynaraExcalidrawAdapter = forwardRef<
         captureUpdate: "NEVER",
       } as PackageSceneUpdate);
     }
-    }, [props.viewModeEnabled]);
+  }, [props.viewModeEnabled]);
 
-    useEffect(() => {
-      if (!apiReady) return;
-      const editorRoot = document.querySelector<HTMLElement>(".excalidraw");
-      const interactiveCanvas = editorRoot?.querySelector<HTMLCanvasElement>(
-        "canvas.excalidraw__canvas.interactive",
-      );
-      if (
-        editorRoot === null ||
-        interactiveCanvas == null ||
-        getComputedStyle(editorRoot).display === "none" ||
-        getComputedStyle(interactiveCanvas).display === "none"
-      ) {
-        report({
-          code: "package-assets-not-ready",
-          ac: "AC1",
-          phase: "runtime-assets",
-          expected: "the package CSS and canvas runtime surface are available after API readiness",
-          observed: "the Excalidraw root or interactive canvas is missing or hidden",
-          recoverable: false,
-        });
-      }
-    }, [apiReady, report]);
+  useEffect(() => {
+    if (!apiReady) return;
+    const editorRoot = document.querySelector<HTMLElement>(".excalidraw");
+    const interactiveCanvas = editorRoot?.querySelector<HTMLCanvasElement>(
+      "canvas.excalidraw__canvas.interactive",
+    );
+    if (
+      editorRoot === null ||
+      interactiveCanvas == null ||
+      getComputedStyle(editorRoot).display === "none" ||
+      getComputedStyle(interactiveCanvas).display === "none"
+    ) {
+      report({
+        code: "package-assets-not-ready",
+        ac: "AC1",
+        phase: "runtime-assets",
+        expected: "the package CSS and canvas runtime surface are available after API readiness",
+        observed: "the Excalidraw root or interactive canvas is missing or hidden",
+        recoverable: false,
+      });
+    }
+  }, [apiReady, report]);
 
   const requireApi = useCallback(
     (details: Omit<SynaraExcalidrawDiagnostic, "packageVersion" | "scenario" | "observed">) => {
@@ -791,7 +791,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
       apiRef.current = api;
       apiIdRef.current = api.id;
       lifecycle({ kind: "api-ready", apiId: api.id });
-        setApiReady(true);
+      setApiReady(true);
       const snapshot = toSnapshot(api.getSceneElements(), api.getAppState(), api.getFiles());
       latestSnapshotRef.current = snapshot;
       latestViewportRef.current = snapshot.viewport;

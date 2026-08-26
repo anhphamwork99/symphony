@@ -12,29 +12,29 @@ Remediated source measured: `0a8f095b43c701ce3c7e2ad0236bf427c9d0c52a`
 
 ## Prior finding closure
 
-| Prior finding | Closure evidence | Status |
-| --- | --- | --- |
-| AC2 original → first normalization | Real browser test compares `EXCALIDRAW_TICKET01_FIXTURE` directly to the first mounted snapshot before serialization (`SynaraExcalidrawAdapter.acceptance.browser.tsx`). | Closed |
-| Restore loss detection | Semantic comparator detects missing/unexpected elements and files, image data loss, relationship loss, and ordering changes; negative fixture tests cover these cases. | Closed |
-| SVG/PNG validity | Adapter validates SVG root, dimensions and rendered children; PNG MIME, signature and Chromium decodability. | Closed |
-| Structured failures | Loader, API-not-ready, hydration, update, export, viewport, selection-timeout and unstable-selection diagnostics use the structured AC/phase/version/scenario/expected/observed schema. | Closed |
-| Undo feasibility | Real Chromium probe proves progressive `captureUpdate: "NEVER"` work does not become an ordinary native Undo event; `undo-feasibility.md` records the absence of a public begin/end transaction and keeps Ticket 02 unaccepted. | Closed for Ticket 01 |
-| Baseline self-validation | Runner separately validates raw markers and generated baselines; candidate baseline validation passes. | Closed |
-| Warm-up protocol | All eight repeatable scenarios execute and record two warm-ups and twelve raw samples. | Closed |
-| Measurement provenance | Reports identify clean measured source `0a8f095b4`, dirty=false, and explain the separate evidence commit policy. | Closed |
-| Selection ordering/timeout | IDs are canonicalized before deduplication; zero/non-zero delay, rapid replacement, timeout and unstable-selection cases pass. | Closed |
-| Font diagnostics | Fixture and semantic projection now include font/layout metadata; semantic round trip passes. | Closed / no blocking residual |
+| Prior finding                      | Closure evidence                                                                                                                                                                                                                | Status                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| AC2 original → first normalization | Real browser test compares `EXCALIDRAW_TICKET01_FIXTURE` directly to the first mounted snapshot before serialization (`SynaraExcalidrawAdapter.acceptance.browser.tsx`).                                                        | Closed                        |
+| Restore loss detection             | Semantic comparator detects missing/unexpected elements and files, image data loss, relationship loss, and ordering changes; negative fixture tests cover these cases.                                                          | Closed                        |
+| SVG/PNG validity                   | Adapter validates SVG root, dimensions and rendered children; PNG MIME, signature and Chromium decodability.                                                                                                                    | Closed                        |
+| Structured failures                | Loader, API-not-ready, hydration, update, export, viewport, selection-timeout and unstable-selection diagnostics use the structured AC/phase/version/scenario/expected/observed schema.                                         | Closed                        |
+| Undo feasibility                   | Real Chromium probe proves progressive `captureUpdate: "NEVER"` work does not become an ordinary native Undo event; `undo-feasibility.md` records the absence of a public begin/end transaction and keeps Ticket 02 unaccepted. | Closed for Ticket 01          |
+| Baseline self-validation           | Runner separately validates raw markers and generated baselines; candidate baseline validation passes.                                                                                                                          | Closed                        |
+| Warm-up protocol                   | All eight repeatable scenarios execute and record two warm-ups and twelve raw samples.                                                                                                                                          | Closed                        |
+| Measurement provenance             | Reports identify clean measured source `0a8f095b4`, dirty=false, and explain the separate evidence commit policy.                                                                                                               | Closed                        |
+| Selection ordering/timeout         | IDs are canonicalized before deduplication; zero/non-zero delay, rapid replacement, timeout and unstable-selection cases pass.                                                                                                  | Closed                        |
+| Font diagnostics                   | Fixture and semantic projection now include font/layout metadata; semantic round trip passes.                                                                                                                                   | Closed / no blocking residual |
 
 ## AC verdicts
 
-| AC | Verdict | Evidence |
-| --- | --- | --- |
-| AC1 — exact official package loads | PASS | Exact `@excalidraw/excalidraw` `0.18.1` package and lock pin; lazy adapter/CSS boundary; real Chromium API-ready/canvas proof; production web build pass. |
-| AC2 — representative semantic round trip | PASS | Six-element fixture with frame, group, bound text, reciprocal connector bindings, image/file data, custom data and ordering; official restore → real hydrate → serialize → restore → second hydrate → SVG/PNG; original→first and first→second semantic equality. |
-| AC3 — ordered progressive updates | PASS | Public `updateScene`, contiguous sequence enforcement, intermediate state observation, stable mount/API identity and retained viewport; order-gap diagnostic. |
-| AC4 — lock with navigation | PASS | Real Delete is blocked under `viewModeEnabled`; wheel pan and Ctrl-wheel zoom work; mutation works after unlock. |
-| AC5 — selection and viewport observation | PASS | Raw/settled events, zero and non-zero delay, canonical deduplication, rapid replacement, timeout/stability diagnostics and viewport capture/restore. |
-| AC6 — measured baseline | PASS | Eight scenarios, twelve samples each, two warm-ups each, visible/hidden retained canvases, eight visibility cycles, separate mount/unmount, image serialization/SVG/PNG, coarse-memory limitation and no blocking incompatibility. |
+| AC                                       | Verdict | Evidence                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC1 — exact official package loads       | PASS    | Exact `@excalidraw/excalidraw` `0.18.1` package and lock pin; lazy adapter/CSS boundary; real Chromium API-ready/canvas proof; production web build pass.                                                                                                         |
+| AC2 — representative semantic round trip | PASS    | Six-element fixture with frame, group, bound text, reciprocal connector bindings, image/file data, custom data and ordering; official restore → real hydrate → serialize → restore → second hydrate → SVG/PNG; original→first and first→second semantic equality. |
+| AC3 — ordered progressive updates        | PASS    | Public `updateScene`, contiguous sequence enforcement, intermediate state observation, stable mount/API identity and retained viewport; order-gap diagnostic.                                                                                                     |
+| AC4 — lock with navigation               | PASS    | Real Delete is blocked under `viewModeEnabled`; wheel pan and Ctrl-wheel zoom work; mutation works after unlock.                                                                                                                                                  |
+| AC5 — selection and viewport observation | PASS    | Raw/settled events, zero and non-zero delay, canonical deduplication, rapid replacement, timeout/stability diagnostics and viewport capture/restore.                                                                                                              |
+| AC6 — measured baseline                  | PASS    | Eight scenarios, twelve samples each, two warm-ups each, visible/hidden retained canvases, eight visibility cycles, separate mount/unmount, image serialization/SVG/PNG, coarse-memory limitation and no blocking incompatibility.                                |
 
 ## Governance and boundary audit
 
@@ -81,16 +81,16 @@ Commands and outcomes:
 
 ## AC6 summary
 
-| Scenario | Samples | Median | P95 |
-| --- | ---: | ---: | ---: |
-| hydrate-empty | 12 | 21.900 ms | 22.545 ms |
-| hydrate-normal | 12 | 22.200 ms | 22.735 ms |
-| hydrate-image | 12 | 22.100 ms | 22.790 ms |
-| serialize-normal | 12 | 0.000 ms | 0.100 ms |
-| update-progressive | 12 | 0.000 ms | 0.100 ms |
-| serialize-image | 12 | 0.000 ms | 0.100 ms |
-| export-svg-image | 12 | 15.250 ms | 16.160 ms |
-| export-png-image | 12 | 9.300 ms | 11.330 ms |
+| Scenario           | Samples |    Median |       P95 |
+| ------------------ | ------: | --------: | --------: |
+| hydrate-empty      |      12 | 21.900 ms | 22.545 ms |
+| hydrate-normal     |      12 | 22.200 ms | 22.735 ms |
+| hydrate-image      |      12 | 22.100 ms | 22.790 ms |
+| serialize-normal   |      12 |  0.000 ms |  0.100 ms |
+| update-progressive |      12 |  0.000 ms |  0.100 ms |
+| serialize-image    |      12 |  0.000 ms |  0.100 ms |
+| export-svg-image   |      12 | 15.250 ms | 16.160 ms |
+| export-png-image   |      12 |  9.300 ms | 11.330 ms |
 
 Memory is explicitly coarse process-level `performance.memory.usedJSHeapSize`, not per-canvas retained memory. No product latency or memory budget is inferred.
 
