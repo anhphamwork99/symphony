@@ -1291,7 +1291,7 @@ describe("Pi Subagent Bounded Foreground Attachment Integrated Acceptance (Issue
     const provenance = verifyExtensionGitProvenance(repoDir);
     expect(provenance.isVerified).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
     expect(provenance.commit).toMatch(/^[0-9a-f]{40}$/);
 
     // 2. Reject synthetic inline factory extension

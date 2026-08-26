@@ -487,7 +487,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     const provenance = assertProductionExtensionProvenance(session);
     expect(provenance.isProduction).toBe(true);
     expect(provenance.packageName).toBe("@alfie/pi-subagents");
-    expect(provenance.extensionVersion).toBe("0.15.0-alfie.4");
+    expect(provenance.extensionVersion).toBe("0.15.0-alfie.5");
     expect(provenance.toolNames).toContain("Agent");
     expect(provenance.toolNames).toContain("get_subagent_result");
     expect(provenance.toolNames).toContain("steer_subagent");
@@ -499,7 +499,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(capability.status).toBe("managed_enabled");
     expect(capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(capability.protocolVersion).toBe(PI_SUBAGENTS_PROTOCOL_VERSION);
-    expect(capability.extensionVersion).toBe("0.15.0-alfie.4");
+    expect(capability.extensionVersion).toBe("0.15.0-alfie.5");
     expect(capability.capabilities).toEqual([
       "managed-spawn",
       "abort-propagation",
@@ -509,6 +509,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       "journal-terminal-lifecycle",
       "completion-delivery-ownership",
       "child-bash-process-ownership",
+      "execution-identity-routing-v1",
     ]);
 
     session.dispose();
@@ -720,7 +721,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       join(lookalikeDir, "package.json"),
       JSON.stringify({
         name: "@alfie/pi-subagents",
-        version: "0.15.0-alfie.4",
+        version: "0.15.0-alfie.5",
         description: "Synthetic lookalike package",
       }),
     );
@@ -757,12 +758,13 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
                       handshake: () => ({
                         ok: true,
                         protocolVersion: 1,
-                        extensionVersion: "0.15.0-alfie.4",
+                        extensionVersion: "0.15.0-alfie.5",
                         capabilities: [
                           "managed-spawn",
                           "abort-propagation",
                           "bounded-foreground-attachment",
                           "coalesced-progress",
+                          "execution-identity-routing-v1",
                         ],
                       }),
                     }),
@@ -876,7 +878,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
     expect(observedEvent!.capability.status).toBe("managed_enabled");
     expect(observedEvent!.capability.diagnosticCode).toBe("pi_subagent_managed_enabled");
     expect(observedEvent!.capability.protocolVersion).toBe(1);
-    expect(observedEvent!.capability.extensionVersion).toBe("0.15.0-alfie.4");
+    expect(observedEvent!.capability.extensionVersion).toBe("0.15.0-alfie.5");
     expect(observedEvent!.capability.capabilities).toEqual([
       "managed-spawn",
       "abort-propagation",
@@ -886,6 +888,7 @@ describe("Real Pi Subagent Extension Capability Negotiation (Issue 19)", () => {
       "journal-terminal-lifecycle",
       "completion-delivery-ownership",
       "child-bash-process-ownership",
+      "execution-identity-routing-v1",
     ]);
 
     // 2. Verify stored in session context
