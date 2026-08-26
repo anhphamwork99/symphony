@@ -38,4 +38,5 @@ export const WALLCLOCK_TESTS: readonly string[] = [
   "src/provider/piSubagentRealPiAcceptance.test.ts",
   "src/provider/piSubagentDesktopManagedRealPiAcceptance.test.ts",
   "src/provider/piSubagentDesktopProductionCompositionAcceptance.test.ts",
+  "src/provider/piSubagentCanonicalIdentityAcceptance.test.ts",
 ];

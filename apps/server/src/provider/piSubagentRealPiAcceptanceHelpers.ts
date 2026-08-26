@@ -197,54 +197,248 @@ function resolveVersionedExtensionDir(): string {
   return extDir;
 }
 
+export type UserPiHomeEntryType =
+  | "absent"
+  | "regular"
+  | "directory"
+  | "symlink"
+  | "other";
+
+export interface UserPiHomePathSnapshot {
+  /** No file contents are retained in an isolation snapshot. */
+  readonly exists: boolean;
+  readonly type: UserPiHomeEntryType;
+  readonly hash: string | null;
+  readonly size: number | null;
+}
+
+export interface UserPiHomeResourceSnapshot extends UserPiHomePathSnapshot {
+  /** Path relative to ~/.pi; never an absolute path or file content. */
+  readonly path: string;
+  /** Present only for symlinks. */
+  readonly symlinkTarget: string | null;
+}
+
+export interface UserPiHomeModelsStoreSnapshot extends UserPiHomePathSnapshot {
+  /** Diagnostic only; unlike the strict digest, cache mtime is allowed to move. */
+  readonly mtimeMs: number | null;
+}
+
 export interface UserPiHomeSnapshot {
+  /** Backward-compatible strict fingerprint of all non-cache, non-session paths. */
   readonly digest: string;
+  readonly sensitive: Readonly<{
+    readonly authJson: UserPiHomePathSnapshot;
+    readonly modelsJson: UserPiHomePathSnapshot;
+    readonly settingsJson: UserPiHomePathSnapshot;
+  }>;
+  /** Every entry below agent/extensions and agent/skills, including symlinks. */
+  readonly resources: ReadonlyArray<UserPiHomeResourceSnapshot>;
+  /** Exact agent/models-store.json observation; non-regular present values fail closed. */
+  readonly modelsStore: UserPiHomeModelsStoreSnapshot;
+}
+
+const USER_PI_SENSITIVE_FILES = {
+  authJson: "agent/auth.json",
+  modelsJson: "agent/models.json",
+  settingsJson: "agent/settings.json",
+} as const;
+const USER_PI_MODELS_STORE = "agent/models-store.json";
+const USER_PI_RESOURCE_ROOTS = ["agent/extensions", "agent/skills"] as const;
+
+type UserPiEntry = {
+  readonly type: UserPiHomeEntryType;
+  readonly hash: string | null;
+  readonly size: number | null;
+  readonly mtimeMs: number | null;
+  readonly symlinkTarget: string | null;
+};
+
+function userPiRelative(piHome: string, fullPath: string): string {
+  return path.relative(piHome, fullPath).split(path.sep).join("/");
+}
+
+function userPiEntryType(stat: ReturnType<typeof lstatSync>): UserPiHomeEntryType {
+  if (stat.isFile()) return "regular";
+  if (stat.isDirectory()) return "directory";
+  if (stat.isSymbolicLink()) return "symlink";
+  return "other";
+}
+
+function hashUserPiRegularFile(fullPath: string): string {
+  try {
+    return crypto.createHash("sha256").update(readFileSync(fullPath)).digest("hex");
+  } catch (cause) {
+    throw new Error(
+      `Unable to fingerprint user Pi home entry '${fullPath}': ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+}
+
+function observeUserPiEntry(fullPath: string, allowAbsent = true): UserPiEntry {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(fullPath);
+  } catch (cause) {
+    if (allowAbsent && (cause as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return { type: "absent", hash: null, size: null, mtimeMs: null, symlinkTarget: null };
+    }
+    throw new Error(
+      `Unable to inspect user Pi home entry '${fullPath}': ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  const type = userPiEntryType(stat);
+  if (type === "regular") {
+    return {
+      type,
+      hash: hashUserPiRegularFile(fullPath),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      symlinkTarget: null,
+    };
+  }
+  if (type === "symlink") {
+    let symlinkTarget: string;
+    try {
+      symlinkTarget = fs.readlinkSync(fullPath);
+    } catch (cause) {
+      throw new Error(
+        `Unable to read user Pi home symlink '${fullPath}': ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+    return {
+      type,
+      // Hashing the link target gives a stable, content-free witness for link
+      // replacement while preserving the link's exact target separately.
+      hash: crypto.createHash("sha256").update(symlinkTarget).digest("hex"),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      symlinkTarget,
+    };
+  }
+  return {
+    type,
+    hash: null,
+    size: type === "absent" ? null : stat.size,
+    mtimeMs: type === "absent" ? null : stat.mtimeMs,
+    symlinkTarget: null,
+  };
+}
+
+function toUserPiPathSnapshot(entry: UserPiEntry): UserPiHomePathSnapshot {
+  return {
+    exists: entry.type !== "absent",
+    type: entry.type,
+    hash: entry.hash,
+    size: entry.size,
+  };
+}
+
+function snapshotUserPiResources(piHome: string): ReadonlyArray<UserPiHomeResourceSnapshot> {
+  const resources: UserPiHomeResourceSnapshot[] = [];
+  const visit = (fullDir: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(fullDir).toSorted();
+    } catch (cause) {
+      throw new Error(
+        `Unable to enumerate user Pi resource directory '${fullDir}': ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+    for (const name of names) {
+      const fullPath = path.join(fullDir, name);
+      const entry = observeUserPiEntry(fullPath, false);
+      const relativePath = userPiRelative(piHome, fullPath);
+      resources.push({
+        path: relativePath,
+        ...toUserPiPathSnapshot(entry),
+        symlinkTarget: entry.symlinkTarget,
+      });
+      if (entry.type === "directory") visit(fullPath);
+    }
+  };
+  for (const resourceRoot of USER_PI_RESOURCE_ROOTS) {
+    const fullRoot = path.join(piHome, resourceRoot);
+    const rootEntry = observeUserPiEntry(fullRoot);
+    if (rootEntry.type === "directory") visit(fullRoot);
+    else if (rootEntry.type !== "absent") {
+      throw new Error(`User Pi resource root '${resourceRoot}' is not a directory.`);
+    }
+  }
+  return resources;
 }
 
 function snapshotUserPiHomeState(): UserPiHomeSnapshot {
   const piHome = path.join(os.homedir(), ".pi");
-  if (!existsSync(piHome)) return { digest: "absent" };
-  const hash = crypto.createHash("sha256");
+  const absentPath = (): UserPiHomePathSnapshot => ({
+    exists: false,
+    type: "absent",
+    hash: null,
+    size: null,
+  });
+  if (!existsSync(piHome)) {
+    return {
+      digest: "absent",
+      sensitive: { authJson: absentPath(), modelsJson: absentPath(), settingsJson: absentPath() },
+      resources: [],
+      modelsStore: { ...absentPath(), mtimeMs: null },
+    };
+  }
+
+  const strictHash = crypto.createHash("sha256");
   const walk = (dir: string) => {
-    const relativeDir = path.relative(piHome, dir);
-    // The active Pi controller appends its own live transcript while this
-    // harness is running. That session history is neither user configuration
-    // nor owned by the harness, so it cannot be a stable no-mutation witness.
-    // All user configuration, extensions, model definitions, and settings
-    // remain fingerprinted.
-    if (relativeDir === "agent/sessions" || relativeDir.startsWith("agent/sessions/")) {
-      return;
-    }
+    const relativeDir = userPiRelative(piHome, dir);
+    if (relativeDir === "agent/sessions" || relativeDir.startsWith("agent/sessions/")) return;
     let names: string[];
     try {
       names = readdirSync(dir).toSorted();
-    } catch {
-      hash.update(`missing:${path.relative(piHome, dir)}`);
-      return;
+    } catch (cause) {
+      throw new Error(
+        `Unable to enumerate user Pi home directory '${dir}': ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
     }
     for (const name of names) {
-      const full = path.join(dir, name);
-      let stat;
-      try {
-        stat = lstatSync(full);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory()) {
-        hash.update(`dir:${path.relative(piHome, full)}`);
-        walk(full);
-      } else {
-        hash.update(`file:${path.relative(piHome, full)}:`);
-        try {
-          hash.update(readFileSync(full));
-        } catch {
-          hash.update("unreadable");
-        }
-      }
+      const fullPath = path.join(dir, name);
+      const relativePath = userPiRelative(piHome, fullPath);
+      if (relativePath === USER_PI_MODELS_STORE) continue;
+      const entry = observeUserPiEntry(fullPath, false);
+      strictHash.update(`${entry.type}:${relativePath}:${entry.size ?? "-"}:`);
+      if (entry.symlinkTarget !== null) strictHash.update(`target:${entry.symlinkTarget}:`);
+      if (entry.hash !== null) strictHash.update(`hash:${entry.hash}:`);
+      if (entry.type === "directory") walk(fullPath);
     }
   };
   walk(piHome);
-  return { digest: hash.digest("hex") };
+
+  const sensitive = Object.fromEntries(
+    Object.entries(USER_PI_SENSITIVE_FILES).map(([name, relativePath]) => {
+      const entry = observeUserPiEntry(path.join(piHome, relativePath));
+      return [name, toUserPiPathSnapshot(entry)];
+    }),
+  ) as UserPiHomeSnapshot["sensitive"];
+  const modelsStoreEntry = observeUserPiEntry(path.join(piHome, USER_PI_MODELS_STORE));
+  if (modelsStoreEntry.type !== "absent" && modelsStoreEntry.type !== "regular") {
+    throw new Error("User Pi models-store.json must be absent or a regular file.");
+  }
+  return {
+    digest: strictHash.digest("hex"),
+    sensitive,
+    resources: snapshotUserPiResources(piHome),
+    modelsStore: {
+      ...toUserPiPathSnapshot(modelsStoreEntry),
+      mtimeMs: modelsStoreEntry.mtimeMs,
+    },
+  };
 }
 
 export interface RealPiProvenanceResult {
