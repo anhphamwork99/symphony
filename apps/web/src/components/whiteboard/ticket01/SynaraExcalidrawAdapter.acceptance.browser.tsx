@@ -48,6 +48,9 @@ type TestHarnessProps = {
   readonly initialScene?: SynaraSceneInput;
   readonly viewModeEnabled?: boolean;
   readonly selectionSettlementDelayMs?: number;
+  readonly selectionSettlementTimeoutMs?: number;
+  readonly selectionStabilityCheck?: (selectedElementIds: readonly string[]) => boolean;
+  readonly adapterLoadFailure?: string;
   readonly scenario: string;
   readonly onDiagnostic?: (diagnostic: SynaraExcalidrawDiagnostic) => void;
   readonly onRawSelection?: (observation: SynaraSelectionObservation) => void;
@@ -66,6 +69,15 @@ const RehydratableHarness = forwardRef<
     {...(props.viewModeEnabled !== undefined ? { viewModeEnabled: props.viewModeEnabled } : {})}
     {...(props.selectionSettlementDelayMs !== undefined
       ? { selectionSettlementDelayMs: props.selectionSettlementDelayMs }
+      : {})}
+    {...(props.selectionSettlementTimeoutMs !== undefined
+      ? { selectionSettlementTimeoutMs: props.selectionSettlementTimeoutMs }
+      : {})}
+    {...(props.selectionStabilityCheck !== undefined
+      ? { selectionStabilityCheck: props.selectionStabilityCheck }
+      : {})}
+    {...(props.adapterLoadFailure !== undefined
+      ? { adapterLoadFailure: props.adapterLoadFailure }
       : {})}
     scenario={props.scenario}
     {...(props.onDiagnostic !== undefined ? { onDiagnostic: props.onDiagnostic } : {})}
@@ -146,6 +158,31 @@ function canvasElement(): HTMLCanvasElement {
   return canvas as HTMLCanvasElement;
 }
 
+async function assertDecodablePng(blob: Blob): Promise<void> {
+  expect(blob.type).toBe("image/png");
+  const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+  expect([...signature]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  const bitmap = await createImageBitmap(blob);
+  expect(bitmap.width).toBeGreaterThan(0);
+  expect(bitmap.height).toBeGreaterThan(0);
+  bitmap.close();
+}
+
+function assertMeaningfulSvg(markup: string): void {
+  const root = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+  expect(root.tagName.toLowerCase()).toBe("svg");
+  const viewBox = root.getAttribute("viewBox")?.trim().split(/\s+/).map(Number);
+  const dimensions = [root.getAttribute("width"), root.getAttribute("height")].map((value) =>
+    value === null ? null : Number.parseFloat(value),
+  );
+  expect(
+    (viewBox?.length === 4 &&
+      viewBox.slice(2).every((value) => Number.isFinite(value) && value > 0)) ||
+      dimensions.every((value) => value !== null && Number.isFinite(value) && value > 0),
+  ).toBe(true);
+  expect(root.childElementCount).toBeGreaterThan(0);
+}
+
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -178,6 +215,11 @@ describe("Synara Excalidraw Ticket 01 real-Chromium acceptance", () => {
     const firstSnapshot = firstHandle.captureScene();
     expect(firstSnapshot.elements).toHaveLength(EXCALIDRAW_TICKET01_FIXTURE.elements.length);
     expect(firstSnapshot.files).toHaveProperty("file-excalidraw-mark");
+    const originalToFirst = compareExcalidrawTicket01Semantics(
+      EXCALIDRAW_TICKET01_FIXTURE,
+      firstSnapshot as unknown as ExcalidrawTicket01Scene,
+    );
+    expect(originalToFirst.equal, originalToFirst.diagnostics.join("\n")).toBe(true);
     const firstSemantics = projectExcalidrawTicket01Semantics(
       firstSnapshot as unknown as ExcalidrawTicket01Scene,
     );
@@ -250,11 +292,11 @@ describe("Synara Excalidraw Ticket 01 real-Chromium acceptance", () => {
     ).toEqual(semanticComparison.after);
 
     const svg = await secondHandle.exportSvg();
-    expect(svg).toContain("<svg");
+    assertMeaningfulSvg(svg);
     expect(svg).toContain("Official API boundary");
     const png = await secondHandle.exportPng();
-    expect(png.type).toBe("image/png");
     expect(png.size).toBeGreaterThan(100);
+    await assertDecodablePng(png);
 
     await firstMount.unmount();
   });
@@ -451,6 +493,57 @@ describe("Synara Excalidraw Ticket 01 real-Chromium acceptance", () => {
   });
 
   it("retains structured diagnostics for malformed scenes and nearest public negative boundaries", async () => {
+    const loadFailureRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const loadFailure = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={loadFailureRef}
+          adapterLoadFailure="injected lazy-loader failure"
+          scenario="negative-lazy-load"
+        />
+      </BrowserShell>,
+    );
+    await vi.waitFor(() =>
+      expect(
+        loadFailureRef.current
+          ?.getDiagnostics()
+          .some((diagnostic) => diagnostic.code === "lazy-load-failed"),
+      ).toBe(true),
+    );
+    expect(
+      diagnosticFor(loadFailureRef.current!.getDiagnostics(), "lazy-load-failed"),
+    ).toMatchObject({
+      ac: "AC1",
+      phase: "lazy-loader",
+      recoverable: false,
+    });
+    await loadFailure.unmount();
+
+    const notReadyRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const notReady = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={notReadyRef}
+          adapterLoadFailure="adapter is intentionally unavailable"
+          scenario="negative-api-not-ready"
+        />
+      </BrowserShell>,
+      );
+      expect(notReadyRef.current).not.toBeNull();
+      expect(() => notReadyRef.current!.serializeScene()).toThrow();
+      expect(() => notReadyRef.current!.exportSvg()).toThrow();
+      expect(() => notReadyRef.current!.exportPng()).toThrow();
+      expect(() => notReadyRef.current!.updateScene(selectionUpdate(1, []))).toThrow();
+    expect(() =>
+      notReadyRef.current!.restoreViewport({ scrollX: 0, scrollY: 0, zoom: 1 }),
+    ).toThrow();
+    expect(
+      notReadyRef
+        .current!.getDiagnostics()
+        .some((diagnostic) => ["adapter-not-ready", "api-not-ready"].includes(diagnostic.code)),
+    ).toBe(true);
+    await notReady.unmount();
+
     const malformedRef = createRef<ExcalidrawTicket01HarnessHandle>();
     const malformed = await render(
       <BrowserShell>
@@ -508,6 +601,127 @@ describe("Synara Excalidraw Ticket 01 real-Chromium acceptance", () => {
     expect(() =>
       invalidViewportHandle.restoreViewport({ scrollX: 0, scrollY: 0, zoom: 0 }),
     ).toThrow("viewport contains non-finite or non-positive values");
+    expect(diagnosticFor(invalidViewportHandle.getDiagnostics(), "invalid-viewport")).toMatchObject(
+      {
+        ac: "AC5",
+        phase: "restore-viewport",
+      },
+    );
     await invalidViewport.unmount();
+  });
+
+  it("retains deterministic selection timeout and unstable-selection diagnostics", async () => {
+    const timeoutRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const timeoutHarness = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={timeoutRef}
+          initialScene={makeExcalidrawTicket01Fixture() as unknown as SynaraSceneInput}
+          selectionSettlementDelayMs={80}
+          selectionSettlementTimeoutMs={1}
+          scenario="negative-selection-timeout"
+        />
+      </BrowserShell>,
+    );
+    const timeoutHandle = await waitForApi(timeoutRef);
+    timeoutHandle.updateScene(selectionUpdate(1, [TICKET01_CARD_ID]));
+    await vi.waitFor(() =>
+      expect(
+        timeoutHandle
+          .getDiagnostics()
+          .some((diagnostic) => diagnostic.code === "selection-settlement-timeout"),
+      ).toBe(true),
+    );
+    await timeoutHarness.unmount();
+
+    const unstableRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const unstableHarness = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={unstableRef}
+          initialScene={makeExcalidrawTicket01Fixture() as unknown as SynaraSceneInput}
+          selectionStabilityCheck={() => false}
+          scenario="negative-unstable-selection"
+        />
+      </BrowserShell>,
+    );
+    const unstableHandle = await waitForApi(unstableRef);
+    unstableHandle.updateScene(selectionUpdate(1, [TICKET01_CARD_ID]));
+    await vi.waitFor(() =>
+      expect(
+        unstableHandle
+          .getDiagnostics()
+          .some((diagnostic) => diagnostic.code === "unstable-selection"),
+      ).toBe(true),
+    );
+    await unstableHarness.unmount();
+  });
+
+  it("canonicalizes selected-ID sets before deduplication", async () => {
+    const settled: SynaraSelectionObservation[] = [];
+    const handleRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const mounted = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={handleRef}
+          initialScene={makeExcalidrawTicket01Fixture() as unknown as SynaraSceneInput}
+          selectionSettlementDelayMs={0}
+          scenario="ac5-selection-canonicalization"
+          onSettledSelection={(observation) => settled.push(observation)}
+        />
+      </BrowserShell>,
+    );
+    const handle = await waitForApi(handleRef);
+    handle.updateScene(selectionUpdate(1, [TICKET01_TARGET_ID, TICKET01_CARD_ID]));
+    await waitForSettledSelection(0);
+    handle.updateScene(selectionUpdate(2, [TICKET01_CARD_ID, TICKET01_TARGET_ID]));
+    await waitForSettledSelection(0);
+    const canonicalSelection = settled.filter(
+      (observation) =>
+        observation.selectedElementIds.join(",") === `${TICKET01_CARD_ID},${TICKET01_TARGET_ID}`,
+    );
+    expect(canonicalSelection).toHaveLength(1);
+    expect(canonicalSelection[0]?.selectedElementIds).toEqual([
+      TICKET01_CARD_ID,
+      TICKET01_TARGET_ID,
+    ]);
+    await mounted.unmount();
+  });
+
+  it("probes real-package Undo feasibility without claiming Ticket 02 acceptance", async () => {
+    const handleRef = createRef<ExcalidrawTicket01HarnessHandle>();
+    const mounted = await render(
+      <BrowserShell>
+        <ExcalidrawTicket01Harness
+          ref={handleRef}
+          initialScene={makeExcalidrawTicket01Fixture() as unknown as SynaraSceneInput}
+          scenario="undo-feasibility-probe"
+        />
+      </BrowserShell>,
+    );
+    const handle = await waitForApi(handleRef);
+    const preBatch = handle.captureScene();
+    handle.updateScene({ sequence: 1, ...mutableProgressScene(1) });
+    handle.updateScene({ sequence: 2, ...mutableProgressScene(2) });
+    expect(handle.captureScene().elements[0]?.customData).toMatchObject({ progress: 2 });
+
+    handle.updateScene(selectionUpdate(3, [TICKET01_CARD_ID]));
+    await vi.waitFor(() =>
+      expect(handle.captureScene().selectedElementIds).toContain(TICKET01_CARD_ID),
+    );
+    document.querySelector<HTMLElement>(".excalidraw")?.focus();
+    await userEvent.keyboard("{Delete}");
+    await vi.waitFor(() =>
+      expect(handle.captureScene().elements.length).toBeLessThan(preBatch.elements.length),
+    );
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    await vi.waitFor(() =>
+      expect(handle.captureScene().elements.length).toBe(preBatch.elements.length),
+    );
+    expect(handle.captureScene().elements[0]?.customData).toMatchObject({ progress: 2 });
+    expect(handle.captureScene().elements[0]?.customData).not.toMatchObject({
+      progress: undefined,
+    });
+    await mounted.unmount();
   });
 });

@@ -57,12 +57,16 @@ describe("Ticket 01 Excalidraw representative fixture", () => {
       TICKET01_CONNECTOR_ID,
       TICKET01_IMAGE_ID,
     ]);
-    expect(first.elements.find((element) => element.id === TICKET01_CARD_TEXT_ID)?.relationships).toMatchObject({
+    expect(
+      first.elements.find((element) => element.id === TICKET01_CARD_TEXT_ID)?.relationships,
+    ).toMatchObject({
       containerId: TICKET01_CARD_ID,
       groupIds: [TICKET01_GROUP_ID],
       frameId: TICKET01_FRAME_ID,
     });
-    expect(first.elements.find((element) => element.id === TICKET01_CONNECTOR_ID)?.relationships).toMatchObject({
+    expect(
+      first.elements.find((element) => element.id === TICKET01_CONNECTOR_ID)?.relationships,
+    ).toMatchObject({
       startBinding: { elementId: TICKET01_CARD_ID },
       endBinding: { elementId: TICKET01_TARGET_ID },
     });
@@ -114,7 +118,9 @@ describe("Ticket 01 Excalidraw representative fixture", () => {
     const result = compare(after);
 
     expect(result.equal).toBe(false);
-    expect(result.differences.map((difference) => difference.code)).toContain("wrong-text-container");
+    expect(result.differences.map((difference) => difference.code)).toContain(
+      "wrong-text-container",
+    );
     expect(result.diagnostics.join("\n")).toContain("has the wrong container");
   });
 
@@ -126,7 +132,9 @@ describe("Ticket 01 Excalidraw representative fixture", () => {
     const result = compare(after);
 
     expect(result.equal).toBe(false);
-    expect(result.differences.map((difference) => difference.code)).toContain("missing-group-member");
+    expect(result.differences.map((difference) => difference.code)).toContain(
+      "missing-group-member",
+    );
     expect(result.diagnostics.join("\n")).toContain("group membership changed");
   });
 
@@ -169,7 +177,7 @@ describe("Ticket 01 Excalidraw representative fixture", () => {
 
   it("diagnoses a changed meaningful element order", () => {
     const after = mutableFixture();
-    [after.elements[1], after.elements[2]] = [after.elements[2], after.elements[1]];
+    [after.elements[1]!, after.elements[2]!] = [after.elements[2]!, after.elements[1]!];
 
     const result = compare(after);
 
@@ -178,5 +186,38 @@ describe("Ticket 01 Excalidraw representative fixture", () => {
       "meaningful-order-changed",
     );
     expect(result.diagnostics.join("\n")).toContain("meaningful element order changed");
+  });
+
+  it("diagnoses a dropped or unsupported element explicitly", () => {
+    const after = mutableFixture();
+    after.elements = after.elements.filter((element) => element.id !== TICKET01_TARGET_ID);
+
+    const result = compare(after);
+
+    expect(result.equal).toBe(false);
+    expect(result.differences.map((difference) => difference.code)).toContain("element-missing");
+    expect(result.diagnostics.join("\n")).toContain("is missing after round-trip");
+  });
+
+  it("diagnoses an unexpected restored element and file", () => {
+    const after = mutableFixture();
+    after.elements.push({
+      ...after.elements[0]!,
+      id: "unsupported-restored-element",
+      type: "ellipse",
+    });
+    after.files["unexpected-file"] = {
+      id: "unexpected-file",
+      dataURL: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      created: 1,
+    };
+
+    const result = compare(after);
+
+    expect(result.equal).toBe(false);
+    expect(result.differences.map((difference) => difference.code)).toEqual(
+      expect.arrayContaining(["unsupported-element", "unexpected-element", "unexpected-file"]),
+    );
   });
 });

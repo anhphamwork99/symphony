@@ -13,6 +13,9 @@ export type ExcalidrawTicket01SemanticDifferenceCode =
   | "custom-data-loss"
   | "element-changed"
   | "element-missing"
+  | "unsupported-element"
+  | "unexpected-element"
+  | "unexpected-file"
   | "meaningful-order-changed"
   | "missing-frame-membership"
   | "missing-group-member"
@@ -48,6 +51,14 @@ export interface ExcalidrawTicket01SemanticElement {
     readonly frameId: string | null;
   };
   readonly text: string | null;
+  readonly textStyle: {
+    readonly fontSize: number | null;
+    readonly fontFamily: number | null;
+    readonly textAlign: string | null;
+    readonly verticalAlign: string | null;
+    readonly autoResize: boolean | null;
+    readonly lineHeight: number | null;
+  } | null;
   readonly image: {
     readonly fileId: string | null;
     readonly fileAvailable: boolean;
@@ -126,7 +137,8 @@ function projectElement(
       width: element.width,
       height: element.height,
       angle: element.angle,
-      points: element.points === undefined ? null : element.points.map((point) => [...point] as const),
+      points:
+        element.points === undefined ? null : element.points.map((point) => [...point] as const),
     },
     relationships: {
       boundElements: (element.boundElements ?? []).map(({ id, type }) => ({ id, type })),
@@ -137,11 +149,22 @@ function projectElement(
       frameId: element.frameId ?? null,
     },
     text: element.type === "text" ? (element.text ?? null) : null,
+    textStyle:
+      element.type === "text"
+        ? {
+            fontSize: element.fontSize ?? null,
+            fontFamily: element.fontFamily ?? null,
+            textAlign: element.textAlign ?? null,
+            verticalAlign: element.verticalAlign ?? null,
+            autoResize: element.autoResize ?? null,
+            lineHeight: element.lineHeight ?? null,
+          }
+        : null,
     image:
       element.type === "image"
         ? {
             fileId: element.fileId ?? null,
-            fileAvailable: imageFile?.dataURL.length > 0,
+            fileAvailable: typeof imageFile?.dataURL === "string" && imageFile.dataURL.length > 0,
             mimeType: imageFile?.mimeType ?? null,
           }
         : null,
@@ -158,25 +181,18 @@ export function projectExcalidrawTicket01Semantics(
   scene: ExcalidrawTicket01Scene,
 ): ExcalidrawTicket01SemanticProjection {
   const elements = scene.elements.map((element) => projectElement(element, scene.files));
-  const referencedFileIds: string[] = [];
-  for (const element of elements) {
-    const fileId = element.image?.fileId;
-    if (fileId !== null && fileId !== undefined) {
-      referencedFileIds.push(fileId);
-    }
-  }
-  const uniqueFileIds: string[] = [...new Set(referencedFileIds)];
-
   return {
     elements,
-    files: uniqueFileIds.map((id) => {
-      const file = scene.files[id];
-      return {
-        id,
-        mimeType: file?.mimeType ?? null,
-        hasData: file?.dataURL.length > 0,
-      };
-    }),
+    files: Object.keys(scene.files)
+      .sort()
+      .map((id) => {
+        const file = scene.files[id];
+        return {
+          id,
+          mimeType: file?.mimeType ?? null,
+          hasData: typeof file?.dataURL === "string" && file.dataURL.length > 0,
+        };
+      }),
   };
 }
 
@@ -223,7 +239,40 @@ export function compareExcalidrawTicket01Semantics(
     );
   }
 
+  const supportedTypes = new Set<ExcalidrawTicket01Element["type"]>([
+    "arrow",
+    "diamond",
+    "frame",
+    "image",
+    "rectangle",
+    "text",
+  ]);
   const afterById = elementById(after);
+  const beforeIdSet = new Set(beforeIds);
+  for (const actualElement of after.elements) {
+    if (!supportedTypes.has(actualElement.type)) {
+      differences.push(
+        difference(
+          "unsupported-element",
+          `elements.${actualElement.id}.type`,
+          `element ${actualElement.id} has unsupported type ${actualElement.type}.`,
+          [...supportedTypes],
+          actualElement.type,
+        ),
+      );
+    }
+    if (!beforeIdSet.has(actualElement.id)) {
+      differences.push(
+        difference(
+          "unexpected-element",
+          `elements.${actualElement.id}`,
+          `element ${actualElement.id} was added or restored with an unsupported shape.`,
+          undefined,
+          actualElement,
+        ),
+      );
+    }
+  }
   for (const expectedElement of before.elements) {
     const actualElement = afterById.get(expectedElement.id);
     if (actualElement === undefined) {
@@ -341,6 +390,17 @@ export function compareExcalidrawTicket01Semantics(
         ),
       );
     }
+    if (!valuesEqual(expectedElement.textStyle, actualElement.textStyle)) {
+      differences.push(
+        difference(
+          "element-changed",
+          `elements.${expectedElement.id}.textStyle`,
+          `text metadata changed for ${expectedElement.id}; font and layout metadata must be explicit and stable.`,
+          expectedElement.textStyle,
+          actualElement.textStyle,
+        ),
+      );
+    }
     if (!valuesEqual(expectedElement.customData, actualElement.customData)) {
       differences.push(
         difference(
@@ -365,9 +425,52 @@ export function compareExcalidrawTicket01Semantics(
     }
   }
 
-  const diagnostics = differences.map(
-    ({ code, path, message }) => `[${code}] ${path}: ${message}`,
-  );
+  const afterFileIds = new Set(after.files.map((file) => file.id));
+  for (const expectedFile of before.files) {
+    if (!afterFileIds.has(expectedFile.id)) {
+      differences.push(
+        difference(
+          "missing-image-file",
+          `files.${expectedFile.id}`,
+          `file ${expectedFile.id} was lost during the round-trip.`,
+          expectedFile,
+          undefined,
+        ),
+      );
+    }
+  }
+  const beforeFileIds = new Set(before.files.map((file) => file.id));
+  for (const actualFile of after.files) {
+    if (!beforeFileIds.has(actualFile.id)) {
+      differences.push(
+        difference(
+          "unexpected-file",
+          `files.${actualFile.id}`,
+          `file ${actualFile.id} was added or restored outside the representative fixture.`,
+          undefined,
+          actualFile,
+        ),
+      );
+    }
+  }
+
+  for (const expectedFile of before.files) {
+    const actualFile = after.files.find((file) => file.id === expectedFile.id);
+    if (actualFile === undefined) continue;
+    if (!valuesEqual(expectedFile, actualFile)) {
+      differences.push(
+        difference(
+          "missing-image-file",
+          `files.${expectedFile.id}`,
+          `file ${expectedFile.id} metadata or data availability changed during the round-trip.`,
+          expectedFile,
+          actualFile,
+        ),
+      );
+    }
+  }
+
+  const diagnostics = differences.map(({ code, path, message }) => `[${code}] ${path}: ${message}`);
   return {
     equal: differences.length === 0,
     before,

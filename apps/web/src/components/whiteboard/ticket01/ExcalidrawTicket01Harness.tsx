@@ -33,6 +33,13 @@ export interface ExcalidrawTicket01HarnessProps {
   readonly initialScene?: SynaraSceneInput;
   readonly viewModeEnabled?: boolean;
   readonly selectionSettlementDelayMs?: number;
+  readonly selectionSettlementTimeoutMs?: number;
+  readonly selectionStabilityCheck?: (selectedElementIds: readonly string[]) => boolean;
+  /**
+   * Lower-seam fault injection for the lazy-loader diagnostic only. Material
+   * package behavior is still proved by the real browser harness.
+   */
+  readonly adapterLoadFailure?: string;
   readonly scenario?: string;
   readonly onDiagnostic?: (diagnostic: SynaraExcalidrawDiagnostic) => void;
   readonly onRawSelection?: (observation: SynaraSelectionObservation) => void;
@@ -88,6 +95,10 @@ function LoadingState() {
       Loading whiteboard editor…
     </div>
   );
+}
+
+function ForcedAdapterLoadFailure(props: { readonly message: string }): never {
+  throw new Error(props.message);
 }
 
 export const ExcalidrawTicket01Harness = forwardRef<
@@ -170,6 +181,12 @@ export const ExcalidrawTicket01Harness = forwardRef<
     ...(props.selectionSettlementDelayMs !== undefined
       ? { selectionSettlementDelayMs: props.selectionSettlementDelayMs }
       : {}),
+    ...(props.selectionSettlementTimeoutMs !== undefined
+      ? { selectionSettlementTimeoutMs: props.selectionSettlementTimeoutMs }
+      : {}),
+    ...(props.selectionStabilityCheck !== undefined
+      ? { selectionStabilityCheck: props.selectionStabilityCheck }
+      : {}),
     ...(props.scenario ? { scenario: props.scenario } : {}),
     onDiagnostic: recordDiagnostic,
     onLifecycle: recordLifecycle,
@@ -208,6 +225,9 @@ export const ExcalidrawTicket01Harness = forwardRef<
           });
         }}
       >
+        {props.adapterLoadFailure ? (
+          <ForcedAdapterLoadFailure message={props.adapterLoadFailure} />
+        ) : null}
         <Suspense fallback={<LoadingState />}>
           <LazyAdapter ref={adapterRef} {...adapterProps} />
         </Suspense>

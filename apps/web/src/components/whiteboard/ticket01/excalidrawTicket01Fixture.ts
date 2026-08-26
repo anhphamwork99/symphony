@@ -48,10 +48,40 @@ export interface ExcalidrawTicket01Element {
   readonly containerId?: string | null;
   readonly text?: string;
   readonly originalText?: string;
+  readonly fontSize?: number;
+  readonly fontFamily?: number;
+  readonly textAlign?: "left" | "center" | "right";
+  readonly verticalAlign?: "top" | "middle";
+  readonly autoResize?: boolean;
+  readonly lineHeight?: number;
   readonly points?: readonly (readonly [number, number])[];
   readonly startBinding?: ExcalidrawTicket01Binding | null;
   readonly endBinding?: ExcalidrawTicket01Binding | null;
   readonly fileId?: string;
+  readonly lastCommittedPoint?: readonly [number, number] | null;
+  readonly startArrowhead?: "arrow" | "bar" | "dot" | "circle" | null;
+  readonly endArrowhead?: "arrow" | "bar" | "dot" | "circle" | null;
+  readonly elbowed?: boolean;
+  readonly name?: string | null;
+  readonly status?: "pending" | "saved" | "error";
+  readonly scale?: readonly [number, number];
+  readonly crop?: null;
+  readonly strokeColor?: string;
+  readonly backgroundColor?: string;
+  readonly fillStyle?: "hachure" | "cross-hatch" | "solid" | "zigzag";
+  readonly strokeWidth?: number;
+  readonly strokeStyle?: "solid" | "dashed" | "dotted";
+  readonly roundness?: null | { readonly type: number; readonly value?: number };
+  readonly roughness?: number;
+  readonly opacity?: number;
+  readonly seed?: number;
+  readonly version?: number;
+  readonly versionNonce?: number;
+  readonly index?: string | null;
+  readonly isDeleted?: boolean;
+  readonly updated?: number;
+  readonly link?: string | null;
+  readonly locked?: boolean;
 }
 
 export interface ExcalidrawTicket01Scene {
@@ -83,6 +113,26 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         width: 760,
         height: 480,
         angle: 0,
+        name: "Release plan",
+        strokeColor: "#1b1b1f",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1001,
+        version: 1,
+        versionNonce: 2001,
+        index: "a0",
+        isDeleted: false,
+        updated: 1_725_000_000_000,
+        link: null,
+        locked: false,
+        groupIds: [],
+        frameId: null,
+        boundElements: null,
         customData: { role: "acceptance-frame", revision: 1 },
       },
       {
@@ -93,6 +143,22 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         width: 220,
         height: 110,
         angle: 0,
+        strokeColor: "#1b1b1f",
+        backgroundColor: "#dbeafe",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1002,
+        version: 1,
+        versionNonce: 2002,
+        index: "a1",
+        isDeleted: false,
+        updated: 1_725_000_000_001,
+        link: null,
+        locked: false,
         groupIds: [GROUP_ID],
         frameId: FRAME_ID,
         boundElements: [
@@ -106,14 +172,36 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         type: "text",
         x: 174,
         y: 190,
-        width: 152,
-        height: 30,
+        width: 178.857421875,
+        height: 25,
         angle: 0,
+        strokeColor: "#1b1b1f",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1003,
+        version: 1,
+        versionNonce: 2003,
+        index: "a2",
+        isDeleted: false,
+        updated: 1_725_000_000_002,
+        link: null,
+        locked: false,
         groupIds: [GROUP_ID],
         frameId: FRAME_ID,
         containerId: CARD_ID,
         text: "Official API boundary",
         originalText: "Official API boundary",
+        fontSize: 20,
+        fontFamily: 1,
+        textAlign: "left",
+        verticalAlign: "middle",
+        autoResize: true,
+        lineHeight: 1.25,
         boundElements: [],
         customData: { role: "bound-label" },
       },
@@ -125,6 +213,23 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         width: 190,
         height: 100,
         angle: 0,
+        strokeColor: "#1b1b1f",
+        backgroundColor: "#dcfce7",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1004,
+        version: 1,
+        versionNonce: 2004,
+        index: "a3",
+        isDeleted: false,
+        updated: 1_725_000_000_003,
+        link: null,
+        locked: false,
+        groupIds: [],
         frameId: FRAME_ID,
         boundElements: [{ id: CONNECTOR_ID, type: "arrow" }],
         customData: { role: "target-card", semanticTag: "browser-proof" },
@@ -137,13 +242,35 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         width: 210,
         height: 0,
         angle: 0,
+        strokeColor: "#1b1b1f",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1005,
+        version: 1,
+        versionNonce: 2005,
+        index: "a4",
+        isDeleted: false,
+        updated: 1_725_000_000_004,
+        link: null,
+        locked: false,
+        groupIds: [],
         frameId: FRAME_ID,
+        boundElements: null,
         points: [
           [0, 0],
           [210, 0],
         ],
         startBinding: { elementId: CARD_ID, focus: 0, gap: 8 },
         endBinding: { elementId: TARGET_ID, focus: 0, gap: 8 },
+        lastCommittedPoint: null,
+        startArrowhead: null,
+        endArrowhead: "arrow",
+        elbowed: false,
         customData: { role: "relationship", meaning: "source-to-target" },
       },
       {
@@ -154,8 +281,29 @@ export function makeExcalidrawTicket01Fixture(): ExcalidrawTicket01Scene {
         width: 96,
         height: 96,
         angle: 0,
+        strokeColor: "#1b1b1f",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 2,
+        strokeStyle: "solid",
+        roundness: null,
+        roughness: 0,
+        opacity: 100,
+        seed: 1006,
+        version: 1,
+        versionNonce: 2006,
+        index: "a5",
+        isDeleted: false,
+        updated: 1_725_000_000_005,
+        link: null,
+        locked: false,
+        groupIds: [],
         frameId: FRAME_ID,
+        boundElements: null,
         fileId: IMAGE_FILE_ID,
+        status: "saved",
+        scale: [1, 1],
+        crop: null,
         customData: { role: "fixture-image", assetKind: "png" },
       },
     ],

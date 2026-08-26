@@ -56,6 +56,7 @@ export interface SynaraSceneSnapshot {
 export interface SynaraSelectionObservation {
   readonly selectedElementIds: readonly string[];
   readonly observedAt: number;
+  readonly settledAfterMs?: number;
 }
 
 export type SynaraDiagnosticAc = "AC1" | "AC2" | "AC3" | "AC4" | "AC5" | "AC6";
@@ -102,6 +103,16 @@ export interface SynaraExcalidrawAdapterProps {
   readonly initialScene?: SynaraSceneInput;
   readonly viewModeEnabled?: boolean;
   readonly selectionSettlementDelayMs?: number;
+  /**
+   * Test-policy injection only. Ticket 01 observes timeout behavior but does
+   * not choose a production timeout value.
+   */
+  readonly selectionSettlementTimeoutMs?: number;
+  /**
+   * Test-policy injection only. Returning false proves the unstable-selection
+   * diagnostic without making a production stability policy here.
+   */
+  readonly selectionStabilityCheck?: (selectedElementIds: readonly string[]) => boolean;
   readonly scenario?: string;
   readonly onDiagnostic?: (diagnostic: SynaraExcalidrawDiagnostic) => void;
   readonly onLifecycle?: (event: SynaraAdapterLifecycleEvent) => void;
@@ -133,9 +144,13 @@ function readViewport(appState: PackageAppState): SynaraViewport {
 }
 
 function readSelectedIds(appState: PackageAppState): readonly string[] {
-  return Object.keys(appState.selectedElementIds).filter(
-    (id) => appState.selectedElementIds[id] === true,
-  );
+  return [
+    ...new Set(
+      Object.keys(appState.selectedElementIds).filter(
+        (id) => appState.selectedElementIds[id] === true,
+      ),
+    ),
+  ].sort();
 }
 
 function validateSceneInput(scene: SynaraSceneInput): void {
@@ -199,6 +214,71 @@ function adapterErrorDiagnostic(
   };
 }
 
+function parsePositiveSvgDimension(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function validateSvgMarkup(markup: string): void {
+  const document = new DOMParser().parseFromString(markup, "image/svg+xml");
+  const root = document.documentElement;
+  if (root.tagName.toLowerCase() !== "svg") {
+    throw new Error("official SVG export did not produce an SVG root element");
+  }
+  const viewBox = root.getAttribute("viewBox")?.trim().split(/\s+/).map(Number);
+  const hasPositiveViewBox =
+    viewBox !== undefined &&
+    viewBox.length === 4 &&
+    viewBox.slice(2).every((value) => Number.isFinite(value) && value > 0);
+  const hasPositiveDimensions =
+    parsePositiveSvgDimension(root.getAttribute("width")) !== null &&
+    parsePositiveSvgDimension(root.getAttribute("height")) !== null;
+  if (!hasPositiveViewBox && !hasPositiveDimensions) {
+    throw new Error("official SVG export did not provide positive dimensions or viewBox");
+  }
+  if (root.childElementCount === 0) {
+    throw new Error("official SVG export contained no rendered content");
+  }
+}
+
+async function validatePngBlob(blob: Blob): Promise<void> {
+  if (blob.type.toLowerCase() !== "image/png") {
+    throw new Error(`official PNG export returned MIME type ${blob.type || "unknown"}`);
+  }
+  const bytes = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (
+    bytes.length < signature.length ||
+    !signature.every((value, index) => bytes[index] === value)
+  ) {
+    throw new Error("official PNG export did not contain a valid PNG signature");
+  }
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    if (bitmap.width <= 0 || bitmap.height <= 0) {
+      bitmap.close();
+      throw new Error("official PNG export decoded with non-positive dimensions");
+    }
+    bitmap.close();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () =>
+        image.naturalWidth > 0 && image.naturalHeight > 0
+          ? resolve()
+          : reject(new Error("official PNG export decoded with non-positive dimensions"));
+      image.onerror = () => reject(new Error("official PNG export was not browser-decodable"));
+      image.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function AdapterFailure(props: { diagnostic: SynaraExcalidrawDiagnostic }) {
   return (
     <div
@@ -227,9 +307,11 @@ export const SynaraExcalidrawAdapter = forwardRef<
   const latestSnapshotRef = useRef<SynaraSceneSnapshot | null>(null);
   const latestViewportRef = useRef<SynaraViewport | null>(null);
   const lastSettledSelectionKeyRef = useRef<string | null>(null);
-  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastUpdateSequenceRef = useRef(0);
-  const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
+    const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastUpdateSequenceRef = useRef(0);
+    const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
+    const [apiReady, setApiReady] = useState(false);
 
   const report = useCallback(
     (details: Omit<SynaraExcalidrawDiagnostic, "packageVersion" | "scenario">) => {
@@ -275,12 +357,13 @@ export const SynaraExcalidrawAdapter = forwardRef<
     lifecycle({ kind: "mounted" });
     return () => {
       if (selectionTimerRef.current !== null) clearTimeout(selectionTimerRef.current);
+      if (selectionTimeoutRef.current !== null) clearTimeout(selectionTimeoutRef.current);
       lifecycle({ kind: "unmounted", ...(apiIdRef.current ? { apiId: apiIdRef.current } : {}) });
     };
   }, [lifecycle]);
 
-  useEffect(() => {
-    const enabled = props.viewModeEnabled;
+    useEffect(() => {
+      const enabled = props.viewModeEnabled;
     if (enabled === undefined) return;
     setViewModeEnabled(enabled);
     if (apiRef.current) {
@@ -289,27 +372,59 @@ export const SynaraExcalidrawAdapter = forwardRef<
         captureUpdate: "NEVER",
       } as PackageSceneUpdate);
     }
-  }, [props.viewModeEnabled]);
+    }, [props.viewModeEnabled]);
 
-  const captureScene = useCallback((): SynaraSceneSnapshot => {
-    const api = apiRef.current;
-    if (!api) {
+    useEffect(() => {
+      if (!apiReady) return;
+      const editorRoot = document.querySelector<HTMLElement>(".excalidraw");
+      const interactiveCanvas = editorRoot?.querySelector<HTMLCanvasElement>(
+        "canvas.excalidraw__canvas.interactive",
+      );
+      if (
+        editorRoot === null ||
+        interactiveCanvas == null ||
+        getComputedStyle(editorRoot).display === "none" ||
+        getComputedStyle(interactiveCanvas).display === "none"
+      ) {
+        report({
+          code: "package-assets-not-ready",
+          ac: "AC1",
+          phase: "runtime-assets",
+          expected: "the package CSS and canvas runtime surface are available after API readiness",
+          observed: "the Excalidraw root or interactive canvas is missing or hidden",
+          recoverable: false,
+        });
+      }
+    }, [apiReady, report]);
+
+  const requireApi = useCallback(
+    (details: Omit<SynaraExcalidrawDiagnostic, "packageVersion" | "scenario" | "observed">) => {
+      const api = apiRef.current;
+      if (api) return api;
       const error = new Error("editor API is not ready");
       report({
-        code: "api-not-ready",
-        ac: "AC1",
-        phase: "capture-scene",
-        expected: "a stable public editor API handle",
+        ...details,
         observed: error.message,
         recoverable: true,
       });
       throw error;
-    }
+    },
+    [report],
+  );
+
+  const captureScene = useCallback((): SynaraSceneSnapshot => {
+    const api = requireApi({
+      code: "api-not-ready",
+      ac: "AC1",
+      phase: "capture-scene",
+      expected: "a stable public editor API handle",
+      recoverable: true,
+    });
     const snapshot = toSnapshot(api.getSceneElements(), api.getAppState(), api.getFiles());
     latestSnapshotRef.current = snapshot;
     latestViewportRef.current = snapshot.viewport;
     return snapshot;
-  }, [report]);
+  }, [requireApi]);
 
   const captureViewport = useCallback(
     (): SynaraViewport => captureScene().viewport,
@@ -317,19 +432,13 @@ export const SynaraExcalidrawAdapter = forwardRef<
   );
 
   const serializeScene = useCallback((): string => {
-    const api = apiRef.current;
-    if (!api) {
-      const error = new Error("editor API is not ready");
-      report({
-        code: "api-not-ready",
-        ac: "AC1",
-        phase: "serialize",
-        expected: "serialization from the current mounted scene",
-        observed: error.message,
-        recoverable: true,
-      });
-      throw error;
-    }
+    const api = requireApi({
+      code: "api-not-ready",
+      ac: "AC1",
+      phase: "serialize",
+      expected: "serialization from the current mounted scene",
+      recoverable: true,
+    });
     try {
       const serialized = serializeAsJSON(
         api.getSceneElements(),
@@ -350,19 +459,24 @@ export const SynaraExcalidrawAdapter = forwardRef<
       });
       throw error;
     }
-  }, [report]);
+  }, [report, requireApi]);
 
   const exportSvg = useCallback(async (): Promise<string> => {
-    const api = apiRef.current;
-    if (!api) throw new Error("editor API is not ready");
     try {
+      const api = requireApi({
+        code: "api-not-ready",
+        ac: "AC1",
+        phase: "export-svg",
+        expected: "official export from the current mounted scene",
+        recoverable: true,
+      });
       const svg = await exportToSvg({
         elements: api.getSceneElements(),
         appState: api.getAppState(),
         files: api.getFiles(),
       });
       const markup = svg.outerHTML;
-      if (!markup.includes("<svg")) throw new Error("official SVG export returned invalid markup");
+      validateSvgMarkup(markup);
       return markup;
     } catch (error) {
       report({
@@ -375,12 +489,17 @@ export const SynaraExcalidrawAdapter = forwardRef<
       });
       throw error;
     }
-  }, [report]);
+  }, [report, requireApi]);
 
   const exportPng = useCallback(async (): Promise<Blob> => {
-    const api = apiRef.current;
-    if (!api) throw new Error("editor API is not ready");
     try {
+      const api = requireApi({
+        code: "api-not-ready",
+        ac: "AC1",
+        phase: "export-png",
+        expected: "official export from the current mounted scene",
+        recoverable: true,
+      });
       const blob = await exportToBlob({
         elements: api.getSceneElements(),
         appState: api.getAppState(),
@@ -388,6 +507,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
         mimeType: "image/png",
       });
       if (blob.size === 0) throw new Error("official PNG export returned an empty blob");
+      await validatePngBlob(blob);
       return blob;
     } catch (error) {
       report({
@@ -400,12 +520,17 @@ export const SynaraExcalidrawAdapter = forwardRef<
       });
       throw error;
     }
-  }, [report]);
+  }, [report, requireApi]);
 
   const updateScene = useCallback(
     (update: SynaraSceneUpdate): void => {
-      const api = apiRef.current;
-      if (!api) throw new Error("editor API is not ready");
+      const api = requireApi({
+        code: "api-not-ready",
+        ac: "AC1",
+        phase: "imperative-update",
+        expected: "imperative updates use the existing mounted editor API",
+        recoverable: true,
+      });
       const sequence = update.sequence ?? lastUpdateSequenceRef.current + 1;
       if (!Number.isSafeInteger(sequence) || sequence !== lastUpdateSequenceRef.current + 1) {
         const error = new Error(
@@ -452,15 +577,20 @@ export const SynaraExcalidrawAdapter = forwardRef<
         throw error;
       }
     },
-    [lifecycle, report],
+    [lifecycle, report, requireApi],
   );
 
   const setViewMode = useCallback(
     (enabled: boolean): void => {
       setViewModeEnabled(enabled);
-      const api = apiRef.current;
-      if (!api) return;
       try {
+        const api = requireApi({
+          code: "api-not-ready",
+          ac: "AC1",
+          phase: "edit-lock",
+          expected: "the mounted editor API is available before changing view mode",
+          recoverable: true,
+        });
         api.updateScene({
           appState: { viewModeEnabled: enabled },
           captureUpdate: "NEVER",
@@ -477,30 +607,59 @@ export const SynaraExcalidrawAdapter = forwardRef<
         throw error;
       }
     },
-    [report],
+    [report, requireApi],
   );
 
-  const restoreViewport = useCallback((viewport: SynaraViewport): void => {
-    if (
-      !Number.isFinite(viewport.scrollX) ||
-      !Number.isFinite(viewport.scrollY) ||
-      !Number.isFinite(viewport.zoom) ||
-      viewport.zoom <= 0
-    ) {
-      throw new Error("viewport contains non-finite or non-positive values");
-    }
-    const api = apiRef.current;
-    if (!api) throw new Error("editor API is not ready");
-    api.updateScene({
-      appState: {
-        scrollX: viewport.scrollX,
-        scrollY: viewport.scrollY,
-        zoom: { value: viewport.zoom },
-      },
-      captureUpdate: "NEVER",
-    } as PackageSceneUpdate);
-    latestViewportRef.current = viewport;
-  }, []);
+  const restoreViewport = useCallback(
+    (viewport: SynaraViewport): void => {
+      if (
+        !Number.isFinite(viewport.scrollX) ||
+        !Number.isFinite(viewport.scrollY) ||
+        !Number.isFinite(viewport.zoom) ||
+        viewport.zoom <= 0
+      ) {
+        const error = new Error("viewport contains non-finite or non-positive values");
+        report({
+          code: "invalid-viewport",
+          ac: "AC5",
+          phase: "restore-viewport",
+          expected: "finite scroll coordinates and a positive zoom",
+          observed: error.message,
+          recoverable: true,
+        });
+        throw error;
+      }
+      try {
+        const api = requireApi({
+          code: "api-not-ready",
+          ac: "AC5",
+          phase: "restore-viewport",
+          expected: "the mounted editor API is available before restoring viewport",
+          recoverable: true,
+        });
+        api.updateScene({
+          appState: {
+            scrollX: viewport.scrollX,
+            scrollY: viewport.scrollY,
+            zoom: { value: viewport.zoom },
+          },
+          captureUpdate: "NEVER",
+        } as PackageSceneUpdate);
+        latestViewportRef.current = viewport;
+      } catch (error) {
+        report({
+          code: "viewport-restore-failed",
+          ac: "AC5",
+          phase: "restore-viewport",
+          expected: "the public updateScene viewport boundary preserves the requested viewport",
+          observed: error instanceof Error ? error.message : String(error),
+          recoverable: true,
+        });
+        throw error;
+      }
+    },
+    [report, requireApi],
+  );
 
   const handle = useMemo<SynaraExcalidrawHandle>(
     () => ({
@@ -542,6 +701,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
       };
       callbacksRef.current.onRawSelection?.(observation);
       if (selectionTimerRef.current !== null) clearTimeout(selectionTimerRef.current);
+      if (selectionTimeoutRef.current !== null) clearTimeout(selectionTimeoutRef.current);
       const configuredDelay = callbacksRef.current.selectionSettlementDelayMs ?? 0;
       const delay = Number.isFinite(configuredDelay) && configuredDelay >= 0 ? configuredDelay : 0;
       if (!Number.isFinite(configuredDelay) || configuredDelay < 0) {
@@ -554,15 +714,74 @@ export const SynaraExcalidrawAdapter = forwardRef<
           recoverable: true,
         });
       }
+      const configuredTimeout = callbacksRef.current.selectionSettlementTimeoutMs;
+      if (
+        configuredTimeout !== undefined &&
+        (!Number.isFinite(configuredTimeout) || configuredTimeout < 0)
+      ) {
+        report({
+          code: "invalid-selection-timeout",
+          ac: "AC5",
+          phase: "selection-settlement",
+          expected: "a finite non-negative injected settlement timeout",
+          observed: String(configuredTimeout),
+          recoverable: true,
+        });
+      }
       selectionTimerRef.current = setTimeout(() => {
         const key = snapshot.selectedElementIds.join("\u001f");
+        if (selectionTimeoutRef.current !== null) clearTimeout(selectionTimeoutRef.current);
         if (key === lastSettledSelectionKeyRef.current) return;
+        const stabilityCheck = callbacksRef.current.selectionStabilityCheck;
+        if (stabilityCheck !== undefined) {
+          try {
+            if (!stabilityCheck(snapshot.selectedElementIds)) {
+              report({
+                code: "unstable-selection",
+                ac: "AC5",
+                phase: "selection-settlement",
+                expected: "the injected selection policy reports a stable selected-ID set",
+                observed: `selection [${snapshot.selectedElementIds.join(", ")}] remained unstable`,
+                recoverable: true,
+              });
+              return;
+            }
+          } catch (error) {
+            report({
+              code: "unstable-selection",
+              ac: "AC5",
+              phase: "selection-settlement",
+              expected: "the injected selection policy can determine stability",
+              observed: error instanceof Error ? error.message : String(error),
+              recoverable: true,
+            });
+            return;
+          }
+        }
         lastSettledSelectionKeyRef.current = key;
+        const settledAt = Date.now();
         callbacksRef.current.onSettledSelection?.({
           selectedElementIds: snapshot.selectedElementIds,
-          observedAt: Date.now(),
+          observedAt: settledAt,
+          settledAfterMs: settledAt - observation.observedAt,
         });
       }, delay);
+      if (
+        Number.isFinite(configuredTimeout) &&
+        configuredTimeout !== undefined &&
+        configuredTimeout >= 0
+      ) {
+        selectionTimeoutRef.current = setTimeout(() => {
+          report({
+            code: "selection-settlement-timeout",
+            ac: "AC5",
+            phase: "selection-settlement",
+            expected: "the selected-ID set settles within the injected timeout policy",
+            observed: `selection [${snapshot.selectedElementIds.join(", ")}] did not settle within ${configuredTimeout}ms`,
+            recoverable: true,
+          });
+        }, configuredTimeout);
+      }
     },
     [report],
   );
@@ -572,6 +791,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
       apiRef.current = api;
       apiIdRef.current = api.id;
       lifecycle({ kind: "api-ready", apiId: api.id });
+        setApiReady(true);
       const snapshot = toSnapshot(api.getSceneElements(), api.getAppState(), api.getFiles());
       latestSnapshotRef.current = snapshot;
       latestViewportRef.current = snapshot.viewport;
