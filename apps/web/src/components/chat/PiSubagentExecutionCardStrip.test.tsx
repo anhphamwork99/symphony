@@ -86,6 +86,8 @@ describe("PiSubagentExecutionCardStrip", () => {
 
     expect(markup).toContain("Owner lost after restart");
     expect(markup).toContain("could not be proven stopped");
+    expect(markup).toContain(">Outcome unknown<");
+    expect(markup).toContain(">Unverified<");
     expect(markup).toContain('data-pi-subagent-dot-grid="static"');
     expect(markup).not.toContain("shimmer");
     expect(markup).not.toContain("animate-pulse");
@@ -105,8 +107,38 @@ describe("PiSubagentExecutionCardStrip", () => {
     expect(markup).toContain("[animation-duration:1.2s]");
     expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).toContain("shimmer shimmer-duration-1800 motion-reduce:shimmer-none");
-    expect(markup).toContain("Working…");
+    expect(markup).toContain("Working");
+    expect(markup).not.toContain("Working…");
     expect(markup).toContain("2/4 turns");
+  });
+
+  it("uses state-specific fallback copy when a spinner has no progress summary", () => {
+    const markup = render([
+      makeCard({ executionId: "requested", observedState: "requested", lastProgressSummary: null }),
+      makeCard({ executionId: "accepted", observedState: "accepted", lastProgressSummary: null }),
+      makeCard({ executionId: "queued", observedState: "queued", lastProgressSummary: null }),
+      makeCard({ executionId: "running", observedState: "running", lastProgressSummary: null }),
+      makeCard({
+        executionId: "cancelling",
+        observedState: "running",
+        desiredState: "cancelling",
+        lastProgressSummary: null,
+      }),
+    ]);
+
+    expect(markup).toContain("Starting");
+    expect(markup).toContain("Preparing");
+    expect(markup).toContain("Waiting to start");
+    expect(markup).toContain("Working");
+    expect(markup).toContain("Waiting for cancellation acknowledgement");
+    expect(markup).not.toContain("Working…");
+  });
+
+  it("omits the turn token when turnCount is unknown", () => {
+    const markup = render([makeCard({ turnCount: null, maxTurns: 4 })]);
+
+    expect(markup).not.toContain('data-pi-subagent-turn="true"');
+    expect(markup).not.toContain("—");
   });
 
   it("keeps the row flat and non-disclosable with the fixed content order", () => {

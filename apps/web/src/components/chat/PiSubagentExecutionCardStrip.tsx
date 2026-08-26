@@ -83,9 +83,27 @@ function ExecutionRow({
   const diagnostic =
     card.diagnosticMessage ??
     (card.diagnosticCode !== undefined ? String(card.diagnosticCode) : null);
+  const spinnerFallbackText =
+    presentation.kind === "cancelling"
+      ? "Waiting for cancellation acknowledgement"
+      : presentation.kind === "running-background"
+        ? "Working"
+        : card.observedState === "requested"
+          ? "Starting"
+          : card.observedState === "accepted"
+            ? "Preparing"
+            : card.observedState === "queued"
+              ? "Waiting to start"
+              : "Working";
   const progressText = spinnerEligible
-    ? (card.lastProgressSummary ?? "Working…")
+    ? (card.lastProgressSummary ?? spinnerFallbackText)
     : (card.lastProgressSummary ?? diagnostic ?? presentation.detailMessage ?? "Outcome unverified");
+  const elapsedOrUncertaintyLabel =
+    presentation.kind === "orphaned"
+      ? "Outcome unknown"
+      : presentation.kind === "unverified"
+        ? "Unverified"
+        : `${elapsedSeconds}s`;
   const cancelVisible = presentation.showCancel;
   const cancelling = presentation.cancelDisabled;
   const resumeVisible = presentation.showResume && onResume !== undefined;
@@ -101,7 +119,7 @@ function ExecutionRow({
       <span className="max-w-36 shrink-0 truncate font-medium text-foreground/85" title={card.agentType}>
         {card.agentType}
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/60">{elapsedSeconds}s</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/60">{elapsedOrUncertaintyLabel}</span>
       <span
         className={cn(
           "min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground/75",
@@ -112,9 +130,11 @@ function ExecutionRow({
       >
         {progressText}
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/60" data-pi-subagent-turn="true">
-        {turnLabel ?? "—"}
-      </span>
+      {turnLabel !== null ? (
+        <span className="shrink-0 tabular-nums text-muted-foreground/60" data-pi-subagent-turn="true">
+          {turnLabel}
+        </span>
+      ) : null}
       {cancelVisible ? (
         <Button
           type="button"
