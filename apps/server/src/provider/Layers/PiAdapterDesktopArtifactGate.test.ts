@@ -14,7 +14,10 @@ import {
 import { ServerConfig, type ServerConfigShape } from "../../config";
 import type { ProviderAdapterError } from "../Errors";
 import { PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME } from "../piSubagentArtifactVerifier.ts";
-import { SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV } from "../piSubagentDesktopArtifactGate.ts";
+import {
+  SYNARA_PI_SUBAGENT_ARTIFACT_DIR_ENV,
+  type PiSubagentDesktopArtifactGateResult,
+} from "../piSubagentDesktopArtifactGate.ts";
 import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter";
 import { makePiAdapterLive } from "./PiAdapter";
 
@@ -38,7 +41,7 @@ const gateHarness = vi.hoisted(() => ({
     kind: "unavailable",
     reason: "locator_missing",
     detail: "managed pi artifact locator is absent or blank",
-  },
+  } as PiSubagentDesktopArtifactGateResult,
 }));
 
 const piSdkHarness = vi.hoisted(() => ({
@@ -290,9 +293,7 @@ describe("PiAdapter desktop managed-artifact early gate (Ticket 01)", () => {
         agentDir: "/controlled/artifact/agent",
         resourceLoaderOptions: {
           noExtensions: true,
-          additionalExtensionPaths: [
-            "/controlled/artifact/agent/extensions/pi-subagents",
-          ],
+          additionalExtensionPaths: ["/controlled/artifact/agent/extensions/pi-subagents"],
         },
         settingsManager: { kind: "in-memory-settings" },
       });
