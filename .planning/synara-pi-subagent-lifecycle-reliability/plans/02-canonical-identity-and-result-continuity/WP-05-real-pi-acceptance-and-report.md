@@ -16,6 +16,23 @@
 
 Exercise the actual controlled managed Pi composition at an isolated runtime boundary and complete Ticket 02's Implementation Report with criterion-level evidence. Separate deterministic repository/service proof, controlled pinned-Alfie proof, and real-Pi proof. Demonstrate canonical public identity, durable-first result continuity, exact live supplement/control, capability fail-closed behavior, eviction/restart continuity, terminal precedence, tuple fencing, bounded diagnostics, and no provider identity leakage.
 
+## Inherited terminal-race evidence obligation (F5)
+
+WP-03 review left F5 open by design. WP-05 must carry and close it with both a
+deterministic race proof and the isolated real-Pi proof against the exact WP-04
+artifact. This is evidence only; it does not authorize a WP-03 or other
+production-source change.
+
+A steer that is already in flight when durable terminal evidence commits must
+re-check the exact current tuple and the pinned Alfie exact-live/status guard.
+The evidence must assert that the racing request cannot mutate or target a
+stale, terminal, or non-live child, and returns a bounded
+`unavailable-control`/stale result. The race must produce no queued work,
+replay, Resume/bootstrap, reconstruction, or new child, and must not leak a
+provider-local identity. Capture the ordering trace, terminal/current-tuple
+state, provider mutation/target observation, bounded diagnostic/result, and
+post-race child/queue/replay counters.
+
 ## Exact write set
 
 - `apps/server/src/provider/piSubagentCanonicalIdentityAcceptance.test.ts` (new isolated real-Pi acceptance suite)
@@ -43,7 +60,13 @@ Required legs:
 3. **Durable-first continuity:** force/observe a nonterminal exact-live supplement, then a terminal durable result with a conflicting live nonterminal report. Prove durable terminal wins. Evict the provider record and reopen the durable repository/file as supported by the existing harness; prove the same authorized `executionId` returns bounded durable evidence rather than `Agent not found`. Missing durable evidence remains honest uncertainty.
 4. **Fencing and authorization:** exercise stale attempt and generation, wrong project/thread, and unauthorized read/control. Verify rejection occurs before provider lookup and cannot reach another execution's live record.
 5. **Exact-live control:** steer an authorized exact current tuple while live; after live-record eviction, return stable unavailable-control. Prove no queue, replay, bootstrap, reconstructed child, or new child occurs.
-6. **Evidence boundaries:** run deterministic, controlled-Alfie, and real-Pi commands separately; capture command, exit code, test count, exact pins, capability response, bounded diagnostics, and any timing/runtime caveat.
+6. **Terminal-during-flight steer race (F5):** start an authorized steer against a
+   live exact current tuple, commit durable terminal evidence while the steer is
+   in flight, and synchronize the completion at the pinned Alfie exact-live/status
+   guard. Assert the request cannot mutate or target the now-terminal/stale or
+   non-live child, returns bounded `unavailable-control`/stale output, and
+   produces no queue, replay, Resume/bootstrap, reconstruction, or new child.
+7. **Evidence boundaries:** run deterministic, controlled-Alfie, and real-Pi commands separately; capture command, exit code, test count, exact pins, capability response, bounded diagnostics, and any timing/runtime caveat.
 
 A real-Pi test may use a deterministic loopback model only as the model server, provided the registered production Pi/Agent path and controlled artifact are real. It must not replace the Agent or provider composition with a fake.
 
@@ -61,8 +84,8 @@ Populate the existing Issue 02 Implementation Report, without changing its statu
 | Contract version | `execution-identity-routing-v1` capability request/response and compatibility result |
 | Ownership split | Alfie exact live tuple index vs Symphony durable auth/current tuple/read boundary |
 | AC1–AC2 | public identity comparisons, no-leak scan, canonical/alias/provider-ID matrix |
-| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case |
-| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics and no replay/Resume proof |
+| AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and the F5 terminal-during-flight steer race |
+| AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics, bounded unavailable/stale F5 race result, and no queue/replay/Resume/bootstrap proof |
 | AC6 | separate deterministic, controlled-Alfie, and isolated real-Pi command/result rows |
 | Non-goals | explicit watchdog/teardown/Resume/bootstrap/replay/guardian exclusions |
 | Review handoff | deviations, untested cases, residual risks, and exact shortest reviewer reproductions |
@@ -110,7 +133,7 @@ Self-review:
 - real-Pi path used the registered production Agent and exact WP-04 artifact;
 - every T02-AC1–AC6 row has normal plus failure evidence and a command/result;
 - no provider `agentId` leaked; no valid public handle becomes `Agent not found` solely due to live eviction;
-- durable terminal precedence, auth-before-provider, tuple fencing, exact-live steer, capability fail-closed, and legacy isolation are all demonstrated;
+- durable terminal precedence, auth-before-provider, tuple fencing, exact-live steer, the F5 terminal-during-flight race, capability fail-closed, and legacy isolation are all demonstrated;
 - no later-ticket behavior or DB migration was introduced;
 - report states every deviation and untested limit honestly.
 

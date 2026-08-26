@@ -1,6 +1,6 @@
 # Ticket 02 Plan — canonical identity and durable result continuity
 
-**State:** ready-for-agent (WP-01 and WP-02 complete; WP-03 is the current package frontier; Ticket 02 status unchanged)
+**State:** ready-for-agent (WP-01 through WP-03 complete; WP-04 is the current package frontier; Ticket 02 status unchanged)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -21,7 +21,7 @@ The implementation is deliberately sequential:
 ```text
 WP-01 Alfie canonical live routing
   -> WP-02 Symphony durable authorized read contract
-    -> WP-03 Symphony managed-tool routing and capability gate
+    -> WP-03 Symphony managed-tool routing and capability gate (complete)
       -> WP-04 Symphony provenance re-pin of exact Alfie commit
         -> WP-05 isolated real-Pi acceptance and report
 ```
@@ -124,10 +124,12 @@ WP-01 is complete in the Alfie repository at immutable commit
 accepted write-set amendment are recorded in
 [WP-01](WP-01-alfie-canonical-live-routing.md). WP-02 is complete in Symphony
 at `ad6f97e8e` and its evidence is recorded in
-[WP-02](WP-02-symphony-durable-read-contract.md). WP-03 is now the next package
-and may consume both completed contracts. This is package routing only: Ticket
-02 remains **ready-for-agent**, and neither Ticket 02 final acceptance nor the
-Project frontier is changed.
+[WP-02](WP-02-symphony-durable-read-contract.md). WP-03 is complete in Symphony
+at integrated source commit `964d32f37` and its completion evidence is recorded
+in [WP-03](WP-03-symphony-managed-tool-routing.md). WP-04 is now the package
+frontier and may consume the exact WP-01 pin plus the WP-03 routing candidate.
+This is package routing only: Ticket 02 remains **ready-for-agent**, and neither
+Ticket 02 final acceptance nor the Project frontier is changed.
 
 ## Dependency graph and work packages
 
@@ -166,12 +168,10 @@ Stop and escalate rather than silently choosing a workaround if: no exact tuple 
 
 ## Commit and handoff
 
-Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md` and the WP-02
-planning record. It does not update `PROJECT.md`, Ticket 02 status/frontier,
-decisions, source, migrations, or any other project.
+Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md`, the WP-03 completion record, and the WP-05 evidence obligation. It does not update `PROJECT.md`, Ticket 02 status/frontier, decisions, source, migrations, or any other project.
 
 Planning commit:
 
 ```text
-docs(planning): record durable subagent read contract
+docs(planning): record managed canonical tool routing
 ```

@@ -1,6 +1,6 @@
 # WP-03 — Symphony managed-tool routing
 
-**State:** pending
+**State:** completed
 
 **Owner role:** implementation worker
 
@@ -8,7 +8,7 @@
 
 **Baseline:** `93628e465866e9bf24610b4fca39b5c30f459221`; WP-01 Alfie commit and WP-02 Symphony commit must be recorded before starting.
 
-**Dependencies:** WP-01 exact Alfie tuple index; WP-02 durable authorized read contract. This is the only WP that wires the managed provider path; WP-04 cannot repin until it passes.
+**Dependencies:** WP-01 exact Alfie tuple index; WP-02 durable authorized read contract. This was the only WP that wires the managed provider path; WP-04 may now consume its passing routing candidate.
 
 **Authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md), §§2–5.
 
@@ -47,6 +47,90 @@ The conditional contract files are in the allowed set but must remain unchanged 
 6. Keep all outputs bounded and identity-safe. Include only stable public execution/tuple/state/diagnostic fields; remove provider `agentId`, raw provider error, and unbounded live result/transcript.
 7. Preserve legacy/unmanaged branch behavior and test that a legacy session neither gains the alias nor receives partial managed capability semantics.
 8. Keep routing additive to existing lifecycle reporting. This WP must not change terminal-before-cleanup behavior or infer terminality from a missing live record.
+
+## Completion record
+
+WP-03 was integrated on Symphony main in source commit `964d32f37`
+(full SHA `964d32f376c6bc42ec2e5f547b40d6e4f1ae8c40`), with source-equivalent
+candidate `2a9ab801...` recorded during review. The capability is
+`execution-identity-routing-v1`.
+
+### Changed files and symbols
+
+The integrated source commit changed exactly these six files:
+
+- `apps/server/src/provider/Layers/PiAdapter.ts` — managed-session capability
+  binding, session-scoped `managedReadService`, durable-before-provider wrapper
+  installation, and `canonicalRoutingBound` enforcement.
+- `apps/server/src/provider/piSubagentManagedRuntimeBinding.ts` —
+  `PI_SUBAGENT_EXECUTION_IDENTITY_ROUTING_CAPABILITY`,
+  `createPiSubagentManagedHandshakeRequest`,
+  `negotiatePiSubagentManagedBridge`,
+  `PiSubagentManagedToolReadService`, and
+  `wrapPiSubagentManagedTool`.
+- `apps/server/src/provider/piSubagentCanonicalRouting.test.ts` — focused
+  managed result/steer routing, ordering, fencing, alias, bounds, diagnostics,
+  and identity-leak assertions.
+- `apps/server/src/provider/piSubagentManagedRuntimeBinding.test.ts` — managed
+  capability/handshake and bounded bootstrap-diagnostic assertions.
+- `apps/server/src/provider/Layers/PiAdapterDesktopManagedBootstrap.test.ts` —
+  the authorized synthetic desktop capability fixture and hard-gate assertions.
+- `packages/contracts/src/piSubagents.ts` — closed capability vocabulary entry
+  for `execution-identity-routing-v1`.
+
+### Ordering, diagnostics, and proof
+
+The managed wrapper binds only after the exact session capability and both
+managed tool endpoints are present. It normalizes `execution_id` before any
+provider call, permits only an equal deprecated `agent_id` alias, and rejects
+provider-local `agentId`, conflicting aliases, malformed/oversized input, and
+missing identity. Durable authorization and current-tuple resolution run before
+`originalExecute`; terminal durable reads do not call the provider; stale,
+wrong-session, and wrong-thread failures remain provider-zero. Exact live
+supplements and steer receive the durable `(executionId, attemptId, generation)`
+tuple, while live eviction becomes bounded unavailable-live/control output with
+no queue, replay, bootstrap, reconstruction, or child creation.
+
+The bounded managed diagnostics exercised/closed by this routing surface are
+`pi_subagent_read_capability_unavailable`,
+`pi_subagent_read_payload_bounded`,
+`pi_subagent_read_alias_conflict`,
+`pi_subagent_read_missing_durable_evidence`,
+`pi_subagent_read_unauthorized_or_out_of_scope`,
+`pi_subagent_read_stale_attempt_or_generation`, and
+`pi_subagent_read_live_record_unavailable`; the provider diagnostic surface is
+closed to the allowlisted contract vocabulary (including
+`pi_subagent_result_truncated`). Bootstrap negotiation retains the bounded
+`pi_subagent_bridge_absent`, `pi_subagent_bridge_malformed_response`,
+`pi_subagent_bridge_error`, `pi_subagent_unsupported_version`, and
+`pi_subagent_capability_mismatch` outcomes rather than exposing raw provider
+messages, paths, versions, or secrets.
+
+The initial focused total was 140 passing. After final hardening, the recorded
+focused totals are **106 server targeted + 38 contracts = 144 passing**, with
+**22/22 desktop bootstrap** tests passing and zero known WP-03 failures.
+Independent review was **PASS WITH GAPS**. F1–F4 were remediated before
+integration: recursive no-`agentId` serialization rejection; session-isolated
+and wrong-thread provider-zero tests; closed provider diagnostic whitelist;
+and dead-assignment removal. F5 remains intentionally open by design: the
+terminal-during-flight steer race depends on the pinned Alfie exact-live/status
+guard and is carried as mandatory WP-05 deterministic/real-Pi evidence, not as
+a WP-03 source change.
+
+### Scope audit and handoff
+
+The exact-six-file source scope is clean: no Alfie, migration, issue, Project
+Home, provenance, lifecycle, or later-ticket files changed. The desktop
+fixture expansion was the authorized planning repair from `a606fc01e`.
+Generic wrapper expansion is deliberately out of scope: `wrapPiSubagentManagedTool`
+currently targets only `get_subagent_result` and `steer_subagent`; any future
+managed tool needs an explicit contract, capability, and review rather than
+implicitly inheriting this wrapper.
+
+WP-04 handoff inputs are the integrated Symphony SHA above, the
+`execution-identity-routing-v1` capability, the six-file scope, and the
+WP-01 immutable Alfie pin already recorded in the plan. WP-05 must additionally
+prove the inherited F5 terminal-race obligation against the exact WP-04 pin.
 
 ## Tests and evidence contract
 
