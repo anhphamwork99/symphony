@@ -2,9 +2,9 @@
 
 **What to build:** Prove with the pinned real Excalidraw embed that one completed, interrupted, or failed partial AI edit batch can be recovered as exactly one user-visible Undo/Redo event without exposing individual streamed updates.
 
-**Blocked by:** Human-owner boundary decision — Decision 0052's single public timing remediation is exhausted.
+**Bounded by:** [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md) — first research/reassess Excalidraw versions and documented public APIs; if no supported public boundary exists, the owner has pre-authorized the native-human plus dedicated-AI-history fallback.
 
-**Status:** blocked-owner-decision
+**Status:** researching-package-boundary
 
 - [ ] **AC1:** Multiple progressive scene updates finalize as exactly one user-visible Undo event.
 - [ ] **AC2:** One Undo restores the complete pre-batch state for completed, Take-Over-interrupted, and invalid-operation partial batches.
@@ -28,6 +28,7 @@ Feature governance: [Decision 0047](../decisions/0047-testing-strategy-governanc
 
 - Binding direction: [Decision 0051](../decisions/0051-ticket-02-exact-batch-history-direction.md).
 - Bounded timing Reassessment: [Decision 0052](../decisions/0052-ticket-02-native-history-timing-probe.md).
+- Owner package/public-API reassessment: [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md).
 - Initial Gate source/evidence: `2d5103b60` / `cd69bc867`.
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`.
 - Review: [Ticket 02 Gate failure verification](../reviews/ticket-02-gate-failure-review.md).
@@ -38,4 +39,17 @@ Completed three-progress Synara Undo/Redo is retained as partial evidence. AC4 a
 mutation:Undo:false:null
 ```
 
-Broad WP-CORE and later work remains blocked. The owner must choose whether to change the package pin, allow a non-public integration boundary, relax the sole-route/no-transient requirement, change the mixed human/AI history model, or defer/remove Whiteboard under the current boundary.
+Broad WP-CORE and later work remains blocked. The owner decision is now recorded in Decision 0053: research supported versions and documented public APIs first; if no supported public boundary exists, use the pre-authorized native-human plus dedicated-AI-history fallback. No implementation direction is active until that research outcome is recorded.
+
+## Active reassessment phase
+
+The owner has now ordered **package/version/public-API research first**. This phase:
+
+1. researches supported Excalidraw versions and documented public APIs for a host-owned single effective history route;
+2. records pass/fail against the no-transient native-route, human-capture, exact AI-batch, image/file-restore, and mixed-history criteria in Decision 0053;
+3. does not upgrade `@excalidraw/excalidraw`, modify `bun.lock`, change runtime source, or begin broad Ticket 02 work;
+4. does not claim that the current `0.18.1` failure proves all versions impossible.
+
+If no supported public boundary passes the research gate, Decision 0053 pre-authorizes the fallback product direction: native Excalidraw Undo/Redo for human edits plus dedicated Synara `Undo AI batch`/`Redo AI batch` actions. That direction changes the mixed human/AI history contract only after the research-fail result is recorded; it does not authorize source implementation in this phase.
+
+**Broad-work prohibition:** WP-CORE, the remaining Ticket 02 matrix, package/lockfile changes, private or undocumented integration, and later-ticket implementation remain prohibited until the reassessment outcome is recorded and a bounded implementation route is authorized.
