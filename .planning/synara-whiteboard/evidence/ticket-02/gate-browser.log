@@ -1,0 +1,84 @@
+=== Ticket 02 Gate clean-source run A ===
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx"
+
+ RUN  v4.1.10 /private/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/pi-agent-da338a87-4aa1-448-d778c72b/apps/web
+
+10:21:03 PM [vite] (client) [console.error] Failed to load font "16px Virgil, Segoe UI Emoji" from urls "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/fonts/Virgil/Virgil-Regular.woff2" NetworkError: A network error occurred.
+10:21:03 PM [vite] (client) [console.error] Failed to load font "16px Virgil, Segoe UI Emoji" from urls "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/fonts/Virgil/Virgil-Regular.woff2" NetworkError: A network error occurred.
+stderr | src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > proves one completed three-progress batch and one Synara route
+Failed to load font "16px Virgil, Segoe UI Emoji" from urls "https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/fonts/Virgil/Virgil-Regular.woff2" [NetworkError: A network error occurred.]
+ ❯ |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx (2 tests | 1 failed) 1819ms
+     × proves one completed three-progress batch and one Synara route 1737ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > proves one completed three-progress batch and one Synara route
+AssertionError: native history control Undo must stay disabled: expected false to be true // Object.is equality
+
+Failure screenshot:
+  - src/components/whiteboard/ticket02/__screenshots__/SynaraHistoryGate.acceptance.browser.tsx/Ticket-02-real-Chromium-public-only-history-gate-proves-one-completed-three-progress-batch-and-one-Synara-route-1.png
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+ ❯ assertNativeControlsDisabledAndInert src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx:66:6
+     64|       control.disabled || control.getAttribute("aria-disabled") === "t…
+     65|       `native history control ${control.getAttribute("aria-label") ?? …
+     66|     ).toBe(true);
+       |      ^
+     67|   }
+     68| }
+ ❯ src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx:142:4
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  22:21:00
+   Duration  3.21s (transform 0ms, setup 0ms, import 526ms, tests 1.82s, environment 0ms)
+
+error: script "test:browser:stable" exited with code 1
+=== Ticket 02 Gate clean-source run B ===
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx"
+
+ RUN  v4.1.10 /private/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/pi-agent-da338a87-4aa1-448-d778c72b/apps/web
+
+ ❯ |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx (2 tests | 1 failed) 1673ms
+     × proves one completed three-progress batch and one Synara route 1588ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |chromium| src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx > Ticket 02 real Chromium public-only history gate > proves one completed three-progress batch and one Synara route
+AssertionError: native history control Undo must stay disabled: expected false to be true // Object.is equality
+
+Failure screenshot:
+  - src/components/whiteboard/ticket02/__screenshots__/SynaraHistoryGate.acceptance.browser.tsx/Ticket-02-real-Chromium-public-only-history-gate-proves-one-completed-three-progress-batch-and-one-Synara-route-1.png
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+ ❯ assertNativeControlsDisabledAndInert src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx:66:6
+     64|       control.disabled || control.getAttribute("aria-disabled") === "t…
+     65|       `native history control ${control.getAttribute("aria-label") ?? …
+     66|     ).toBe(true);
+       |      ^
+     67|   }
+     68| }
+ ❯ src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx:142:4
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  22:21:10
+   Duration  3.11s (transform 0ms, setup 0ms, import 521ms, tests 1.67s, environment 0ms)
+
+error: script "test:browser:stable" exited with code 1
