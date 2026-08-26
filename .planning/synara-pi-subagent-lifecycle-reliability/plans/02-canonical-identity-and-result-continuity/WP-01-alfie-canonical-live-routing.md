@@ -1,12 +1,12 @@
 # WP-01 — Alfie canonical live routing
 
-**State:** pending
+**State:** completed (Alfie commit `73bc7744f`; Ticket 02 remains unaccepted)
 
 **Owner role:** implementation worker
 
 **Repository:** `/Users/anhpham99/alfie`
 
-**Baseline:** `aa6fa4a8540644d2509b10d6df854486ddc67d1d` / `@alfie/pi-subagents@0.15.0-alfie.4`; confirm clean status before editing.
+**Baseline:** `aa6fa4a8540644d2509b10d6df854486ddc67d1d` / `@alfie/pi-subagents@0.15.0-alfie.4`; clean status was confirmed before editing.
 
 **Dependencies:** none. WP-02 consumes this contract; WP-04 later consumes the immutable WP-01 Alfie commit/version read-only. Do not wait for or edit Symphony.
 
@@ -26,8 +26,10 @@ Make the pinned extension's managed result/control boundary use the server-owned
 - `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/synara-bridge.test.ts`
 - `/Users/anhpham99/alfie/agent/extensions/pi-subagents/package.json` — only the package `version` field; bump exactly from `0.15.0-alfie.4` to `0.15.0-alfie.5`
 - one new focused test under `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/` named `canonical-identity-routing.test.ts`
+- `/Users/anhpham99/alfie/agent/extensions/pi-subagents/test/steering.test.ts` — accepted scope amendment; final hardening legitimately changed this existing test
 
-No dependencies or scripts may change. WP-01 owns the package version bump and must commit it together with the runtime implementation; WP-04 consumes the resulting immutable Alfie commit/version read-only.
+The final exact write set therefore includes `test/steering.test.ts` in addition
+to the originally listed paths. No dependencies or scripts may change. WP-01 owns the package version bump and must commit it together with the runtime implementation; WP-04 consumes the resulting immutable Alfie commit/version read-only.
 
 ## Prohibited changes
 
@@ -102,6 +104,55 @@ Self-review checklist:
 - no migration, lifecycle, cleanup, Resume, replay, or bootstrap behavior changed.
 
 Report the full commit SHA, focused/full test exit codes and counts, tuple/index bounds, and any diagnostic wording. Do not claim Symphony integration or real-Pi evidence.
+
+## Completion record
+
+- **Outcome:** WP-01 is complete and the exact Alfie implementation was
+  integrated on the primary Alfie `main` as commit `73bc7744f`.
+- **Base/candidate/version:** base `aa6fa4a8540644d2509b10d6df854486ddc67d1d`
+  / `@alfie/pi-subagents@0.15.0-alfie.4`; candidate
+  `73bc7744f` / `@alfie/pi-subagents@0.15.0-alfie.5`.
+- **Candidate tree:** `e48c0deb97c10323282712c89059ee4d299e8150`.
+  The isolated reviewed candidate was carried into this primary commit/tree.
+- **Final changed files:** exactly the two runtime files, package version,
+  the four originally listed focused tests, the new canonical-identity test,
+  and the amended `test/steering.test.ts`:
+  `src/index.ts`, `src/agent-manager.ts`, `package.json` (version field only),
+  `test/identity.test.ts`, `test/agent-tool-execute.test.ts`,
+  `test/extension-capabilities.test.ts`, `test/synara-bridge.test.ts`,
+  `test/canonical-identity-routing.test.ts`, and `test/steering.test.ts`.
+- **Verification evidence supplied:** canonical identity suite **8/8**;
+  focused steering suites **82/82** and **58/58**; full extension suite
+  **36 files / 545 tests**; `git diff --check` passed. The Alfie primary
+  checkout was clean after commit, and the Symphony checkout had no source
+  or unrelated primary changes.
+
+### Review findings and remediations
+
+The independent review result was **PASS WITH GAPS**. Before integration, the
+orchestrator completed the required hardening:
+
+- made the `agent_id` schema optional;
+- immediately unindexed all managed lifecycle transitions from the exact-live
+  index;
+- enforced the managed 2000-character bound with verbose omission;
+- restored `durationMs`;
+- fixed the managed error preview;
+- delivered diagnostic redaction; and
+- incorporated the review's recommendation to accept the existing
+  `test/steering.test.ts` scope variance because final hardening legitimately
+  changed that file.
+
+### Scope audit and residual boundaries
+
+The final Alfie commit is limited to the amended exact write set. The WP-01
+implementation changed no Symphony source, contracts, migrations, Project Home
+status/frontier, or other primary repository files; this record is the only
+primary-checkout planning change for this closeout. The result proves only the
+Alfie implementation and its controlled extension tests. It does **not** claim a controlled artifact,
+Symphony integration, isolated real-Pi behavior, Ticket 02 acceptance, or
+Project acceptance. WP-02 is the next package; WP-04 still owns the later
+read-only provenance re-pin.
 
 ## Escalation
 

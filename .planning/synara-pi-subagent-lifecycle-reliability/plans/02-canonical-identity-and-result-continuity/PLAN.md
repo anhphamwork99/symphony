@@ -1,6 +1,6 @@
 # Ticket 02 Plan — canonical identity and durable result continuity
 
-**State:** ready-for-agent (delegation-ready plan; no implementation)
+**State:** ready-for-agent (WP-01 complete; WP-02 is the current package frontier; Ticket 02 status unchanged)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -8,7 +8,7 @@
 
 **Binding authority:** [`../../decisions/0002-canonical-execution-identity-and-result-read-contract.md`](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
 
-**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These are the clean baselines to record before implementation. WP-01 owns the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump; WP-04 consumes that commit/version read-only while re-pinning Symphony provenance.
+**Plan baseline:** Symphony `93628e465866e9bf24610b4fca39b5c30f459221`; Alfie `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`. These were the clean baselines recorded before implementation. WP-01 produced the immutable Alfie runtime commit and exact `0.15.0-alfie.5` version bump; WP-04 consumes that commit/version read-only while re-pinning Symphony provenance.
 
 **Date:** 2026-08-26
 
@@ -117,6 +117,16 @@ The intended order is:
 
 This is a candidate implementation contract to be evidenced by the WPs, not a permission to change later lifecycle semantics.
 
+## Current package frontier
+
+WP-01 is complete in the Alfie repository at immutable commit
+`73bc7744f` (`@alfie/pi-subagents@0.15.0-alfie.5`); its completion record and
+accepted write-set amendment are recorded in
+[WP-01](WP-01-alfie-canonical-live-routing.md). WP-02 is now the next package
+and may consume WP-01's exact tuple/binding contract. This is package routing
+only: Ticket 02 remains **ready-for-agent**, and neither Ticket 02 final
+acceptance nor the Project frontier is changed.
+
 ## Dependency graph and work packages
 
 | Order | Work package | Repository | Depends on | Owns |
@@ -154,10 +164,12 @@ Stop and escalate rather than silently choosing a workaround if: no exact tuple 
 
 ## Commit and handoff
 
-Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update itself is one planning-only commit:
+Future workers commit only their owned implementation/evidence unit, in order, and report full SHA, clean status, exact changed files, and AC evidence. This planning update changes only this Ticket 02 `PLAN.md` and the WP-01
+planning record. It does not update `PROJECT.md`, Ticket 02 status/frontier,
+decisions, source, migrations, or any other project.
+
+Planning commit:
 
 ```text
-docs(planning): repair Alfie version ownership in ticket 02 plan
+docs(planning): record Alfie canonical identity routing
 ```
-
-The plan does not update `PROJECT.md`, ticket status/frontier, decisions, source, migrations, or any other project.
