@@ -23,6 +23,7 @@ import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-a
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  type OrchestrationReadModel,
   EventId,
   type McpAuthorityBinding,
   type ProviderComposerCapabilities,
@@ -3793,13 +3794,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               ? undefined
               : {
                   getThreadShellById: (threadId: ThreadId) =>
-                    adapterSnapshotQuery.getSnapshot().pipe(
-                      Effect.map((snapshot: any) =>
-                        Option.fromNullable(
-                          snapshot.threads?.find((candidate: any) => candidate.id === threadId),
+                    adapterSnapshotQuery
+                      .getSnapshot()
+                      .pipe(
+                        Effect.map((snapshot: OrchestrationReadModel) =>
+                          Option.fromNullishOr(
+                            snapshot.threads.find((candidate) => candidate.id === threadId),
+                          ),
                         ),
                       ),
-                    ),
                 });
           const managedReadService: PiSubagentManagedToolReadService | undefined =
             managedReadSnapshotQuery === undefined
@@ -4658,14 +4661,13 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // unavailable, install a fail-closed wrapper rather than exposing
           // Alfie's provider-local legacy lookup.
           {
-            const routingReadService: PiSubagentManagedToolReadService =
-              managedReadService ?? {
-                readResult: () =>
-                  Effect.fail({
-                    kind: "denied" as const,
-                    diagnosticCode: "pi_subagent_read_capability_unavailable" as const,
-                  }),
-              };
+            const routingReadService: PiSubagentManagedToolReadService = managedReadService ?? {
+              readResult: () =>
+                Effect.fail({
+                  kind: "denied" as const,
+                  diagnosticCode: "pi_subagent_read_capability_unavailable" as const,
+                }),
+            };
             for (const ext of loadedExtensions) {
               if (!(ext && ext.tools instanceof Map)) continue;
               for (const [name, entry] of ext.tools.entries()) {
@@ -6021,8 +6023,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             | Awaited<ReturnType<PiCodingAgentModule["createAgentSessionServices"]>>
             | undefined;
           if (!loader) {
-            const discoverySdk =
-              piSdk ?? (await loadPiSdkPromise("skill/list", gateResult));
+            const discoverySdk = piSdk ?? (await loadPiSdkPromise("skill/list", gateResult));
             const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
             const agentDir =
               discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
@@ -6118,8 +6119,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }
           const discoverySdk = piSdk ?? (await loadPiSdkPromise("command/list", gateResult));
           const discoveryBinding = makeManagedRuntimeBinding(gateResult, discoverySdk);
-          const agentDir =
-            discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
+          const agentDir = discoveryBinding?.agentDir ?? makeAgentDir(input.agentDir, discoverySdk);
           const modelRuntime = await createPiModelRuntime(
             discoveryBinding?.userAgentDir ?? agentDir,
             discoverySdk,

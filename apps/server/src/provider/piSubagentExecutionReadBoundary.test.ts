@@ -235,6 +235,28 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
     );
   });
 
+  it("T12-AC2: a snapshot failure fails closed with the stable read-denied diagnostic", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* PiSubagentExecutionRepository;
+        yield* admit(makeExecution());
+
+        const service = makePiSubagentExecutionReadService({
+          repository,
+          snapshotQuery: {
+            getThreadShellById: () => Effect.fail(new Error("projection unavailable")),
+          },
+          summaryMaxChars: SUMMARY_MAX_CHARS,
+        });
+        const denied = yield* service.readResult({ executionId: "exec_t12_1" }).pipe(Effect.flip);
+        expect(denied).toEqual({
+          kind: "denied",
+          diagnosticCode: "pi_subagent_read_denied",
+        });
+      }).pipe(Effect.provide(repositoryLayer)),
+    );
+  });
+
   it("T12-AC3: transcript reads page by cursor through the authorized boundary", async () => {
     const harness = makeSnapshotHarness();
     const transcriptRef = join(artifactDir, "paged-boundary.output");
@@ -567,7 +589,10 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
           snapshotQuery: harness.snapshotQuery,
           liveSupplement: () => {
             providerCalls += 1;
-            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+            return Effect.succeed({
+              kind: "available" as const,
+              observedState: "running" as const,
+            });
           },
         });
         const providerLikeUnknown = yield* providerLikeService
@@ -619,7 +644,10 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
           summaryMaxChars: SUMMARY_MAX_CHARS,
           liveSupplement: () => {
             liveCalls += 1;
-            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+            return Effect.succeed({
+              kind: "available" as const,
+              observedState: "running" as const,
+            });
           },
         });
         const terminalResult = yield* terminalService.readResult({ executionId: "exec_t12_1" });
@@ -646,7 +674,10 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
             expect(input.executionId).toBe("exec_t12_live_available");
             expect(input.attemptId).toBe("att_t12_live_available");
             expect(input.generation).toBe(1);
-            return Effect.succeed({ kind: "available" as const, observedState: "running" as const });
+            return Effect.succeed({
+              kind: "available" as const,
+              observedState: "running" as const,
+            });
           },
         });
         const available = yield* availableService.readResult({
@@ -654,7 +685,9 @@ describe("Pi subagent authorized result/transcript read boundary (Issue 12)", ()
         });
         expect(available.observedState).toBe("accepted");
         expect(available.liveObservedState).toBe("running");
-        expect(available.diagnostics ?? []).not.toContain("pi_subagent_read_live_record_unavailable");
+        expect(available.diagnostics ?? []).not.toContain(
+          "pi_subagent_read_live_record_unavailable",
+        );
 
         const nonterminalService = makePiSubagentExecutionReadService({
           repository,

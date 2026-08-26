@@ -1,10 +1,12 @@
 import type {
+  OrchestrationThreadShell,
   PiSubagentDiagnosticCode,
   PiSubagentExecutionReadInput,
   PiSubagentExecutionRecord,
   PiSubagentLifecycleState,
   PiSubagentResultReadResult,
   PiSubagentTranscriptReadResult,
+  ThreadId,
 } from "@synara/contracts";
 import { WsRpcError } from "@synara/contracts";
 import { PI_SUBAGENT_RESULT_SUMMARY_EXCERPT_MAX_CHARS } from "@synara/contracts";
@@ -16,7 +18,6 @@ import {
   MIN_PI_SUBAGENT_TERMINAL_SUMMARY_MAX_CHARS,
 } from "../config.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
-import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   readPiSubagentTranscriptPage,
   type PiSubagentTranscriptPage,
@@ -68,9 +69,19 @@ export const piSubagentReadDenialToWsRpcError = (denial: PiSubagentReadDenied): 
     retryable: false,
   });
 
+export interface PiSubagentExecutionReadSnapshotQuery {
+  readonly getThreadShellById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<Pick<OrchestrationThreadShell, "id" | "projectId">>, unknown>;
+}
+
 export interface PiSubagentExecutionReadServiceInput {
   readonly repository: PiSubagentExecutionRepositoryShape;
-  readonly snapshotQuery: Pick<ProjectionSnapshotQueryShape, "getThreadShellById">;
+  /**
+   * Snapshot failures are intentionally widened to `unknown`: this boundary
+   * maps every projection failure to the same closed read denial below.
+   */
+  readonly snapshotQuery: PiSubagentExecutionReadSnapshotQuery;
   /**
    * Optional caller-authorization hook (T12-AC1): invoked AFTER the
    * execution resolves and its project/thread binding verifies, with the
@@ -124,10 +135,12 @@ export interface PiSubagentExecutionReadService {
   readonly readResult: (
     input: PiSubagentExecutionReadInput,
   ) => Effect.Effect<PiSubagentResultReadResult, PiSubagentReadDenied>;
-  readonly readTranscriptPage: (input: PiSubagentExecutionReadInput & {
-    readonly cursor?: number | undefined;
-    readonly limit?: number | undefined;
-  }) => Effect.Effect<PiSubagentTranscriptReadResult, PiSubagentReadDenied>;
+  readonly readTranscriptPage: (
+    input: PiSubagentExecutionReadInput & {
+      readonly cursor?: number | undefined;
+      readonly limit?: number | undefined;
+    },
+  ) => Effect.Effect<PiSubagentTranscriptReadResult, PiSubagentReadDenied>;
 }
 
 const MAX_PUBLIC_EXECUTION_ID_CHARS = 256;
@@ -154,7 +167,10 @@ const normalizeReadInput = (
   // Provider-local ids therefore resolve only if they happen to equal a
   // durable public identity; an unknown provider-like value remains a normal
   // not-found result without provider access or metadata leakage.
-  if (executionId.length > MAX_PUBLIC_EXECUTION_ID_CHARS || alias.length > MAX_PUBLIC_EXECUTION_ID_CHARS) {
+  if (
+    executionId.length > MAX_PUBLIC_EXECUTION_ID_CHARS ||
+    alias.length > MAX_PUBLIC_EXECUTION_ID_CHARS
+  ) {
     return Effect.fail({
       kind: "denied",
       diagnosticCode: "pi_subagent_read_payload_bounded",
@@ -270,14 +286,16 @@ export const makePiSubagentExecutionReadService = (
       if (Option.isSome(snapshotOption)) {
         evidence = snapshotOption.value.terminalEvidence;
       } else {
-        const evidenceOption = yield* input.repository.getTerminalEvidence(normalized.executionId).pipe(
-          Effect.mapError(
-            (): PiSubagentReadDenied => ({
-              kind: "denied",
-              diagnosticCode: "pi_subagent_read_denied",
-            }),
-          ),
-        );
+        const evidenceOption = yield* input.repository
+          .getTerminalEvidence(normalized.executionId)
+          .pipe(
+            Effect.mapError(
+              (): PiSubagentReadDenied => ({
+                kind: "denied",
+                diagnosticCode: "pi_subagent_read_denied",
+              }),
+            ),
+          );
         evidence = Option.isSome(evidenceOption)
           ? evidenceOption.value
           : { terminalSummary: null, terminalTranscriptRef: null, staleTerminalEvents: 0 };
