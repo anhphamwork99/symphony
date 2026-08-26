@@ -640,7 +640,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
     // any leg of this file.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.6");
 
     const rootDir = mkdtempSync(join(tmpdir(), "synara-t24-integrated-"));
     createdDirs.push(rootDir);
@@ -1779,7 +1779,7 @@ describe("Pi Subagent Integrated Remediation Acceptance (Ticket 24)", () => {
         "coalesced-progress",
         "execution-identity-routing-v1",
       ],
-      extensionVersion: "0.15.0-alfie.5",
+      extensionVersion: "0.15.0-alfie.6",
     });
     const capturingFloodExtension = {
       name: "pi-subagents-t24-flood",

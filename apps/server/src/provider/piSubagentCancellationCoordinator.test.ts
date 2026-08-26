@@ -86,7 +86,7 @@ function makeBridge(
     handshake: async () => ({
       ok: true as const,
       protocolVersion: 1,
-      extensionVersion: "0.15.0-alfie.5",
+      extensionVersion: "0.15.0-alfie.6",
       capabilities: ["managed-spawn", "abort-propagation", "durable-cancellation"],
     }),
     ...(cancelImpl !== undefined ? { cancel: cancelImpl } : {}),

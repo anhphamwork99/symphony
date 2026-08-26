@@ -539,7 +539,7 @@ describe("Pi Subagent Completion-Delivery Ownership Real-Pi Acceptance (Issue 09
     // Real Git provenance first: no synthetic Agent replacement may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.6");
 
     const modelServer = await startDeterministicModelServer();
 

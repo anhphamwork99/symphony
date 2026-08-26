@@ -96,7 +96,7 @@ describe("negotiatePiSubagentDesktopManagedBridge", () => {
       return {
         ok: true,
         protocolVersion: request.protocolVersion,
-        extensionVersion: "0.15.0-alfie.5",
+        extensionVersion: "0.15.0-alfie.6",
         capabilities: [...REQUIRED_CAPABILITIES, "terminal-outbox"],
       };
     });

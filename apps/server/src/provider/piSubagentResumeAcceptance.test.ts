@@ -349,7 +349,7 @@ describe("Pi Subagent Explicit Resume Real-Pi Acceptance (Issue 14)", () => {
     // Real Git provenance first: no synthetic bridge may satisfy this.
     const provenance = verifyExtensionGitProvenance();
     expect(provenance.isVerified).toBe(true);
-    expect(provenance.packageVersion).toBe("0.15.0-alfie.5");
+    expect(provenance.packageVersion).toBe("0.15.0-alfie.6");
 
     const modelServer = await startDeterministicModelServer();
 

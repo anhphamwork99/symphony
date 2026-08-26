@@ -16,13 +16,13 @@ import {
 // SHA-256 of the empty string — a real, well-formed digest reused as filler.
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const OTHER_SHA256 = "a430a9ae07212092c159a32404b0a315155a3d4c0a0def1fa167209716b7ccf9";
-const PINNED_COMMIT = "73bc7744f8fbbd12206302de2df8230b29a49178";
+const PINNED_COMMIT = "3fe340b401ca86bcbe8b55abd4de107e1d93482e";
 
 const validSourceIdentity = {
   repositoryUrl: "https://github.com/anhphamwork99/alfie.git",
   pinnedCommit: PINNED_COMMIT,
   packageName: "@alfie/pi-subagents",
-  packageVersion: "0.15.0-alfie.5",
+  packageVersion: "0.15.0-alfie.6",
 };
 
 const validCapabilityProfile = {

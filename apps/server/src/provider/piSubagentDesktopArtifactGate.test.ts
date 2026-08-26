@@ -51,9 +51,9 @@ const validVerification: PiSubagentArtifactVerification = {
   metadata: {
     sourceIdentity: {
       repositoryUrl: "https://github.com/anhphamwork99/alfie.git",
-      pinnedCommit: "73bc7744f8fbbd12206302de2df8230b29a49178",
+      pinnedCommit: "3fe340b401ca86bcbe8b55abd4de107e1d93482e",
       packageName: "@alfie/pi-subagents",
-      packageVersion: "0.15.0-alfie.5",
+      packageVersion: "0.15.0-alfie.6",
     },
     capabilityProfile: {
       protocolVersion: 1,
@@ -354,7 +354,7 @@ const closureSha256 = (content: string): string =>
 const CLOSURE_VALID_FILES = [
   {
     path: "agent/extensions/pi-subagents/package.json",
-    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.5" }),
+    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.6" }),
   },
   {
     path: "agent/extensions/shared/durable-preferences.js",

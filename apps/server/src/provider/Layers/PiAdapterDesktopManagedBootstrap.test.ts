@@ -220,13 +220,13 @@ const managedHandshake =
         ok: false as const,
         error: "missing_capabilities" as const,
         missingCapabilities: missing,
-        extensionVersion: "0.15.0-alfie.5",
+        extensionVersion: "0.15.0-alfie.6",
       };
     }
     return {
       ok: true as const,
       protocolVersion: request.protocolVersion,
-      extensionVersion: "0.15.0-alfie.5",
+      extensionVersion: "0.15.0-alfie.6",
       capabilities: [...capabilities],
     };
   };
@@ -670,7 +670,7 @@ const sha256 = (content: string): string => createHash("sha256").update(content)
 const ARTIFACT_FILES = [
   {
     path: "agent/extensions/pi-subagents/package.json",
-    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.5" }),
+    content: JSON.stringify({ name: "@alfie/pi-subagents", version: "0.15.0-alfie.6" }),
   },
   {
     path: "agent/extensions/pi-subagents/src/index.ts",
@@ -682,9 +682,9 @@ const manifestFor = () => ({
   schemaVersion: PI_SUBAGENT_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   sourceIdentity: {
     repositoryUrl: "https://github.com/anhphamwork99/alfie.git",
-    pinnedCommit: "73bc7744f8fbbd12206302de2df8230b29a49178",
+    pinnedCommit: "3fe340b401ca86bcbe8b55abd4de107e1d93482e",
     packageName: "@alfie/pi-subagents",
-    packageVersion: "0.15.0-alfie.5",
+    packageVersion: "0.15.0-alfie.6",
   },
   capabilityProfile: {
     protocolVersion: 1,

@@ -28,8 +28,8 @@ import {
 } from "./piSubagentManagedRuntimeBinding.ts";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");
-const PINNED_ALFIE_COMMIT = "73bc7744f8fbbd12206302de2df8230b29a49178";
-const PINNED_ALFIE_VERSION = "0.15.0-alfie.5";
+const PINNED_ALFIE_COMMIT = "3fe340b401ca86bcbe8b55abd4de107e1d93482e";
+const PINNED_ALFIE_VERSION = "0.15.0-alfie.6";
 const PINNED_PI_SDK_VERSION = "0.83.0";
 
 const toolResult = (text: string) => ({ content: [{ type: "text", text }] });

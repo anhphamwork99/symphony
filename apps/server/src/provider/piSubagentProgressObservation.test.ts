@@ -287,7 +287,7 @@ const makeCapturingExtension = (hooks: {
       "coalesced-progress",
       "execution-identity-routing-v1",
     ],
-    extensionVersion: "0.15.0-alfie.5",
+    extensionVersion: "0.15.0-alfie.6",
   });
   return {
     name: "pi-subagents",
