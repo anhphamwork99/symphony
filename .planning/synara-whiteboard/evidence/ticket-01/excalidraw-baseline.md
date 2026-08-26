@@ -5,7 +5,8 @@ This is a feasibility baseline from the real lazy Synara adapter and official `@
 ## Environment and protocol
 
 - Package: `@excalidraw/excalidraw@0.18.1` (exact package pin 0.18.1)
-- Synara revision: `8bc16f46eb51cfe3b7d94ceab5ee7c175ebacbdd`
+- Measured Synara source revision: `0a8f095b43c701ce3c7e2ad0236bf427c9d0c52a`
+- Evidence/report commit: separate commit, not recorded by the measurement runner
 - Browser: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36
 - OS/architecture: darwin 25.4.0 / arm64
 - Build mode: Vite browser test build using the production-compatible apps/web toolchain; not production minification
@@ -19,8 +20,8 @@ This is a feasibility baseline from the real lazy Synara adapter and official `@
 | Fixture | Elements | Files | JSON bytes |
 | --- | ---: | ---: | ---: |
 | empty | 0 | 0 | 26 |
-| normal | 5 | 0 | 1440 |
-| image | 6 | 1 | 1880 |
+| normal | 5 | 0 | 3184 |
+| image | 6 | 1 | 3987 |
 
 ## Raw latency summaries
 
@@ -28,14 +29,14 @@ Raw samples are retained in `excalidraw-baseline.json`. No threshold or pass/fai
 
 | Scenario | Samples | Median | p95 |
 | --- | ---: | ---: | ---: |
-| hydrate-empty | 12 | 22.150 ms | 24.730 ms |
-| hydrate-normal | 12 | 22.400 ms | 24.180 ms |
-| hydrate-image | 12 | 21.950 ms | 24.425 ms |
+| hydrate-empty | 12 | 21.900 ms | 22.545 ms |
+| hydrate-normal | 12 | 22.200 ms | 22.735 ms |
+| hydrate-image | 12 | 22.100 ms | 22.790 ms |
 | serialize-normal | 12 | 0.000 ms | 0.100 ms |
-| update-progressive | 12 | 0.000 ms | 0.145 ms |
-| serialize-image | 12 | 0.000 ms | 0.145 ms |
-| export-svg-image | 12 | 2.000 ms | 11.125 ms |
-| export-png-image | 12 | 6.700 ms | 9.940 ms |
+| update-progressive | 12 | 0.000 ms | 0.100 ms |
+| serialize-image | 12 | 0.000 ms | 0.100 ms |
+| export-svg-image | 12 | 15.250 ms | 16.160 ms |
+| export-png-image | 12 | 9.300 ms | 11.330 ms |
 
 ## Boundary proofs
 
@@ -48,7 +49,7 @@ Raw samples are retained in `excalidraw-baseline.json`. No threshold or pass/fai
 
 ## Memory instrumentation
 
-- **Available, coarse process observation:** performance.memory.usedJSHeapSize; before=53500000 bytes, after=53500000 bytes.
+- **Available, coarse process observation:** performance.memory.usedJSHeapSize; before=68000000 bytes, after=68000000 bytes.
 - Limitation: Chrome coarse process heap telemetry; it is not precise per-canvas retained memory.
 - Unavailable memory is represented as `{status:"unavailable", reason}` in JSON; it is never recorded as zero.
 

@@ -8,7 +8,7 @@
     "resolution": "exact package pin 0.18.1"
   },
   "environment": {
-    "synaraRevision": "8bc16f46eb51cfe3b7d94ceab5ee7c175ebacbdd",
+    "synaraRevision": "0a8f095b43c701ce3c7e2ad0236bf427c9d0c52a",
     "browser": {
       "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
       "platform": "MacIntel",
@@ -21,7 +21,13 @@
       "architecture": "arm64"
     },
     "buildMode": "Vite browser test build using the production-compatible apps/web toolchain; not production minification",
-    "focusedCommand": "VITEST_BROWSER_API_PORT=51101 bun run --cwd apps/web test:browser -- src/components/whiteboard/ticket01/SynaraExcalidrawAdapter.performance.browser.tsx --reporter=verbose"
+    "focusedCommand": "VITEST_BROWSER_API_PORT=51107 bun run --cwd apps/web test:browser -- src/components/whiteboard/ticket01/SynaraExcalidrawAdapter.performance.browser.tsx --reporter=verbose"
+  },
+  "provenance": {
+    "measuredSourceRevision": "0a8f095b43c701ce3c7e2ad0236bf427c9d0c52a",
+    "measuredSourceRevisionDirty": false,
+    "evidenceCommit": null,
+    "evidenceCommitPolicy": "The measurement source revision is captured before the browser run. Evidence/report artifacts are committed separately by the integrator; this runner never claims that later commit."
   },
   "fixtures": {
     "empty": {
@@ -32,16 +38,26 @@
     "normal": {
       "elements": 5,
       "files": 0,
-      "jsonBytes": 1440
+      "jsonBytes": 3184
     },
     "image": {
       "elements": 6,
       "files": 1,
-      "jsonBytes": 1880
+      "jsonBytes": 3987
     }
   },
   "protocol": {
     "warmupCount": 2,
+    "warmupCountByScenario": {
+      "hydrate-empty": 2,
+      "hydrate-normal": 2,
+      "hydrate-image": 2,
+      "serialize-normal": 2,
+      "update-progressive": 2,
+      "serialize-image": 2,
+      "export-svg-image": 2,
+      "export-png-image": 2
+    },
     "sampleCount": 12,
     "timer": "performance.now() in the Chromium page; operation timers exclude mount/unmount except hydration timers",
     "gc": "No forced garbage collection; samples include normal browser scheduling and allocator state.",
@@ -52,23 +68,23 @@
       "id": "hydrate-empty",
       "unit": "ms",
       "samplesMs": [
-        25.5,
-        23,
-        24.09999990463257,
-        24.100000143051147,
-        22.700000047683716,
-        22.200000047683716,
-        22.09999990463257,
-        21.40000009536743,
+        21.799999952316284,
+        21.700000047683716,
+        22.299999952316284,
+        21.600000143051147,
+        21.700000047683716,
+        21.700000047683716,
         22,
-        21.5,
-        21.40000009536743,
-        21.59999990463257
+        20.800000190734863,
+        22.600000143051147,
+        22,
+        22,
+        22.5
       ],
       "summary": {
         "count": 12,
-        "medianMs": 22.149999976158142,
-        "p95Ms": 24.73000007867813,
+        "medianMs": 21.899999976158142,
+        "p95Ms": 22.545000064373017,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -76,23 +92,23 @@
       "id": "hydrate-normal",
       "unit": "ms",
       "samplesMs": [
-        22.399999856948853,
-        21.699999809265137,
         22.40000009536743,
+        21.899999856948853,
+        21.300000190734863,
+        21.799999952316284,
+        22.600000143051147,
+        21.59999990463257,
+        21.59999990463257,
+        22.200000047683716,
+        22.899999856948853,
         22.40000009536743,
-        23.299999952316284,
-        22.300000190734863,
-        22.299999952316284,
-        24.40000009536743,
-        22,
-        22.59999990463257,
-        24,
-        21.700000047683716
+        22.5,
+        22.200000047683716
       ],
       "summary": {
         "count": 12,
-        "medianMs": 22.399999976158142,
-        "p95Ms": 24.180000042915346,
+        "medianMs": 22.200000047683716,
+        "p95Ms": 22.735000014305115,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -100,23 +116,23 @@
       "id": "hydrate-image",
       "unit": "ms",
       "samplesMs": [
-        26.899999856948853,
-        22.399999856948853,
-        22.100000143051147,
-        22.09999990463257,
-        22.299999952316284,
-        22,
-        21.700000047683716,
         21.799999952316284,
-        21.299999952316284,
-        21.600000143051147,
-        21.90000009536743,
-        21.800000190734863
+        21.100000143051147,
+        22.90000009536743,
+        22.5,
+        22.200000047683716,
+        22,
+        22.700000047683716,
+        21.700000047683716,
+        21.399999856948853,
+        22.699999809265137,
+        22.299999952316284,
+        20.800000190734863
       ],
       "summary": {
         "count": 12,
-        "medianMs": 21.950000047683716,
-        "p95Ms": 24.42499985694885,
+        "medianMs": 22.100000023841858,
+        "p95Ms": 22.79000006914139,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -124,10 +140,9 @@
       "id": "serialize-normal",
       "unit": "ms",
       "samplesMs": [
+        0,
+        0,
         0.10000014305114746,
-        0.09999990463256836,
-        0.10000014305114746,
-        0,
         0,
         0,
         0,
@@ -135,12 +150,13 @@
         0.09999990463256836,
         0,
         0,
-        0.09999990463256836
+        0,
+        0
       ],
       "summary": {
         "count": 12,
         "medianMs": 0,
-        "p95Ms": 0.10000014305114746,
+        "p95Ms": 0.10000001192092896,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -148,14 +164,14 @@
       "id": "update-progressive",
       "unit": "ms",
       "samplesMs": [
-        0.20000004768371582,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
         0.09999990463256836,
+        0.09999990463256836,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.10000014305114746,
         0.09999990463256836,
         0,
         0,
@@ -164,7 +180,7 @@
       "summary": {
         "count": 12,
         "medianMs": 0,
-        "p95Ms": 0.14499996900558465,
+        "p95Ms": 0.10000001192092896,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -172,23 +188,23 @@
       "id": "serialize-image",
       "unit": "ms",
       "samplesMs": [
-        0,
-        0,
-        0.09999990463256836,
-        0,
-        0.09999990463256836,
-        0,
         0.09999990463256836,
         0,
         0,
         0.09999990463256836,
-        0.20000004768371582,
+        0,
+        0.09999990463256836,
+        0,
+        0,
+        0.10000014305114746,
+        0.09999990463256836,
+        0,
         0
       ],
       "summary": {
         "count": 12,
         "medianMs": 0,
-        "p95Ms": 0.14499996900558465,
+        "p95Ms": 0.10000001192092896,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -196,23 +212,23 @@
       "id": "export-svg-image",
       "unit": "ms",
       "samplesMs": [
-        8.200000047683716,
-        2.6000001430511475,
-        2.200000047683716,
-        2.0999999046325684,
-        14.700000047683716,
-        2,
-        1.7000000476837158,
-        1.8000001907348633,
-        1.7999999523162842,
-        2,
-        1.7000000476837158,
-        1.7999999523162842
+        15.599999904632568,
+        16.600000143051147,
+        15.799999952316284,
+        15.5,
+        15.299999952316284,
+        14.900000095367432,
+        15.299999952316284,
+        15.200000047683716,
+        15,
+        14.799999952316284,
+        14.900000095367432,
+        14.600000143051147
       ],
       "summary": {
         "count": 12,
-        "medianMs": 2,
-        "p95Ms": 11.125000047683711,
+        "medianMs": 15.25,
+        "p95Ms": 16.160000038146972,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     },
@@ -220,23 +236,23 @@
       "id": "export-png-image",
       "unit": "ms",
       "samplesMs": [
-        10.599999904632568,
-        4,
-        6.299999952316284,
-        6.1000001430511475,
-        9.400000095367432,
-        6.799999952316284,
-        6.599999904632568,
-        7,
-        6.200000047683716,
-        7,
-        5.3999998569488525,
-        7
+        9.200000047683716,
+        8.299999952316284,
+        9.5,
+        8.900000095367432,
+        9.600000143051147,
+        12.099999904632568,
+        7.700000047683716,
+        3.3999998569488525,
+        8,
+        10.700000047683716,
+        9.399999856948853,
+        10.399999856948853
       ],
       "summary": {
         "count": 12,
-        "medianMs": 6.699999928474426,
-        "p95Ms": 9.940000009536742,
+        "medianMs": 9.299999952316284,
+        "p95Ms": 11.329999983310698,
         "percentileDefinition": "linear interpolation over sorted samples; p95 position=(n-1)*0.95"
       }
     }
@@ -245,8 +261,8 @@
     "status": "available",
     "api": "performance.memory.usedJSHeapSize",
     "kind": "coarse-process",
-    "beforeBytes": 53500000,
-    "afterBytes": 53500000,
+    "beforeBytes": 68000000,
+    "afterBytes": 68000000,
     "limitation": "Chrome coarse process heap telemetry; it is not precise per-canvas retained memory."
   },
   "proofs": {

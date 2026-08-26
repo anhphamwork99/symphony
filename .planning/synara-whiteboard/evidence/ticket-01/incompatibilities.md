@@ -1,6 +1,6 @@
 # Ticket 01 incompatibility report
 
-Evidence source: `excalidraw-baseline.json`, schema `ticket01-excalidraw-baseline.v1`, package `@excalidraw/excalidraw@0.18.1`, Synara revision `8bc16f46eb51cfe3b7d94ceab5ee7c175ebacbdd`.
+Evidence source: `excalidraw-baseline.json`, schema `ticket01-excalidraw-baseline.v1`, package `@excalidraw/excalidraw@0.18.1`, measured Synara source revision `0a8f095b43c701ce3c7e2ad0236bf427c9d0c52a`.
 
 Decision 0048 classifications are limited to: none observed, non-blocking limitation, or blocking incompatibility. A finite timing or memory observation is not a failure because Ticket 01 defines no product budget.
 
