@@ -10,7 +10,7 @@
 
 **Dependencies:** WP-04 complete. This is the final Ticket 02 work package; it does not accept the ticket or open Ticket 03.
 
-**Authority:** Ticket 02 acceptance criteria and evidence obligations in [`../../issues/02-canonical-identity-and-result-continuity.md`](../../issues/02-canonical-identity-and-result-continuity.md), Decision 0002, binding Decision 0003 for WP-05/F5, and inherited controlled-artifact/real-Pi evidence rules.
+**Authority:** Ticket 02 acceptance criteria and evidence obligations in [`../../issues/02-canonical-identity-and-result-continuity.md`](../../issues/02-canonical-identity-and-result-continuity.md), Decision 0002, binding Decision 0003 for WP-05/F5, narrow T17-AC8 cache-isolation reassessment in [Decision 0004](../../decisions/0004-volatile-pi-model-catalogue-cache-isolation-witness.md), and inherited controlled-artifact/real-Pi evidence rules.
 
 ## Objective
 
@@ -91,7 +91,7 @@ manifest; no separate unit-config edit is authorized by WP-05.
 - `apps/server/src/provider/piSubagentProgressObservation.test.ts`
 - `apps/server/src/provider/piSubagentRealExtension.test.ts`
 - `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`
-- `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` — real-Pi stripped-capability helper only.
+- `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` — real-Pi stripped-capability helper plus the T17-AC8 isolated-root snapshot helper change authorized solely for the exact `agent/models-store.json` exclusion and the required structured before/after snapshots/assertions in Decision 0004.
 - `apps/server/src/provider/piSubagentRestartAcceptance.test.ts`
 - `apps/server/src/provider/piSubagentResumeAcceptance.test.ts`
 - `apps/server/src/provider/piSubagentTerminalAcceptance.test.ts`
@@ -108,7 +108,10 @@ verifier/gates, desktop bootstrap/gates, managed binding names/counts, the
 real-Pi stripped-capability helper, and the contract artifact fixture.
 
 No manifest update, production source change, contract source change, migration,
-Alfie file, Project Home, decision, or other issue is in this WP's write set.
+Alfie file, Project Home, decision, or other issue is in this WP's implementation
+write set. Decision 0004 is a separately persisted planning authority and does
+not expand WP-05 beyond the named helper and existing acceptance-test
+assertions.
 `apps/server/src/provider/Layers/PiAdapter.ts`,
 `apps/server/src/provider/piSubagentManagedRuntimeBinding.ts`, and
 `packages/contracts/src/piSubagents.ts` remain outside the write set even when
@@ -120,6 +123,7 @@ comments or shared constants mention the capability.
 - No changes to watchdog, teardown, cancellation, lifecycle containment, Resume, provider bootstrap, automatic replay, guardian, or unrelated public API.
 - No changes to production source, contracts source, provenance manifest, or Alfie; fixture repair must stay within the exact list above.
 - F5 instrumentation is test-only and must not be extracted into production code, the provider manager, the Pi adapter, the managed-tool wrapper, or shared runtime modules. It may wrap only the exact staged artifact module and exact live child session described below, and must restore every prototype/session method in `finally`.
+- T17-AC8 cache isolation instrumentation is also test-only and is limited to `piSubagentRealPiAcceptanceHelpers.ts` plus assertions in the existing canonical acceptance suite. It may exclude only `agent/sessions/**` and the exact `agent/models-store.json` path from the broad fingerprint. It must not write the ambient cache, treat cache metadata as causal evidence, use broader exclusions, or replace strict sensitive-file, extension/skill, artifact, symlink, environment, and cleanup assertions.
 - No blanket replacement of every `.4`/old-commit literal. A legacy, stale, mixed-version, wrong-hash, stripped-capability, or lookalike fixture may retain `.4` or the old commit only when it is an intentional negative/control script and the report classifies its path, test, and expected rejection. Positive active pin assertions must use the WP-04 exact pin.
 - No claim that deterministic or controlled fixtures are real-Pi evidence; no claim of Ticket 02 acceptance or downstream-ticket completion.
 - No new migration, database rewrite, or test that opens a second read-only SQLite connection while the live repository owns the WAL.
@@ -163,6 +167,36 @@ The same-module proof, barrier synchronization, exact tuple filtering,
 production-tool trigger, live-bridge retirement observation, journal-terminal
 observation, and `finally` restoration are mandatory acceptance conditions;
 module-resolution coincidence or a passing simulated race is insufficient.
+
+### Authorized T17-AC8 volatile-cache witness
+
+Under [Decision 0004](../../decisions/0004-volatile-pi-model-catalogue-cache-isolation-witness.md),
+WP-05 may add test-only structured snapshot helpers in
+`piSubagentRealPiAcceptanceHelpers.ts` and assertions in the existing
+canonical acceptance suite. The broad fingerprint must exclude only
+`agent/sessions/**` and the exact `agent/models-store.json` path; no wildcard or
+broader exclusion is allowed. The exact cache path is observed separately with
+bounded presence, type, regular-file hash, size, and mtime metadata for
+diagnostic purposes only. The test must not write the cache or attribute a
+cache change causally.
+
+The witness must strictly snapshot before/after existence, type, and content
+hash for `agent/auth.json`, `agent/models.json`, and `agent/settings.json`;
+recursively snapshot path, type, symlink target, and hash for
+`agent/extensions/**` and `agent/skills/**`; and fingerprint every other
+non-excluded path. Unexpected non-regular cache entries, non-excluded or
+sensitive changes, sibling agent directories, or symlink targets into the real
+home fail. It must verify the controlled artifact/tree before and after and
+assert that no auth/models/models-store/settings file is created inside the
+artifact.
+
+The evidence must record the canonical isolated root/home/database/workspace,
+parent and child agent directories, `userAgentDir`, `authPath`, and
+`modelsPath`, assert no symlink into the real home, prove the extension is
+loaded only from the verified artifact, serialize access to the isolated paths,
+and restore environment state and remove the isolated root in `finally`. These
+assertions are an exact T17-AC8 evidence amendment only and do not change
+runtime semantics.
 
 Before implementation, perform a repository-wide census limited to tracked
 `apps/server` and `packages/contracts` tests/helpers. Classify every remaining
@@ -233,12 +267,32 @@ Required legs:
     count, exact pins, capability response, bounded diagnostics, ordered
     insertion/retirement/durable traces, cleanup/isolation assertions, and any
     timing/runtime caveat.
+11. **T17-AC8 volatile-cache isolation witness:** using only the authorized
+    helper/test assertion change, exclude exactly `agent/sessions/**` and
+    `agent/models-store.json` from the broad fingerprint; record bounded
+    non-causal cache metadata; prove strict auth/models/settings snapshots,
+    recursive extension/skill snapshots, all other non-excluded paths,
+    artifact/tree stability, canonical isolated paths, no real-home symlink,
+    artifact-only extension loading, serialized access, environment restore,
+    and isolated-root removal. Fail on a non-regular cache entry, sibling,
+    sensitive/non-excluded mutation, direct cache write, or artifact mutation.
 
 A real-Pi test may use a deterministic loopback model only as the model server, provided the registered production Pi/Agent path and controlled artifact are real. It must not replace the Agent or provider composition with a fake.
 
 ## Tests and evidence contract
 
 The acceptance suite must execute every leg in the implementation contract and preserve separate unit-simulation, controlled-Alfie, and synchronized real-Pi result rows. The scripted `RaceState` rows are diagnostic/unit evidence only and must be visibly excluded from Decision 0003 acceptance claims. The real-Pi rows must prove same-module staged instrumentation, barrier-controlled synchronous insertion, exact tuple filtering, production `steer_subagent` dispatch, `bridgeActiveExecutions` retirement, live-journal terminal truth, ordered traces, and cleanup/isolation assertions. The matrix below is the report shape, not a substitute for running the tests.
+
+For T17-AC8, the report must additionally preserve the cache witness as a
+separate bounded diagnostic: the exact excluded paths, before/after cache
+presence/type/hash/size/mtime, strict auth/models/settings existence/type/hash,
+recursive extension/skill snapshots, broad non-excluded fingerprint, artifact
+before/after tree and verification, canonical isolated path inventory,
+real-home symlink check, artifact-only extension provenance, serialized-run
+boundary, environment restoration, and root-removal result. A cache digest or
+mtime difference must not be reported as causal. The row fails for any
+non-regular cache entry, direct cache write, sibling, non-excluded or sensitive
+change, artifact mutation, or cleanup failure.
 
 In addition, the evidence must include a fixture reconciliation ledger with:
 
@@ -267,7 +321,7 @@ Populate the existing Issue 02 Implementation Report, without changing its statu
 | AC1–AC2 | public identity comparisons, no-leak scan, canonical/alias/provider-ID matrix |
 | AC3–AC4 | auth-before-provider trace, terminal precedence, eviction/restart durable fallback, exact-live steer unavailable case, and actual real-Pi F5 terminal-first plus enqueue-first traces with same-module proof, retirement/index removal, and durable commit ordering |
 | AC5 | stale/unauthorized/missing/oversized/capability/legacy diagnostics; bounded real-Pi terminal-first unavailable/stale result; real-Pi enqueue-first applied result only after exactly one synchronous insertion; unit-simulation cancellation generation invalidation; and no queue/replay/Resume/bootstrap/reconstruction/new-child proof |
-| AC6 | separate unit-simulation terminal-first/enqueue-first/cancellation rows (not Decision 0003 acceptance), controlled-Alfie capability/provenance row, and synchronized isolated real-Pi terminal-first/enqueue-first rows with same-module proof, exact artifact/SDK versions, ordered live/journal traces, and cleanup/isolation assertions |
+| AC6 | separate unit-simulation terminal-first/enqueue-first/cancellation rows (not Decision 0003 acceptance), controlled-Alfie capability/provenance row, and synchronized isolated real-Pi terminal-first/enqueue-first rows with same-module proof, exact artifact/SDK versions, ordered live/journal traces, and cleanup/isolation assertions; T17-AC8 exact-cache exclusion witness with compensating sensitive-file, extension/skill, broad-fingerprint, artifact, path, symlink, provenance, concurrency, environment, and cleanup assertions |
 | Non-goals | explicit watchdog/teardown/Resume/bootstrap/replay/guardian exclusions |
 | Review handoff | deviations, untested cases, residual risks, and exact shortest reviewer reproductions |
 
@@ -330,7 +384,14 @@ synchronized unit-simulation terminal-first, enqueue-first, and cancellation
 strands separately, while the required standalone wallclock invocation above
 must run the actual real-Pi terminal-first and enqueue-first cases in the
 wallclock project and keep this suite out of unit discovery through the shared
-manifest. Record each command's exit code, elapsed time, test count, exact
+manifest. The real-Pi invocation must serialize access to its isolated paths
+and capture the T17-AC8 witness separately from the race traces: exact
+`agent/sessions/**` and `agent/models-store.json` exclusions, bounded
+non-causal cache metadata, strict auth/models/settings snapshots, recursive
+extension/skill snapshots, broad non-excluded fingerprint, artifact/tree
+before/after verification, canonical path inventory, no-real-home symlink
+assertion, artifact-only extension provenance, environment restoration, and
+root removal. Record each command's exit code, elapsed time, test count, exact
 pin/capability output, exact artifact and Pi SDK versions
 (`@alfie/pi-subagents@0.15.0-alfie.5` and
 `@earendil-works/pi-coding-agent@0.83.0`), same-module proof, ordered
@@ -368,6 +429,7 @@ Self-review:
 - every actual real-Pi F5 trace contains invocation, tuple lookup, live guard, SDK insertion when applicable, retirement/index removal, durable commit, bookkeeping, and return, with no post-terminal second action or identity leak; scripted `RaceState` traces are labeled unit simulations only and are not used as Decision 0003 acceptance;
 - isolated real-Pi terminal-first and enqueue-first evidence proves same-module staged instrumentation, uses the registered production Agent, exact WP-04 artifact, and exact Pi SDK version rather than a synthetic Agent, and records live-bridge retirement plus live-journal terminal truth;
 - the wallclock manifest registers only the canonical suite, unit discovery excludes it through shared config, and the standalone command passes with prototype/session restoration and cleanup/isolation assertions;
+- the T17-AC8 witness uses only the exact `agent/sessions/**` and `agent/models-store.json` exclusions, records cache metadata as non-causal, proves strict auth/models/settings and recursive extension/skill snapshots, fingerprints all other paths, verifies artifact/tree stability and artifact-only extension loading, proves canonical isolated paths/no real-home symlink/serialized access, and restores/removes all runtime state;
 - no later-ticket behavior or DB migration was introduced;
 - report states every deviation and untested limit honestly.
 
