@@ -147,3 +147,59 @@ Direct web typecheck reports eight diagnostics, all outside `apps/web/src/compon
 The failures belong to unrelated RightDock, ChatView, Pi execution-card, and Pi artifact-tooling work. No Ticket 01 source or test path appears in the diagnostics, and the format-only candidate changes none of those files.
 
 Ticket 01 correctness and AC1–AC6 remain **PASS**. Repository-wide typecheck completion remains separately non-green and must not be represented as passing.
+
+## Decision 0049 Reassessment addendum
+
+Date: 2026-08-26
+
+Candidate: `f9f73f2a5f698841a04d4926cb1e7b7e3c87d9b1`
+Accepted Ticket source baseline: `87b86fb57e1797c516c3a94f3ea141d266a30468`
+
+**Independent recommendation: READY FOR SUPERVISOR REASSESSMENT.**
+
+Decision 0049 held final acceptance only because repository-wide typecheck was non-green. The intervening repository-maintenance range was independently audited against the exact reopening conditions.
+
+### Maintenance safety
+
+- Ticket source, measurement runner, AC evidence, Excalidraw dependency, lock resolution, and web build configuration are unchanged.
+- RightDock optional-prop and browser-hook changes preserve runtime behavior; the dock browser suite passes 4/4.
+- ChatView and canonical managed-routing changes are test-fixture typing corrections.
+- Pi execution-card retention removes a post-guard tautology; its focused suite passes 14/14.
+- Pi repository tests now prove the optional snapshot method exists before invoking it.
+- The Pi managed-read bridge uses the current `Option.fromNullishOr` API and an explicit snapshot-query error boundary. Snapshot failures remain fail-closed as `pi_subagent_read_denied`.
+- The PiAdapter bridge is a real runtime seam, not merely formatting. Independent inspection found no valid-input behavior change: decoded production snapshots require a threads array, production projection-query precedence is preserved, and the existing admission path already relies on the same valid shape.
+
+### Reassessment gate
+
+| Decision 0049 condition                        | Result                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| Exact candidate retains accepted Ticket source | PASS                                                                  |
+| Repository-wide `bun run typecheck`            | PASS; 7/7 Turbo tasks                                                 |
+| Clean worktree                                 | PASS                                                                  |
+| Bounded Ticket no-impact proof                 | PASS; zero source/evidence/dependency/build-seam paths                |
+| Rerun affected Ticket Chromium proofs          | Not triggered; no Ticket or materially shared Whiteboard seam changed |
+
+### Final bundled checks
+
+| Check                       | Result                                                 |
+| --------------------------- | ------------------------------------------------------ |
+| Frozen install              | PASS                                                   |
+| `bun run fmt`               | PASS; 29 unrelated baseline paths, zero relevant paths |
+| `git diff --check`          | PASS                                                   |
+| `bun run lint`              | PASS; 0 errors and 21 warnings                         |
+| `bun run typecheck`         | PASS; 7/7 Turbo tasks                                  |
+| Exact-candidate cleanliness | PASS                                                   |
+
+Focused maintenance evidence:
+
+- Pi execution-card presentation: 14/14.
+- Dock browser suite: 4/4.
+- ChatView filtered regression: 1/1.
+- Pi repository snapshot suite: 17 tests reported passing.
+- Pi execution-read boundary: 14/14 reported passing.
+- PiAdapter desktop managed bootstrap: 22/22 reported passing.
+- Desktop artifact gate and canonical identity/routing suites reported passing.
+
+The final three rows are worker-reported evidence rather than retained final-gate logs. Repository-wide typecheck and the directly retained focused suites independently cover the corrected type boundaries.
+
+Prior Ticket 01 AC1–AC6 PASS evidence remains valid. This addendum supplies Reassessment evidence only and does not itself make the binding acceptance decision.
