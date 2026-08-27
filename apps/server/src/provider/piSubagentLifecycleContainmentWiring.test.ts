@@ -12,10 +12,7 @@ import {
 } from "../agentGateway/Services/McpSessionAuthority.ts";
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import {
-  makePiSubagentExecutionRepository,
-  PiSubagentExecutionRepositoryLive,
-} from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import { makePiSubagentExecutionRepository } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import {
   PiSubagentExecutionRepository,
@@ -412,7 +409,9 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
       expect(probe.steerProviderCalls.count).toBe(0);
       expect(preSeq2.isError).toBe(true);
       expect(preSeq2.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
-      expect(String(preSeq2.content[0].text)).toContain("pi_subagent_live_lifecycle_unavailable");
+      expect(String(preSeq2.content[0]?.text)).toContain(
+        "pi_subagent_live_lifecycle_unavailable",
+      );
 
       // The durable seq2 `started` commit happens only through the
       // observation seam (reportObservation); before it, the journal holds
@@ -441,7 +440,7 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
       );
       // Applied control flows through the bounded success shape.
       expect(postSeq2.isError).toBeUndefined();
-      expect(String(postSeq2.content[0].text)).toContain("Steer state: applied");
+      expect(String(postSeq2.content[0]?.text)).toContain("Steer state: applied");
 
       // A distinct admission whose sequence-2 persistence fails never
       // activates its captured route. This proves the failure branch, not
@@ -480,9 +479,7 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
         invokeSteer(steerTool, failedExecutionId, failedBinding, "t03_leg1_failed_seq2"),
       );
       expect(afterFailedSeq2.isError).toBe(true);
-      expect(afterFailedSeq2.diagnosticCode).toBe(
-        "pi_subagent_live_lifecycle_unavailable",
-      );
+      expect(afterFailedSeq2.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
       expect(probe.steerProviderCalls.count).toBe(1);
 
       yield* adapter.stopSession("th_t03_wiring_1" as ThreadId);
@@ -580,7 +577,8 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
       });
       yield* Effect.promise(async () => {
         // Wait until the terminal repository write is actually held.
-        for (let i = 0; i < 500 && !terminalWriteHeld; i += 1) {
+        for (let i = 0; i < 500; i += 1) {
+          if (terminalWriteHeld) break;
           await Promise.resolve();
         }
         return undefined;
@@ -714,7 +712,9 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
       // commit never happened, so delivery may not begin.
       expect(
         runtimeEvents.filter(
-          (e) => e.raw?.method === "subagents/terminal-settled" || e.raw?.method === "subagents/completion-outbox-pending",
+          (e) =>
+            e.raw?.method === "subagents/terminal-settled" ||
+            e.raw?.method === "subagents/completion-outbox-pending",
         ),
       ).toHaveLength(0);
       const outboxId = `outbox_${executionId}_${binding.attemptId}_gen${binding.generation}`;

@@ -88,23 +88,23 @@ All packages are serial. No parallel write overlap is permitted.
 
 ## Work packages
 
-| Order | Package | Primary output |
-| --- | --- | --- |
-| 01 | [Containment core and diagnostics](WP-01-containment-core-and-diagnostics.md) | **complete** — reusable registry, managed binding integration, diagnostics, unit evidence |
-| 02 | [Production lifecycle integration](WP-02-production-lifecycle-integration.md) | **complete** — PiAdapter activation/retirement/disposal and deterministic lifecycle races |
-| 03 | [Controlled and real-Pi evidence/report](WP-03-controlled-and-real-pi-acceptance-report.md) | unchanged `.6` proof, isolated real-Pi evidence, Ticket 03 report |
-| 04 | [Independent review](WP-04-independent-review.md) | criterion-level review artifact and disposition |
-| 05 | [Ticket closure and routing](WP-05-ticket-closure-and-routing.md) | accepted Ticket 03 and Ticket 04 frontier, only after PASS |
+| Order | Package                                                                                     | Primary output                                                                            |
+| ----- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 01    | [Containment core and diagnostics](WP-01-containment-core-and-diagnostics.md)               | **complete** — reusable registry, managed binding integration, diagnostics, unit evidence |
+| 02    | [Production lifecycle integration](WP-02-production-lifecycle-integration.md)               | **complete** — PiAdapter activation/retirement/disposal and deterministic lifecycle races |
+| 03    | [Controlled and real-Pi evidence/report](WP-03-controlled-and-real-pi-acceptance-report.md) | unchanged `.6` proof, isolated real-Pi evidence, Ticket 03 report                         |
+| 04    | [Independent review](WP-04-independent-review.md)                                           | criterion-level review artifact and disposition                                           |
+| 05    | [Ticket closure and routing](WP-05-ticket-closure-and-routing.md)                           | accepted Ticket 03 and Ticket 04 frontier, only after PASS                                |
 
 ## Acceptance traceability
 
-| Criterion | Owning packages |
-| --- | --- |
-| T03-AC1 journal-first bounded terminal | WP-02, WP-03, WP-04 |
-| T03-AC2 deterministic terminal/cleanup/current/stale races | WP-02, WP-03, WP-04 |
-| T03-AC3 bands 70–78 and cleanup uncertainty preserved | WP-02, WP-03, WP-04 |
-| T03-AC4 exact owned runtime only | WP-01, WP-02, WP-03, WP-04 |
-| T03-AC5 stable inactive/loss/persistence/late diagnostics | WP-01, WP-02, WP-03, WP-04 |
+| Criterion                                                  | Owning packages            |
+| ---------------------------------------------------------- | -------------------------- |
+| T03-AC1 journal-first bounded terminal                     | WP-02, WP-03, WP-04        |
+| T03-AC2 deterministic terminal/cleanup/current/stale races | WP-02, WP-03, WP-04        |
+| T03-AC3 bands 70–78 and cleanup uncertainty preserved      | WP-02, WP-03, WP-04        |
+| T03-AC4 exact owned runtime only                           | WP-01, WP-02, WP-03, WP-04 |
+| T03-AC5 stable inactive/loss/persistence/late diagnostics  | WP-01, WP-02, WP-03, WP-04 |
 
 ## Verification policy
 

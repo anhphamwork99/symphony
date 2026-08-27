@@ -3972,7 +3972,11 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             });
             if (liveRegistration !== undefined) {
               subagentLiveLifecycle.registrations.set(
-                JSON.stringify([identities.executionId, identities.attemptId, identities.generation]),
+                JSON.stringify([
+                  identities.executionId,
+                  identities.attemptId,
+                  identities.generation,
+                ]),
                 liveRegistration,
               );
             }

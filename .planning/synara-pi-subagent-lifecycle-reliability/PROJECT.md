@@ -169,14 +169,14 @@ Tickets 04–06 remain serially blocked behind Ticket 03 and their listed
 dependency gates. The single Supervisor final-acceptance consultation remains
 reserved for the complete integrated project candidate.
 
-| Ticket | Status | Dependency / unlock |
-| --- | --- | --- |
-| [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **accepted** | grounding report accepted; no source edits |
-| [02](issues/02-canonical-identity-and-result-continuity.md) | **accepted** | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
+| Ticket                                                                    | Status                         | Dependency / unlock                                                                                           |
+| ------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| [01](issues/01-baseline-reproduction-and-decision-matrix.md)              | **accepted**                   | grounding report accepted; no source edits                                                                    |
+| [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                   | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **in progress — WP-03 active** | WP-01 containment core and WP-02 production integration complete; controlled/real-Pi evidence and report next |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | Ticket 03 lifecycle boundary settled |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | Tickets 02–04 accepted seams |
-| [06](issues/06-integrated-real-pi-acceptance.md) | blocked | Tickets 01–05 accepted; all provenance and evidence gates |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | blocked                        | Ticket 03 lifecycle boundary settled                                                                          |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | blocked                        | Tickets 02–04 accepted seams                                                                                  |
+| [06](issues/06-integrated-real-pi-acceptance.md)                          | blocked                        | Tickets 01–05 accepted; all provenance and evidence gates                                                     |
 
 The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
 is discharged by Decision 0002. It remains a historical consultation link;

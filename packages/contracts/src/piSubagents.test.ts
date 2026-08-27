@@ -35,7 +35,7 @@ describe("Pi subagent live lifecycle diagnostics (Ticket 03)", () => {
       "pi_subagent_live_lifecycle_outcome_unknown",
       "pi_subagent_live_lifecycle_stale_ignored",
       "pi_subagent_terminal_late_applied",
-    ]) {
+    ] as const) {
       expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
     }
   });

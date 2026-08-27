@@ -141,6 +141,17 @@ than identify a distinct late callback. The diagnostic remains reserved in
 the contract vocabulary for now; WP-05 must either document that reservation
 or remove it under an explicit contracts write-set amendment.
 
-`bun fmt`, `bun lint`, and `bun typecheck` were not run because project policy
-requires explicit owner authorization. They remain a Ticket 03 closure gate,
-not a WP-02 semantic gate.
+The owner authorized the workspace checks after WP-02 completion:
+
+- `bun fmt`: pass on 3,089 files; unrelated formatter churn was restored while
+  retaining the formatted Ticket 03 files.
+- `bun lint`: pass with 0 errors and 33 warnings; WP-02's two newly introduced
+  warnings were removed.
+- `bun typecheck`: remains blocked outside WP-02. The contracts package passes
+  after correcting its diagnostic-code literal inference. Workspace
+  typechecking stops on four pre-existing whiteboard errors in `apps/web`;
+  standalone server typechecking additionally reports pre-existing Ticket 02
+  acceptance/helper errors and WP-01 managed-binding tuple-narrowing errors.
+
+Ticket 03 closure therefore remains blocked on the integrated workspace
+typecheck gate even though WP-02's focused behavior and contracts checks pass.
