@@ -4,7 +4,7 @@
 
 **Bounded by:** [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), following [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md) — the public-boundary research failed, so fallback direction 4 is active for contract design only.
 
-**Status:** designing-fallback-history-contract
+**Status:** awaiting-owner-fallback-contract-approval
 
 - [ ] **AC1:** Multiple progressive scene updates finalize as exactly one user-visible Undo event.
 - [ ] **AC2:** One Undo restores the complete pre-batch state for completed, Take-Over-interrupted, and invalid-operation partial batches.
@@ -53,4 +53,13 @@ The public-boundary research required by Decision 0053 is complete and failed. T
 
 Decision 0054 records the research-fail result and activates the fallback direction. It does not itself rewrite the existing acceptance criteria or authorize source implementation.
 
-**Broad-work prohibition:** WP-CORE, the remaining Ticket 02 matrix, package/lockfile changes, private or undocumented integration, and later-ticket implementation remain prohibited until the fallback contract is approved, affected acceptance language is deliberately revised, and a bounded implementation route is authorized.
+## Proposed fallback contract — owner approval required
+
+- [Proposed dual-history contract](../designs/ticket-02-fallback-dual-history-contract.md)
+- [Fallback contract challenge review](../reviews/ticket-02-fallback-contract-challenge.md)
+
+The proposed contract is explicitly `Proposed — awaiting owner approval`. It preserves this ticket's current AC1–AC7 language until a binding owner decision deliberately replaces the affected shared-history, keyboard, cap, and native-image clauses. The proposal must not be treated as acceptance evidence or implementation authorization.
+
+**Routing:** `awaiting-owner-fallback-contract-approval`
+
+**Broad-work prohibition:** WP-CORE, the remaining Ticket 02 matrix, package/lockfile changes, private or undocumented integration, source implementation, and later-ticket implementation remain prohibited until the fallback contract is owner-approved, affected acceptance language is deliberately revised, and a bounded implementation route is authorized.
