@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: native-image Gate blocked; governance reassessment required
-Triage: awaiting-native-image-gate-governance-reassessment
+Lifecycle: bounded native-image drag-and-drop feasibility
+Triage: active-native-image-drop-gate
 Tracker: Local Markdown
 
 ## Artifacts
@@ -24,6 +24,7 @@ Tracker: Local Markdown
 - [Decision 0057 — Ticket 02 fallback WP-GATE PASS and post-Gate routing](./decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Decision 0058 — Ticket 02 WP-NATIVE-IMAGE-GATE authorization](./decisions/0058-ticket-02-native-image-gate-authorization.md)
 - [Decision 0059 — Ticket 02 native-image Gate BLOCKER and governance routing](./decisions/0059-ticket-02-native-image-gate-blocked-routing.md)
+- [Decision 0060 — Ticket 02 native-image drag-and-drop Gate authorization](./decisions/0060-ticket-02-native-image-drop-gate-authorization.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
 - [Ticket 02 native-image Gate BLOCKER evidence](./evidence/ticket-02/native-image-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
@@ -38,4 +39,4 @@ Completed bounded phase: Ticket 02 fallback WP-GATE passed on measured source ca
 
 Completed bounded phase: Ticket 02 WP-NATIVE-IMAGE-GATE stopped as a valid `BLOCKER` on measured source candidate `209ca21370415afcea5e860474ca8fdefd166bae`. Two stable-Chromium runs reproducibly reached the package File System Access chooser branch but could not supply a file through the authorized public Vitest Browser surface. The independent read-only review returned `PASS-BLOCKER` with high confidence. Native image behavior was not measured.
 
-Current boundary: Ticket 02 is `awaiting-native-image-gate-governance-reassessment` under [Decision 0059](./decisions/0059-ticket-02-native-image-gate-blocked-routing.md). No production runtime or later work package is authorized. Production outcomes, assets, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
+Current boundary: Ticket 02 is `active-native-image-drop-gate` under [Decision 0060](./decisions/0060-ticket-02-native-image-drop-gate-authorization.md). Only the existing native-image browser test and three evidence files may change. The Gate must use the real Excalidraw drag-and-drop handler with an in-test deterministic PNG. No production runtime or later work package is authorized. Production outcomes, assets, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
