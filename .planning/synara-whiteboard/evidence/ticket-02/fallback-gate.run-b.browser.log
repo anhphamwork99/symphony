@@ -1,0 +1,22 @@
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraHistoryGate.acceptance.browser.tsx"
+
+ RUN  v4.1.10 /private/tmp/synara-whiteboard-wp-gate-recovery/apps/web
+
+The request id "/private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Regular.woff2" is outside of Vite serving allow list.
+
+- /private/tmp/synara-whiteboard-wp-gate-recovery/apps/web
+- /private/tmp/synara-whiteboard-wp-gate-recovery
+- /private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/vitest@4.1.10+b675788e84e571f1/node_modules/vitest
+- /private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/@vitest+browser@4.1.10+81ecffb7a7dc0e03/node_modules/@vitest/browser/dist
+- /private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/vite@8.1.5+c07c6cebe09319b1/node_modules/vite/dist/client
+- /private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/@vitest+browser-playwright@4.1.10+4ee149e80d5959ba/node_modules/@vitest/browser-playwright/dist/locators.js
+
+Refer to docs https://vite.dev/config/server-options.html#server-fs-allow for configurations and more details.
+
+The request id "/private/tmp/synara-whiteboard-wp-a-clean.IbOHNm/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Medium.woff2" is outside of Vite serving allow list.
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  12:29:50
+   Duration  6.66s (transform 0ms, setup 0ms, import 612ms, tests 5.16s, environment 0ms)
+

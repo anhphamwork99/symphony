@@ -1,0 +1,10 @@
+$ vitest run --passWithNoTests "src/components/whiteboard/ticket02/SynaraHistoryGate.test.ts"
+
+ RUN  v4.1.10 /private/tmp/synara-whiteboard-wp-gate-recovery/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  12:29:19
+   Duration  736ms (transform 74ms, setup 0ms, import 90ms, tests 573ms, environment 0ms)
+
