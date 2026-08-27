@@ -14,6 +14,8 @@ Decision 0062 records `TICKET 02 NATIVE IMAGE DROP GATE: BOUNDED PASS` on exact 
 
 Decision 0063 authorizes `WP-OPERATION-TRANSPORT-OUTCOMES` with the minimal image-free ephemeral operation-session seam across strict contracts, server authority, production WebSocket RPC/stream, truthful browser acknowledgement, and the existing AI-history coordinator. Web-only operation ownership is rejected. AI assets/restore/failure remains a separate deferred package.
 
+Decision 0064 narrowly repairs Decision 0063's write set by adding `packages/contracts/src/rpc.ts`, the actual canonical `WsFeatureRpcGroup` assembly point. A supplemental or parallel Whiteboard RPC group remains prohibited.
+
 ## Acceptance criteria
 
 - [ ] **AC1 — Route ownership and labels:** In stable Chromium with the pinned real Excalidraw embed, native Excalidraw toolbar Undo/Redo and package-supported platform shortcuts mutate only human history. Synara exposes only visibly labeled, keyboard-accessible `Undo AI batch` and `Redo AI batch` actions for AI history. There is no generic dispatcher, mixed-history panel, shared cursor, or first-release AI keyboard shortcut; no native route invokes AI snapshots and no AI action invokes native Undo/Redo.
@@ -60,6 +62,7 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - [Decision 0061 — native-image package-normalization amendment](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md)
 - [Decision 0062 — native-image drop Gate PASS and governance routing](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md)
 - [Decision 0063 — operation transport/outcomes authorization](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md)
+- [Decision 0064 — canonical RPC write-set reassessment](../decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md)
 - [Native-image Gate BLOCKER exact-candidate evidence](../evidence/ticket-02/native-image-gate.md)
 - [Decision 0057 — bounded WP-GATE PASS and post-Gate routing](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Fallback WP-GATE exact-candidate evidence](../evidence/ticket-02/fallback-gate.md)
@@ -76,4 +79,4 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 
 **Routing:** `active-operation-transport-outcomes`
 
-**Current authorization boundary:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md) authorizes only its exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set. Assets, lifecycle/cap, accessibility, RightDock, persistence, provider/UI mounting, workspace gates, later work packages, AC claims, feature review, and final acceptance do not follow by inference.
+**Current authorization boundary:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md), as amended only by [Decision 0064](../decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md), authorizes its exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set including additive canonical RPC membership in `packages/contracts/src/rpc.ts`. Assets, lifecycle/cap, accessibility, RightDock, persistence, provider/UI mounting, workspace gates, later work packages, AC claims, feature review, and final acceptance do not follow by inference.
