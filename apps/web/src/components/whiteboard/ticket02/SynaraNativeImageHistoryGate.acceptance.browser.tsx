@@ -81,8 +81,14 @@ function sentinelBytes(): Uint8Array {
   return bytes;
 }
 
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes));
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
@@ -143,7 +149,7 @@ async function assertCompleteClosure(
   expect(Number(file.created)).toBeGreaterThan(0);
   expect(bytes.byteLength).toBeGreaterThan(0);
   const storedHash = await sha256(bytes);
-  const storedBlob = new Blob([bytes], { type: SENTINEL_MIME });
+  const storedBlob = new Blob([ownedArrayBuffer(bytes)], { type: SENTINEL_MIME });
   await assertExactSentinelPixels(storedBlob);
   const identity = {
     elementId,
@@ -217,7 +223,7 @@ async function assertExactSentinelPixels(blob: Blob): Promise<void> {
       const expected = SENTINEL_COLORS[Math.floor(y / 8) * 4 + Math.floor(x / 8)];
       const offset = (y * SENTINEL_WIDTH + x) * 4;
       expect(
-        [...decoded.pixels.slice(offset, offset + 4)],
+        Array.from(decoded.pixels.slice(offset, offset + 4)),
         `sentinel pixel (${x}, ${y})`,
       ).toEqual(expected);
     }
@@ -228,9 +234,10 @@ async function assertMeaningfulPng(blob: Blob, present: boolean): Promise<void> 
   const decoded = await decodePng(blob);
   const matches = SENTINEL_COLORS.filter((color) => decoded.colors.has(color.join(",")));
   if (present) {
-    expect(matches, `decoded PNG colors: ${JSON.stringify([...decoded.colors].slice(0, 30))}`).toEqual([
-      ...SENTINEL_COLORS,
-    ]);
+    expect(
+      matches,
+      `decoded PNG colors: ${JSON.stringify([...decoded.colors].slice(0, 30))}`,
+    ).toEqual([...SENTINEL_COLORS]);
   } else {
     expect(matches, "deleted image colors must be absent from official PNG").toEqual([]);
   }
@@ -247,8 +254,10 @@ async function assertExports(
 async function makeSentinelFile(): Promise<File> {
   const bytes = sentinelBytes();
   expect(await sha256(bytes)).toBe(SENTINEL_SHA256);
-  await assertExactSentinelPixels(new Blob([bytes], { type: SENTINEL_MIME }));
-  const file = new File([bytes], "ticket02-sentinel.png", { type: SENTINEL_MIME });
+  await assertExactSentinelPixels(new Blob([ownedArrayBuffer(bytes)], { type: SENTINEL_MIME }));
+  const file = new File([ownedArrayBuffer(bytes)], "ticket02-sentinel.png", {
+    type: SENTINEL_MIME,
+  });
   expect(file.size).toBe(SENTINEL_BYTE_LENGTH);
   expect(file.type).toBe(SENTINEL_MIME);
   return file;
@@ -285,11 +294,9 @@ async function clickImage(
   const canvasBox = canvas().getBoundingClientRect();
   const viewport = handle.getAdapter().captureViewport();
   const centerX =
-    rootBox.left +
-    (Number(image.x) + Number(image.width) / 2 + viewport.scrollX) * viewport.zoom;
+    rootBox.left + (Number(image.x) + Number(image.width) / 2 + viewport.scrollX) * viewport.zoom;
   const centerY =
-    rootBox.top +
-    (Number(image.y) + Number(image.height) / 2 + viewport.scrollY) * viewport.zoom;
+    rootBox.top + (Number(image.y) + Number(image.height) / 2 + viewport.scrollY) * viewport.zoom;
   editorRoot().focus();
   await userEvent.click(canvas(), {
     position: {
