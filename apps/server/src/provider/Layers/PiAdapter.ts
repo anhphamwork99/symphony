@@ -129,7 +129,6 @@ import {
 import {
   makePiSubagentLiveLifecycleContainment,
   type PiSubagentLiveLifecycleContainment,
-  type PiSubagentLiveLifecycleDiagnosticCode,
   type PiSubagentLiveLifecycleRegistration,
 } from "../piSubagentLiveLifecycleContainment.ts";
 import {
@@ -459,8 +458,6 @@ interface PiSubagentLiveLifecycleSessionState {
   readonly session: object;
   /** Exact registration handles by tuple key; identity is the only authority. */
   readonly registrations: Map<string, PiSubagentLiveLifecycleRegistration>;
-  /** Observational late-applied diagnostic counter (bounded by distinct tuples). */
-  lateAppliedDiagnosticCount: number;
 }
 
 interface PiSessionContext {
@@ -3936,7 +3933,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             containment: makePiSubagentLiveLifecycleContainment(),
             session: runtime.session,
             registrations: new Map(),
-            lateAppliedDiagnosticCount: 0,
           };
           context.subagentLiveLifecycle = subagentLiveLifecycle;
           // Exact-handle tuple lookup for the managed wrappers. A tuple with
@@ -4095,41 +4091,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                             : undefined,
                       },
                       onTerminalPersisted: (event) => {
-                        // Ticket 03 (Decision 0006): the optional observational
-                        // late-applied diagnostic. It fires ONLY after a
-                        // current first-applicable terminal committed AND the
-                        // volatile route was already retired synchronously
-                        // before this ingest began — exactly the "same-
-                        // generation terminal applied after route retirement"
-                        // case. It is observational only: never a lifecycle
-                        // state, never a delay, never a notification gate.
-                        if (
-                          event.result.kind === "recorded" &&
-                          liveRegistration !== undefined
-                        ) {
-                          subagentLiveLifecycle.lateAppliedDiagnosticCount += 1;
-                          offerRuntimeEvent({
-                            ...makeEventBase(context),
-                            type: "runtime.warning",
-                            payload: {
-                              message: `Pi subagent terminal applied after live route retirement [${event.result.execution.executionId}]`,
-                              detail: {
-                                executionId: event.result.execution.executionId,
-                                attemptId: event.result.execution.attemptId,
-                                generation: event.result.execution.generation,
-                              },
-                            },
-                            raw: {
-                              source: "pi.sdk.event",
-                              method: "subagents/terminal-late-applied",
-                              payload: {
-                                executionId: event.result.execution.executionId,
-                                attemptId: event.result.execution.attemptId,
-                                generation: event.result.execution.generation,
-                              },
-                            },
-                          } satisfies ProviderRuntimeEvent);
-                        }
                         // Decision 0033 review follow-up: capture the exact
                         // committed aggregate below. `onTerminalPersisted` is
                         // the post-commit seam (it fires ONLY for a `recorded`
@@ -4301,7 +4262,15 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     }),
                   ),
                 );
-                if (ingest._tag === "Failure") {
+                if (ingest._tag === "Failure" || ingest.success.outcome === "failed") {
+                  // T07-AC1/T07-AC6: terminal truth is control truth. Both a
+                  // failed Effect AND the handled `{ outcome: "failed" }`
+                  // return (the coordinator degrades health internally via
+                  // `onTerminalPersistenceFailed`) must reject the producer —
+                  // an undurable terminal must never be swallowed into a
+                  // silent success-shaped handle. The route stays retired in
+                  // both cases; the bounded retry path re-ingests the same
+                  // evidence through this same observation seam.
                   const err = new Error("pi_subagent_terminal_persistence_failed");
                   (err as any).diagnosticCode = "pi_subagent_terminal_persistence_failed";
                   throw err;
