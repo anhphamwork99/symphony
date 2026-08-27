@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Ticket 02 accepted; Ticket 03 is the sole frontier pending DG-3/DG-4 disposition
+- **Triage status:** Ticket 02 accepted; Decision 0006 bound; Ticket 03 ready-for-agent
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -150,8 +150,8 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Current frontier: Ticket 03 is the sole project frontier, but source
-implementation remains blocked pending DG-3/DG-4 disposition.** Ticket 01 is
+**Current frontier: Ticket 03 is the sole source implementation frontier.**
+Ticket 01 is
 accepted as the read-only grounding report. Ticket 02 is accepted at Symphony
 candidate `cb023e587` plus Implementation Report `d77a566e0`, against
 controlled Alfie
@@ -159,16 +159,19 @@ controlled Alfie
 `@alfie/pi-subagents@0.15.0-alfie.6`. Its deterministic,
 controlled-Alfie, and isolated real-Pi evidence passed independent review; the
 report-only closure introduced no material reopening, so no second review or
-ticket-level Supervisor final-acceptance consultation is required. Tickets
-04–06 remain serially blocked behind Ticket 03 and their listed dependency
-gates. The single Supervisor final-acceptance consultation remains reserved
-for the complete integrated project candidate.
+ticket-level Supervisor final-acceptance consultation is required. Binding
+[Decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md)
+settles DG-3 through an exact-tuple live lifecycle proxy and preserves the
+already-closed DG-4 owner boundary. Ticket 03 is ready for implementation.
+Tickets 04–06 remain serially blocked behind Ticket 03 and their listed
+dependency gates. The single Supervisor final-acceptance consultation remains
+reserved for the complete integrated project candidate.
 
 | Ticket | Status | Dependency / unlock |
 | --- | --- | --- |
 | [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **accepted** | grounding report accepted; no source edits |
 | [02](issues/02-canonical-identity-and-result-continuity.md) | **accepted** | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
-| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **blocked — current frontier** | Ticket 02 accepted; determine DG-3/DG-4 before source implementation |
+| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **ready-for-agent** | Ticket 02 accepted; Decision 0006 settles DG-3 and preserves closed DG-4 |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | blocked | Ticket 03 lifecycle boundary settled |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | blocked | Tickets 02–04 accepted seams |
 | [06](issues/06-integrated-real-pi-acceptance.md) | blocked | Tickets 01–05 accepted; all provenance and evidence gates |
@@ -271,6 +274,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [design-tree.md](design-tree.md) — decision tree, gates, and evidence map.
 - [decision 0001](decisions/0001-project-charter-and-inherited-authority.md) — project charter and inherited authority.
 - [decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md) — binding canonical identity and durable result-read contract for Ticket 02.
+- [decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md) — binding live lifecycle observation/control linearization contract for Ticket 03 DG-3; preserves DG-4.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
@@ -280,8 +284,8 @@ Tickets 01 and 02 are accepted. Ticket 02's implementation lineage, exact
 controlled Alfie `.6` provenance, criterion evidence, race traces, limitations,
 and review disposition are recorded in
 [Ticket 02](issues/02-canonical-identity-and-result-continuity.md). Ticket 03
-is now the sole frontier, with source implementation blocked until DG-3/DG-4
-are classified as already settled or routed through a narrow material
-technical-decision consultation. The one integrated project review and exactly
-one Supervisor final-acceptance consultation remain reserved for the complete
+is now the sole source implementation frontier. Decision 0006 settles DG-3
+with the exact-tuple Alternative A proxy and preserves the inherited closed
+DG-4 owner boundary. The one integrated project review and exactly one
+Supervisor final-acceptance consultation remain reserved for the complete
 project candidate.

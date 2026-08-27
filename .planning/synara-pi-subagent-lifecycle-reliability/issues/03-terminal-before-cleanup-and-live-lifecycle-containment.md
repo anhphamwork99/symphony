@@ -1,8 +1,9 @@
 # Ticket 03 — terminal-before-cleanup and live lifecycle containment
 
-**Status:** blocked
-**Blocked by:** Ticket 01 accepted; Ticket 02 accepted; DG-3 and DG-4
-**Implementation:** forbidden while blocked
+**Status:** ready-for-agent
+**Dependencies:** Tickets 01–02 accepted
+**Authoritative decision:** [Decision 0006 — live lifecycle containment linearization contract](../decisions/0006-live-lifecycle-containment-linearization-contract.md)
+**Implementation:** authorized within Decision 0006's bounded source and evidence contract
 
 ## Objective
 
@@ -43,5 +44,6 @@ acceptance requires it.
 
 ## Unlock gate
 
-Requires accepted identity/read contract and a new decision if terminal/cleanup
-ordering or owner authority changes inherited semantics.
+Discharged. Tickets 01–02 are accepted; binding Decision 0006 settles DG-3
+through the exact-tuple Alternative A proxy and preserves the inherited closed
+DG-4 owner boundary. Ticket 03 is the sole implementation frontier.
