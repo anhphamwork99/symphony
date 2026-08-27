@@ -206,13 +206,17 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
 
     // Plan §6.6 scenario 2: an explicit accessible activation attempt under the
     // AI lock through public user interaction only. The Synara "Undo AI batch"
-    // surface is reached by stable role/name, receives real keyboard focus,
-    // and Enter/Space are pressed on it; with `busy` the guarded action must
-    // not mutate document content and must retain its aria-disabled state.
+    // surface is reached by stable role/name and its own data action attribute,
+    // receives real keyboard focus, and Enter/Space are pressed on it; with
+    // `busy` the guarded action must not mutate document content and must
+    // retain its aria-disabled state.
     const lockedUndoButton = page.getByRole("button", { name: "Undo AI batch" });
-    await lockedUndoButton.focus();
-    expect(document.activeElement).toHaveAttribute("aria-label", "Undo AI batch");
-    expect(lockedUndoButton).toHaveAttribute("aria-disabled", "true");
+    const lockedUndoElement = lockedUndoButton.element() as HTMLButtonElement;
+    expect(lockedUndoElement).not.toBeNull();
+    expect(lockedUndoElement.dataset.ticket02Action).toBe("undo-ai-batch");
+    lockedUndoElement.focus();
+    expect(document.activeElement).toBe(lockedUndoElement);
+    expect(lockedUndoElement.getAttribute("aria-disabled")).toBe("true");
     await userEvent.keyboard("{Enter}");
     await userEvent.keyboard(" ");
     await new Promise((resolve) => window.setTimeout(resolve, 50));
@@ -222,7 +226,7 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
         captureDocumentSnapshot(handle.getAdapter().captureScene()),
       ),
     ).toBe(true);
-    expect(lockedUndoButton).toHaveAttribute("aria-disabled", "true");
+    expect(lockedUndoElement.getAttribute("aria-disabled")).toBe("true");
     expect(handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical")).toEqual([]);
 
     const lockedViewport = handle.getAdapter().captureViewport();
