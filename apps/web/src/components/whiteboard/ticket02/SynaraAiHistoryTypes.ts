@@ -1,38 +1,13 @@
 import type { SynaraDocumentSnapshot } from "./SynaraDocumentSnapshot";
 
-/**
- * Ticket 02 WP-GATE — AI-only history types.
- *
- * Humans are never events. A human mutation is a settlement/invalidation
- * input consumed by the coordinator; only AI batches become events. There is
- * no generic undo/redo dispatcher and no shared cursor with native history.
- */
-
-export const SYNARA_HISTORY_DIAGNOSTIC_SCHEMA = "synara.whiteboard.history-diagnostic/v1" as const;
-
+/** AI-only history types for the bounded Ticket 02 fallback Gate. */
 export type SynaraHistoryDiagnosticOwner = "adapter" | "coordinator";
-
 export type SynaraHistoryDiagnosticSeverity = "info" | "warning" | "error" | "critical";
-
 export type SynaraHistoryDiagnosticRecoverability =
   | "retryable"
   | "reset-required"
   | "locked"
   | "none";
-
-/**
- * Bounded Gate evidence or AC identifiers. Never an acceptance verdict: the
- * Gate claims no AC passed.
- */
-export type SynaraHistoryAcApplicability =
-  | "gate-bounded-evidence"
-  | "AC1"
-  | "AC2"
-  | "AC3"
-  | "AC4"
-  | "AC8"
-  | "AC9"
-  | "AC10";
 
 export type SynaraHistoryDiagnosticCode =
   | "adapter-not-ready"
@@ -52,27 +27,24 @@ export type SynaraHistoryDiagnosticCode =
   | "native-mutation-during-ai-lock"
   | "identity-changed-unexpectedly"
   | "human-settlement-uncertain"
-  | "ai-history-cleared-by-human"
-  | "ai-redo-cleared-by-new-ai-batch"
-  | "restore-rollback-succeeded"
-  | "restore-rollback-failed"
   | "operation-not-applicable"
-  | "cursor-not-actionable"
-  | "session-locked";
+  | "cursor-not-actionable";
 
-/** Serialized `synara.whiteboard.history-diagnostic/v1` diagnostic record. */
+export type SynaraEditLockState = "unlocked" | "ai-batch" | "restore" | "locked-fault";
+
+/** Serialized diagnostic. `acApplicability` is evidence scope, never acceptance. */
 export interface SynaraHistoryDiagnostic {
-  readonly schema: typeof SYNARA_HISTORY_DIAGNOSTIC_SCHEMA;
+  readonly schema: "synara.whiteboard.history-diagnostic/v1";
   readonly owner: SynaraHistoryDiagnosticOwner;
   readonly code: SynaraHistoryDiagnosticCode;
   readonly severity: SynaraHistoryDiagnosticSeverity;
   readonly recoverability: SynaraHistoryDiagnosticRecoverability;
-  readonly acApplicability: SynaraHistoryAcApplicability;
+  readonly acApplicability: "bounded-gate-evidence";
   readonly phase: string;
   readonly scenario: string;
   readonly message: string;
   readonly summary: string;
-  readonly packageVersion: string;
+  readonly packageVersion: "0.18.1";
   readonly browser: string;
   readonly platform: string;
   readonly canvasIdentity: string;
@@ -92,19 +64,17 @@ export interface SynaraHistoryDiagnostic {
   readonly expected: string;
   readonly observed: string;
   readonly lockState: SynaraEditLockState;
-  readonly rollbackResult?: "succeeded" | "failed" | "not-attempted";
   readonly timestamp: number;
 }
 
-export type SynaraEditLockState = "unlocked" | "ai-batch" | "restore" | "locked-fault";
+export interface SynaraHistoryIdentity {
+  readonly canvasIdentity: string;
+  readonly mountIdentity: string;
+  readonly apiIdentity: string;
+  readonly sessionEpoch: number;
+}
 
-/** Outcome of a finalized AI batch. The Gate proves only `completed`. */
-export type SynaraAiEventOutcome = "completed" | "interrupted" | "failed-partial";
-
-/**
- * Immutable event provenance. Creation fields are never rewritten and need
- * not equal the current route epoch after AI Undo.
- */
+/** Immutable creation provenance; command applicability is evaluated separately. */
 export interface SynaraAiEventProvenance {
   readonly canvasIdentity: string;
   readonly mountIdentity: string;
@@ -120,22 +90,13 @@ export interface SynaraAiEventProvenance {
 export interface SynaraAiHistoryEvent {
   readonly id: string;
   readonly provenance: SynaraAiEventProvenance;
-  readonly outcome: SynaraAiEventOutcome;
+  readonly outcome: "completed";
   readonly batchId: string;
   readonly acceptedSyntheticWriteCount: number;
   readonly before: SynaraDocumentSnapshot;
   readonly after: SynaraDocumentSnapshot;
 }
 
-/** Adapter identities fenced into every applicability decision. */
-export interface SynaraHistoryIdentity {
-  readonly canvasIdentity: string;
-  readonly mountIdentity: string;
-  readonly apiIdentity: string;
-  readonly sessionEpoch: number;
-}
-
-/** Test-only ordered lifecycle trace for AI Undo/Redo clear proof (plan §6.5). */
 export type SynaraAiCommandTraceStep =
   | "restore-write-issued"
   | "restore-callback-acknowledged"
@@ -153,14 +114,6 @@ export interface SynaraAiCommandTrace {
   readonly steps: readonly SynaraAiCommandTraceStep[];
 }
 
-/** Result of one settlement decision over a human mutation family. */
-export interface SynaraHumanSettlementResult {
-  readonly family: string;
-  readonly settled: "changed" | "no-op" | "uncertain";
-  readonly startFingerprint: string;
-  readonly endFingerprint: string;
-}
-
 export interface SynaraAiHistoryState {
   readonly events: readonly SynaraAiHistoryEvent[];
   readonly cursor: number;
@@ -168,68 +121,4 @@ export interface SynaraAiHistoryState {
   readonly routeEpoch: number;
   readonly mutationRevision: number;
   readonly identity: SynaraHistoryIdentity;
-}
-
-export interface SynaraAiHistoryReporter {
-  readonly report: (diagnostic: Omit<SynaraHistoryDiagnostic, "schema">) => void;
-  readonly diagnostics: () => readonly SynaraHistoryDiagnostic[];
-  readonly traces: () => readonly SynaraAiCommandTrace[];
-  readonly settlements: () => readonly SynaraHumanSettlementResult[];
-}
-
-/** Context the adapter fences into every synthetic write scope. */
-export interface SynaraSyntheticScopeContext {
-  readonly purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback";
-  readonly operationId: string;
-  readonly operationGeneration: number;
-  readonly sessionEpoch: number;
-  readonly routeEpoch: number;
-  readonly expectedBeforeRevision: number;
-  readonly batchId?: string;
-}
-
-/** Opaque receipt returned by scope.issue — no forgeable token inside. */
-export interface SynaraSyntheticWriteReceipt {
-  readonly adapterGlobalSyntheticSequence: number;
-  readonly correlationId: string;
-}
-
-export interface SynaraSyntheticIssueInput {
-  readonly operationLocalSequence: number;
-  readonly expectedBeforeRevision: number;
-  readonly apply: () => void;
-}
-
-export interface SynaraSyntheticWriteScope {
-  readonly issue: (input: SynaraSyntheticIssueInput) => SynaraSyntheticWriteReceipt;
-  readonly drain: () => Promise<void>;
-  readonly close: () => Promise<void>;
-  readonly abort: (reason: string) => void;
-}
-
-/** Public host observation consumed by the settlement protocol (plan §5.1). */
-export interface SynaraHostObservation {
-  readonly adapterCallbackSequence: number;
-  readonly scopeActive: boolean;
-  readonly tombstoneCount: number;
-}
-
-export type SynaraSettlementFamily =
-  | "pointer-gesture"
-  | "discrete-keyboard-mutation"
-  | "text-edit-composition"
-  | "generic-native-command"
-  | "presentation-no-op";
-
-export interface SynaraSettlementObservationInput {
-  readonly kind:
-    | "pointer-down"
-    | "pointer-up"
-    | "pointer-cancel"
-    | "keyboard-candidate"
-    | "text-edit-active"
-    | "text-edit-inactive"
-    | "semantic-callback"
-    | "focus";
-  readonly key?: string;
 }

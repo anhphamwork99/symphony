@@ -2,6 +2,7 @@ import type {
   SynaraSceneInput,
   SynaraSceneSnapshot,
   SynaraSyntheticWriteScopeHandle,
+  SynaraViewport,
 } from "../ticket01/SynaraExcalidrawAdapter";
 import {
   captureDocumentSnapshot,
@@ -21,38 +22,31 @@ import type {
   SynaraAiCommandTrace,
   SynaraAiCommandTraceStep,
   SynaraAiHistoryEvent,
-  SynaraAiHistoryReporter,
+  SynaraAiHistoryState,
   SynaraEditLockState,
   SynaraHistoryDiagnostic,
+  SynaraHistoryDiagnosticCode,
   SynaraHistoryIdentity,
 } from "./SynaraAiHistoryTypes";
-
-/**
- * AI-only history coordinator (plan §§4.3, 6.4).
- *
- * Humans are settlement/invalidation inputs, never events. There is no
- * generic undo/redo dispatcher: `undoAiBatch` and `redoAiBatch` are the only
- * commands, they never dispatch native Undo/Redo, and native shortcuts pass
- * untouched to the package.
- */
-
-const MAX_RETAINED_AI_EVENTS = 20;
 
 export interface SynaraAiHistoryHost {
   readonly getIdentity: () => { readonly mountId: number; readonly apiId: string | null };
   readonly captureScene: () => SynaraSceneSnapshot;
-  readonly captureViewport: () => { readonly scrollX: number; readonly scrollY: number; readonly zoom: number };
+  readonly captureViewport: () => SynaraViewport;
   readonly updateScene: (update: SynaraSceneInput & { readonly sequence?: number }) => void;
   readonly restoreScene: (snapshot: SynaraSceneSnapshot) => void;
-  readonly restoreViewport: (viewport: { readonly scrollX: number; readonly scrollY: number; readonly zoom: number }) => void;
   readonly clearNativeHistory: () => void;
   readonly setViewModeEnabled: (enabled: boolean) => void;
   readonly openSyntheticWriteScope: (context: {
     readonly purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback";
+    readonly canvasIdentity: string;
+    readonly mountIdentity: string;
+    readonly apiIdentity: string;
     readonly operationId: string;
     readonly operationGeneration: number;
     readonly sessionEpoch: number;
     readonly routeEpoch: number;
+    readonly expectedBeforeRevision: number;
   }) => SynaraSyntheticWriteScopeHandle;
   readonly observeHostBoundary: () => {
     readonly adapterCallbackSequence: number;
@@ -68,7 +62,6 @@ export interface SynaraAiHistoryCoordinatorOptions {
   readonly browser?: string;
   readonly platform?: string;
   readonly settlementMaxWaitMs?: number;
-  readonly syntheticDrainWindowMs?: number;
   readonly onDiagnostic?: (diagnostic: SynaraHistoryDiagnostic) => void;
 }
 
@@ -79,44 +72,55 @@ interface ActiveAiBatch {
   readonly before: SynaraDocumentSnapshot;
   readonly beforeRevision: number;
   readonly creationRouteEpoch: number;
+  readonly identity: SynaraHistoryIdentity;
+  readonly scope: SynaraSyntheticWriteScopeHandle;
   acceptedSyntheticWriteCount: number;
-  nextLocalSequence: number;
-  scope: SynaraSyntheticWriteScopeHandle | null;
+  lastTarget: SynaraDocumentSnapshot;
 }
 
-export class SynaraAiHistoryCoordinator implements SynaraAiHistoryReporter {
+type ApplicableSide = {
+  readonly eventId: string;
+  readonly side: "before" | "after";
+  readonly routeEpoch: number;
+  readonly mutationRevision: number;
+} | null;
+
+/** AI-only coordinator. Native history is never dispatched or represented here. */
+export class SynaraAiHistoryCoordinator {
   private events: SynaraAiHistoryEvent[] = [];
   private cursor = 0;
   private lockState: SynaraEditLockState = "unlocked";
   private routeEpoch = 1;
   private mutationRevision = 0;
-  private sessionEpoch = 1;
+  private readonly sessionEpoch = 1;
   private eventCounter = 0;
   private activeBatch: ActiveAiBatch | null = null;
+  private applicableSide: ApplicableSide = null;
   private readonly diagnostics: SynaraHistoryDiagnostic[] = [];
   private readonly traces: SynaraAiCommandTrace[] = [];
   private readonly settlements: SynaraSettlementResult[] = [];
   private readonly settlementObserver: SynaraSettlementObserver;
-  private humanInvalidated = false;
+  private readonly initialIdentity: SynaraHistoryIdentity;
 
   public constructor(
     private readonly host: SynaraAiHistoryHost,
     private readonly options: SynaraAiHistoryCoordinatorOptions,
   ) {
+    this.initialIdentity = this.identity();
     this.settlementObserver = createSettlementObserver({
       maxWaitMs: options.settlementMaxWaitMs ?? 500,
     });
   }
 
-  public getState() {
-    return {
+  public getState(): SynaraAiHistoryState {
+    return Object.freeze({
       events: Object.freeze([...this.events]),
       cursor: this.cursor,
       lockState: this.lockState,
       routeEpoch: this.routeEpoch,
       mutationRevision: this.mutationRevision,
       identity: this.identity(),
-    };
+    });
   }
 
   public getDiagnostics(): readonly SynaraHistoryDiagnostic[] {
@@ -131,55 +135,48 @@ export class SynaraAiHistoryCoordinator implements SynaraAiHistoryReporter {
     return Object.freeze([...this.settlements]);
   }
 
-  public report(
-    diagnostic: Omit<SynaraHistoryDiagnostic, "schema">,
-  ): void {
-    const record = { ...diagnostic, schema: "synara.whiteboard.history-diagnostic/v1" as const };
-    this.diagnostics.push(record);
-    this.options.onDiagnostic?.(record);
-  }
-
   private identity(): SynaraHistoryIdentity {
-    const adapterIdentity = this.host.getIdentity();
+    const adapter = this.host.getIdentity();
     return {
       canvasIdentity: this.options.canvasIdentity,
-      mountIdentity: `mount-${adapterIdentity.mountId}`,
-      apiIdentity: adapterIdentity.apiId ?? "api-unready",
+      mountIdentity: `mount-${adapter.mountId}`,
+      apiIdentity: adapter.apiId ?? "api-unready",
       sessionEpoch: this.sessionEpoch,
     };
   }
 
-  private baseDiagnostic(
+  private report(
     owner: "adapter" | "coordinator",
-    code: SynaraHistoryDiagnostic["code"],
-    fields: {
-      readonly severity: SynaraHistoryDiagnostic["severity"];
-      readonly recoverability: SynaraHistoryDiagnostic["recoverability"];
-      readonly acApplicability: SynaraHistoryDiagnostic["acApplicability"];
+    code: SynaraHistoryDiagnosticCode,
+    input: {
       readonly phase: string;
       readonly message: string;
-      readonly summary: string;
       readonly expected: string;
       readonly observed: string;
-      readonly batchId?: string;
-      readonly eventId?: string;
+      readonly severity?: SynaraHistoryDiagnostic["severity"];
+      readonly recoverability?: SynaraHistoryDiagnostic["recoverability"];
       readonly operationId?: string;
       readonly operationGeneration?: number;
+      readonly operationLocalSequence?: number;
+      readonly adapterSyntheticSequence?: number;
+      readonly adapterCallbackSequence?: number;
       readonly scopeCorrelationId?: string;
-      readonly rollbackResult?: SynaraHistoryDiagnostic["rollbackResult"];
+      readonly batchId?: string;
+      readonly eventId?: string;
     },
-  ): Omit<SynaraHistoryDiagnostic, "schema"> {
+  ): SynaraHistoryDiagnostic {
     const identity = this.identity();
-    return {
+    const diagnostic: SynaraHistoryDiagnostic = Object.freeze({
+      schema: "synara.whiteboard.history-diagnostic/v1",
       owner,
       code,
-      severity: fields.severity,
-      recoverability: fields.recoverability,
-      acApplicability: fields.acApplicability,
-      phase: fields.phase,
+      severity: input.severity ?? "error",
+      recoverability: input.recoverability ?? "locked",
+      acApplicability: "bounded-gate-evidence",
+      phase: input.phase,
       scenario: this.options.scenario,
-      message: fields.message,
-      summary: fields.summary,
+      message: input.message,
+      summary: `${code}: ${input.message}`,
       packageVersion: "0.18.1",
       browser: this.options.browser ?? "stable-chromium",
       platform: this.options.platform ?? "gate-harness",
@@ -189,415 +186,564 @@ export class SynaraAiHistoryCoordinator implements SynaraAiHistoryReporter {
       sessionEpoch: identity.sessionEpoch,
       routeEpoch: this.routeEpoch,
       mutationRevision: this.mutationRevision,
-      ...(fields.operationId !== undefined ? { operationId: fields.operationId } : {}),
-      ...(fields.operationGeneration !== undefined
-        ? { operationGeneration: fields.operationGeneration }
-        : {}),
-      ...(fields.scopeCorrelationId !== undefined
-        ? { scopeCorrelationId: fields.scopeCorrelationId }
-        : {}),
-      ...(fields.batchId !== undefined ? { batchId: fields.batchId } : {}),
-      ...(fields.eventId !== undefined ? { eventId: fields.eventId } : {}),
-      expected: fields.expected,
-      observed: fields.observed,
+      ...(input.operationId === undefined ? {} : { operationId: input.operationId }),
+      ...(input.operationGeneration === undefined
+        ? {}
+        : { operationGeneration: input.operationGeneration }),
+      ...(input.operationLocalSequence === undefined
+        ? {}
+        : { operationLocalSequence: input.operationLocalSequence }),
+      ...(input.adapterSyntheticSequence === undefined
+        ? {}
+        : { adapterSyntheticSequence: input.adapterSyntheticSequence }),
+      ...(input.adapterCallbackSequence === undefined
+        ? {}
+        : { adapterCallbackSequence: input.adapterCallbackSequence }),
+      ...(input.scopeCorrelationId === undefined
+        ? {}
+        : { scopeCorrelationId: input.scopeCorrelationId }),
+      ...(input.batchId === undefined ? {} : { batchId: input.batchId }),
+      ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+      expected: input.expected,
+      observed: input.observed,
       lockState: this.lockState,
-      ...(fields.rollbackResult !== undefined ? { rollbackResult: fields.rollbackResult } : {}),
       timestamp: Date.now(),
-    };
+    });
+    this.diagnostics.push(diagnostic);
+    this.options.onDiagnostic?.(diagnostic);
+    return diagnostic;
   }
 
-  /**
-   * Begin a fake AI operation: deep-capture pre-state before any progress and
-   * open the edit lock plus the single mutation-capable synthetic scope.
-   */
-  public beginAiOperation(input: {
+  public recordAdapterDiagnostic(input: {
+    readonly code: SynaraHistoryDiagnosticCode;
+    readonly phase: string;
+    readonly expected: string;
+    readonly observed: string;
+  }): void {
+    this.report("adapter", input.code, {
+      ...input,
+      message: input.observed,
+      severity: input.code === "duplicate-synthetic-callback" ? "error" : "critical",
+      recoverability: "locked",
+    });
+  }
+
+  public failClosedForUnknownCallback(): void {
+    this.lockState = "locked-fault";
+    this.host.setViewModeEnabled(true);
+  }
+
+  public async beginAiOperation(input: {
     readonly batchId: string;
     readonly operationId: string;
     readonly operationGeneration: number;
-  }): void {
-    if (this.activeBatch !== null) {
-      this.report(
-        this.baseDiagnostic("coordinator", "operation-not-applicable", {
-          severity: "error",
-          recoverability: "none",
-          acApplicability: "AC2",
-          phase: "ai-batch-begin",
-          message: "an AI batch is already active",
-          summary: "AI batch begin rejected: another batch is active",
-          expected: "no AI batch is active before accepting a new batch",
-          observed: `batch ${this.activeBatch.batchId} is active`,
-          batchId: input.batchId,
-          operationId: input.operationId,
-          operationGeneration: input.operationGeneration,
-        }),
-      );
-      throw new Error("an AI batch is already active");
+  }): Promise<void> {
+    if (this.activeBatch !== null || this.lockState !== "unlocked") {
+      this.report("coordinator", "operation-not-applicable", {
+        phase: "ai-batch-begin",
+        message: "AI batch begin requires one unlocked idle coordinator",
+        expected: "unlocked with no active batch",
+        observed: `lock=${this.lockState}, active=${this.activeBatch?.batchId ?? "none"}`,
+        batchId: input.batchId,
+        operationId: input.operationId,
+        operationGeneration: input.operationGeneration,
+        recoverability: "none",
+      });
+      throw new Error("AI operation is not applicable");
     }
-    if (this.lockState === "locked-fault") {
-      this.report(
-        this.baseDiagnostic("coordinator", "session-locked", {
-          severity: "critical",
-          recoverability: "locked",
-          acApplicability: "AC8",
-          phase: "ai-batch-begin",
-          message: "editing is locked by an unrecoverable fault",
-          summary: "AI batch begin rejected: session is locked",
-          expected: "the session is not in a locked-fault state",
-          observed: "locked-fault",
-        }),
-      );
-      throw new Error("session is locked");
-    }
+    this.assertStableIdentity("ai-batch-begin");
     const before = captureDocumentSnapshot(this.host.captureScene());
-    const scope = this.host.openSyntheticWriteScope({
-      purpose: "ai-batch-progress",
-      operationId: input.operationId,
-      operationGeneration: input.operationGeneration,
-      sessionEpoch: this.sessionEpoch,
-      routeEpoch: this.routeEpoch,
-    });
-    this.host.setViewModeEnabled(true);
+    const identity = this.identity();
     this.lockState = "ai-batch";
+    this.host.setViewModeEnabled(true);
+    await this.awaitHostQuiescence();
+    const locked = captureDocumentSnapshot(this.host.captureScene());
+    if (!documentSnapshotsEqual(before, locked)) {
+      this.report("adapter", "edit-lock-failed", {
+        phase: "ai-batch-begin",
+        message: "document changed while establishing the supported AI edit lock",
+        expected: before.semanticFingerprint,
+        observed: locked.semanticFingerprint,
+      });
+      this.lockFault();
+      throw new Error("AI edit lock failed");
+    }
+    const scope = this.openScope(
+      "ai-batch-progress",
+      input.operationId,
+      input.operationGeneration,
+      this.mutationRevision,
+    );
     this.activeBatch = {
-      batchId: input.batchId,
-      operationId: input.operationId,
-      operationGeneration: input.operationGeneration,
+      ...input,
       before,
       beforeRevision: this.mutationRevision,
       creationRouteEpoch: this.routeEpoch,
-      acceptedSyntheticWriteCount: 0,
-      nextLocalSequence: 1,
+      identity,
       scope,
+      acceptedSyntheticWriteCount: 0,
+      lastTarget: before,
     };
   }
 
-  /**
-   * Ordered progress: `captureUpdate: "NEVER"` through the host updateScene,
-   * issued inside the synthetic scope so every write is registered,
-   * sequenced, and acknowledged before finalize.
-   */
   public applyAiProgress(input: {
     readonly batchId: string;
+    readonly operationGeneration: number;
     readonly operationLocalSequence: number;
     readonly update: SynaraSceneInput;
-  }): { readonly adapterGlobalSyntheticSequence: number; readonly correlationId: string } {
+  }): {
+    readonly adapterGlobalSyntheticSequence: number;
+    readonly correlationId: string;
+    readonly acknowledgement: Promise<void>;
+  } {
     const batch = this.requireBatch(input.batchId);
-    if (batch.scope === null) throw new Error("AI batch has no open synthetic scope");
+    if (input.operationGeneration !== batch.operationGeneration) {
+      this.report("coordinator", "stale-operation-generation", {
+        phase: "ai-progress",
+        message: "stale operation generation was rejected before a scene write",
+        expected: String(batch.operationGeneration),
+        observed: String(input.operationGeneration),
+        operationId: batch.operationId,
+        operationGeneration: input.operationGeneration,
+        operationLocalSequence: input.operationLocalSequence,
+        batchId: batch.batchId,
+        recoverability: "none",
+      });
+      throw new Error("stale operation generation");
+    }
+    const current = this.host.captureScene();
+    const targetScene: SynaraSceneSnapshot = {
+      ...current,
+      elements: input.update.elements ?? current.elements,
+      files: input.update.files ?? current.files,
+    };
+    const target = captureDocumentSnapshot(targetScene);
     const receipt = batch.scope.issue({
       operationLocalSequence: input.operationLocalSequence,
-      apply: () => {
-        this.host.updateScene(input.update);
+      expectedBeforeRevision: this.mutationRevision,
+      targetProjection: target.semanticFingerprint,
+      apply: () => this.host.updateScene(input.update),
+      onAcknowledged: () => {
+        batch.acceptedSyntheticWriteCount += 1;
+        batch.lastTarget = target;
+        this.mutationRevision += 1;
       },
     });
-    batch.acceptedSyntheticWriteCount += 1;
-    this.mutationRevision += 1;
     return receipt;
   }
 
-  /**
-   * Finalize the completed batch: verify canonically, drain/close the scope,
-   * clear native history through the public boundary, observe the bounded
-   * post-clear drain, and only then expose one event and unlock.
-   */
   public async completeAiOperation(batchId: string): Promise<SynaraAiHistoryEvent | null> {
     const batch = this.requireBatch(batchId);
-    if (batch.scope === null) throw new Error("AI batch has no open synthetic scope");
-    const after = captureDocumentSnapshot(this.host.captureScene());
-    if (
-      batch.acceptedSyntheticWriteCount === 0 ||
-      documentSnapshotsEqual(batch.before, after)
-    ) {
+    try {
       await batch.scope.drain();
+      this.assertOperationLock("ai-batch", "ai-batch-complete");
+      const after = captureDocumentSnapshot(this.host.captureScene());
+      if (!documentSnapshotsEqual(after, batch.lastTarget)) {
+        throw this.failSemanticVerification("ai-batch-complete", batch.lastTarget, after);
+      }
       await batch.scope.close();
+      this.assertOperationLock("ai-batch", "ai-batch-complete");
+      if (
+        batch.acceptedSyntheticWriteCount === 0 ||
+        documentSnapshotsEqual(batch.before, after)
+      ) {
+        this.activeBatch = null;
+        this.host.setViewModeEnabled(false);
+        this.lockState = "unlocked";
+        return null;
+      }
+      await this.clearAndProveStable(after, "ai-batch-complete");
+      this.assertOperationLock("ai-batch", "ai-batch-complete");
+      const event = this.appendCompletedEvent(batch, after);
       this.activeBatch = null;
-      this.lockState = "unlocked";
+      this.routeEpoch += 1;
+      this.applicableSide = {
+        eventId: event.id,
+        side: "after",
+        routeEpoch: this.routeEpoch,
+        mutationRevision: this.mutationRevision,
+      };
       this.host.setViewModeEnabled(false);
-      return null;
+      this.lockState = "unlocked";
+      return event;
+    } catch (error) {
+      batch.scope.abort(error instanceof Error ? error.message : String(error));
+      this.lockFault();
+      throw error;
     }
-    await batch.scope.drain();
-    await batch.scope.close();
-    this.host.clearNativeHistory();
-    await this.postClearDrain();
-    const event = this.appendEvent(batch, after, "completed");
-    this.activeBatch = null;
-    this.routeEpoch += 1;
-    this.lockState = "unlocked";
-    this.host.setViewModeEnabled(false);
-    return event;
   }
 
-  private async postClearDrain(): Promise<void> {
-    const before = this.host.observeHostBoundary().adapterCallbackSequence;
-    await settlementDrainWindow({
-      maxWaitMs: this.options.settlementMaxWaitMs ?? 500,
-      onNewCallback: () => this.host.observeHostBoundary().adapterCallbackSequence !== before,
-    });
-  }
-
-  private appendEvent(
+  private appendCompletedEvent(
     batch: ActiveAiBatch,
     after: SynaraDocumentSnapshot,
-    outcome: SynaraAiHistoryEvent["outcome"],
   ): SynaraAiHistoryEvent {
-    const identity = this.identity();
-    const event: SynaraAiHistoryEvent = {
+    const event: SynaraAiHistoryEvent = Object.freeze({
       id: `ai-event-${++this.eventCounter}`,
-      provenance: {
-        canvasIdentity: identity.canvasIdentity,
-        mountIdentity: identity.mountIdentity,
-        apiIdentity: identity.apiIdentity,
-        sessionEpoch: identity.sessionEpoch,
+      provenance: Object.freeze({
+        canvasIdentity: batch.identity.canvasIdentity,
+        mountIdentity: batch.identity.mountIdentity,
+        apiIdentity: batch.identity.apiIdentity,
+        sessionEpoch: batch.identity.sessionEpoch,
         creationRouteEpoch: batch.creationRouteEpoch,
         operationId: batch.operationId,
         operationGeneration: batch.operationGeneration,
         beforeRevision: batch.beforeRevision,
         afterRevision: this.mutationRevision,
-      },
-      outcome,
+      }),
+      outcome: "completed",
       batchId: batch.batchId,
       acceptedSyntheticWriteCount: batch.acceptedSyntheticWriteCount,
       before: batch.before,
       after,
-    };
-    // A new mutated AI batch after Undo deletes only the AI Redo branch.
-    this.events = [...this.events.slice(0, this.cursor), event].slice(-MAX_RETAINED_AI_EVENTS);
+    });
+    this.events = [...this.events.slice(0, this.cursor), event];
     this.cursor = this.events.length;
     return event;
   }
 
-  /** Current command applicability for Undo, evaluated from live state. */
   public canUndoAiBatch(): boolean {
-    return (
-      this.lockState === "unlocked" &&
-      !this.humanInvalidated &&
-      this.cursor > 0 &&
-      this.cursor <= this.events.length
-    );
+    return this.commandEvent("undo-ai-batch", false) !== null;
   }
 
-  /** Current command applicability for Redo, evaluated from live state. */
   public canRedoAiBatch(): boolean {
-    return (
-      this.lockState === "unlocked" &&
-      !this.humanInvalidated &&
-      this.cursor >= 0 &&
-      this.cursor < this.events.length
-    );
+    return this.commandEvent("redo-ai-batch", false) !== null;
   }
 
-  private recordTrace(command: "undo-ai-batch" | "redo-ai-batch", eventId: string): {
-    readonly push: (step: SynaraAiCommandTraceStep) => void;
-    readonly finish: () => void;
-  } {
-    const steps: SynaraAiCommandTraceStep[] = [];
-    return {
-      push: (step) => {
-        steps.push(step);
-      },
-      finish: () => {
-        this.traces.push({ command, eventId, steps: Object.freeze([...steps]) });
-      },
-    };
-  }
-
-  /**
-   * Explicit AI Undo. Never dispatches native Undo/Redo. Restores the exact
-   * canonical pre-state with command-start viewport/zoom preserved, verifies
-   * before moving the cursor, invokes the public native clear at the required
-   * point, and exposes/unlocks only after the bounded post-clear drain.
-   */
-  public async undoAiBatch(): Promise<boolean> {
+  public undoAiBatch(): Promise<boolean> {
     return this.restoreCommand("undo-ai-batch");
   }
 
-  /** Explicit AI Redo with the same ordered lifecycle as Undo. */
-  public async redoAiBatch(): Promise<boolean> {
+  public redoAiBatch(): Promise<boolean> {
     return this.restoreCommand("redo-ai-batch");
   }
 
   private async restoreCommand(command: "undo-ai-batch" | "redo-ai-batch"): Promise<boolean> {
-    if (this.lockState !== "unlocked" || this.activeBatch !== null) {
-      this.report(
-        this.baseDiagnostic("coordinator", "cursor-not-actionable", {
-          severity: "warning",
-          recoverability: "retryable",
-          acApplicability: "AC3",
-          phase: command,
-          message: "AI command is unavailable while a batch or restore is active",
-          summary: `${command} rejected: session busy or locked`,
-          expected: "unlocked session with no active batch",
-          observed: `lockState=${this.lockState}`,
-        }),
-      );
-      return false;
-    }
-    if (this.humanInvalidated) {
-      this.report(
-        this.baseDiagnostic("coordinator", "ai-history-cleared-by-human", {
-          severity: "info",
-          recoverability: "none",
-          acApplicability: "AC4",
-          phase: command,
-          message: "AI history was cleared by a settled semantic human mutation",
-          summary: `${command} inert: AI history cleared by manual editing`,
-          expected: "AI history still actionable",
-          observed: "human mutation invalidated all AI events",
-        }),
-      );
-      return false;
-    }
-    const event =
-      command === "undo-ai-batch" ? this.events[this.cursor - 1] : this.events[this.cursor];
-    if (event === undefined) {
-      this.report(
-        this.baseDiagnostic("coordinator", "cursor-not-actionable", {
-          severity: "info",
-          recoverability: "none",
-          acApplicability: "AC3",
-          phase: command,
-          message: "no AI event is selected by the current cursor",
-          summary: `${command} inert: cursor selects no event`,
-          expected: "a cursor-selected AI event",
-          observed: `cursor=${this.cursor}, events=${this.events.length}`,
-        }),
-      );
-      return false;
-    }
-    const target =
-      command === "undo-ai-batch" ? event.before : event.after;
-    const commandStartSnapshot = captureDocumentSnapshot(this.host.captureScene());
-    const commandStartViewport = this.host.captureViewport();
-    const trace = this.recordTrace(command, event.id);
-    this.lockState = "restore";
-    const scope = this.host.openSyntheticWriteScope({
-      purpose: command === "undo-ai-batch" ? "ai-undo" : "ai-redo",
-      operationId: event.provenance.operationId,
-      operationGeneration: event.provenance.operationGeneration,
-      sessionEpoch: this.sessionEpoch,
-      routeEpoch: this.routeEpoch,
-    });
-    try {
-      trace.push("restore-write-issued");
-      scope.issue({
-        operationLocalSequence: 1,
-        apply: () => {
-          this.host.restoreScene(toSceneSnapshot(target));
-        },
+    const event = this.commandEvent(command, true);
+    if (event === null) return false;
+    const target = command === "undo-ai-batch" ? event.before : event.after;
+    if (target.activeFileReferences.length !== 0) {
+      this.report("coordinator", "operation-not-applicable", {
+        phase: command,
+        message: "Gate restore requires an empty active-file closure",
+        expected: "zero active file references",
+        observed: String(target.activeFileReferences.length),
+        eventId: event.id,
+        recoverability: "none",
       });
+      return false;
+    }
+    const viewport = this.host.captureViewport();
+    const selected = this.host.captureScene().selectedElementIds;
+    const targetIds = new Set(
+      target.elements.map((element) => String((element as Record<string, unknown>).id ?? "")),
+    );
+    const targetScene = {
+      ...toSceneSnapshot(target),
+      viewport,
+      selectedElementIds: selected.filter((id) => targetIds.has(id)),
+    };
+    const traceSteps: SynaraAiCommandTraceStep[] = [];
+    const push = (step: SynaraAiCommandTraceStep) => traceSteps.push(step);
+    this.lockState = "restore";
+    this.host.setViewModeEnabled(true);
+    await this.awaitHostQuiescence();
+    const scope = this.openScope(
+      command === "undo-ai-batch" ? "ai-undo" : "ai-redo",
+      event.provenance.operationId,
+      event.provenance.operationGeneration,
+      this.mutationRevision,
+    );
+    try {
+      push("restore-write-issued");
+      const receipt = scope.issue({
+        operationLocalSequence: 1,
+        expectedBeforeRevision: this.mutationRevision,
+        targetProjection: target.semanticFingerprint,
+        apply: () => this.host.restoreScene(targetScene),
+      });
+      await receipt.acknowledgement;
+      push("restore-callback-acknowledged");
       await scope.drain();
-      trace.push("restore-callback-acknowledged");
+      this.assertOperationLock("restore", command);
       const verified = captureDocumentSnapshot(this.host.captureScene());
       if (!documentSnapshotsEqual(target, verified)) {
-        this.report(
-          this.baseDiagnostic("coordinator", "semantic-verification-mismatch", {
-            severity: "critical",
-            recoverability: "locked",
-            acApplicability: "AC3",
-            phase: command,
-            message: "restored scene did not verify against the canonical target",
-            summary: `${command} failed verification; editing locked`,
-            expected: target.semanticFingerprint,
-            observed: verified.semanticFingerprint,
-            eventId: event.id,
-          }),
-        );
-        // Smallest Gate-safe command-start restoration.
-        this.host.restoreScene(toSceneSnapshot(commandStartSnapshot));
-        this.host.restoreViewport(commandStartViewport);
-        trace.push("restore-target-verified");
-        this.lockState = "locked-fault";
-        trace.finish();
-        return false;
+        throw this.failSemanticVerification(command, target, verified, event.id);
       }
-      trace.push("restore-target-verified");
-      this.host.restoreViewport(commandStartViewport);
-      trace.push("native-history-clear-invoked");
+      push("restore-target-verified");
+      await scope.close();
+      this.assertOperationLock("restore", command);
+      push("native-history-clear-invoked");
       this.host.clearNativeHistory();
-      trace.push("native-history-clear-returned");
-      await this.postClearDrain();
-      trace.push("post-clear-drain-complete");
+      push("native-history-clear-returned");
+      await this.provePostClearStable(target, command);
+      this.assertOperationLock("restore", command);
+      push("post-clear-drain-complete");
       this.cursor += command === "undo-ai-batch" ? -1 : 1;
-      trace.push("cursor-moved");
       this.mutationRevision += 1;
       this.routeEpoch += 1;
-      trace.push("result-exposed");
+      this.applicableSide = {
+        eventId: event.id,
+        side: command === "undo-ai-batch" ? "before" : "after",
+        routeEpoch: this.routeEpoch,
+        mutationRevision: this.mutationRevision,
+      };
+      push("cursor-moved");
+      push("result-exposed");
+      this.host.setViewModeEnabled(false);
       this.lockState = "unlocked";
-      trace.push("lock-released");
-      trace.finish();
+      push("lock-released");
+      this.traces.push(Object.freeze({ command, eventId: event.id, steps: Object.freeze(traceSteps) }));
       return true;
-    } finally {
-      await scope.close().catch(() => undefined);
+    } catch (error) {
+      scope.abort(error instanceof Error ? error.message : String(error));
+      this.lockFault();
+      return false;
     }
   }
 
-  /**
-   * Feed one public settlement observation. Returns the settlement result
-   * when a family settles through the drain decision.
-   */
-  public observeSettlementInput(input: SynaraSettlementInput): SynaraSettlementResult | null {
-    return this.settlementObserver.observe(input);
-  }
-
-  /**
-   * Settle any open human family after the common drain window. A changed
-   * projection clears all AI history exactly once; a proven no-op preserves
-   * it; uncertainty invalidates conservatively and marks the family unproven.
-   */
-  public async settleHumanMutation(): Promise<SynaraSettlementResult> {
-    const endSnapshot = captureDocumentSnapshot(this.host.captureScene());
-    const result = settleFamily(this.settlementObserver, endSnapshot);
-    this.settlements.push(result);
-    if (result.settled === "changed") {
-      this.clearAiHistory("human-mutation");
-    } else if (result.settled === "uncertain") {
-      this.report(
-        this.baseDiagnostic("coordinator", "human-settlement-uncertain", {
-          severity: "warning",
-          recoverability: "none",
-          acApplicability: "AC4",
-          phase: "human-settlement",
-          message: `settlement family ${result.family} could not be established safely`,
-          summary: `human settlement uncertain for ${result.family}; AI history invalidated conservatively`,
-          expected: "a reliable changed/no-op settlement",
-          observed: result.reason,
-        }),
+  private commandEvent(
+    command: "undo-ai-batch" | "redo-ai-batch",
+    reportFailure: boolean,
+  ): SynaraAiHistoryEvent | null {
+    const event = command === "undo-ai-batch" ? this.events[this.cursor - 1] : this.events[this.cursor];
+    const expectedSide = command === "undo-ai-batch" ? "after" : "before";
+    const invalid =
+      this.lockState !== "unlocked" ||
+      this.activeBatch !== null ||
+      event === undefined ||
+      this.applicableSide?.eventId !== event.id ||
+      this.applicableSide?.side !== expectedSide ||
+      this.applicableSide?.routeEpoch !== this.routeEpoch ||
+      this.applicableSide?.mutationRevision !== this.mutationRevision ||
+      !this.sameIdentity(event) ||
+      !documentSnapshotsEqual(
+        captureDocumentSnapshot(this.host.captureScene()),
+        expectedSide === "after" ? event.after : event.before,
       );
-      this.clearAiHistory("settlement-uncertain");
+    if (!invalid) return event;
+    if (reportFailure) {
+      this.report("coordinator", "cursor-not-actionable", {
+        phase: command,
+        message: "current identity, lineage, cursor, revision side, and projection must be actionable",
+        expected: `${expectedSide} side of one cursor-selected AI event`,
+        observed: `lock=${this.lockState}, cursor=${this.cursor}, events=${this.events.length}, side=${this.applicableSide?.side ?? "none"}`,
+        ...(event === undefined ? {} : { eventId: event.id }),
+        recoverability: "none",
+        severity: "info",
+      });
     }
+    return null;
+  }
+
+  private sameIdentity(event: SynaraAiHistoryEvent): boolean {
+    const current = this.identity();
+    return (
+      current.canvasIdentity === event.provenance.canvasIdentity &&
+      current.mountIdentity === event.provenance.mountIdentity &&
+      current.apiIdentity === event.provenance.apiIdentity &&
+      current.sessionEpoch === event.provenance.sessionEpoch
+    );
+  }
+
+  public observeSettlementInput(input: SynaraSettlementInput): SynaraSettlementResult | null {
+    if (this.lockState === "ai-batch" || this.lockState === "restore") {
+      if (input.kind === "semantic-callback" && input.callbackProvenance !== "synthetic") {
+        this.report("coordinator", "native-mutation-during-ai-lock", {
+          phase: "human-settlement",
+          message: "a human semantic callback arrived while AI mutation was locked",
+          expected: "only correlated synthetic callbacks while locked",
+          observed: input.callbackProvenance ?? "human",
+          adapterCallbackSequence: input.adapterCallbackSequence,
+        });
+        this.lockFault();
+      }
+      return null;
+    }
+    const immediate = this.settlementObserver.observe(input);
+    if (immediate !== null) this.acceptSettlement(immediate);
+    return immediate;
+  }
+
+  public async settleHumanMutation(): Promise<SynaraSettlementResult> {
+    let callbackSequence = this.host.observeHostBoundary().adapterCallbackSequence;
+    await settlementDrainWindow({
+      maxWaitMs: this.options.settlementMaxWaitMs ?? 500,
+      onNewCallback: () => {
+        const next = this.host.observeHostBoundary().adapterCallbackSequence;
+        const changed = next !== callbackSequence;
+        callbackSequence = next;
+        return changed;
+      },
+    });
+    const result = settleFamily(
+      this.settlementObserver,
+      captureDocumentSnapshot(this.host.captureScene()),
+    );
+    this.acceptSettlement(result);
     return result;
   }
 
-  private clearAiHistory(reason: string): void {
-    if (this.events.length === 0 && this.cursor === 0 && !this.humanInvalidated) return;
+  private acceptSettlement(result: SynaraSettlementResult): void {
+    this.settlements.push(result);
+    if (result.settled === "no-op") return;
+    if (result.settled === "uncertain") {
+      this.report("coordinator", "human-settlement-uncertain", {
+        phase: "human-settlement",
+        message: `settlement family ${result.family} remained uncertain`,
+        expected: "reliable changed/no-op settlement within 500ms",
+        observed: result.reason,
+        recoverability: "none",
+        severity: "warning",
+      });
+    }
     this.events = [];
     this.cursor = 0;
-    this.humanInvalidated = true;
+    this.applicableSide = null;
     this.routeEpoch += 1;
-    this.mutationRevision += 1;
-    void reason;
+    if (result.settled === "changed") this.mutationRevision += 1;
   }
 
-  public isHumanInvalidated(): boolean {
-    return this.humanInvalidated;
+  private openScope(
+    purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback",
+    operationId: string,
+    operationGeneration: number,
+    expectedBeforeRevision: number,
+  ): SynaraSyntheticWriteScopeHandle {
+    const identity = this.identity();
+    return this.host.openSyntheticWriteScope({
+      purpose,
+      canvasIdentity: identity.canvasIdentity,
+      mountIdentity: identity.mountIdentity,
+      apiIdentity: identity.apiIdentity,
+      operationId,
+      operationGeneration,
+      sessionEpoch: identity.sessionEpoch,
+      routeEpoch: this.routeEpoch,
+      expectedBeforeRevision,
+    });
+  }
+
+  private async clearAndProveStable(
+    expected: SynaraDocumentSnapshot,
+    phase: string,
+  ): Promise<void> {
+    try {
+      this.host.clearNativeHistory();
+    } catch (error) {
+      this.report("adapter", "native-history-clear-failed", {
+        phase,
+        message: "public native history clear failed",
+        expected: "api.history.clear returns",
+        observed: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    await this.provePostClearStable(expected, phase);
+  }
+
+  private async awaitHostQuiescence(): Promise<void> {
+    let callbackSequence = this.host.observeHostBoundary().adapterCallbackSequence;
+    await settlementDrainWindow({
+      maxWaitMs: this.options.settlementMaxWaitMs ?? 500,
+      onNewCallback: () => {
+        const next = this.host.observeHostBoundary().adapterCallbackSequence;
+        const changed = next !== callbackSequence;
+        callbackSequence = next;
+        return changed;
+      },
+    });
+  }
+
+  private async provePostClearStable(
+    expected: SynaraDocumentSnapshot,
+    phase: string,
+  ): Promise<void> {
+    let callbackSequence = this.host.observeHostBoundary().adapterCallbackSequence;
+    await settlementDrainWindow({
+      maxWaitMs: this.options.settlementMaxWaitMs ?? 500,
+      onNewCallback: () => {
+        const next = this.host.observeHostBoundary().adapterCallbackSequence;
+        const changed = next !== callbackSequence;
+        callbackSequence = next;
+        return changed;
+      },
+    });
+    const observed = captureDocumentSnapshot(this.host.captureScene());
+    if (!documentSnapshotsEqual(expected, observed)) {
+      this.report("adapter", "native-history-reappeared-after-clear", {
+        phase,
+        message: "document content changed during the bounded post-clear drain",
+        expected: expected.semanticFingerprint,
+        observed: observed.semanticFingerprint,
+      });
+      throw new Error("native history reappeared after clear");
+    }
+  }
+
+  private failSemanticVerification(
+    phase: string,
+    expected: SynaraDocumentSnapshot,
+    observed: SynaraDocumentSnapshot,
+    eventId?: string,
+  ): Error {
+    this.report("coordinator", "semantic-verification-mismatch", {
+      phase,
+      message: "canonical target verification failed",
+      expected: expected.semanticFingerprint,
+      observed: observed.semanticFingerprint,
+      ...(eventId === undefined ? {} : { eventId }),
+    });
+    return new Error("canonical target verification failed");
+  }
+
+  private assertStableIdentity(phase: string): void {
+    const current = this.identity();
+    if (
+      current.mountIdentity === this.initialIdentity.mountIdentity &&
+      current.apiIdentity === this.initialIdentity.apiIdentity
+    ) {
+      return;
+    }
+    this.report("adapter", "identity-changed-unexpectedly", {
+      phase,
+      message: "adapter mount/API identity changed outside a lifecycle boundary",
+      expected: `${this.initialIdentity.mountIdentity}/${this.initialIdentity.apiIdentity}`,
+      observed: `${current.mountIdentity}/${current.apiIdentity}`,
+    });
+    this.lockFault();
+    throw new Error("adapter identity changed unexpectedly");
   }
 
   private requireBatch(batchId: string): ActiveAiBatch {
-    if (this.activeBatch === null || this.activeBatch.batchId !== batchId) {
-      this.report(
-        this.baseDiagnostic("coordinator", "operation-not-applicable", {
-          severity: "error",
-          recoverability: "none",
-          acApplicability: "AC2",
-          phase: "ai-batch",
-          message: "no matching active AI batch",
-          summary: "AI batch operation rejected: batch not active",
-          expected: `active batch ${batchId}`,
-          observed: this.activeBatch === null ? "no active batch" : `active batch ${this.activeBatch.batchId}`,
-          batchId,
-        }),
-      );
-      throw new Error(`batch ${batchId} is not active`);
-    }
-    return this.activeBatch;
+    if (this.activeBatch?.batchId === batchId) return this.activeBatch;
+    this.report("coordinator", "operation-not-applicable", {
+      phase: "ai-batch",
+      message: "no matching active AI batch",
+      expected: batchId,
+      observed: this.activeBatch?.batchId ?? "none",
+      batchId,
+      recoverability: "none",
+    });
+    throw new Error(`batch ${batchId} is not active`);
+  }
+
+  private lockFault(): void {
+    this.lockState = "locked-fault";
+    this.host.setViewModeEnabled(true);
+  }
+
+  private assertOperationLock(
+    expected: Extract<SynaraEditLockState, "ai-batch" | "restore">,
+    phase: string,
+  ): void {
+    if (this.lockState === expected) return;
+    this.report("coordinator", "operation-not-applicable", {
+      phase,
+      message: "operation faulted before its result could be exposed",
+      expected: `lock=${expected}`,
+      observed: `lock=${this.lockState}`,
+    });
+    this.lockFault();
+    throw new Error("operation faulted before completion");
   }
 }

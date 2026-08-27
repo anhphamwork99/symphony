@@ -47,27 +47,19 @@ const CANONICAL_ELEMENT_FIELDS = [
   "endBinding",
   "startArrowhead",
   "endArrowhead",
-  "lastCommittedPoint",
+  // `lastCommittedPoint` is package editing state, not document meaning.
   "fileId",
   "scale",
-  "seed",
-  "version",
-  "versionNonce",
-  "index",
-  "isDeleted",
-  "updated",
+  // Excalidraw's seed/version/index/deletion/update fields are package
+  // normalization and history state, so they are intentionally excluded.
   "name",
   "customData",
-  "status",
 ] as const;
-
-/** Semantic file-reference metadata retained by the projection. */
-const CANONICAL_FILE_FIELDS = ["id", "mimeType", "created"] as const;
 
 export interface SynaraActiveFileReference {
   readonly fileId: string;
-  readonly mimeType: string;
-  readonly created: number;
+  readonly mimeType: string | null;
+  readonly created: number | null;
 }
 
 export interface SynaraDocumentSnapshot {
@@ -78,7 +70,61 @@ export interface SynaraDocumentSnapshot {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * Convert package/caller values into an owned, JSON-shaped value. In
+ * particular, no Date, Map, Set, typed array, class instance, or other
+ * mutable host object is allowed to cross the snapshot boundary.
+ */
+function canonicalizeValue(value: unknown, active: WeakSet<object>): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") {
+    return null;
+  }
+  if (typeof value === "bigint") return value.toString();
+
+  const object = value as object;
+  if (active.has(object)) throw new TypeError("canonical snapshot cannot contain a cyclic value");
+  active.add(object);
+  try {
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof RegExp) return value.toString();
+    if (value instanceof ArrayBuffer) return [...new Uint8Array(value)].map((entry) => entry);
+    if (ArrayBuffer.isView(value)) {
+      return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
+    if (value instanceof Map) {
+      return [...value.entries()]
+        .map(([key, nested]) => [
+          canonicalizeValue(key, active),
+          canonicalizeValue(nested, active),
+        ])
+        .toSorted(([left], [right]) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    }
+    if (value instanceof Set) {
+      return [...value.values()]
+        .map((nested) => canonicalizeValue(nested, active))
+        .toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    }
+    if (Array.isArray(value)) {
+      return value.map((nested) => canonicalizeValue(nested, active));
+    }
+
+    // Class instances are copied by their enumerable data only. This strips
+    // prototype methods and preserves no caller-owned object identity.
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalizeValue(nested, active)]),
+    );
+  } finally {
+    active.delete(object);
+  }
 }
 
 function cloneFrozen<T>(value: T): T {
@@ -93,6 +139,10 @@ function cloneFrozen<T>(value: T): T {
   return value;
 }
 
+function canonicalOwnedValue(value: unknown): unknown {
+  return canonicalizeValue(value, new WeakSet<object>());
+}
+
 /**
  * The named canonical semantic projection: canonical element fields only,
  * sorted by stable id, with package-default normalization through the
@@ -100,13 +150,17 @@ function cloneFrozen<T>(value: T): T {
  */
 export function canonicalSemanticProjection(
   scene: Pick<SynaraSceneSnapshot, "elements" | "files">,
-): { readonly elements: readonly SynaraSceneElement[]; readonly activeFileReferences: readonly SynaraActiveFileReference[] } {
+): {
+  readonly elements: readonly SynaraSceneElement[];
+  readonly activeFileReferences: readonly SynaraActiveFileReference[];
+} {
   const elements = [...scene.elements]
     .map((element) => {
       const projected: Record<string, unknown> = {};
       for (const field of CANONICAL_ELEMENT_FIELDS) {
-        if (field in (element as Record<string, unknown>)) {
-          projected[field] = (element as Record<string, unknown>)[field];
+        const value = (element as Record<string, unknown>)[field];
+        if (value !== undefined) {
+          projected[field] = canonicalOwnedValue(value);
         }
       }
       return projected as unknown as SynaraSceneElement;
@@ -117,20 +171,36 @@ export function canonicalSemanticProjection(
       return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
     });
 
-  const activeFileReferences = Object.values(scene.files ?? {})
-    .map((file) => {
+  const referencedFileIds = new Set(
+    scene.elements.flatMap((element) => {
+      const fileId = (element as Record<string, unknown>).fileId;
+      return typeof fileId === "string" ? [fileId] : [];
+    }),
+  );
+  const activeFileReferences = Object.entries(scene.files ?? {})
+    .filter(([fileId]) => referencedFileIds.has(fileId))
+    .map(([fileId, file]) => {
       const record = file as Record<string, unknown>;
-      const projected: Record<string, unknown> = {};
-      for (const field of CANONICAL_FILE_FIELDS) {
-        if (field in record) projected[field] = record[field];
-      }
-      return projected as unknown as SynaraActiveFileReference;
+      // The Excalidraw file map key is authoritative. `file.id` is package
+      // metadata and can be stale/malformed; never confuse it with fileId.
+      return {
+        fileId,
+        mimeType:
+          typeof record.mimeType === "string" ? record.mimeType : null,
+        created:
+          typeof record.created === "number" && Number.isFinite(record.created)
+            ? record.created
+            : null,
+      } satisfies SynaraActiveFileReference;
     })
     .toSorted((left, right) =>
       left.fileId < right.fileId ? -1 : left.fileId > right.fileId ? 1 : 0,
     );
 
-  return { elements, activeFileReferences };
+  return Object.freeze({
+    elements: Object.freeze(elements),
+    activeFileReferences: Object.freeze(activeFileReferences),
+  });
 }
 
 function stableValue(value: unknown): unknown {
@@ -149,8 +219,7 @@ function stableValue(value: unknown): unknown {
 export function semanticFingerprint(
   scene: Pick<SynaraSceneSnapshot, "elements" | "files">,
 ): string {
-  const { elements, activeFileReferences } = canonicalSemanticProjection(scene);
-  return JSON.stringify(stableValue({ elements, activeFileReferences }));
+  return JSON.stringify(stableValue(canonicalSemanticProjection(scene)));
 }
 
 /**
@@ -168,7 +237,7 @@ export function captureDocumentSnapshot(scene: SynaraSceneSnapshot): SynaraDocum
     elements,
     files,
     activeFileReferences,
-    semanticFingerprint: semanticFingerprint({ elements, files: {} }),
+    semanticFingerprint: JSON.stringify(stableValue(projection)),
   });
 }
 
