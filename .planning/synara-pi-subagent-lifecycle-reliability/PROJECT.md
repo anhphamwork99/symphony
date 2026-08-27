@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–03 accepted; Ticket 04 is the sole frontier (`ready-for-agent` under its accepted evidence-first plan)
+- **Triage status:** Tickets 01–04 accepted; Ticket 05 is the sole frontier (`ready-for-planning`)
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -150,7 +150,7 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Current frontier: Ticket 04 is the sole project frontier.** Ticket 01 is
+**Current frontier: Ticket 05 is the sole project frontier.** Ticket 01 is
 accepted as the read-only grounding report. Ticket 02 is accepted at Symphony
 candidate `cb023e587` plus Implementation Report `d77a566e0`, against
 controlled Alfie
@@ -165,35 +165,37 @@ already-closed DG-4 owner boundary. Ticket 03 is accepted at frozen Symphony
 candidate `5a1ff1d42`, including exact-tuple remediation `1913a9a61`,
 controlled/real-Pi evidence `1a92d1cfa`, Implementation Report `db27626b7`,
 and independent PASS review `c3dbc328a`. Its final gate passed `bun fmt`,
-`bun lint` with 0 warnings/0 errors, and `bun typecheck` 7/7. Ticket 04's
-Ticket-03 dependency is therefore discharged and it is now the sole frontier.
-Its accepted evidence-first plan at
-[`plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md`](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md)
-routes it `ready-for-agent`: initial execution authorizes evidence artifacts
-only — deterministic test evidence, controlled-provider provenance, and the
-issue Implementation Report — and authorizes no source, test, contract,
-manifest, lockfile, or Alfie change; any remediation requires the plan's
-§9 challenge/replan gate with a newly persisted amended plan. Inherited DG-4
-authority and the plan's exact write sets remain binding. Tickets 05–06
-remain serially blocked behind their listed dependency gates. The single
-Supervisor final-acceptance consultation remains reserved for the complete
-integrated project candidate.
+`bun lint` with 0 warnings/0 errors, and `bun typecheck` 7/7. Ticket 04 is
+accepted at frozen candidate
+`08b65ebb466470d71814c4467d74e68f43991138` from evidence-only execution:
+WP-01 evidence `bab07af82d31c7fc128fd561fc0dc06eed0f7300` passed 11/11
+files and 177/177 tests; WP-02 report
+`e160ccd8c6bfbd9839b67618ffdbaf7d85ee8e11` verified the exact clean
+Alfie pin and recorded non-destructive real-Pi cancellation 2/2 plus
+watchdog 2/2 PASS. No Ticket 04 source, test, contract, manifest, lockfile,
+or Alfie change exists; no destructive manual run was run or claimed. Its
+final gate passed `bun fmt`, `bun lint` with 0 warnings/0 errors, and
+`bun typecheck` 7/7 with non-failing console advisories recorded. Ticket-level
+review and Supervisor acceptance were intentionally unused. Ticket 05 is now
+the sole `ready-for-planning` frontier; Ticket 06 remains blocked. One
+integrated project review and exactly one Supervisor final-acceptance
+consultation remain reserved for the complete integrated candidate.
 
 | Ticket                                                                    | Status                                 | Dependency / unlock                                                                                           |
 | ------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | [01](issues/01-baseline-reproduction-and-decision-matrix.md)              | **accepted**                           | grounding report accepted; no source edits                                                                    |
 | [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                           | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted**                           | Decision 0006 implemented, evidenced, reviewed, and closed at frozen candidate `5a1ff1d42`                    |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | **ready-for-agent — sole frontier**    | Ticket 03 dependency discharged; evidence-only execution under the accepted plan; inherited Decisions 0021–0034 and DG-4 remain binding |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | blocked                                | Tickets 02–04 accepted seams                                                                                  |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | **accepted**                           | T04-AC1–AC5 deterministically evidenced and reported; no source change                                        |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | **ready-for-planning — sole frontier** | Tickets 02–04 accepted seams                                                                                  |
 | [06](issues/06-integrated-real-pi-acceptance.md)                          | blocked                                | Tickets 01–05 accepted; all provenance and evidence gates                                                     |
 
-Ticket 04's issue-local `blocked` marker is discharged: Ticket 03 is accepted
-and the accepted evidence-first plan now routes Ticket 04 `ready-for-agent`.
+Ticket 04's evidence-first plan executed in full: WP-01 froze deterministic
+criterion evidence, WP-02 verified controlled provenance and completed the
+Implementation Report, and WP-03 closed the ticket from that evidence only.
 Under the Router rule, this Project Home remains the sole status and frontier
-authority. `ready-for-agent` authorizes the plan's evidence-only work packages
-and does not authorize source implementation; inherited authority gates and
-the plan's §9 challenge/replan gate remain required.
+authority. This closure advances planning authority to Ticket 05; it does not
+claim the integrated project accepted.
 
 The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
 is discharged by Decision 0002. It remains a historical consultation link;
@@ -295,19 +297,19 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 plan](plans/03-terminal-before-cleanup-and-live-lifecycle-containment/PLAN.md) — completed serial implementation, evidence, review, and closure packages.
 - [Ticket 03 review](reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md) — independent criterion-level PASS review of frozen candidate `5a1ff1d42`.
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
-- [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — accepted evidence-first plan with serial WP-01–WP-03 packages; authorizes evidence artifacts only.
+- [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
-Tickets 01–03 are accepted. Ticket 03 implements Decision 0006's exact-tuple
+Tickets 01–04 are accepted. Ticket 03 implements Decision 0006's exact-tuple
 Alternative A proxy, preserves the inherited closed DG-4 owner boundary, and
 is closed at frozen candidate `5a1ff1d42` with PASS review `c3dbc328a`.
-Ticket 04 is now the sole frontier at `ready-for-agent` under its accepted
-evidence-first plan: initial execution authorizes evidence artifacts only and
-no source/Alfie change. Its cancellation/watchdog/owned-teardown evidence
-must preserve bands 70–78, proof-before-fence, and exact-owner-only
-authority. Tickets 05–06 remain blocked. The one integrated project review and
-exactly one Supervisor final-acceptance consultation remain reserved for the
-complete project candidate.
+Ticket 04 is accepted at frozen candidate `08b65ebb4` from evidence-only
+execution with no source or Alfie change; its cancellation/watchdog/owned
+teardown evidence preserves bands 70–78, proof-before-fence, and
+exact-owner-only authority. Ticket 05 is the sole `ready-for-planning`
+frontier behind accepted Tickets 02–04 seams; Ticket 06 remains blocked. The
+one integrated project review and exactly one Supervisor final-acceptance
+consultation remain reserved for the complete project candidate.

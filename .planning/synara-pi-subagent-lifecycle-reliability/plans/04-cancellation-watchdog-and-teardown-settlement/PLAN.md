@@ -1,6 +1,6 @@
 # Ticket 04 Plan — cancellation, watchdog, and owned teardown retry settlement
 
-**Plan state:** ready-for-agent
+**Plan state:** completed — Ticket 04 accepted; Ticket 05 routed as the sole `ready-for-planning` frontier
 
 **Authoritative router baseline:** Symphony `83620ab07760ac45cdf314a4d0df8d96f83a1300`.
 
@@ -150,3 +150,33 @@ On completion, WP-03 sets Ticket 04 to `accepted`, changes Ticket 05 to `ready-f
 ## 11. Reopening conditions
 
 Replan on any Ticket 04 seam change after the frozen candidate, failed criterion, dirty/unpinned controlled Alfie, nondeterministic evidence that cannot be reproduced deterministically, a request for destructive automation, or any proposed change to the accepted identity, band, proof, owner, fallback, replay, Resume, migration, or governance contracts.
+
+## 12. Completion record
+
+- WP-01 completed at evidence commit
+  `bab07af82d31c7fc128fd561fc0dc06eed0f7300`: frozen candidate
+  `08b65ebb466470d71814c4467d74e68f43991138`, 11/11 files, 177/177
+  tests, producer exit 0.
+- WP-02 completed at report commit
+  `e160ccd8c6bfbd9839b67618ffdbaf7d85ee8e11`: controlled Alfie
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+  `@alfie/pi-subagents@0.15.0-alfie.6`, clean checkout, all fixture hashes
+  matched; non-destructive real-Pi cancellation 2/2 PASS (12.01 s) and
+  watchdog 2/2 PASS (6.62 s), producer exit 0.
+- T04-AC1–T04-AC5 PASS from the recorded evidence. The
+  `stopProviderSession` failed-stop named-case gap remains an explicit
+  residual and does not defeat AC4.
+- No Ticket 04 production, test, contract, manifest, lockfile, migration,
+  configuration, or Alfie change exists from the frozen candidate through
+  closure.
+- Destructive manual real-Pi was not run or claimed.
+- The explicitly authorized final gate passed: `bun fmt` exit 0 (3,111
+  files), `bun lint` exit 0 (0 warnings/0 errors; 2,658 files; 149 rules),
+  and `bun typecheck` exit 0 (7/7 packages; 13.434 s) with non-failing Vite
+  deprecation warnings and two TS44 advisory messages recorded.
+- The three unrelated owner files remained byte-identical, modified-unstaged,
+  and excluded. Ticket-level review/Supervisor acceptance remained unused;
+  the integrated project review and exactly one Supervisor final acceptance
+  remain reserved.
+- Ticket 05 is the sole `ready-for-planning` frontier; Ticket 06 remains
+  blocked.

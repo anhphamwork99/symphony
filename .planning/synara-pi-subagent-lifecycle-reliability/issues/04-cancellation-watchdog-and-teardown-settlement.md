@@ -1,9 +1,10 @@
 # Ticket 04 — cancellation, watchdog, and owned teardown retry settlement
 
-**Status:** ready-for-agent
-**Dependencies:** Ticket 03 accepted; inherited Decisions 0021–0034, DG-4, and this evidence-first plan remain binding
+**Status:** accepted
+**Dependencies (discharged):** Ticket 03 accepted; inherited Decisions 0021–0034, DG-4, and this evidence-first plan remain binding
 **Plan:** [`../plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md`](../plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md)
 **Execution authorization:** evidence-only WPs below; no source/test remediation is authorized without the PLAN §9 challenge/replan gate
+**Implementation result:** evidence-only closure; no Ticket 04 source/test/contract/Alfie change
 
 ## Objective
 
@@ -102,9 +103,21 @@ Coordinator/restart owner-death evidence is accepted: the full conjunction (dead
 
 Ticket-level independent review and Supervisor acceptance are intentionally not activated, per Plan §2 item 10. One integrated project review and exactly one Supervisor final-acceptance consultation remain reserved for the complete multi-ticket project (Project Home). No review or Supervisor artifact was created for Ticket 04.
 
-### 13. Heavyweight checks
+### 13. Heavyweight checks — final current-session gate
 
-`bun fmt`, `bun lint`, `bun typecheck`, and the package-wide `bun run test` were **not run — no current-session authorization** (Plan §7 authorizes them only on separate explicit owner authorization). This is an evidence/docs-only ticket with zero source delta, so their absence gates nothing here and is not converted into a source-remediation gate.
+The owner explicitly authorized the final gate. The commands ran once from the
+repository root before closure:
+
+- `bun fmt` — exit 0; 3,111 files; 3,042 ms. Formatter-only changes to five
+  pre-clean planning files were restored to preserve the exact WP-03 write set;
+  the three unrelated owner files remained byte-identical to their pre-gate
+  snapshots.
+- `bun lint` — exit 0; 0 warnings and 0 errors; 2,658 files; 149 rules.
+- `bun typecheck` — exit 0; 7/7 packages successful; 0 cached; 13.434 s.
+  Non-failing console advisories were preserved honestly: Vite deprecation
+  warnings and two TS44 advisory messages in contracts tests.
+- Package-wide `bun run test` was not run. Ticket 04 used the focused
+  deterministic and real-Pi commands recorded in §§5 and 9.
 
 ### 14. Residual uncertainty and reopening conditions
 
@@ -114,6 +127,35 @@ Ticket-level independent review and Supervisor acceptance are intentionally not 
 ### 15. Per-AC conclusion
 
 PASS only from recorded evidence: **T04-AC1 PASS, T04-AC2 PASS, T04-AC3 PASS, T04-AC4 PASS (with the §14 named-case residual), T04-AC5 PASS.** Every verdict cites executed named cases in `WP-01-ac-diagnostic-matrix.md`; nothing is inferred from inherited totals, and no destructive manual run is claimed or required.
+
+## Closure record
+
+- Router baseline: Symphony
+  `83620ab07760ac45cdf314a4d0df8d96f83a1300`; frozen execution candidate:
+  `08b65ebb466470d71814c4467d74e68f43991138`.
+- WP-01 evidence commit:
+  `bab07af82d31c7fc128fd561fc0dc06eed0f7300`; deterministic result:
+  11/11 files, 177/177 tests, producer exit 0.
+- WP-02 report commit:
+  `e160ccd8c6bfbd9839b67618ffdbaf7d85ee8e11`; controlled Alfie:
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`,
+  `@alfie/pi-subagents@0.15.0-alfie.6`, clean checkout and matching fixture
+  hashes.
+- Current-session non-destructive real-Pi result: cancellation 2/2 PASS
+  (12.01 s), watchdog 2/2 PASS (6.62 s), producer exit 0.
+- T04-AC1–T04-AC5: PASS. The §14 failed-stop named-case gap remains recorded
+  without defeating AC4.
+- Destructive manual real-Pi: not run for Ticket 04.
+- Final workspace gate: `bun fmt` exit 0; `bun lint` 0 warnings/0 errors;
+  `bun typecheck` 7/7 with the console advisories recorded in §13.
+- The unrelated owner changes in `apps/web/package.json`,
+  `apps/web/src/main.tsx`, and `bun.lock` remained modified-unstaged,
+  byte-identical to their pre-gate snapshots, and excluded from every Ticket
+  04 commit.
+- Ticket-level review and Supervisor acceptance were intentionally unused.
+  One integrated project review and exactly one Supervisor final-acceptance
+  consultation remain reserved.
+- Next frontier: Ticket 05, sole `ready-for-planning`.
 
 ## Unlock gate
 

@@ -1,8 +1,10 @@
 # WP-03 — Ticket 04 closure and project routing
 
-**State:** blocked on WP-02 PASS
+**State:** completed — Ticket 04 accepted; Ticket 05 is the sole `ready-for-planning` frontier
 
-**Dependencies:** WP-01 PASS; WP-02 report complete; frozen candidate unchanged; no source/test/Alfie delta; no unresolved criterion challenge.
+**Result:** WP-01 and WP-02 evidence consumed; T04-AC1–T04-AC5 accepted from the frozen candidate with no Ticket 04 source/test/contract/Alfie delta; final `bun fmt`, `bun lint`, and `bun typecheck` gate passed; routing advanced to Ticket 05 without consuming ticket-level review or Supervisor acceptance.
+
+**Dependencies:** discharged — WP-01 PASS; WP-02 report complete; frozen candidate unchanged; no source/test/Alfie delta; no unresolved criterion challenge.
 
 ## Objective and observable outcome
 
@@ -114,3 +116,22 @@ docs(planning): accept Ticket 04 cancellation settlement
 ## Escalation
 
 Do not close if any AC is inferred rather than evidenced, the candidate changed, Alfie is dirty/mismatched, a destructive run is ambiguously represented, an unrelated path is staged, or a challenge remains. Return `challenge` if closure would reinterpret accepted bands/owner authority or consume project-level review/Supervisor governance. Return `blocked` for repository/staging access failures.
+
+## Completion record
+
+- Router baseline:
+  `83620ab07760ac45cdf314a4d0df8d96f83a1300`; frozen candidate:
+  `08b65ebb466470d71814c4467d74e68f43991138`.
+- WP-01: `bab07af82d31c7fc128fd561fc0dc06eed0f7300`; 11/11
+  deterministic files, 177/177 tests, producer exit 0.
+- WP-02: `e160ccd8c6bfbd9839b67618ffdbaf7d85ee8e11`; controlled
+  Alfie exact/clean; non-destructive real-Pi cancellation 2/2 and watchdog
+  2/2 PASS, producer exit 0.
+- T04-AC1–T04-AC5 PASS; failed-stop named-case residual preserved.
+- Destructive manual real-Pi not run.
+- Final gate: `bun fmt` exit 0; `bun lint` 0 warnings/0 errors;
+  `bun typecheck` 7/7 with non-failing advisories recorded in the issue.
+- Owner files remained byte-identical, modified-unstaged, and excluded.
+- Ticket 05 is the sole `ready-for-planning` frontier; Ticket 06 remains
+  blocked; integrated review and exactly one Supervisor final acceptance
+  remain reserved.
