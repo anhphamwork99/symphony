@@ -2,7 +2,7 @@
 
 Owner: repository owner
 Lifecycle: implementation planning
-Triage: ready-for-fallback-implementation-planning
+Triage: active-fallback-wp-gate
 Tracker: Local Markdown
 
 ## Artifacts
@@ -19,6 +19,8 @@ Tracker: Local Markdown
 - [Ticket 02 public-history boundary research failure and fallback activation](./decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md)
 - [Accepted Ticket 02 fallback dual-history contract](./designs/ticket-02-fallback-dual-history-contract.md)
 - [Decision 0055 — owner approval of fallback dual-history contract](./decisions/0055-ticket-02-fallback-dual-history-contract-approved.md)
+- [Remediated Ticket 02 fallback dual-history implementation plan](./plans/02-fallback-dual-history-implementation.md)
+- [Decision 0056 — Ticket 02 WP-GATE-only authorization](./decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
 
 Owner-confirmed product discovery and targeted risk grilling completed on 2026-08-26. The refreshed spec and accepted Testing Strategy Governance Reassessment are the normative implementation handoff.
@@ -27,6 +29,6 @@ Accepted: [01 — Prove the Excalidraw integration boundary](./issues/01-prove-e
 
 Current frontier: [02 — Prove exact AI edit-batch Undo and Redo](./issues/02-prove-ai-batch-undo-redo.md).
 
-Active bounded phase: Ticket 02 is `ready-for-fallback-implementation-planning` under [Decision 0055](./decisions/0055-ticket-02-fallback-dual-history-contract-approved.md), following [Decision 0054](./decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md). The [fallback dual-history contract](./designs/ticket-02-fallback-dual-history-contract.md) is accepted by the owner, and the Product Contract, spec, and Ticket 02 acceptance language now use that approved model.
+Active bounded phase: Ticket 02 is `active-fallback-wp-gate` under [Decision 0056](./decisions/0056-ticket-02-fallback-wp-gate-authorization.md), the implementation-boundary record that authorizes only the bounded WP-GATE feasibility proof of the remediated [fallback dual-history implementation plan](./plans/02-fallback-dual-history-implementation.md). The [fallback dual-history contract](./designs/ticket-02-fallback-dual-history-contract.md) remains accepted by the owner per [Decision 0055](./decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
-Current boundary: Decision 0052's real-Chromium public timing remediation remains exhausted and the measured `0.18.1` candidate's prior AC4/AC7 failure remains historical evidence. Decision 0055 binds native Excalidraw Undo/Redo for human edits plus dedicated Synara `Undo AI batch`/`Redo AI batch` actions, with the six approved cross-route, cap, keyboard, native-image, and lifecycle rules. Only bounded implementation planning is authorized. Source, tests, package/lockfile changes, evidence-log changes, WP-CORE, and broad implementation remain prohibited until a separate implementation-boundary decision.
+Current boundary: Decision 0056 authorizes exactly the Gate source/test write set and four evidence artifacts, the source-candidate-before-measurement and evidence-only-after-measurement commit ordering, focused unit tests, and two stable-Chromium runs with `pipefail`, explicit `PIPESTATUS[0]` exit capture, and separate immutable logs. It claims no AC and no Ticket 02 acceptance. All later work packages (outcomes/assets/failure, cap/lifecycle, accessibility, native-image gate, final integration), production WebSocket/lifecycle/persistence/navigation, final review and Supervisor acceptance, package/lockfile changes, protected Agentation work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited pending post-Gate governance reassessment. A Gate PASS routes to that reassessment, not to a later WP; a Gate FAIL stops, preserves evidence, and returns to the Supervisor/owner.

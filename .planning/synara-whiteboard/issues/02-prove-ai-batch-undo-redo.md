@@ -2,11 +2,11 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md), following [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md) and [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md).
+**Bounded by:** [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md) — active WP-GATE-only implementation authorization — following [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md), [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), and [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md), and executing the remediated [fallback dual-history implementation plan](../plans/02-fallback-dual-history-implementation.md).
 
-**Status:** ready-for-fallback-implementation-planning
+**Status:** active-fallback-wp-gate
 
-Decision 0055 is the binding owner-approved product amendment. This ticket is routed to bounded implementation planning only. No source, tests, package manifests, lockfile, evidence-log, WP-CORE, or broad implementation work is authorized until a separate implementation-boundary decision approves the plan.
+Decision 0056 is the binding implementation-boundary record. It authorizes exactly one work package: WP-GATE, the bounded isolated feasibility proof of the approved fallback contract with a deterministic fake producer and the real pinned Excalidraw embed in stable Chromium. All later work packages, production WebSocket/lifecycle/persistence/navigation integration, final AC claims, final review and Supervisor acceptance, package/lockfile changes, protected Agentation work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited until post-Gate governance reassessment.
 
 ## Acceptance criteria
 
@@ -48,6 +48,8 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 
 ## Current evidence and references
 
+- [Decision 0056 — active WP-GATE-only implementation authorization](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
+- [Remediated fallback dual-history implementation plan](../plans/02-fallback-dual-history-implementation.md)
 - [Decision 0055 — approved fallback dual-history contract](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md)
 - [Decision 0054 — research failure and fallback activation](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md)
 - [Decision 0053 — package/public-API reassessment](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md)
@@ -57,6 +59,6 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
 - Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-**Routing:** `ready-for-fallback-implementation-planning`
+**Routing:** `active-fallback-wp-gate`
 
-**Next authorization boundary:** a separate bounded implementation decision must cite Decision 0055, accept the plan, and explicitly authorize source work. Ticket 02 final acceptance remains a later exactly-once consultation after implementation, real-Chromium verification, and one independent feature-level review.
+**Current authorization boundary:** [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md) authorizes only WP-GATE — the exact Gate source/test write set, the four Gate evidence artifacts, the source-candidate commit before measurement, the focused unit test and two stable-Chromium runs with `pipefail`/explicit `PIPESTATUS[0]` exits and separate logs, and the evidence-only commit after measurement. A Gate PASS routes to post-Gate governance reassessment, not to a later work package; a Gate FAIL stops, preserves reproducible evidence, and returns to the Supervisor/owner. No AC is claimed by the Gate. Ticket 02 final acceptance remains a later exactly-once consultation after authorized integrated implementation, real-Chromium verification, and one independent feature-level review.
