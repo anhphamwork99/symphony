@@ -6,6 +6,21 @@
  * already-captured provider callback for one invocation.  The registry only
  * decides whether that callback may be entered and whether its response may
  * be exposed; it never queues, retries, reconstructs, or persists a route.
+ *
+ * Linearization contract (Decision 0006 / WP-01 remediation):
+ *
+ * - Live CONTROL is only ever returned as `applied` after the provider-owned
+ *   callback explicitly marked the acceptance boundary (`markAccepted`) AND
+ *   the registration still revalidates as current after the response.  A
+ *   control callback that returns without ever marking acceptance is NOT an
+ *   applied control; it classifies as bounded unavailable, because no
+ *   provider-owned acceptance point was reached.
+ * - Live OBSERVATION never emits a provider acceptance boundary, never
+ *   classifies as outcome-unknown, and is only returned as `applied` when the
+ *   current registration revalidates after the bounded snapshot resolves.
+ * - Internal reasons are a closed, bounded vocabulary.  They reach only the
+ *   injected trace seam; the public result surface stays the fixed diagnostic
+ *   code.  Timeout reasons are reachable only through `markTimedOut`.
  */
 
 export type PiSubagentLiveLifecycleDiagnosticCode =
@@ -30,6 +45,7 @@ export type PiSubagentLiveLifecycleTraceEvent =
   | "callback_entered"
   | "callback_revalidated"
   | "provider_acceptance"
+  | "provider_unavailable"
   | "callback_retired"
   | "response_revalidated"
   | "return_unavailable"
@@ -64,6 +80,12 @@ export interface PiSubagentLiveLifecycleInvocationContext {
   readonly markTimedOut: () => void;
   /** Marks a response loss after a provider-owned acceptance point. */
   readonly markResponseLost: () => void;
+  /**
+   * Marks a structured pre-acceptance provider failure with a closed
+   * bounded reason.  Only the `provider_inactive` member is used by the
+   * managed binding today; the full set keeps the seam typed and closed.
+   */
+  readonly markUnavailable: (reason: PiSubagentLiveLifecycleUnavailableReason) => void;
 }
 
 export type PiSubagentLiveLifecycleInvocation<T> = (
@@ -80,8 +102,11 @@ export interface PiSubagentLiveLifecycleDispatchInput<T> {
   readonly session: PiSubagentLiveLifecycleSession;
   readonly registration?: PiSubagentLiveLifecycleRegistration | undefined;
   /**
-   * The callback captured from the exact provider runtime.  It is never
-   * called unless the registration passes entry validation.
+   * Trusted internal closure over the callback captured from the exact
+   * provider runtime. It is never called unless the opaque registration
+   * passes entry validation. Callers must not substitute a callback from
+   * another tool or provider session; WP-02 composition retains the exact
+   * registration handle and captured target together.
    */
   readonly invoke?: PiSubagentLiveLifecycleInvocation<T> | undefined;
 }
@@ -93,27 +118,35 @@ export interface PiSubagentLiveLifecycleResult<T> {
   readonly value?: T;
 }
 
-interface RegistrationState {
-  readonly registration: PiSubagentLiveLifecycleRegistration;
-  readonly epoch: number;
-  readonly observe: PiSubagentLiveLifecycleInvocation<unknown> | undefined;
-  readonly control: PiSubagentLiveLifecycleInvocation<unknown> | undefined;
-  active: boolean;
-  retired: boolean;
-  cleared: boolean;
-}
-
-type InternalReason =
+/**
+ * Bounded, closed internal reason vocabulary for the unavailable shape.
+ * These values are emitted to the trace seam only; they never become public
+ * diagnostics or arbitrary error text.
+ */
+export type PiSubagentLiveLifecycleUnavailableReason =
   | "provider_inactive"
   | "callback_missing"
   | "callback_disposed"
   | "callback_mismatched"
-  | "callback_timeout_before_acceptance"
+  | "callback_failed_before_acceptance"
+  | "callback_timeout_before_acceptance";
+
+/** Bounded, closed internal reason vocabulary for the outcome-unknown shape. */
+export type PiSubagentLiveLifecycleUnknownReason =
   | "callback_lost_after_acceptance"
   | "callback_timeout_after_acceptance"
-  | "callback_failed_after_acceptance"
+  | "callback_failed_after_acceptance";
+
+type InternalReason =
+  | PiSubagentLiveLifecycleUnavailableReason
+  | PiSubagentLiveLifecycleUnknownReason
   | "stale"
   | "active";
+
+/** Classified failure produced by the closed reason table below. */
+type ClassifiedFailure =
+  | { readonly kind: "unavailable"; readonly reason: PiSubagentLiveLifecycleUnavailableReason }
+  | { readonly kind: "outcome_unknown"; readonly reason: PiSubagentLiveLifecycleUnknownReason };
 
 const isValidTuple = (tuple: PiSubagentLiveLifecycleTuple): boolean =>
   typeof tuple.executionId === "string" &&
@@ -126,7 +159,7 @@ const isValidTuple = (tuple: PiSubagentLiveLifecycleTuple): boolean =>
   tuple.generation > 0;
 
 const tupleKey = (tuple: PiSubagentLiveLifecycleTuple): string =>
-  `${tuple.executionId}\u0000${tuple.attemptId}\u0000${String(tuple.generation)}`;
+  JSON.stringify([tuple.executionId, tuple.attemptId, tuple.generation]);
 
 const safeTrace = (
   trace: ((event: PiSubagentLiveLifecycleTrace) => void) | undefined,
@@ -145,20 +178,36 @@ const safeTrace = (
   }
 };
 
-const unavailable = <T>(_reason: InternalReason): PiSubagentLiveLifecycleResult<T> => ({
-  status: "unavailable",
-  diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
-});
-
-const unknown = <T>(_reason: InternalReason): PiSubagentLiveLifecycleResult<T> => ({
-  status: "outcome_unknown",
-  diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
-});
-
-const stale = <T>(): PiSubagentLiveLifecycleResult<T> => ({
-  status: "stale",
-  diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored",
-});
+/**
+ * The closed classification table.  It never infers a timeout from an
+ * unmarked throw: timeout reasons are reachable only when the callback
+ * marked `markTimedOut`, and outcome-unknown only on the control path after
+ * an explicitly marked acceptance.  Observation always stays unavailable.
+ */
+function classifyFailure(
+  kind: "observe" | "control",
+  accepted: boolean,
+  timedOut: boolean,
+  unavailableReason: PiSubagentLiveLifecycleUnavailableReason | undefined,
+  unknownReason: PiSubagentLiveLifecycleUnknownReason | undefined,
+): ClassifiedFailure {
+  if (unavailableReason !== undefined && !accepted) {
+    return { kind: "unavailable", reason: unavailableReason };
+  }
+  if (unknownReason !== undefined) {
+    return kind === "control" && accepted
+      ? { kind: "outcome_unknown", reason: unknownReason }
+      : { kind: "unavailable", reason: "callback_failed_before_acceptance" };
+  }
+  if (kind === "control" && accepted) {
+    return timedOut
+      ? { kind: "outcome_unknown", reason: "callback_timeout_after_acceptance" }
+      : { kind: "outcome_unknown", reason: "callback_failed_after_acceptance" };
+  }
+  return timedOut
+    ? { kind: "unavailable", reason: "callback_timeout_before_acceptance" }
+    : { kind: "unavailable", reason: "callback_failed_before_acceptance" };
+}
 
 /**
  * Make one volatile containment instance.  The returned object is the only
@@ -237,17 +286,13 @@ export function makePiSubagentLiveLifecycleContainment(
     const state = map.get(tupleKey(tuple));
     if (state === undefined) return { reason: "callback_missing" };
     if (
-      registration !== undefined &&
-      (registration !== state.registration ||
-        registration.session !== session ||
-        tupleKey(registration.tuple) !== tupleKey(tuple))
+      registration !== state.registration ||
+      registration.session !== session ||
+      tupleKey(registration.tuple) !== tupleKey(tuple)
     ) {
       return { reason: "callback_mismatched" };
     }
     if (state.cleared || state.retired) return { state, reason: "callback_disposed" };
-    if (state.registration.session !== session || tupleKey(state.registration.tuple) !== tupleKey(tuple)) {
-      return { state, reason: "callback_mismatched" };
-    }
     if (!state.active) return { state, reason: "provider_inactive" };
     return { state, reason: "active" };
   };
@@ -261,37 +306,51 @@ export function makePiSubagentLiveLifecycleContainment(
     const resolved = stateFor(input.tuple, input.session, input.registration);
     const state = resolved.state;
     if (state === undefined || resolved.reason !== "active" || !state.active) {
-      emit("return_unavailable", input.tuple, resolved.reason);
-      return unavailable(resolved.reason);
+      const reason = resolved.reason as PiSubagentLiveLifecycleUnavailableReason;
+      emit("return_unavailable", input.tuple, reason);
+      return {
+        status: "unavailable",
+        diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      };
     }
     const captured = kind === "observe" ? state.observe : state.control;
     const invoke = input.invoke ?? (captured as PiSubagentLiveLifecycleInvocation<T> | undefined);
     if (invoke === undefined) {
       emit("return_unavailable", input.tuple, "callback_missing");
-      return unavailable("callback_missing");
+      return {
+        status: "unavailable",
+        diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      };
     }
 
     emit("callback_entered", input.tuple);
-    let accepted = kind === "observe";
-    let failureReason: InternalReason | undefined;
+    // Control acceptance starts unproven and must be marked explicitly at
+    // the provider-owned boundary.  Observation has no acceptance boundary at
+    // all: it resolves or fails, and never becomes outcome-unknown.
+    let accepted = false;
+    let timedOut = false;
+    let unavailableReason: PiSubagentLiveLifecycleUnavailableReason | undefined;
+    let unknownReason: PiSubagentLiveLifecycleUnknownReason | undefined;
     const markAccepted = (): void => {
+      // Observation has no provider-owned acceptance boundary: its context's
+      // markAccepted is a structural no-op so the observation path can never
+      // emit provider_acceptance or classify as outcome-unknown.
+      if (kind === "observe") return;
       if (!accepted) {
         accepted = true;
         emit("provider_acceptance", input.tuple);
       }
     };
     const markTimedOut = (): void => {
-      failureReason = accepted
-        ? "callback_timeout_after_acceptance"
-        : "callback_timeout_before_acceptance";
+      timedOut = true;
     };
     const markResponseLost = (): void => {
-      accepted = true;
-      failureReason = "callback_lost_after_acceptance";
-      emit("provider_acceptance", input.tuple);
+      unknownReason = "callback_lost_after_acceptance";
+    };
+    const markUnavailable = (reason: PiSubagentLiveLifecycleUnavailableReason): void => {
+      if (unavailableReason === undefined) unavailableReason = reason;
     };
     emit("callback_revalidated", input.tuple);
-    if (kind === "observe") emit("provider_acceptance", input.tuple);
 
     const isCurrent = (): boolean => {
       const current = bySession.get(input.session)?.get(tupleKey(input.tuple));
@@ -305,6 +364,21 @@ export function makePiSubagentLiveLifecycleContainment(
       );
     };
 
+    const returnFailure = (failure: ClassifiedFailure): PiSubagentLiveLifecycleResult<T> => {
+      if (failure.kind === "outcome_unknown") {
+        emit("return_outcome_unknown", input.tuple, failure.reason);
+        return {
+          status: "outcome_unknown",
+          diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+        };
+      }
+      emit("return_unavailable", input.tuple, failure.reason);
+      return {
+        status: "unavailable",
+        diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      };
+    };
+
     let value: T;
     try {
       value = await invoke({
@@ -313,31 +387,57 @@ export function makePiSubagentLiveLifecycleContainment(
         markAccepted,
         markTimedOut,
         markResponseLost,
+        markUnavailable,
       });
     } catch {
       if (!isCurrent()) {
         emit("response_revalidated", input.tuple);
         emit("return_stale", input.tuple, "stale");
-        return stale();
+        return { status: "stale", diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored" };
       }
-      const reason =
-        failureReason ??
-        (accepted ? "callback_failed_after_acceptance" : "callback_timeout_before_acceptance");
-      const result = accepted ? unknown<T>(reason) : unavailable<T>(reason);
-      emit(
-        result.status === "outcome_unknown" ? "return_outcome_unknown" : "return_unavailable",
-        input.tuple,
-        reason,
+      return returnFailure(
+        classifyFailure(kind, accepted, timedOut, unavailableReason, unknownReason),
       );
-      return result;
     }
 
     if (!isCurrent()) {
       emit("response_revalidated", input.tuple);
       emit("return_stale", input.tuple, "stale");
-      return stale();
+      return { status: "stale", diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored" };
     }
     emit("response_revalidated", input.tuple);
+    if (unavailableReason !== undefined && !accepted) {
+      // A structured pre-acceptance provider failure beats any returned
+      // value: no provider-owned acceptance point was reached, so the
+      // bounded result is unavailable with zero accepted effect claimed.
+      emit("provider_unavailable", input.tuple, unavailableReason);
+      return returnFailure({ kind: "unavailable", reason: unavailableReason });
+    }
+    if (unknownReason !== undefined) {
+      // A marked response loss means the returned value cannot be trusted as
+      // the provider-owned outcome, even if some value came back.
+      return returnFailure(classifyFailure(kind, accepted, timedOut, unavailableReason, unknownReason));
+    }
+    if (timedOut) {
+      // A bounded deadline remains authoritative even if the provider later
+      // resolves a value. Before acceptance it is unavailable; after a
+      // control acceptance point it is outcome-unknown. A late value is never
+      // exposed as applied merely because it eventually arrived.
+      return returnFailure(
+        classifyFailure(kind, accepted, true, unavailableReason, unknownReason),
+      );
+    }
+    if (kind === "control" && !accepted) {
+      // Pure control is never reported as applied when the provider-owned
+      // acceptance boundary was not marked, even if the callback returned a
+      // value: a return without acceptance proves no accepted effect.
+      return returnFailure({
+        kind: "unavailable",
+        reason: timedOut
+          ? "callback_timeout_before_acceptance"
+          : "callback_failed_before_acceptance",
+      });
+    }
     emit("return_applied", input.tuple);
     return { status: "applied", value };
   };
@@ -370,14 +470,11 @@ export function makePiSubagentLiveLifecycleContainment(
     ): boolean => {
       const map = bySession.get(input.session);
       const state = map?.get(tupleKey(input.tuple));
-      if (
-        state === undefined ||
-        (state.registration !== input &&
-          (state.registration.session !== input.session ||
-            tupleKey(state.registration.tuple) !== tupleKey(input.tuple)))
-      ) {
-        return false;
-      }
+      if (state === undefined) return false;
+      // Exact identity retirement: only the identical registration object may
+      // retire its state. An earlier registration carrying an equal public
+      // tuple must never retire the replacement that displaced it.
+      if (state.registration !== input) return false;
       state.retired = true;
       state.active = false;
       // Keep the tombstone in this volatile instance.  A retired registration
@@ -406,6 +503,16 @@ export function makePiSubagentLiveLifecycleContainment(
   };
 
   return containment;
+}
+
+interface RegistrationState {
+  readonly registration: PiSubagentLiveLifecycleRegistration;
+  readonly epoch: number;
+  readonly observe: PiSubagentLiveLifecycleInvocation<unknown> | undefined;
+  readonly control: PiSubagentLiveLifecycleInvocation<unknown> | undefined;
+  active: boolean;
+  retired: boolean;
+  cleared: boolean;
 }
 
 export type PiSubagentLiveLifecycleContainment = ReturnType<

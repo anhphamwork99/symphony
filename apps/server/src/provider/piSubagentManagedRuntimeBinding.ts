@@ -25,6 +25,7 @@ import type { PiSubagentExecutionReadService } from "./piSubagentExecutionReadSe
 import type {
   PiSubagentLiveLifecycleContainment,
   PiSubagentLiveLifecycleRegistration,
+  PiSubagentLiveLifecycleUnavailableReason,
 } from "./piSubagentLiveLifecycleContainment.ts";
 
 import {
@@ -200,6 +201,7 @@ export interface PiSubagentManagedToolRouterOptions {
 
 const MANAGED_ROUTING_MAX_OUTPUT_CHARS = 4_000;
 const MANAGED_ROUTING_ID_MAX_CHARS = 256;
+const MANAGED_ROUTING_MAX_CONTENT_ITEMS = 64;
 
 const PROVIDER_IDENTITY_PATTERN = /agent[_-]?id/i;
 
@@ -349,6 +351,147 @@ function durableReadText(read: any): string {
   );
 }
 
+const MANAGED_LIVE_UNAVAILABLE_CODE = "pi_subagent_managed_execution_unavailable_live";
+
+interface ManagedControlRunContext {
+  readonly originalExecute: (
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: unknown,
+    onUpdate: unknown,
+    ctx: unknown,
+  ) => Promise<any>;
+  readonly markAccepted: () => void;
+  readonly markTimedOut: () => void;
+  readonly markUnavailable: (reason: PiSubagentLiveLifecycleUnavailableReason) => void;
+  readonly markResponseLost: () => void;
+}
+
+/**
+ * Exact structured classification of ONE control-class provider response.
+ *
+ * No human-text parsing happens on this path: the provider's structured
+ * `isError` + closed `diagnosticCode` pair is the only error signal.
+ *
+ * - exact `isError && diagnosticCode ===
+ *   pi_subagent_managed_execution_unavailable_live` → `markUnavailable(provider_inactive)`;
+ * - a valid bounded controlled success object → `markAccepted` then the
+ *   value flows through post-response revalidation;
+   * - anything malformed, any other error shape, or a throw → conservative
+   *   outcome-unknown via `markAccepted` followed by failure classification
+   *   (an effect may have linearized; zero-effect is never claimed).
+ */
+async function classifyAndRunManagedControl(
+  toolCallId: string,
+  providerParams: Record<string, unknown>,
+  signal: unknown,
+  onUpdate: unknown,
+  ctx: unknown,
+  context: ManagedControlRunContext,
+): Promise<any> {
+  let providerResult: any;
+  try {
+    providerResult = await context.originalExecute(
+      toolCallId,
+      providerParams,
+      signal,
+      onUpdate,
+      ctx,
+    );
+  } catch {
+    // The provider transport threw after the call was issued. An effect may
+      // have linearized; the conservative bounded classification is outcome
+      // unknown, never a zero-effect claim.
+      context.markAccepted();
+      throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+  }
+  if (
+    providerResult?.isError === true &&
+    providerResult?.diagnosticCode === MANAGED_LIVE_UNAVAILABLE_CODE
+  ) {
+    // Exact structured provider-inactive marker: no accepted effect exists.
+    context.markUnavailable("provider_inactive");
+    throw new Error("pi_subagent_live_lifecycle_unavailable");
+  }
+  if (providerResult?.isError === true) {
+    // Any other provider error after dispatch may follow a linearized
+      // effect, so it stays conservative outcome-unknown.
+      context.markAccepted();
+      throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+  }
+  if (isBoundedControlledSuccess(providerResult)) {
+    // Decision 0003: the managed steer insertion boundary is synchronous and
+    // occurs before the async provider call can settle. A later response
+    // loss is therefore outcome-unknown.
+    context.markAccepted();
+    return providerResult;
+  }
+  // Malformed response: acceptance may have occurred before the malformed
+    // payload was produced, so this stays conservative outcome-unknown too.
+    context.markAccepted();
+    throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+}
+
+/**
+ * A controlled success is a bounded result object with a content array of
+ * bounded text entries. Anything else is malformed for live routing.
+ */
+function isBoundedControlledSuccess(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  if (result.isError === true) return false;
+  if (!Array.isArray(result.content)) return false;
+  if (result.content.length > MANAGED_ROUTING_MAX_CONTENT_ITEMS) return false;
+  return result.content.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const entry = item as Record<string, unknown>;
+    if (entry.type !== "text" || typeof entry.text !== "string") return false;
+    return entry.text.length <= MANAGED_ROUTING_MAX_OUTPUT_CHARS;
+  });
+}
+
+/**
+ * Observation path: bounded snapshot capture with NO acceptance boundary.
+ * A successful capture only counts when the current registration still
+ * revalidates afterwards; any throw, malformed payload, or structured
+ * provider error degrades to bounded unavailable — never outcome-unknown,
+ * never provider_acceptance.
+ */
+async function observeManagedResult(
+  originalExecute: (
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: unknown,
+    onUpdate: unknown,
+    ctx: unknown,
+  ) => Promise<any>,
+  toolCallId: string,
+  providerParams: Record<string, unknown>,
+  signal: unknown,
+  onUpdate: unknown,
+  ctx: unknown,
+  markUnavailable: (reason: PiSubagentLiveLifecycleUnavailableReason) => void,
+): Promise<any> {
+  let providerResult: any;
+  try {
+    providerResult = await originalExecute(toolCallId, providerParams, signal, onUpdate, ctx);
+  } catch {
+    // Observation has no accepted side effect; a transport failure is a
+    // bounded unavailable snapshot, not outcome-unknown.
+    throw new Error("pi_subagent_live_lifecycle_unavailable");
+  }
+    if (providerResult?.isError === true) {
+      if (providerResult?.diagnosticCode === MANAGED_LIVE_UNAVAILABLE_CODE) {
+        markUnavailable("provider_inactive");
+      }
+      throw new Error("pi_subagent_live_lifecycle_unavailable");
+  }
+  if (!isBoundedControlledSuccess(providerResult)) {
+    throw new Error("pi_subagent_live_lifecycle_unavailable");
+  }
+  return providerResult;
+}
+
 /**
  * Wrap one Alfie managed result/control tool. Durable authorization and tuple
  * resolution are deliberately performed before `originalExecute`; terminal
@@ -444,25 +587,52 @@ export function wrapPiSubagentManagedTool(
             tuple,
             session: liveLifecycle.session,
             registration,
-            invoke: ({ markAccepted }) => {
-              // Decision 0003: the managed steer insertion boundary is
-              // synchronous and occurs before the async provider call can
-              // settle. A later response loss is therefore outcome-unknown.
-              markAccepted();
-              return originalExecute(toolCallId, providerParams, signal, onUpdate, ctx);
-            },
+            invoke: (context) =>
+              classifyAndRunManagedControl(toolCallId, providerParams, signal, onUpdate, ctx, {
+                originalExecute,
+                markAccepted: context.markAccepted,
+                markTimedOut: context.markTimedOut,
+                markUnavailable: context.markUnavailable,
+                markResponseLost: context.markResponseLost,
+              }),
           })
         : liveLifecycle.containment.observe({
             tuple,
             session: liveLifecycle.session,
             registration,
-            invoke: () => originalExecute(toolCallId, providerParams, signal, onUpdate, ctx),
+            invoke: ({ markUnavailable }) =>
+              observeManagedResult(
+                originalExecute,
+                toolCallId,
+                providerParams,
+                signal,
+                onUpdate,
+                ctx,
+                markUnavailable,
+              ),
           }));
       if (liveResult.status !== "applied") {
         const code = liveResult.diagnosticCode ?? "pi_subagent_live_lifecycle_unavailable";
+        if (toolName === "get_subagent_result") {
+          const diagnostics = Array.isArray(read.diagnostics) ? [...read.diagnostics] : [];
+          if (!diagnostics.includes(code)) diagnostics.push(code);
+          const durableWithLiveDiagnostic = { ...read, diagnostics };
+          return managedRoutingResult(
+            durableReadText(durableWithLiveDiagnostic),
+            publicReadDetails(durableWithLiveDiagnostic),
+            false,
+            code,
+          );
+        }
+        const classification =
+          liveResult.status === "outcome_unknown"
+            ? "outcome unknown"
+            : liveResult.status === "stale"
+              ? "stale response ignored"
+              : "unavailable";
         return managedRoutingFailure(
           code,
-          `Managed live lifecycle unavailable [${code}].`,
+          `Managed live lifecycle ${classification} [${code}].`,
         );
       }
       providerResult = liveResult.value;
