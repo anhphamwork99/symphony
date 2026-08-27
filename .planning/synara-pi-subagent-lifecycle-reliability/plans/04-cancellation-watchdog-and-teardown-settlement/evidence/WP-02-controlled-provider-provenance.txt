@@ -1,0 +1,86 @@
+WP-02 controlled-provider provenance — captured 2026-08-27 (current session), read-only
+
+## Symphony boundary
+
+Frozen deterministic execution candidate (WP-01 HEAD at run time):
+  08b65ebb466470d71814c4467d74e68f43991138
+WP-01 evidence/report commit (current HEAD at capture):
+  bab07af82d31c7fc128fd561fc0dc06eed0f7300 ("test(pi): record Ticket 04 deterministic settlement evidence")
+
+Committed delta 08b65ebb466470d71814c4467d74e68f43991138..bab07af82 (git diff --name-status):
+  M  .../plans/04-.../WP-01-focused-deterministic-evidence.md
+  A  .../plans/04-.../evidence/WP-01-ac-diagnostic-matrix.md
+  A  .../plans/04-.../evidence/WP-01-focused-deterministic.log
+  A  .../plans/04-.../evidence/WP-01-workspace-state.txt
+=> WP-01 planning evidence only. No Ticket 04 production, contract, test, manifest,
+   lockfile, Alfie, decision, or lifecycle-authority source path changed between the
+   frozen candidate and current HEAD.
+
+Working tree (git status --short at capture) — unrelated owner changes only, untouched,
+excluded from every Ticket 04 write/stage/commit set:
+  M apps/web/package.json
+  M apps/web/src/main.tsx
+  M bun.lock
+
+## Controlled Alfie checkout (read-only verification; nothing modified)
+
+Exact HEAD (git -C /Users/anhpham99/alfie rev-parse HEAD):
+  3fe340b401ca86bcbe8b55abd4de107e1d93482e
+Origin (git -C /Users/anhpham99/alfie remote get-url origin):
+  https://github.com/anhphamwork99/alfie.git
+Working tree (git -C /Users/anhpham99/alfie status --short): CLEAN (empty output)
+Provenance-surface tracked delta (git -C /Users/anhpham99/alfie diff -- package.json
+src/index.ts src/agent-manager.ts src/agent-runner.ts src/child-bash-supervisor.ts
+agent/extensions/pi-subagents/package.json): NONE ("NO TRACKED PROV SURFACE DELTA")
+
+## Authoritative extension manifest (the manifest the acceptance tests actually read)
+
+Path:  /Users/anhpham99/alfie/agent/extensions/pi-subagents/package.json
+Identity (require(manifest).name + '@' + .version):  @alfie/pi-subagents@0.15.0-alfie.6
+
+Honest path note (non-material command drift): the WP-02 plan's sample verification
+command reads the repository-root manifest /Users/anhpham99/alfie/package.json, which
+does not exist in this checkout. This is a command-path drift only, not a provenance
+defect: both acceptance suites (piSubagentCancellationAcceptance.test.ts and
+piSubagentWatchdogAcceptance.test.ts) resolve and verify the published extension
+manifest at agent/extensions/pi-subagents/package.json through their local
+verifyExtensionGitProvenance() helpers, matching
+apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json
+(packageManifestRelativePath: "agent/extensions/pi-subagents/package.json").
+No plan/sample verification depended on a root manifest value.
+
+## Fixture hash verification (SHA-256, fixture piSubagentExtensionProvenance.json)
+
+All five fixture hashes MATCH the clean checkout (computed via shasum -a 256):
+
+  agent/extensions/pi-subagents/package.json
+    expected 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f
+    computed 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f  MATCH
+  agent/extensions/pi-subagents/src/index.ts
+    expected c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9
+    computed c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9  MATCH
+  agent/extensions/pi-subagents/src/agent-manager.ts
+    expected 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783
+    computed 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783  MATCH
+  agent/extensions/pi-subagents/src/agent-runner.ts
+    expected 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2
+    computed 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2  MATCH
+  agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+    expected ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0
+    computed ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0  MATCH
+
+Fixture identity fields: expectedRepositoryUrl https://github.com/anhphamwork99/alfie.git
+(normalized match), pinnedCommit 3fe340b401ca86bcbe8b55abd4de107e1d93482e (exact match),
+packageName @alfie/pi-subagents, packageVersion 0.15.0-alfie.6 (exact match).
+
+## Pi SDK pin
+
+apps/server/package.json: "@earendil-works/pi-coding-agent": "^0.83.0"
+bun.lock: pins @earendil-works/pi-coding-agent@0.83.0
+=> Pi SDK 0.83.0, matching the PLAN provenance line.
+
+## Verdict
+
+Controlled boundary VERIFIED: exact pinned commit, clean tree, clean origin, exact
+package identity, all fixture hashes match, Pi SDK pinned at 0.83.0. WP-02 is not
+blocked on controlled-provider verification.

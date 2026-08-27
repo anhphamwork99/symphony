@@ -1,6 +1,8 @@
 # WP-02 — controlled provider disposition and Implementation Report
 
-**State:** blocked on WP-01 PASS
+**State:** completed — WP-01 PASS evidence consumed; controlled-provider provenance verified; current-session non-destructive real-Pi run authorized, executed (cancellation 2/2, watchdog 2/2, producer exit 0), and dispositioned; Implementation Report complete.
+
+**Result:** Produced `evidence/WP-02-controlled-provider-provenance.txt`, `evidence/WP-02-nondestructive-real-pi-disposition.md`, preserved raw `evidence/WP-02-nondestructive-real-pi.log`, and completed the issue Implementation Report (issue status unchanged: `ready-for-agent`). Consumed by WP-03.
 
 **Dependencies:** WP-01 evidence committed; frozen candidate unchanged; no Ticket 04 source/test delta.
 
