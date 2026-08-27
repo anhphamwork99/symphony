@@ -19,6 +19,8 @@ const SENTINEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAIAAAD4YuoOAAAAP0lEQVR42mMQVDLGijyjc7Gi5qnLsaKDl59iRQyjFoxaMAQskHUvxIr0I9diRamq3VjR/bm2WNGoBaMWDAELALPRod/0CWeTAAAAAElFTkSuQmCC";
 const SENTINEL_BYTE_LENGTH = 120;
 const SENTINEL_SHA256 = "820a2c5650f64161d184782ba6659456d5cfca6af1bc7d45a3241416aa33a37e";
+const NORMALIZED_BYTE_LENGTH = 171;
+const NORMALIZED_SHA256 = "7d9fc3dfc16b9293589a2f87239dfa7a8325441bb1648eac3729f11819e3858c";
 const SENTINEL_WIDTH = 32;
 const SENTINEL_HEIGHT = 16;
 const SENTINEL_MIME = "image/png";
@@ -138,7 +140,10 @@ async function assertCompleteClosure(
   expect(SENTINEL_COLORS.filter((color) => storedColors.has(color.join(",")))).toEqual([
     ...SENTINEL_COLORS,
   ]);
-  if (expected !== undefined) {
+  if (expected === undefined) {
+    expect(bytes.byteLength).toBe(NORMALIZED_BYTE_LENGTH);
+    expect(storedHash).toBe(NORMALIZED_SHA256);
+  } else {
     expect({ elementId, fileId, storedHash }).toEqual(expected);
   }
   return { elementId, fileId, storedHash, image };
