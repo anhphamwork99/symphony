@@ -113,9 +113,17 @@ async function waitForSingleImage(handle: ExcalidrawTicket02HarnessHandle) {
   );
 }
 
+type ClosureIdentity = {
+  readonly elementId: string;
+  readonly fileId: string;
+  readonly storedHash: string;
+  readonly storedByteLength: number;
+  readonly dataUrl: string;
+};
+
 async function assertCompleteClosure(
   handle: ExcalidrawTicket02HarnessHandle,
-  expected?: { readonly elementId: string; readonly fileId: string; readonly storedHash: string },
+  expected?: ClosureIdentity,
 ) {
   await waitForSingleImage(handle);
   const scene = handle.getAdapter().captureScene();
@@ -136,17 +144,21 @@ async function assertCompleteClosure(
   expect(bytes.byteLength).toBeGreaterThan(0);
   const storedHash = await sha256(bytes);
   const storedBlob = new Blob([bytes], { type: SENTINEL_MIME });
-  const storedColors = await decodedColors(storedBlob);
-  expect(SENTINEL_COLORS.filter((color) => storedColors.has(color.join(",")))).toEqual([
-    ...SENTINEL_COLORS,
-  ]);
+  await assertExactSentinelPixels(storedBlob);
+  const identity = {
+    elementId,
+    fileId,
+    storedHash,
+    storedByteLength: bytes.byteLength,
+    dataUrl,
+  } satisfies ClosureIdentity;
   if (expected === undefined) {
-    expect(bytes.byteLength).toBe(NORMALIZED_BYTE_LENGTH);
-    expect(storedHash).toBe(NORMALIZED_SHA256);
+    expect(identity.storedByteLength).toBe(NORMALIZED_BYTE_LENGTH);
+    expect(identity.storedHash).toBe(NORMALIZED_SHA256);
   } else {
-    expect({ elementId, fileId, storedHash }).toEqual(expected);
+    expect(identity).toEqual(expected);
   }
-  return { elementId, fileId, storedHash, image };
+  return { ...identity, image };
 }
 
 function assertMeaningfulSvg(markup: string, present: boolean): void {
@@ -164,7 +176,14 @@ function assertMeaningfulSvg(markup: string, present: boolean): void {
   }
 }
 
-async function decodedColors(blob: Blob): Promise<Set<string>> {
+type DecodedPng = {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8ClampedArray;
+  readonly colors: Set<string>;
+};
+
+async function decodePng(blob: Blob): Promise<DecodedPng> {
   expect(blob.type).toBe("image/png");
   expect([...new Uint8Array(await blob.slice(0, 8).arrayBuffer())]).toEqual([
     137, 80, 78, 71, 13, 10, 26, 10,
@@ -172,31 +191,44 @@ async function decodedColors(blob: Blob): Promise<Set<string>> {
   const bitmap = await createImageBitmap(blob);
   expect(bitmap.width).toBeGreaterThan(0);
   expect(bitmap.height).toBeGreaterThan(0);
+  const width = bitmap.width;
+  const height = bitmap.height;
   const output = document.createElement("canvas");
-  output.width = bitmap.width;
-  output.height = bitmap.height;
+  output.width = width;
+  output.height = height;
   const context = output.getContext("2d", { willReadFrequently: true });
   expect(context).not.toBeNull();
   (context as CanvasRenderingContext2D).drawImage(bitmap, 0, 0);
-  const pixels = (context as CanvasRenderingContext2D).getImageData(
-    0,
-    0,
-    bitmap.width,
-    bitmap.height,
-  ).data;
+  const pixels = (context as CanvasRenderingContext2D).getImageData(0, 0, width, height).data;
   bitmap.close();
   const colors = new Set<string>();
   for (let index = 0; index < pixels.length; index += 4) {
     colors.add(`${pixels[index]},${pixels[index + 1]},${pixels[index + 2]},${pixels[index + 3]}`);
   }
-  return colors;
+  return { width, height, pixels, colors };
+}
+
+async function assertExactSentinelPixels(blob: Blob): Promise<void> {
+  const decoded = await decodePng(blob);
+  expect(decoded.width).toBe(SENTINEL_WIDTH);
+  expect(decoded.height).toBe(SENTINEL_HEIGHT);
+  for (let y = 0; y < SENTINEL_HEIGHT; y += 1) {
+    for (let x = 0; x < SENTINEL_WIDTH; x += 1) {
+      const expected = SENTINEL_COLORS[Math.floor(y / 8) * 4 + Math.floor(x / 8)];
+      const offset = (y * SENTINEL_WIDTH + x) * 4;
+      expect(
+        [...decoded.pixels.slice(offset, offset + 4)],
+        `sentinel pixel (${x}, ${y})`,
+      ).toEqual(expected);
+    }
+  }
 }
 
 async function assertMeaningfulPng(blob: Blob, present: boolean): Promise<void> {
-  const colors = await decodedColors(blob);
-  const matches = SENTINEL_COLORS.filter((color) => colors.has(color.join(",")));
+  const decoded = await decodePng(blob);
+  const matches = SENTINEL_COLORS.filter((color) => decoded.colors.has(color.join(",")));
   if (present) {
-    expect(matches, `decoded PNG colors: ${JSON.stringify([...colors].slice(0, 30))}`).toEqual([
+    expect(matches, `decoded PNG colors: ${JSON.stringify([...decoded.colors].slice(0, 30))}`).toEqual([
       ...SENTINEL_COLORS,
     ]);
   } else {
@@ -212,14 +244,26 @@ async function assertExports(
   await assertMeaningfulPng(await handle.getAdapter().exportPng(), present);
 }
 
-function dispatchImageDrop(): { readonly clientX: number; readonly clientY: number } {
+async function makeSentinelFile(): Promise<File> {
+  const bytes = sentinelBytes();
+  expect(await sha256(bytes)).toBe(SENTINEL_SHA256);
+  await assertExactSentinelPixels(new Blob([bytes], { type: SENTINEL_MIME }));
+  const file = new File([bytes], "ticket02-sentinel.png", { type: SENTINEL_MIME });
+  expect(file.size).toBe(SENTINEL_BYTE_LENGTH);
+  expect(file.type).toBe(SENTINEL_MIME);
+  return file;
+}
+
+function dispatchImageDrop(file: File): { readonly clientX: number; readonly clientY: number } {
   const target = editorRoot();
   const box = target.getBoundingClientRect();
   const clientX = box.left + box.width * 0.72;
   const clientY = box.top + box.height * 0.68;
   const transfer = new DataTransfer();
-  transfer.items.add(new File([sentinelBytes()], "ticket02-sentinel.png", { type: SENTINEL_MIME }));
+  transfer.items.add(file);
   expect(transfer.files).toHaveLength(1);
+  expect(transfer.files[0]?.size).toBe(SENTINEL_BYTE_LENGTH);
+  expect(transfer.files[0]?.type).toBe(SENTINEL_MIME);
   for (const type of ["dragenter", "dragover", "drop"] as const) {
     const event = new DragEvent(type, {
       bubbles: true,
@@ -264,13 +308,17 @@ async function clickNativeHistory(kind: "undo" | "redo"): Promise<void> {
   );
 }
 
+function assertAiIdle(handle: ExcalidrawTicket02HarnessHandle): void {
+  expect(handle.getHistory().events).toHaveLength(0);
+  expect(handle.getHistory().lockState).toBe("unlocked");
+}
+
 async function assertRemoved(handle: ExcalidrawTicket02HarnessHandle): Promise<void> {
   await vi.waitFor(() => expect(activeImages(handle)).toHaveLength(0), {
     timeout: 10_000,
     interval: 25,
   });
-  expect(handle.getHistory().events).toHaveLength(0);
-  expect(handle.getHistory().lockState).toBe("unlocked");
+  assertAiIdle(handle);
   await assertExports(handle, false);
 }
 
@@ -280,7 +328,7 @@ describe("WP-NATIVE-IMAGE-DROP-GATE in stable Chromium", () => {
   });
 
   it("preserves complete native image closure through Delete, Undo, Redo, and second Undo", async () => {
-    expect(await sha256(sentinelBytes())).toBe(SENTINEL_SHA256);
+    const sourceFile = await makeSentinelFile();
     const ref = createRef<ExcalidrawTicket02HarnessHandle>();
     const mounted = await render(
       <Shell>
@@ -294,16 +342,19 @@ describe("WP-NATIVE-IMAGE-DROP-GATE in stable Chromium", () => {
     );
     const handle = await waitForHarness(ref);
     expect(activeImages(handle)).toHaveLength(0);
-    expect(handle.getHistory().events).toHaveLength(0);
+    assertAiIdle(handle);
 
-    const drop = dispatchImageDrop();
+    const drop = dispatchImageDrop(sourceFile);
     const initial = await assertCompleteClosure(handle);
     const initialIdentity = {
       elementId: initial.elementId,
       fileId: initial.fileId,
       storedHash: initial.storedHash,
+      storedByteLength: initial.storedByteLength,
+      dataUrl: initial.dataUrl,
     };
     expect(handle.getAdapter().captureScene().selectedElementIds).toContain(initial.elementId);
+    assertAiIdle(handle);
     await assertExports(handle, true);
 
     await clickImage(handle, initial.image);
@@ -313,6 +364,7 @@ describe("WP-NATIVE-IMAGE-DROP-GATE in stable Chromium", () => {
 
     await clickNativeHistory("undo");
     await assertCompleteClosure(handle, initialIdentity);
+    assertAiIdle(handle);
     await assertExports(handle, true);
 
     await clickNativeHistory("redo");
@@ -320,12 +372,12 @@ describe("WP-NATIVE-IMAGE-DROP-GATE in stable Chromium", () => {
 
     await clickNativeHistory("undo");
     await assertCompleteClosure(handle, initialIdentity);
+    assertAiIdle(handle);
     await assertExports(handle, true);
 
     expect(drop.clientX).toBeGreaterThan(editorRoot().getBoundingClientRect().left);
     expect(drop.clientY).toBeGreaterThan(editorRoot().getBoundingClientRect().top);
-    expect(handle.getHistory().events).toHaveLength(0);
-    expect(handle.getHistory().lockState).toBe("unlocked");
+    assertAiIdle(handle);
     expect(
       handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical"),
     ).toEqual([]);
