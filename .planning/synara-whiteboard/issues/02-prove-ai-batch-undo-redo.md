@@ -2,11 +2,11 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md) — WP-NATIVE-IMAGE-GATE-only authorization — following [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
+**Bounded by:** [Decision 0059](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md) — native-image Gate BLOCKER and governance reassessment routing — following [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
-**Status:** active-native-image-gate
+**Status:** awaiting-native-image-gate-governance-reassessment
 
-Decision 0058 authorizes only a real-Chromium proof of native image insertion, complete element/file closure, meaningful official SVG/PNG exports, native Undo recovery, native Redo removal, and second native Undo recovery. It allows one browser test and three evidence artifacts only. It claims no Ticket 02 AC and authorizes no production runtime, WebSocket, lifecycle, persistence, assets, accessibility, or final integration work.
+Decision 0059 records that Decision 0058's package-supported file-chooser scenario is blocked by the authorized public browser-test boundary. Two stable-Chromium runs reached the modern File System Access route but could not supply a file without prohibited browser setup/configuration, private or undocumented access, chooser replacement, or scope expansion. This is not a native-image behavior failure: image closure, exports, native Undo/Redo, and second Undo remain unmeasured. No Ticket 02 AC or production work is authorized.
 
 ## Acceptance criteria
 
@@ -49,6 +49,8 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 ## Current evidence and references
 
 - [Decision 0058 — WP-NATIVE-IMAGE-GATE authorization](../decisions/0058-ticket-02-native-image-gate-authorization.md)
+- [Decision 0059 — native-image Gate BLOCKER and governance routing](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md)
+- [Native-image Gate BLOCKER exact-candidate evidence](../evidence/ticket-02/native-image-gate.md)
 - [Decision 0057 — bounded WP-GATE PASS and post-Gate routing](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Fallback WP-GATE exact-candidate evidence](../evidence/ticket-02/fallback-gate.md)
 - [Decision 0056 — active WP-GATE-only implementation authorization](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
@@ -62,6 +64,6 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
 - Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-**Routing:** `active-native-image-gate`
+**Routing:** `awaiting-native-image-gate-governance-reassessment`
 
-**Current authorization boundary:** [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md) authorizes only the four-path native-image Gate and its exact-candidate two-run stable-Chromium evidence protocol. A bounded PASS returns to governance; a valid native-behavior failure returns to the owner to narrow or leave the native exact-image promise unaccepted; inability to measure without crossing the public/write boundary is a `BLOCKER`. No production implementation or AC claim follows by inference.
+**Current authorization boundary:** [Decision 0059](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md) records a valid public-boundary `BLOCKER` and authorizes no implementation. Governance must explicitly choose a technically valid new measurement boundary, amend the required user insertion boundary, or leave native-image behavior unmeasured and decide sequencing. No production implementation, later work package, AC claim, feature review, or final acceptance follows by inference.

@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: bounded native-image feasibility
-Triage: active-native-image-gate
+Lifecycle: native-image Gate blocked; governance reassessment required
+Triage: awaiting-native-image-gate-governance-reassessment
 Tracker: Local Markdown
 
 ## Artifacts
@@ -23,7 +23,9 @@ Tracker: Local Markdown
 - [Decision 0056 — Ticket 02 WP-GATE-only authorization](./decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
 - [Decision 0057 — Ticket 02 fallback WP-GATE PASS and post-Gate routing](./decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Decision 0058 — Ticket 02 WP-NATIVE-IMAGE-GATE authorization](./decisions/0058-ticket-02-native-image-gate-authorization.md)
+- [Decision 0059 — Ticket 02 native-image Gate BLOCKER and governance routing](./decisions/0059-ticket-02-native-image-gate-blocked-routing.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
+- [Ticket 02 native-image Gate BLOCKER evidence](./evidence/ticket-02/native-image-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
 
 Owner-confirmed product discovery and targeted risk grilling completed on 2026-08-26. The refreshed spec and accepted Testing Strategy Governance Reassessment are the normative implementation handoff.
@@ -34,4 +36,6 @@ Current frontier: [02 — Prove exact AI edit-batch Undo and Redo](./issues/02-p
 
 Completed bounded phase: Ticket 02 fallback WP-GATE passed on measured source candidate `a483ed6a3e3d6fe832250c1ab170f7a350268feb`, with unit 18/18 and two stable-Chromium runs 4/4 at exit `0`. The source and evidence commits are preserved in main history, and an independent remediation re-review returned PASS. See [Decision 0057](./decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md) and the [Gate evidence](./evidence/ticket-02/fallback-gate.md).
 
-Current boundary: Ticket 02 is `active-native-image-gate` under [Decision 0058](./decisions/0058-ticket-02-native-image-gate-authorization.md). Only one real-Chromium browser test and three exact-candidate evidence artifacts are authorized. No production runtime source may change. Production outcomes, assets, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
+Completed bounded phase: Ticket 02 WP-NATIVE-IMAGE-GATE stopped as a valid `BLOCKER` on measured source candidate `209ca21370415afcea5e860474ca8fdefd166bae`. Two stable-Chromium runs reproducibly reached the package File System Access chooser branch but could not supply a file through the authorized public Vitest Browser surface. The independent read-only review returned `PASS-BLOCKER` with high confidence. Native image behavior was not measured.
+
+Current boundary: Ticket 02 is `awaiting-native-image-gate-governance-reassessment` under [Decision 0059](./decisions/0059-ticket-02-native-image-gate-blocked-routing.md). No production runtime or later work package is authorized. Production outcomes, assets, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
