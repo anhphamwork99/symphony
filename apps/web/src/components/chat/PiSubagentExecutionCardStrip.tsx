@@ -19,7 +19,17 @@ import { LoaderIcon, RotateCcwIcon, StopIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { ComposerStackedPanelExecutionStrip } from "./ComposerStackedPanel";
 
-const DOT_DELAYS_MS = [0, 80, 160, 80, 160, 240, 160, 240, 320] as const;
+const DOTS = [
+  { id: "top-left", delayMs: 0 },
+  { id: "top-center", delayMs: 80 },
+  { id: "top-right", delayMs: 160 },
+  { id: "middle-left", delayMs: 80 },
+  { id: "middle-center", delayMs: 160 },
+  { id: "middle-right", delayMs: 240 },
+  { id: "bottom-left", delayMs: 160 },
+  { id: "bottom-center", delayMs: 240 },
+  { id: "bottom-right", delayMs: 320 },
+] as const;
 
 function orderCards(cards: ReadonlyArray<PiSubagentExecutionCard>): PiSubagentExecutionCard[] {
   return [...cards].toSorted((left, right) => {
@@ -45,14 +55,14 @@ function DotGrid({
       aria-hidden="true"
       data-pi-subagent-dot-grid={animated ? "animated" : "static"}
     >
-      {DOT_DELAYS_MS.map((delay, index) => (
+      {DOTS.map(({ id, delayMs }) => (
         <span
-          key={index}
+          key={id}
           className={cn(
             "size-[3px] rounded-full bg-current",
             animated && "animate-pulse [animation-duration:1.2s] motion-reduce:animate-none",
           )}
-          style={animated ? { animationDelay: `-${delay}ms` } : undefined}
+          style={animated ? { animationDelay: `-${delayMs}ms` } : undefined}
         />
       ))}
     </span>
@@ -97,7 +107,10 @@ function ExecutionRow({
               : "Working";
   const progressText = spinnerEligible
     ? (card.lastProgressSummary ?? spinnerFallbackText)
-    : (card.lastProgressSummary ?? diagnostic ?? presentation.detailMessage ?? "Outcome unverified");
+    : (card.lastProgressSummary ??
+      diagnostic ??
+      presentation.detailMessage ??
+      "Outcome unverified");
   const elapsedOrUncertaintyLabel =
     presentation.kind === "orphaned"
       ? "Outcome unknown"
@@ -122,10 +135,15 @@ function ExecutionRow({
     >
       <DotGrid animated={spinnerEligible} className={dotToneClassName} />
       <span className={cn("sr-only", presentation.textToneClassName)}>{presentation.label}</span>
-      <span className="max-w-36 shrink-0 truncate font-medium text-foreground/85" title={card.agentType}>
+      <span
+        className="max-w-36 shrink-0 truncate font-medium text-foreground/85"
+        title={card.agentType}
+      >
         {card.agentType}
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/60">{elapsedOrUncertaintyLabel}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+        {elapsedOrUncertaintyLabel}
+      </span>
       <span
         className={cn(
           "min-w-0 flex-1 truncate whitespace-nowrap text-muted-foreground/75",
@@ -137,7 +155,10 @@ function ExecutionRow({
         {progressText}
       </span>
       {turnLabel !== null ? (
-        <span className="shrink-0 tabular-nums text-muted-foreground/60" data-pi-subagent-turn="true">
+        <span
+          className="shrink-0 tabular-nums text-muted-foreground/60"
+          data-pi-subagent-turn="true"
+        >
           {turnLabel}
         </span>
       ) : null}
@@ -148,11 +169,19 @@ function ExecutionRow({
           size="icon-xs"
           className="size-6 shrink-0"
           disabled={cancelPending || cancelling}
-          title={cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"}
-          aria-label={cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"}
+          title={
+            cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"
+          }
+          aria-label={
+            cancelling ? "Cancelling — waiting for server acknowledgement" : "Cancel execution"
+          }
           onClick={() => onCancel(card)}
         >
-          {cancelling ? <LoaderIcon className="size-3 animate-spin" /> : <StopIcon className="size-3" />}
+          {cancelling ? (
+            <LoaderIcon className="size-3 animate-spin" />
+          ) : (
+            <StopIcon className="size-3" />
+          )}
         </Button>
       ) : null}
       {resumeVisible ? (
@@ -166,7 +195,11 @@ function ExecutionRow({
           aria-label={`Resume execution ${card.executionId}`}
           onClick={() => onResume(card)}
         >
-          {resumePending ? <LoaderIcon className="size-3 animate-spin" /> : <RotateCcwIcon className="size-3" />}
+          {resumePending ? (
+            <LoaderIcon className="size-3 animate-spin" />
+          ) : (
+            <RotateCcwIcon className="size-3" />
+          )}
         </Button>
       ) : null}
     </div>

@@ -75,6 +75,9 @@ import { estimateTimelineMessageHeight } from "./timelineHeight";
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const OTHER_THREAD_ID = "thread-browser-test-other" as ThreadId;
 
+const findBackgroundActivityStatusRow = () =>
+  document.querySelector<HTMLElement>("[data-testid='composer-background-activity-status']");
+
 // Each call to the snapshot factory gets a fresh, monotonically increasing sequence.
 // The step (1_000_000) is far larger than any single test can bridge: in-test
 // increments come only from `recordProjectCreateCommand`, `addThreadToSnapshot`, and
@@ -3856,9 +3859,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
       payload: { state, source: "provider_stop" },
     });
 
-    const findStatusRow = () =>
-      document.querySelector<HTMLElement>("[data-testid='composer-background-activity-status']");
-
     try {
       const scrollContainer = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-chat-scroll-container='true']"),
@@ -3915,7 +3915,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           updatedAt: isoAt(offset),
         }));
         await waitForLayout();
-        const statusRow = findStatusRow();
+        const statusRow = findBackgroundActivityStatusRow();
         expect(statusRow, `status row missing for the ${state} state`).not.toBeNull();
         expect(statusRow!.textContent, `status row label wrong for the ${state} state`).toBe(
           state === "active" ? "Waiting for background tasks…" : "Finishing…",
@@ -3938,7 +3938,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         updatedAt: isoAt(2_510),
       }));
       await waitForLayout();
-      expect(findStatusRow(), "settled turn kept the background-activity row").toBeNull();
+      expect(
+        findBackgroundActivityStatusRow(),
+        "settled turn kept the background-activity row",
+      ).toBeNull();
       expect(scrollSpy.calls).toHaveLength(0);
 
       // Control: back at the bottom, a real streaming assistant message re-sticks.
@@ -4167,8 +4170,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       ...runningSnapshot,
       threads: runningSnapshot.threads.map((thread) =>
         thread.id === THREAD_ID
-          ? {
-              ...thread,
+          ? Object.assign({}, thread, {
               latestTurn: {
                 turnId: runningTurnId,
                 state: "running" as const,
@@ -4177,7 +4179,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 completedAt: null,
                 assistantMessageId: null,
               },
-            }
+            })
           : thread,
       ),
     };

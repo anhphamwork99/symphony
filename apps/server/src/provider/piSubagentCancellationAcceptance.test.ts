@@ -617,12 +617,10 @@ describe("Pi Subagent Durable Parent-Turn Cancellation Real-Pi Acceptance (Issue
     const { authorityService, binding } = makeAuthorityFixture("th_t06_replay_1");
 
     let observedSession: any;
-    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
-        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),

@@ -560,10 +560,10 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     throw new Error("ALFIE_REPO_DIR is required for synchronized real-Pi acceptance.");
   }
 
-    const userPiBefore = provenance.snapshotUserPiHome();
-    const root = mkdtempSync(join(tmpdir(), `synara-t02-steer-${mode}-`));
-    const artifactDir = join(root, "artifact");
-    const userAgentDir = join(root, "user-agent");
+  const userPiBefore = provenance.snapshotUserPiHome();
+  const root = mkdtempSync(join(tmpdir(), `synara-t02-steer-${mode}-`));
+  const artifactDir = join(root, "artifact");
+  const userAgentDir = join(root, "user-agent");
   const previousRaceEnv = {
     [RACE_HOOK_ENV]: process.env[RACE_HOOK_ENV],
     [RACE_RUN_ID_ENV]: process.env[RACE_RUN_ID_ENV],
@@ -574,11 +574,12 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
   let artifactBefore: ReturnType<typeof snapshotFilesystemTree> | undefined;
   let userAgentBefore: ReturnType<typeof snapshotFilesystemTree> | undefined;
   let isolatedPiBefore: ReturnType<typeof snapshotFilesystemTree> | undefined;
-    let isolatedAgentRuntimeBefore: ReturnType<typeof snapshotPiAgentRuntime> | undefined;
-    let turnStart: Promise<unknown> | undefined;
-    const causalTrace: string[] = [];
-    let capturedHookEventCount = 0;
-    const cleanupFailures: unknown[] = [];
+  let isolatedAgentRuntimeBefore: ReturnType<typeof snapshotPiAgentRuntime> | undefined;
+  let turnStart: Promise<unknown> | undefined;
+  const causalTrace: string[] = [];
+  let capturedHookEventCount = 0;
+  const cleanupFailures: unknown[] = [];
+  let cleanupError: Error | undefined;
 
   try {
     process.env[RACE_HOOK_ENV] = "canonical-steer-race-v1";
@@ -597,11 +598,11 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     artifactBefore = snapshotFilesystemTree(artifactDir);
     expect((await verifyPiSubagentArtifact(artifactDir)).valid).toBe(true);
 
-      harness = await makeRealPiWsHarness({
-        foregroundWaitMs: 300,
-        holdDeterministicSlowResponses: true,
-        desktopManaged: { artifactDir, userAgentDir, mode: "desktop" },
-      });
+    harness = await makeRealPiWsHarness({
+      foregroundWaitMs: 300,
+      holdDeterministicSlowResponses: true,
+      desktopManaged: { artifactDir, userAgentDir, mode: "desktop" },
+    });
     harness.writeSubagentModelPreference("synara-local-echo/echo-slow");
     writeFileSync(
       join(harness.piHomeDir, "PREFERENCES.md"),
@@ -624,19 +625,19 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     expect(isPathWithin(harness.rootDir, harness.dbPath)).toBe(true);
     expect(isPathWithin(root, desktop.managedAgentDir)).toBe(true);
     const realPiHome = resolve(join(homedir(), ".pi"));
-      const isolation = observeIsolationPaths({
-        runRoot: root,
-        artifact: artifactDir,
-        writableUserAgentDir: userAgentDir,
-        writableAuth: join(userAgentDir, "auth.json"),
-        writableModels: join(userAgentDir, "models.json"),
-        writableSettings: join(userAgentDir, "settings.json"),
-        writableModelsStore: join(userAgentDir, "models-store.json"),
-        managedAgentDir: desktop.managedAgentDir,
-        managedExtensionDir: desktop.managedExtensionDir,
-        harnessRoot: harness.rootDir,
-        home: harness.homeDir,
-        state: harness.dbPath,
+    const isolation = observeIsolationPaths({
+      runRoot: root,
+      artifact: artifactDir,
+      writableUserAgentDir: userAgentDir,
+      writableAuth: join(userAgentDir, "auth.json"),
+      writableModels: join(userAgentDir, "models.json"),
+      writableSettings: join(userAgentDir, "settings.json"),
+      writableModelsStore: join(userAgentDir, "models-store.json"),
+      managedAgentDir: desktop.managedAgentDir,
+      managedExtensionDir: desktop.managedExtensionDir,
+      harnessRoot: harness.rootDir,
+      home: harness.homeDir,
+      state: harness.dbPath,
       workspace: harness.workspaceDir,
       parentAgentDir: harness.parentAgentDir,
       childAgentDir: harness.childAgentDir,
@@ -645,43 +646,43 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     expect(new Set(Object.values(isolation).map((entry) => entry.realpath)).size).toBe(
       Object.keys(isolation).length,
     );
-      for (const entry of Object.values(isolation)) {
-        expect(entry.type).not.toBe("symlink");
-        expect(entry.realpath).not.toBe(realPiHome);
-        expect(entry.realpath.startsWith(`${realPiHome}${sep}`)).toBe(false);
-      }
-      for (const name of [
-        "artifact",
-        "writableUserAgentDir",
-        "writableAuth",
-        "writableModels",
-        "writableSettings",
-        "writableModelsStore",
-        "managedAgentDir",
-        "managedExtensionDir",
-      ]) {
-        expect(
-          isPathWithin(isolation.runRoot!.realpath, isolation[name]!.realpath),
-          `${name} must remain under ${isolation.runRoot!.realpath}: ${isolation[name]!.realpath}`,
-        ).toBe(true);
-      }
-      for (const name of [
-        "harnessRoot",
-        "home",
-        "state",
-        "workspace",
-        "parentAgentDir",
-        "childAgentDir",
-        "piHomeDir",
-      ]) {
-        expect(isPathWithin(isolation.harnessRoot!.realpath, isolation[name]!.realpath)).toBe(true);
-      }
-      expect(isolation.writableAuth?.type).toBe("regular");
-      expect(isolation.writableModels?.type).toBe("regular");
-      expect(isolation.writableSettings?.type).toBe("absent");
-      expect(["absent", "regular"]).toContain(isolation.writableModelsStore?.type);
-      expect(isolation.managedAgentDir?.type).toBe("directory");
-      expect(isolation.managedExtensionDir?.type).toBe("directory");
+    for (const entry of Object.values(isolation)) {
+      expect(entry.type).not.toBe("symlink");
+      expect(entry.realpath).not.toBe(realPiHome);
+      expect(entry.realpath.startsWith(`${realPiHome}${sep}`)).toBe(false);
+    }
+    for (const name of [
+      "artifact",
+      "writableUserAgentDir",
+      "writableAuth",
+      "writableModels",
+      "writableSettings",
+      "writableModelsStore",
+      "managedAgentDir",
+      "managedExtensionDir",
+    ]) {
+      expect(
+        isPathWithin(isolation.runRoot!.realpath, isolation[name]!.realpath),
+        `${name} must remain under ${isolation.runRoot!.realpath}: ${isolation[name]!.realpath}`,
+      ).toBe(true);
+    }
+    for (const name of [
+      "harnessRoot",
+      "home",
+      "state",
+      "workspace",
+      "parentAgentDir",
+      "childAgentDir",
+      "piHomeDir",
+    ]) {
+      expect(isPathWithin(isolation.harnessRoot!.realpath, isolation[name]!.realpath)).toBe(true);
+    }
+    expect(isolation.writableAuth?.type).toBe("regular");
+    expect(isolation.writableModels?.type).toBe("regular");
+    expect(isolation.writableSettings?.type).toBe("absent");
+    expect(["absent", "regular"]).toContain(isolation.writableModelsStore?.type);
+    expect(isolation.managedAgentDir?.type).toBe("directory");
+    expect(isolation.managedExtensionDir?.type).toBe("directory");
     assertArtifactAgentHasNoUserConfiguration(desktop.managedAgentDir);
     assertArtifactTreeHasNoUserConfiguration(artifactBefore ?? []);
     userAgentBefore = snapshotFilesystemTree(userAgentDir);
@@ -757,10 +758,10 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
         `Observed production parent session key mismatch (expected ${thread}; observed ${[...observedSessions.keys()].join(",")}).`,
       );
     }
-      const loaded = registeredProductionTool(session, "steer_subagent");
-      const loadedExtensionPath = realpathSync(loaded.extension.path);
-      expect(isPathWithin(isolation.managedExtensionDir!.realpath, loadedExtensionPath)).toBe(true);
-      expect(isPathWithin(isolation.writableUserAgentDir!.realpath, loadedExtensionPath)).toBe(false);
+    const loaded = registeredProductionTool(session, "steer_subagent");
+    const loadedExtensionPath = realpathSync(loaded.extension.path);
+    expect(isPathWithin(isolation.managedExtensionDir!.realpath, loadedExtensionPath)).toBe(true);
+    expect(isPathWithin(isolation.writableUserAgentDir!.realpath, loadedExtensionPath)).toBe(false);
     expect((session as any).getAllTools?.().some((tool: any) => tool.name === "Agent")).toBe(true);
 
     const admission = await waitFor(
@@ -773,14 +774,14 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     expect(admissionsForThread()).toHaveLength(1);
     const identity = admission.result;
     expect(identity.executionId).toMatch(/^exec_/);
-      expect(identity.attemptId).toMatch(/^att_/);
-      expect(identity.generation).toBeGreaterThan(0);
-      await waitFor(
-        () => harness!.modelServer.pendingSlowResponseCount(),
-        (count) => count === 1,
-        "one causally held slow child response",
-        30_000,
-      );
+    expect(identity.attemptId).toMatch(/^att_/);
+    expect(identity.generation).toBeGreaterThan(0);
+    await waitFor(
+      () => harness!.modelServer.pendingSlowResponseCount(),
+      (count) => count === 1,
+      "one causally held slow child response",
+      30_000,
+    );
 
     // The hook is obtained only after the observed parent session has loaded.
     // Its installation resolves the exact tuple in that extension-owned manager;
@@ -805,54 +806,54 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
       generation: identity.generation,
     });
 
-      const captureHookEvents = () => {
-        const events = hook!.snapshot().events;
-        for (const event of events.slice(capturedHookEventCount)) {
-          causalTrace.push(`hook:${event.type}`);
-        }
-        capturedHookEventCount = events.length;
-      };
-      const steerCall = invoke(loaded.target, {
-        execution_id: identity.executionId,
+    const captureHookEvents = () => {
+      const events = hook!.snapshot().events;
+      for (const event of events.slice(capturedHookEventCount)) {
+        causalTrace.push(`hook:${event.type}`);
+      }
+      capturedHookEventCount = events.length;
+    };
+    const steerCall = invoke(loaded.target, {
+      execution_id: identity.executionId,
       attempt_id: identity.attemptId,
       generation: identity.generation,
       task: `Continue the synchronized ${mode} race task.`,
       context: "Use only the exact current execution tuple.",
       link_references: "Decision 0005",
-        expected_outcome: "The exact production hook proves one linearization.",
-      });
-      causalTrace.push("production-tool-call-promise-created");
-      await waitFor(
+      expected_outcome: "The exact production hook proves one linearization.",
+    });
+    causalTrace.push("production-tool-call-promise-created");
+    await waitFor(
       () => hook!.snapshot(),
       (snapshot) =>
         snapshot.events.some((event) => event.type === "manager-invocation") &&
         snapshot.events.some((event) => event.type === "before-live-guard"),
-        "exact production manager invocation and pre-guard barrier",
+      "exact production manager invocation and pre-guard barrier",
+    );
+    captureHookEvents();
+    const liveAtManagerBarrier = harness
+      .bridgeActiveExecutions(thread)
+      .filter(
+        (candidate) =>
+          candidate.executionId === identity.executionId &&
+          candidate.attemptId === identity.attemptId &&
+          candidate.generation === identity.generation,
       );
-      captureHookEvents();
-      const liveAtManagerBarrier = harness
-        .bridgeActiveExecutions(thread)
-        .filter(
-          (candidate) =>
-            candidate.executionId === identity.executionId &&
-            candidate.attemptId === identity.attemptId &&
-            candidate.generation === identity.generation,
-        );
-      expect(liveAtManagerBarrier).toHaveLength(1);
-      expect(harness.modelServer.pendingSlowResponseCount()).toBe(1);
-      causalTrace.push("exact-live-tuple-and-held-child-observed-at-manager-barrier");
+    expect(liveAtManagerBarrier).toHaveLength(1);
+    expect(harness.modelServer.pendingSlowResponseCount()).toBe(1);
+    causalTrace.push("exact-live-tuple-and-held-child-observed-at-manager-barrier");
 
-      if (mode === "terminal-first") {
-        harness.modelServer.releaseSlowResponses();
-        causalTrace.push("slow-child-response-released");
-        await waitFor(
+    if (mode === "terminal-first") {
+      harness.modelServer.releaseSlowResponses();
+      causalTrace.push("slow-child-response-released");
+      await waitFor(
         () => harness!.bridgeActiveExecutions(thread),
         (active) => active.every((candidate) => candidate.executionId !== identity.executionId),
         "terminal-first live retirement and bridge removal",
-          90_000,
-        );
-        causalTrace.push("bridge-index-retired");
-        const terminal = await waitFor(
+        90_000,
+      );
+      causalTrace.push("bridge-index-retired");
+      const terminal = await waitFor(
         () => harness!.durable.listJournalEvents(identity.executionId),
         (events) =>
           events.some(
@@ -864,32 +865,32 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
           ),
         "terminal-first durable seq-40 commit",
         90_000,
-        );
-        expect(terminal.filter((event) => event.sequence === 40)).toHaveLength(1);
-        causalTrace.push("durable-exact-seq40-committed");
-        hook.releaseManagerGuard();
-        causalTrace.push("manager-guard-released");
-      } else {
-        hook.releaseManagerGuard();
-        causalTrace.push("manager-guard-released");
-        await waitFor(
+      );
+      expect(terminal.filter((event) => event.sequence === 40)).toHaveLength(1);
+      causalTrace.push("durable-exact-seq40-committed");
+      hook.releaseManagerGuard();
+      causalTrace.push("manager-guard-released");
+    } else {
+      hook.releaseManagerGuard();
+      causalTrace.push("manager-guard-released");
+      await waitFor(
         () => hook!.snapshot(),
         (snapshot) => snapshot.events.some((event) => event.type === "returned-promise-held"),
-          "exact returned-promise-held insertion barrier",
-        );
-        captureHookEvents();
-        expect(hook.snapshot().counters["session-steer-invocation"]).toBe(1);
-        expect(hook.snapshot().counters["sdk-insertion"]).toBe(1);
-        harness.modelServer.releaseSlowResponses();
-        causalTrace.push("slow-child-response-released");
-        await waitFor(
+        "exact returned-promise-held insertion barrier",
+      );
+      captureHookEvents();
+      expect(hook.snapshot().counters["session-steer-invocation"]).toBe(1);
+      expect(hook.snapshot().counters["sdk-insertion"]).toBe(1);
+      harness.modelServer.releaseSlowResponses();
+      causalTrace.push("slow-child-response-released");
+      await waitFor(
         () => harness!.bridgeActiveExecutions(thread),
         (active) => active.every((candidate) => candidate.executionId !== identity.executionId),
         "enqueue-first natural live retirement and bridge removal",
-          90_000,
-        );
-        causalTrace.push("bridge-index-retired");
-        const terminal = await waitFor(
+        90_000,
+      );
+      causalTrace.push("bridge-index-retired");
+      const terminal = await waitFor(
         () => harness!.durable.listJournalEvents(identity.executionId),
         (events) =>
           events.some(
@@ -901,17 +902,17 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
           ),
         "enqueue-first durable seq-40 commit",
         90_000,
-        );
-        expect(terminal.filter((event) => event.sequence === 40)).toHaveLength(1);
-        causalTrace.push("durable-exact-seq40-committed");
-        hook.releaseSessionPromise();
-        causalTrace.push("session-promise-released");
-      }
+      );
+      expect(terminal.filter((event) => event.sequence === 40)).toHaveLength(1);
+      causalTrace.push("durable-exact-seq40-committed");
+      hook.releaseSessionPromise();
+      causalTrace.push("session-promise-released");
+    }
 
-      const result = await steerCall;
-      captureHookEvents();
-      causalTrace.push("production-tool-call-settled");
-      const observedHook = hook.snapshot();
+    const result = await steerCall;
+    captureHookEvents();
+    causalTrace.push("production-tool-call-settled");
+    const observedHook = hook.snapshot();
     const eventTypes = observedHook.events.map((event) => event.type);
     if (mode === "terminal-first") {
       expect(result.diagnosticCode).toBe("pi_subagent_read_live_record_unavailable");
@@ -954,81 +955,81 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
         .bridgeActiveExecutions(thread)
         .some((candidate) => candidate.executionId === identity.executionId),
     ).toBe(false);
-      expect(admissionsForThread()).toHaveLength(1);
-      expect(harness.modelServer.requests().filter((request) => request.delegated)).toHaveLength(1);
-      expect(harness.modelServer.pendingSlowResponseCount()).toBe(0);
-      const observedActionCounters = {
-        managedAdmissions: admissionsForThread().length,
-        delegatedModelRequests: harness.modelServer.requests().filter((request) => request.delegated)
-          .length,
-        activeExactTuples: harness
-          .bridgeActiveExecutions(thread)
-          .filter((candidate) => candidate.executionId === identity.executionId).length,
-        sessionSteerInvocations: observedHook.counters["session-steer-invocation"] ?? 0,
-        sdkInsertions: observedHook.counters["sdk-insertion"] ?? 0,
-      };
-      expect(observedActionCounters).toEqual({
-        managedAdmissions: 1,
-        delegatedModelRequests: 1,
-        activeExactTuples: 0,
-        sessionSteerInvocations: mode === "enqueue-first" ? 1 : 0,
-        sdkInsertions: mode === "enqueue-first" ? 1 : 0,
-      });
-      // These actions have no runtime counter in the production manager steer path.
-      // Their zero evidence is structural: the exact-live steer implementation calls
-      // only the already-owned record.session.steer and contains no admission,
-      // Resume, bootstrap, reconstruction, queue-replay, or child-creation branch.
-      const structurallyAbsentActions = [
-        "resume",
-        "bootstrap",
-        "reconstruction",
-        "queue-replay",
-        "new-child",
-      ] as const;
-      expect(structurallyAbsentActions).toHaveLength(5);
-      expect(causalTrace).toEqual(
-        mode === "terminal-first"
-          ? [
-              "production-tool-call-promise-created",
-              "hook:manager-invocation",
-              "hook:before-live-guard",
-              "exact-live-tuple-and-held-child-observed-at-manager-barrier",
-              "slow-child-response-released",
-              "bridge-index-retired",
-              "durable-exact-seq40-committed",
-              "manager-guard-released",
-              "hook:live-guard-rejected-not-running",
-              "hook:manager-return-rejected",
-              "production-tool-call-settled",
-            ]
-          : [
-              "production-tool-call-promise-created",
-              "hook:manager-invocation",
-              "hook:before-live-guard",
-              "exact-live-tuple-and-held-child-observed-at-manager-barrier",
-              "manager-guard-released",
-              "hook:live-guard-pass",
-              "hook:session-steer-invocation",
-              "hook:sdk-insertion",
-              "hook:returned-promise-held",
-              "slow-child-response-released",
-              "bridge-index-retired",
-              "durable-exact-seq40-committed",
-              "session-promise-released",
-              "hook:returned-promise-released",
-              "hook:post-await-generation-pass",
-              "hook:bookkeeping-commit",
-              "hook:manager-return-sent",
-              "production-tool-call-settled",
-            ],
-      );
-      process.stdout.write(
-        `T02-F5 ${mode} evidence: ${JSON.stringify({
-          causalTrace,
-          observedActionCounters,
-          structurallyAbsentActions,
-        })}\n`,
-      );
+    expect(admissionsForThread()).toHaveLength(1);
+    expect(harness.modelServer.requests().filter((request) => request.delegated)).toHaveLength(1);
+    expect(harness.modelServer.pendingSlowResponseCount()).toBe(0);
+    const observedActionCounters = {
+      managedAdmissions: admissionsForThread().length,
+      delegatedModelRequests: harness.modelServer.requests().filter((request) => request.delegated)
+        .length,
+      activeExactTuples: harness
+        .bridgeActiveExecutions(thread)
+        .filter((candidate) => candidate.executionId === identity.executionId).length,
+      sessionSteerInvocations: observedHook.counters["session-steer-invocation"] ?? 0,
+      sdkInsertions: observedHook.counters["sdk-insertion"] ?? 0,
+    };
+    expect(observedActionCounters).toEqual({
+      managedAdmissions: 1,
+      delegatedModelRequests: 1,
+      activeExactTuples: 0,
+      sessionSteerInvocations: mode === "enqueue-first" ? 1 : 0,
+      sdkInsertions: mode === "enqueue-first" ? 1 : 0,
+    });
+    // These actions have no runtime counter in the production manager steer path.
+    // Their zero evidence is structural: the exact-live steer implementation calls
+    // only the already-owned record.session.steer and contains no admission,
+    // Resume, bootstrap, reconstruction, queue-replay, or child-creation branch.
+    const structurallyAbsentActions = [
+      "resume",
+      "bootstrap",
+      "reconstruction",
+      "queue-replay",
+      "new-child",
+    ] as const;
+    expect(structurallyAbsentActions).toHaveLength(5);
+    expect(causalTrace).toEqual(
+      mode === "terminal-first"
+        ? [
+            "production-tool-call-promise-created",
+            "hook:manager-invocation",
+            "hook:before-live-guard",
+            "exact-live-tuple-and-held-child-observed-at-manager-barrier",
+            "slow-child-response-released",
+            "bridge-index-retired",
+            "durable-exact-seq40-committed",
+            "manager-guard-released",
+            "hook:live-guard-rejected-not-running",
+            "hook:manager-return-rejected",
+            "production-tool-call-settled",
+          ]
+        : [
+            "production-tool-call-promise-created",
+            "hook:manager-invocation",
+            "hook:before-live-guard",
+            "exact-live-tuple-and-held-child-observed-at-manager-barrier",
+            "manager-guard-released",
+            "hook:live-guard-pass",
+            "hook:session-steer-invocation",
+            "hook:sdk-insertion",
+            "hook:returned-promise-held",
+            "slow-child-response-released",
+            "bridge-index-retired",
+            "durable-exact-seq40-committed",
+            "session-promise-released",
+            "hook:returned-promise-released",
+            "hook:post-await-generation-pass",
+            "hook:bookkeeping-commit",
+            "hook:manager-return-sent",
+            "production-tool-call-settled",
+          ],
+    );
+    process.stdout.write(
+      `T02-F5 ${mode} evidence: ${JSON.stringify({
+        causalTrace,
+        observedActionCounters,
+        structurallyAbsentActions,
+      })}\n`,
+    );
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
     assertNoProviderIdentity(observedHook.events);
     assertArtifactAgentHasNoUserConfiguration(desktop.managedAgentDir);
@@ -1039,29 +1040,29 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
       snapshotFilesystemTree(userAgentDir).filter((entry) => entry.path !== "models-store.json"),
     ).toEqual(userAgentBefore?.filter((entry) => entry.path !== "models-store.json"));
     expect(snapshotFilesystemTree(harness.piHomeDir)).toEqual(isolatedPiBefore);
-      const isolatedAgentRuntimeAfter = snapshotPiAgentRuntime(userAgentDir);
+    const isolatedAgentRuntimeAfter = snapshotPiAgentRuntime(userAgentDir);
     expect(isolatedAgentRuntimeAfter.authJson).toEqual(isolatedAgentRuntimeBefore?.authJson);
     expect(isolatedAgentRuntimeAfter.modelsJson).toEqual(isolatedAgentRuntimeBefore?.modelsJson);
     expect(isolatedAgentRuntimeAfter.settingsJson).toEqual(
       isolatedAgentRuntimeBefore?.settingsJson,
-      );
-      expect(["absent", "regular"]).toContain(isolatedAgentRuntimeAfter.modelsStore.type);
-      const isolatedCacheDiagnostic = {
-        before: isolatedAgentRuntimeBefore?.modelsStore,
-        after: isolatedAgentRuntimeAfter.modelsStore,
-        classification: "non-causal-provider-catalogue-cache",
-      };
-      expect(isolatedCacheDiagnostic.before).toBeDefined();
-      expect(isolatedCacheDiagnostic.after).toBeDefined();
-      process.stdout.write(
-        `T02-F5 ${mode} isolated cache diagnostic: ${JSON.stringify(isolatedCacheDiagnostic)}\n`,
-      );
-    } finally {
-      try {
-        hook ??= (globalThis as any)[RACE_HOOK_KEY] as RaceHook | undefined;
-        hook?.releaseManagerGuard();
-      } catch (cause) {
-        cleanupFailures.push(cause);
+    );
+    expect(["absent", "regular"]).toContain(isolatedAgentRuntimeAfter.modelsStore.type);
+    const isolatedCacheDiagnostic = {
+      before: isolatedAgentRuntimeBefore?.modelsStore,
+      after: isolatedAgentRuntimeAfter.modelsStore,
+      classification: "non-causal-provider-catalogue-cache",
+    };
+    expect(isolatedCacheDiagnostic.before).toBeDefined();
+    expect(isolatedCacheDiagnostic.after).toBeDefined();
+    process.stdout.write(
+      `T02-F5 ${mode} isolated cache diagnostic: ${JSON.stringify(isolatedCacheDiagnostic)}\n`,
+    );
+  } finally {
+    try {
+      hook ??= (globalThis as any)[RACE_HOOK_KEY] as RaceHook | undefined;
+      hook?.releaseManagerGuard();
+    } catch (cause) {
+      cleanupFailures.push(cause);
     }
     try {
       hook?.releaseSessionPromise();
@@ -1075,60 +1076,60 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     } catch (cause) {
       cleanupFailures.push(cause);
     }
-      if (harness) {
-        try {
-          harness.modelServer.releaseSlowResponses();
-          await harness.dispose();
+    if (harness) {
+      try {
+        harness.modelServer.releaseSlowResponses();
+        await harness.dispose();
         expect(harness.envWasRestored()).toBe(true);
         expect((await harness.rootExists())()).toBe(false);
       } catch (cause) {
         cleanupFailures.push(cause);
       }
-      }
+    }
+    try {
+      let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
       try {
-        let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([
-            turnStart?.catch(() => undefined) ?? Promise.resolve(),
-            new Promise((_, reject) => {
-              cleanupTimer = setTimeout(
-                () => reject(new Error("Timed out awaiting parent turn cleanup.")),
-                5_000,
-              );
-            }),
-          ]);
-        } finally {
-          if (cleanupTimer) clearTimeout(cleanupTimer);
-        }
-      } catch (cause) {
+        await Promise.race([
+          turnStart?.catch(() => undefined) ?? Promise.resolve(),
+          new Promise((_, reject) => {
+            cleanupTimer = setTimeout(
+              () => reject(new Error("Timed out awaiting parent turn cleanup.")),
+              5_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (cleanupTimer) clearTimeout(cleanupTimer);
+      }
+    } catch (cause) {
       cleanupFailures.push(cause);
     }
     try {
       const userPiAfter = verifyRealPiExtensionProvenance().snapshotUserPiHome();
-        expect(userPiAfter.digest).toBe(userPiBefore.digest);
-        expect(userPiAfter.sensitive).toEqual(userPiBefore.sensitive);
-        expect(userPiAfter.resources).toEqual(userPiBefore.resources);
-        expect(["absent", "regular"]).toContain(userPiBefore.modelsStore.type);
-        expect(["absent", "regular"]).toContain(userPiAfter.modelsStore.type);
-        const ambientCacheDiagnostic = {
-          before: userPiBefore.modelsStore,
-          after: userPiAfter.modelsStore,
-          classification: "non-causal-provider-catalogue-cache",
-        };
-        expect(ambientCacheDiagnostic.before).toBeDefined();
-        expect(ambientCacheDiagnostic.after).toBeDefined();
-        process.stdout.write(
-          `T02-F5 ${mode} ambient cache diagnostic: ${JSON.stringify(ambientCacheDiagnostic)}\n`,
-        );
-      } catch (cause) {
-        cleanupFailures.push(cause);
-      }
-      try {
-        rmSync(root, { recursive: true, force: true });
-        expect(existsSync(root)).toBe(false);
-      } catch (cause) {
-        cleanupFailures.push(cause);
-      }
+      expect(userPiAfter.digest).toBe(userPiBefore.digest);
+      expect(userPiAfter.sensitive).toEqual(userPiBefore.sensitive);
+      expect(userPiAfter.resources).toEqual(userPiBefore.resources);
+      expect(["absent", "regular"]).toContain(userPiBefore.modelsStore.type);
+      expect(["absent", "regular"]).toContain(userPiAfter.modelsStore.type);
+      const ambientCacheDiagnostic = {
+        before: userPiBefore.modelsStore,
+        after: userPiAfter.modelsStore,
+        classification: "non-causal-provider-catalogue-cache",
+      };
+      expect(ambientCacheDiagnostic.before).toBeDefined();
+      expect(ambientCacheDiagnostic.after).toBeDefined();
+      process.stdout.write(
+        `T02-F5 ${mode} ambient cache diagnostic: ${JSON.stringify(ambientCacheDiagnostic)}\n`,
+      );
+    } catch (cause) {
+      cleanupFailures.push(cause);
+    }
+    try {
+      rmSync(root, { recursive: true, force: true });
+      expect(existsSync(root)).toBe(false);
+    } catch (cause) {
+      cleanupFailures.push(cause);
+    }
     try {
       for (const [key, value] of Object.entries(previousRaceEnv)) {
         if (value === undefined) delete process.env[key];
@@ -1140,13 +1141,14 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
       cleanupFailures.push(cause);
     }
     if (cleanupFailures.length > 0) {
-      throw new Error(
+      cleanupError = new Error(
         cleanupFailures
           .map((cause) => (cause instanceof Error ? cause.message : String(cause)))
           .join("; "),
       );
     }
   }
+  if (cleanupError !== undefined) throw cleanupError;
 }
 
 describe("Ticket 02 synchronized controlled real-Pi F5 acceptance", () => {

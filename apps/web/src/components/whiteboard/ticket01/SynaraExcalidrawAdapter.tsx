@@ -59,15 +59,7 @@ export interface SynaraSelectionObservation {
   readonly settledAfterMs?: number;
 }
 
-export type SynaraDiagnosticAc =
-  | "AC1"
-  | "AC2"
-  | "AC3"
-  | "AC4"
-  | "AC5"
-  | "AC6"
-  | "AC8"
-  | "AC10";
+export type SynaraDiagnosticAc = "AC1" | "AC2" | "AC3" | "AC4" | "AC5" | "AC6" | "AC8" | "AC10";
 
 export interface SynaraExcalidrawDiagnostic {
   readonly code: string;
@@ -118,7 +110,14 @@ export interface SynaraSyntheticWriteScopeHandle {
 }
 
 export interface SynaraSyntheticTraceEntry {
-  readonly kind: "scope-opened" | "write-issued" | "callback-acknowledged" | "scope-drained" | "scope-closed" | "scope-aborted" | "callback-rejected";
+  readonly kind:
+    | "scope-opened"
+    | "write-issued"
+    | "callback-acknowledged"
+    | "scope-drained"
+    | "scope-closed"
+    | "scope-aborted"
+    | "callback-rejected";
   readonly scopeCorrelationId: string;
   readonly operationLocalSequence?: number;
   readonly adapterGlobalSyntheticSequence?: number;
@@ -157,7 +156,12 @@ export interface SynaraExcalidrawHandle {
   readonly clearNativeHistory: () => void;
   readonly restoreScene: (snapshot: SynaraSceneSnapshot) => void;
   readonly openSyntheticWriteScope: (context: {
-    readonly purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback";
+    readonly purpose:
+      | "ai-batch-progress"
+      | "ai-batch-finalize"
+      | "ai-undo"
+      | "ai-redo"
+      | "rollback";
     readonly canvasIdentity: string;
     readonly mountIdentity: string;
     readonly apiIdentity: string;
@@ -252,7 +256,7 @@ function readSelectedIds(appState: PackageAppState): readonly string[] {
         (id) => appState.selectedElementIds[id] === true,
       ),
     ),
-  ].sort();
+  ].toSorted();
 }
 
 function publicPresentationSignature(appState: PackageAppState): string {
@@ -417,11 +421,7 @@ export class SynaraSyntheticScopeRegistry {
       identity.canvasIdentity !== undefined &&
       identity.canvasIdentity !== context.canvasIdentity
     ) {
-      this.emitDiagnostic(
-        "stale-session-epoch",
-        identity.canvasIdentity,
-        context.canvasIdentity,
-      );
+      this.emitDiagnostic("stale-session-epoch", identity.canvasIdentity, context.canvasIdentity);
       throw new Error("synthetic scope canvas identity is stale");
     }
     const scopeCorrelationId = `scope-${++this.nextScopeSequence}`;
@@ -437,12 +437,11 @@ export class SynaraSyntheticScopeRegistry {
       routeEpoch: context.routeEpoch,
       mutationRevision: context.expectedBeforeRevision,
     });
-    const registry = this;
     return {
-      issue: (input) => registry.issue(scopeCorrelationId, input),
-      drain: () => registry.drain(scopeCorrelationId),
-      close: () => registry.close(scopeCorrelationId),
-      abort: (reason) => registry.abort(scopeCorrelationId, reason),
+      issue: (input) => this.issue(scopeCorrelationId, input),
+      drain: () => this.drain(scopeCorrelationId),
+      close: () => this.close(scopeCorrelationId),
+      abort: (reason) => this.abort(scopeCorrelationId, reason),
     };
   }
 
@@ -625,7 +624,7 @@ export class SynaraSyntheticScopeRegistry {
     if (this.openScopeCorrelationId !== scopeCorrelationId || this.openScopeContext === null) {
       return;
     }
-    for (const record of [...this.pending]) {
+    for (const record of Array.from(this.pending)) {
       this.emitDiagnostic(
         "synthetic-scope-unresolved",
         "abort invalidates unissued work and reports unresolved callbacks",
@@ -653,7 +652,10 @@ export class SynaraSyntheticScopeRegistry {
    * Correlate one callback from the monotonic stream by invocation order,
    * sequence window, and scope state. Never by fingerprint equality.
    */
-  public associate(callbackSequence: number, observedProjection: string | null): AdapterSyntheticCallback {
+  public associate(
+    callbackSequence: number,
+    observedProjection: string | null,
+  ): AdapterSyntheticCallback {
     if (this.pending.length > 0) {
       const record = this.pending[0]!;
       if (!this.isSyntheticLockHeld()) {
@@ -664,10 +666,18 @@ export class SynaraSyntheticScopeRegistry {
       }
       const identity = this.currentIdentity();
       const fenceFailure = [
-        ["stale-mount-identity", `${record.context.mountIdentity}/${record.context.apiIdentity}`, `${identity.mountIdentity}/${identity.apiIdentity}`],
+        [
+          "stale-mount-identity",
+          `${record.context.mountIdentity}/${record.context.apiIdentity}`,
+          `${identity.mountIdentity}/${identity.apiIdentity}`,
+        ],
         ["stale-session-epoch", String(record.context.sessionEpoch), String(identity.sessionEpoch)],
         ["stale-route-epoch", String(record.context.routeEpoch), String(identity.routeEpoch)],
-        ["stale-mutation-revision", String(record.expectedBeforeRevision), String(identity.mutationRevision)],
+        [
+          "stale-mutation-revision",
+          String(record.expectedBeforeRevision),
+          String(identity.mutationRevision),
+        ],
       ].find(([, expected, observed]) => observed !== "undefined" && expected !== observed);
       if (fenceFailure !== undefined) {
         const [code, expected, observed] = fenceFailure;
@@ -682,7 +692,11 @@ export class SynaraSyntheticScopeRegistry {
         identity.canvasIdentity !== record.context.canvasIdentity
       ) {
         const reason = `stale-session-epoch: expected ${record.context.canvasIdentity}, observed ${identity.canvasIdentity}`;
-        this.emitDiagnostic("stale-session-epoch", record.context.canvasIdentity, identity.canvasIdentity);
+        this.emitDiagnostic(
+          "stale-session-epoch",
+          record.context.canvasIdentity,
+          identity.canvasIdentity,
+        );
         this.traceRejected(record, callbackSequence, reason);
         this.failOpenScope(new Error(reason));
         return { kind: "rejected", code: "stale-session-epoch", reason };
@@ -753,7 +767,7 @@ export class SynaraSyntheticScopeRegistry {
 
   private failOpenScope(reason: Error): void {
     this.failedScopeReason ??= reason;
-    for (const record of [...this.pending]) {
+    for (const record of Array.from(this.pending)) {
       record.failWith(this.failedScopeReason);
       this.removePending(record.correlationId);
     }
@@ -911,11 +925,19 @@ async function validatePngBlob(blob: Blob): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const image = new Image();
-      image.onload = () =>
-        image.naturalWidth > 0 && image.naturalHeight > 0
-          ? resolve()
-          : reject(new Error("official PNG export decoded with non-positive dimensions"));
-      image.onerror = () => reject(new Error("official PNG export was not browser-decodable"));
+      image.addEventListener(
+        "load",
+        () =>
+          image.naturalWidth > 0 && image.naturalHeight > 0
+            ? resolve()
+            : reject(new Error("official PNG export decoded with non-positive dimensions")),
+        { once: true },
+      );
+      image.addEventListener(
+        "error",
+        () => reject(new Error("official PNG export was not browser-decodable")),
+        { once: true },
+      );
       image.src = url;
     });
   } finally {
@@ -1142,7 +1164,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
 
   const exportSvg = useCallback(async (): Promise<string> => {
     try {
-      requireApi({
+      const api = requireApi({
         code: "api-not-ready",
         ac: "AC1",
         phase: "export-svg",
@@ -1285,7 +1307,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
   const restoreScene = useCallback(
     (snapshot: SynaraSceneSnapshot): void => {
       const registry = syntheticScopeRegistryRef.current!;
-      const targetProjection = callbacksRef.current.projectSceneForSyntheticWrite?.(snapshot) ?? null;
+      const targetProjection =
+        callbacksRef.current.projectSceneForSyntheticWrite?.(snapshot) ?? null;
       if (
         syntheticLockHeldRef.current &&
         !registry.isApplyingIssuedWrite &&
@@ -1347,7 +1370,7 @@ export const SynaraExcalidrawAdapter = forwardRef<
     (enabled: boolean): void => {
       syntheticLockHeldRef.current = enabled;
       setViewModeEnabled(enabled);
-      const api = requireApi({
+      requireApi({
         code: "api-not-ready",
         ac: "AC1",
         phase: "edit-lock",
@@ -1579,7 +1602,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
       adapterCallbackSequenceRef.current += 1;
       editingTextActiveRef.current = appState.editingTextElement !== null;
       const registry = syntheticScopeRegistryRef.current!;
-      const observedProjection = callbacksRef.current.projectSceneForSyntheticWrite?.(snapshot) ?? null;
+      const observedProjection =
+        callbacksRef.current.projectSceneForSyntheticWrite?.(snapshot) ?? null;
       const presentationSignature = publicPresentationSignature(appState);
       const packageDocumentReferencesStable =
         lastPackageElementsRef.current !== null &&

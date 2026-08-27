@@ -5,10 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import type {
-  SynaraSceneInput,
-  SynaraSceneSnapshot,
-} from "../ticket01/SynaraExcalidrawAdapter";
+import type { SynaraSceneInput, SynaraSceneSnapshot } from "../ticket01/SynaraExcalidrawAdapter";
 import {
   TICKET01_CARD_ID,
   TICKET01_IMAGE_ID,
@@ -61,9 +58,9 @@ async function nativeShortcut(kind: "undo" | "redo"): Promise<void> {
   );
 }
 
-async function waitForHarness(
-  ref: { current: ExcalidrawTicket02HarnessHandle | null },
-): Promise<ExcalidrawTicket02HarnessHandle> {
+async function waitForHarness(ref: {
+  current: ExcalidrawTicket02HarnessHandle | null;
+}): Promise<ExcalidrawTicket02HarnessHandle> {
   await vi.waitFor(
     () => {
       expect(ref.current).not.toBeNull();
@@ -227,7 +224,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
       ),
     ).toBe(true);
     expect(lockedUndoElement.getAttribute("aria-disabled")).toBe("true");
-    expect(handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical")).toEqual([]);
+    expect(
+      handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical"),
+    ).toEqual([]);
 
     const lockedViewport = handle.getAdapter().captureViewport();
     await userEvent.wheel(canvas(), { delta: { y: 160 } });
@@ -257,11 +256,17 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     const final = captureDocumentSnapshot(handle.getAdapter().captureScene());
     expect(
       handle.getHistory(),
-      JSON.stringify({ diagnostics: handle.getDiagnostics(), trace: handle.getAdapter().getSyntheticTrace() }),
+      JSON.stringify({
+        diagnostics: handle.getDiagnostics(),
+        trace: handle.getAdapter().getSyntheticTrace(),
+      }),
     ).toMatchObject({ cursor: 1, lockState: "unlocked" });
     expect(
       handle.getHistory().events,
-      JSON.stringify({ settlements: handle.getSettlements(), diagnostics: handle.getDiagnostics() }),
+      JSON.stringify({
+        settlements: handle.getSettlements(),
+        diagnostics: handle.getDiagnostics(),
+      }),
     ).toHaveLength(1);
     expect(handle.getHistory().events[0]?.acceptedSyntheticWriteCount).toBe(3);
     // Establish a stale selection through the public app-state update path.
@@ -282,7 +287,10 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     ).toBe(true);
     expect(
       handle.getHistory().events,
-      JSON.stringify({ settlements: handle.getSettlements(), diagnostics: handle.getDiagnostics() }),
+      JSON.stringify({
+        settlements: handle.getSettlements(),
+        diagnostics: handle.getDiagnostics(),
+      }),
     ).toHaveLength(1);
 
     const undoAiButton = page.getByRole("button", { name: "Undo AI batch" });
@@ -300,7 +308,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     );
     expect(redo).not.toBeNull();
     await vi.waitFor(() => expect((redo as HTMLButtonElement).disabled).toBe(false));
-    await vi.waitFor(() => expect((redo as HTMLButtonElement).getAttribute("aria-disabled")).toBe("false"));
+    await vi.waitFor(() =>
+      expect((redo as HTMLButtonElement).getAttribute("aria-disabled")).toBe("false"),
+    );
     // Plan §6.6 scenario 4: Redo by Enter/Space keyboard activation of the
     // plainly labeled public AI action. A real keyboard user reaches the
     // focused Redo surface and presses Enter; on a native button this fires
@@ -311,7 +321,10 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     await vi.waitFor(() =>
       expect(
         documentSnapshotsEqual(final, captureDocumentSnapshot(handle.getAdapter().captureScene())),
-        JSON.stringify({ diagnostics: handle.getDiagnostics(), trace: handle.getAdapter().getSyntheticTrace() }),
+        JSON.stringify({
+          diagnostics: handle.getDiagnostics(),
+          trace: handle.getAdapter().getSyntheticTrace(),
+        }),
       ).toBe(true),
     );
     expect(handle.getAdapter().captureViewport()).toEqual(retainedViewport);
@@ -332,7 +345,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
       ]);
     }
     expect(handle.getAdapter().getIdentity()).toEqual(identity);
-    expect(handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical")).toEqual([]);
+    expect(
+      handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical"),
+    ).toEqual([]);
     await mounted.unmount();
   });
 
@@ -505,7 +520,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
       handle.getSettlements().some((result) => result.settled === "uncertain"),
       JSON.stringify(handle.getSettlements()),
     ).toBe(false);
-    expect(handle.getSettlements().filter((result) => result.settled === "no-op").length).toBeGreaterThanOrEqual(5);
+    expect(
+      handle.getSettlements().filter((result) => result.settled === "no-op").length,
+    ).toBeGreaterThanOrEqual(5);
     expect(handle.getHistory().events[0]?.id).toBe(eventId);
     expect(handle.getHistory().cursor).toBe(1);
     await mounted.unmount();
@@ -571,18 +588,23 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     await Promise.resolve();
     const delayed = {
       ...current,
-      elements: current.elements.map((element) => ({
-        ...element,
-        customData: {
-          ...((element as Record<string, unknown>).customData as Record<string, unknown> | undefined),
-          delayedDuplicate: true,
-        },
-      })),
+      elements: current.elements.map((element) =>
+        Object.assign({}, element, {
+          customData: {
+            ...((element as Record<string, unknown>).customData as
+              | Record<string, unknown>
+              | undefined),
+            delayedDuplicate: true,
+          },
+        }),
+      ),
     };
     adapter.restoreScene(delayed);
     await vi.waitFor(() =>
       expect(
-        handle.getDiagnostics().some((diagnostic) => diagnostic.code === "duplicate-synthetic-callback"),
+        handle
+          .getDiagnostics()
+          .some((diagnostic) => diagnostic.code === "duplicate-synthetic-callback"),
       ).toBe(true),
     );
     await closing;
@@ -592,9 +614,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     adapter.restoreScene(delayed);
     await vi.waitFor(() =>
       expect(
-        handle.getDiagnostics().some(
-          (diagnostic) => diagnostic.code === "unknown-callback-provenance",
-        ),
+        handle
+          .getDiagnostics()
+          .some((diagnostic) => diagnostic.code === "unknown-callback-provenance"),
       ).toBe(true),
     );
     expect(handle.getHistory().lockState).toBe("locked-fault");
@@ -629,21 +651,22 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     const unknownCurrent = unknownAdapter.captureScene();
     unknownAdapter.restoreScene({
       ...unknownCurrent,
-      elements: unknownCurrent.elements.map((element) => ({
-        ...element,
-        customData: {
-          ...((element as Record<string, unknown>).customData as Record<string, unknown> | undefined),
-          unknownCallback: true,
-        },
-      })),
-    });
-    await vi.waitFor(() =>
-      expect(unknownHandle.getHistory().lockState).toBe("locked-fault"),
-    );
-    expect(
-      unknownHandle.getDiagnostics().some(
-        (diagnostic) => diagnostic.code === "unknown-callback-provenance",
+      elements: unknownCurrent.elements.map((element) =>
+        Object.assign({}, element, {
+          customData: {
+            ...((element as Record<string, unknown>).customData as
+              | Record<string, unknown>
+              | undefined),
+            unknownCallback: true,
+          },
+        }),
       ),
+    });
+    await vi.waitFor(() => expect(unknownHandle.getHistory().lockState).toBe("locked-fault"));
+    expect(
+      unknownHandle
+        .getDiagnostics()
+        .some((diagnostic) => diagnostic.code === "unknown-callback-provenance"),
     ).toBe(true);
     expect(unknownHandle.getHistory().cursor).toBe(0);
     expect(unknownHandle.getHistory().events).toHaveLength(0);
@@ -671,9 +694,9 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
       ),
     ).toThrow("stale operation generation");
     expect(
-      staleGeneration.getDiagnostics().some(
-        (diagnostic) => diagnostic.code === "stale-operation-generation",
-      ),
+      staleGeneration
+        .getDiagnostics()
+        .some((diagnostic) => diagnostic.code === "stale-operation-generation"),
     ).toBe(true);
     await staleGenerationMounted.unmount();
   });

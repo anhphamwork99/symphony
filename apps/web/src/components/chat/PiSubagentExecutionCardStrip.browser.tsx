@@ -14,6 +14,11 @@ import { PiSubagentExecutionCardStrip } from "./PiSubagentExecutionCardStrip";
 
 const VIEWPORT = { width: 1_500, height: 805 };
 
+const dotGridForExecution = (executionId: string) =>
+  document.querySelector<HTMLElement>(
+    `[data-pi-subagent-execution-id="${executionId}"] [data-pi-subagent-dot-grid]`,
+  );
+
 function makeCard(
   executionId: string,
   overrides: Partial<PiSubagentExecutionCard> = {},
@@ -100,7 +105,9 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     await page.viewport(VIEWPORT.width, VIEWPORT.height);
     const screen = await render(<RailHarness />);
 
-    const strip = document.querySelector<HTMLElement>('[data-testid="pi-subagent-execution-card-strip"]');
+    const strip = document.querySelector<HTMLElement>(
+      '[data-testid="pi-subagent-execution-card-strip"]',
+    );
     const progress = document.querySelector<HTMLElement>('[data-pi-subagent-progress="true"]');
     expect(strip).not.toBeNull();
     expect(progress).not.toBeNull();
@@ -140,14 +147,10 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     await page.viewport(VIEWPORT.width, VIEWPORT.height);
     const screen = await render(<ToneHarness />);
 
-    const gridFor = (executionId: string) =>
-      document.querySelector<HTMLElement>(
-        `[data-pi-subagent-execution-id="${executionId}"] [data-pi-subagent-dot-grid]`,
-      );
-    const runningGrid = gridFor("exec-running");
-    const cancellingGrid = gridFor("exec-cancelling");
-    const unverifiedGrid = gridFor("exec-unverified");
-    const orphanedGrid = gridFor("exec-orphaned");
+    const runningGrid = dotGridForExecution("exec-running");
+    const cancellingGrid = dotGridForExecution("exec-cancelling");
+    const unverifiedGrid = dotGridForExecution("exec-unverified");
+    const orphanedGrid = dotGridForExecution("exec-orphaned");
 
     expect(runningGrid?.className).toContain("text-muted-foreground/55");
     expect(runningGrid?.className).not.toMatch(/text-(?:sky|cyan)/u);
@@ -162,9 +165,7 @@ describe("PiSubagentExecutionCardStrip browser rail", () => {
     await page.viewport(VIEWPORT.width, VIEWPORT.height);
     const screen = await render(<RailHarness />);
 
-    const dot = document.querySelector<HTMLElement>(
-      '[data-pi-subagent-dot-grid="animated"] span',
-    );
+    const dot = document.querySelector<HTMLElement>('[data-pi-subagent-dot-grid="animated"] span');
     const progress = document.querySelector<HTMLElement>('[data-pi-subagent-progress="true"]');
     expect(dot).not.toBeNull();
     expect(progress).not.toBeNull();

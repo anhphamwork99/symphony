@@ -101,7 +101,7 @@ function stableValue(value: unknown): unknown {
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .toSorted(([left], [right]) => left.localeCompare(right))
         .map(([key, nested]) => [key, stableValue(nested)]),
     );
   }
@@ -184,7 +184,7 @@ export function projectExcalidrawTicket01Semantics(
   return {
     elements,
     files: Object.keys(scene.files)
-      .sort()
+      .toSorted()
       .map((id) => {
         const file = scene.files[id];
         return {

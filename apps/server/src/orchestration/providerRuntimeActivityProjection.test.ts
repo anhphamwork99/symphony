@@ -665,7 +665,9 @@ describe("provider runtime activity projection", () => {
         detail: expect.any(String) as unknown,
       },
     });
-    const detail = (withDetail?.payload as { detail?: string }).detail;
+    expect(withDetail).toBeDefined();
+    const detail = (withDetail!.payload as { detail?: string }).detail;
+    expect(detail).toBeDefined();
     expect(detail!.length).toBeLessThanOrEqual(180);
     // The activity must survive the schema of the command that carries it.
     expect(() => decodeActivityAppendCommand(withDetail!)).not.toThrow();
@@ -695,8 +697,9 @@ describe("provider runtime activity projection", () => {
         payload: { state: "finalizing", source: "provider_stop" },
       }),
     );
+    expect(noTurn).toBeDefined();
     expect(noTurn?.turnId).toBeNull();
-    expect((noTurn?.payload as Record<string, unknown>).state).toBe("finalizing");
+    expect((noTurn!.payload as Record<string, unknown>).state).toBe("finalizing");
 
     // Aggregate rows never update-in-place: each change is its own append.
     expect(

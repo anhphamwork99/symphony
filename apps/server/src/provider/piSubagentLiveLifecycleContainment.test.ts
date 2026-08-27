@@ -178,9 +178,9 @@ describe("PiSubagentLiveLifecycleContainment", () => {
       },
     })!;
     containment.activate(lost);
-    expect(
-      (await containment.control({ tuple, session, registration: lost })).diagnosticCode,
-    ).toBe("pi_subagent_live_lifecycle_outcome_unknown");
+    expect((await containment.control({ tuple, session, registration: lost })).diagnosticCode).toBe(
+      "pi_subagent_live_lifecycle_outcome_unknown",
+    );
 
     const failed = containment.capture({
       tuple,
@@ -194,7 +194,9 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(
       (await containment.control({ tuple, session, registration: failed })).diagnosticCode,
     ).toBe("pi_subagent_live_lifecycle_outcome_unknown");
-    expect(traces.some((entry) => entry.reason === "callback_timeout_before_acceptance")).toBe(true);
+    expect(traces.some((entry) => entry.reason === "callback_timeout_before_acceptance")).toBe(
+      true,
+    );
     expect(traces.some((entry) => entry.reason === "callback_timeout_after_acceptance")).toBe(true);
     expect(traces.some((entry) => entry.reason === "callback_lost_after_acceptance")).toBe(true);
     expect(traces.some((entry) => entry.reason === "callback_failed_after_acceptance")).toBe(true);
@@ -253,9 +255,10 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     containment.activate(first);
     containment.activate(second);
 
-    expect(await containment.observe({ tuple: firstTuple, session, registration: first })).toEqual(
-      { status: "applied", value: "first" },
-    );
+    expect(await containment.observe({ tuple: firstTuple, session, registration: first })).toEqual({
+      status: "applied",
+      value: "first",
+    });
     expect(
       await containment.observe({ tuple: secondTuple, session, registration: second }),
     ).toEqual({ status: "applied", value: "second" });
@@ -319,9 +322,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
       status: "stale",
       diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored",
     });
-    expect(
-      await containment.observe({ tuple, session, registration }),
-    ).toMatchObject({
+    expect(await containment.observe({ tuple, session, registration })).toMatchObject({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
     });
@@ -372,7 +373,9 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(
       await containment.observe({ tuple, session: sessionOne, registration: one }),
     ).toMatchObject({ diagnosticCode: "pi_subagent_live_lifecycle_unavailable" });
-    expect(containment.capture({ tuple, session: sessionOne, observe: () => "reconstructed" })).toBeUndefined();
+    expect(
+      containment.capture({ tuple, session: sessionOne, observe: () => "reconstructed" }),
+    ).toBeUndefined();
     expect(await containment.observe({ tuple, session: sessionTwo, registration: two })).toEqual({
       status: "applied",
       value: "two",
@@ -485,7 +488,9 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     );
     expect(
       traces.some(
-        (entry) => entry.event === "return_unavailable" && entry.reason === "callback_timeout_before_acceptance",
+        (entry) =>
+          entry.event === "return_unavailable" &&
+          entry.reason === "callback_timeout_before_acceptance",
       ),
     ).toBe(true);
     // The raw throw text never reaches the bounded trace surface.
@@ -507,9 +512,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
       },
     })!;
     containment.activate(thrown);
-    expect(
-      await containment.observe({ tuple, session, registration: thrown }),
-    ).toMatchObject({
+    expect(await containment.observe({ tuple, session, registration: thrown })).toMatchObject({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
     });
@@ -549,9 +552,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
       },
     })!;
     containment.activate(control);
-    expect(
-      await containment.control({ tuple, session, registration: control }),
-    ).toMatchObject({
+    expect(await containment.control({ tuple, session, registration: control })).toMatchObject({
       status: "outcome_unknown",
       diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
     });
@@ -566,9 +567,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
       },
     })!;
     containment.activate(observation);
-    expect(
-      await containment.observe({ tuple, session, registration: observation }),
-    ).toMatchObject({
+    expect(await containment.observe({ tuple, session, registration: observation })).toMatchObject({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
     });
@@ -600,17 +599,19 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     })!;
     containment.activate(replacement);
     expect(containment.retire(stale)).toBe(false);
-    expect(
-      await containment.control({ tuple, session, registration: stale }),
-    ).toMatchObject({ status: "unavailable", diagnosticCode: "pi_subagent_live_lifecycle_unavailable" });
+    expect(await containment.control({ tuple, session, registration: stale })).toMatchObject({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+    });
     expect(firstCalls).toBe(0);
-    expect(
-      await containment.control({ tuple, session, registration: replacement }),
-    ).toEqual({ status: "applied", value: "replacement" });
+    expect(await containment.control({ tuple, session, registration: replacement })).toEqual({
+      status: "applied",
+      value: "replacement",
+    });
     expect(containment.retire(replacement)).toBe(true);
-    expect(
-      await containment.control({ tuple, session, registration: replacement }),
-    ).toMatchObject({ status: "unavailable" });
+    expect(await containment.control({ tuple, session, registration: replacement })).toMatchObject({
+      status: "unavailable",
+    });
   });
 
   it("never exposes internal reasons or provider text on the public result surface", async () => {
@@ -625,7 +626,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     })!;
     containment.activate(registration);
     const result = await containment.control({ tuple, session, registration });
-    expect(Object.keys(result).sort()).toEqual(["diagnosticCode", "status"]);
+    expect(Object.keys(result).toSorted()).toEqual(["diagnosticCode", "status"]);
     expect(JSON.stringify(result)).not.toContain("sk-provider-secret");
     expect(JSON.stringify(result)).not.toContain("callback_");
   });

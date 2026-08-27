@@ -2101,6 +2101,11 @@ export const PLAIN_PI_EXTENSION_THEME = {
   },
 } as unknown as ExtensionUIContext["theme"];
 
+const makeManagedResourceLoaderOptions = (extensionPath: string) => ({
+  noExtensions: true,
+  additionalExtensionPaths: [extensionPath],
+});
+
 const makePiAdapter = (options?: PiAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
@@ -2513,11 +2518,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             extensionPath: piSubagentDesktopManagedExtensionDir(gateResult.managed.agentDir),
           }
         : undefined;
-
-    const makeManagedResourceLoaderOptions = (extensionPath: string) => ({
-      noExtensions: true,
-      additionalExtensionPaths: [extensionPath],
-    });
 
     const makeEventBase = makePiRuntimeEventBase;
 

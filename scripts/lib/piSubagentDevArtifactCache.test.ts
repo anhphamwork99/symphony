@@ -24,7 +24,6 @@ import { verifyPiSubagentArtifact } from "../../apps/server/src/provider/piSubag
 import {
   buildPiSubagentArtifact,
   PI_SUBAGENT_ARTIFACT_MANIFEST_FILE_NAME,
-  loadPiSubagentExtensionProvenance,
 } from "./piSubagentArtifactStaging.ts";
 import {
   PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME,
@@ -234,10 +233,7 @@ function createSyntheticAlfieRepo(): SyntheticAlfieRepo {
  */
 function createSyntheticRepoRootFixture(source: SyntheticAlfieRepo): string {
   const repoRoot = makeTempRoot("dev-cache-repo-root-");
-  const fixtureDir = join(
-    repoRoot,
-    "apps/server/src/provider/test-fixtures",
-  );
+  const fixtureDir = join(repoRoot, "apps/server/src/provider/test-fixtures");
   mkdirSync(fixtureDir, { recursive: true });
   const extensionRoot = "agent/extensions/pi-subagents";
   writeFileSync(
@@ -333,21 +329,19 @@ describe("piSubagentDevArtifactCacheEntryDir", () => {
     );
   });
 
-  it.for([
-    "not-a-sha",
-    "",
-    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-    "../escape",
-  ] as const)("rejects a non-SHA pin '%s' with cache_location_invalid", (pin) => {
-    expect(() =>
-      piSubagentDevArtifactCacheEntryDir({ synaraHome: "/tmp/synara-home", pinnedCommit: pin }),
-    ).toThrowError(PiSubagentDevArtifactCacheError);
-    try {
-      piSubagentDevArtifactCacheEntryDir({ synaraHome: "/tmp/synara-home", pinnedCommit: pin });
-    } catch (cause) {
-      expect((cause as PiSubagentDevArtifactCacheError).code).toBe("cache_location_invalid");
-    }
-  });
+  it.for(["not-a-sha", "", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "../escape"] as const)(
+    "rejects a non-SHA pin '%s' with cache_location_invalid",
+    (pin) => {
+      expect(() =>
+        piSubagentDevArtifactCacheEntryDir({ synaraHome: "/tmp/synara-home", pinnedCommit: pin }),
+      ).toThrowError(PiSubagentDevArtifactCacheError);
+      try {
+        piSubagentDevArtifactCacheEntryDir({ synaraHome: "/tmp/synara-home", pinnedCommit: pin });
+      } catch (cause) {
+        expect((cause as PiSubagentDevArtifactCacheError).code).toBe("cache_location_invalid");
+      }
+    },
+  );
 });
 
 describe("loadDevArtifactPin", () => {
@@ -390,9 +384,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     // The cache root contains exactly the one pin entry after preparation
     // (no staging siblings left behind).
     const cacheRoot = join(environment.synaraHome, PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME);
-    expect(readdirSync(cacheRoot).toSorted()).toEqual([
-      environment.pinnedCommit.toLowerCase(),
-    ]);
+    expect(readdirSync(cacheRoot).toSorted()).toEqual([environment.pinnedCommit.toLowerCase()]);
   }, 60_000);
 
   it("returns a verified hit unchanged on the second preparation (hit, no restage)", async () => {
@@ -420,10 +412,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     const environment = createDevCacheEnvironment();
     const first = await prepareIn(environment);
 
-    const extensionEntry = join(
-      first.artifactDir,
-      "agent/extensions/pi-subagents/src/index.ts",
-    );
+    const extensionEntry = join(first.artifactDir, "agent/extensions/pi-subagents/src/index.ts");
     writeFileSync(
       extensionEntry,
       `${readFileSync(extensionEntry, "utf8")}\n// tampered after first preparation\n`,
@@ -464,10 +453,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     const verification = await verifyPiSubagentArtifact(prepared.artifactDir);
     expect(verification.valid).toBe(true);
     expect(
-      readFileSync(
-        join(entryDir, "agent/extensions/pi-subagents/package.json"),
-        "utf8",
-      ),
+      readFileSync(join(entryDir, "agent/extensions/pi-subagents/package.json"), "utf8"),
     ).toContain("@alfie/pi-subagents");
   }, 60_000);
 
@@ -608,9 +594,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
       ),
       "lock_write_failed",
     );
-    expect(writeError.message).toBe(
-      "Could not write the managed pi-subagents dev artifact lock.",
-    );
+    expect(writeError.message).toBe("Could not write the managed pi-subagents dev artifact lock.");
     expect(writeError.message).not.toContain(writeCause.message);
 
     const closeCause = new Error(`close failed at ${cacheRoot}`);
@@ -632,9 +616,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
       ),
       "lock_close_failed",
     );
-    expect(closeError.message).toBe(
-      "Could not close the managed pi-subagents dev artifact lock.",
-    );
+    expect(closeError.message).toBe("Could not close the managed pi-subagents dev artifact lock.");
     expect(closeError.message).not.toContain(closeCause.message);
   });
 
@@ -747,9 +729,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     await prepareIn(environment);
 
     expect(existsSync(staleSibling)).toBe(false);
-    expect(readdirSync(cacheRoot).toSorted()).toEqual([
-      environment.pinnedCommit.toLowerCase(),
-    ]);
+    expect(readdirSync(cacheRoot).toSorted()).toEqual([environment.pinnedCommit.toLowerCase()]);
   }, 60_000);
 
   it("fails closed when the pinned source cannot be resolved (unclean tree)", async () => {
@@ -793,9 +773,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
   it("serializes concurrent preparations of the same pin: one stages, the rest hit", async () => {
     const environment = createDevCacheEnvironment();
 
-    const results = await Promise.all(
-      Array.from({ length: 4 }, () => prepareIn(environment)),
-    );
+    const results = await Promise.all(Array.from({ length: 4 }, () => prepareIn(environment)));
 
     for (const result of results) {
       expect(result.artifactDir).toBe(expectedEntryDir(environment));
@@ -852,10 +830,7 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     const secondCommit = run(["rev-parse", "HEAD"]).trim();
     expect(secondCommit).not.toBe(environment.pinnedCommit);
 
-    const fixtureDir = join(
-      environment.repoRoot,
-      "apps/server/src/provider/test-fixtures",
-    );
+    const fixtureDir = join(environment.repoRoot, "apps/server/src/provider/test-fixtures");
     writeFileSync(
       join(fixtureDir, "piSubagentExtensionProvenance.json"),
       JSON.stringify(
@@ -905,8 +880,8 @@ describe("preparePiSubagentDevArtifact (cache layer semantics)", () => {
     const environment = createDevCacheEnvironment();
     const prepared = await prepareIn(environment);
 
-    const stagedBasenames = walkFiles(prepared.artifactDir).map((relative) =>
-      relative.split("/").pop()!,
+    const stagedBasenames = walkFiles(prepared.artifactDir).map(
+      (relative) => relative.split("/").pop()!,
     );
     for (const prohibited of ["auth.json", "models.json", "credentials.json"]) {
       expect(stagedBasenames, `prohibited payload ${prohibited}`).not.toContain(prohibited);

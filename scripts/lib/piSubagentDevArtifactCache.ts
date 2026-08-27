@@ -30,13 +30,7 @@
 //   remove-then-rename interleaving window between concurrent rebuilds).
 
 import { randomBytes } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { open as openFile, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -184,10 +178,11 @@ function withAlfieLocatorEnv<T>(
 }
 
 /** Loads the authoritative read-only pin fixture for this repository. */
-export function loadDevArtifactPin(
-  repoRoot: string,
-): PiSubagentExtensionProvenanceFixture {
-  const fixturePath = join(resolve(repoRoot), PI_SUBAGENT_EXTENSION_PROVENANCE_FIXTURE_RELATIVE_PATH);
+export function loadDevArtifactPin(repoRoot: string): PiSubagentExtensionProvenanceFixture {
+  const fixturePath = join(
+    resolve(repoRoot),
+    PI_SUBAGENT_EXTENSION_PROVENANCE_FIXTURE_RELATIVE_PATH,
+  );
   try {
     return loadPiSubagentExtensionProvenance(fixturePath);
   } catch (cause) {
@@ -211,11 +206,7 @@ export function piSubagentDevArtifactCacheEntryDir(input: {
       "Managed pi-subagents pin is not a Git commit SHA; refusing to derive a cache location.",
     );
   }
-  return join(
-    resolve(input.synaraHome),
-    PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME,
-    normalized,
-  );
+  return join(resolve(input.synaraHome), PI_SUBAGENT_DEV_ARTIFACT_CACHE_DIR_NAME, normalized);
 }
 
 /**
@@ -223,10 +214,7 @@ export function piSubagentDevArtifactCacheEntryDir(input: {
  * result or `undefined` — never throws for an invalid tree (the caller
  * decides between quarantine+restage and fail-closed).
  */
-const verifyCacheEntry = (
-  artifactDir: string,
-  provenance: PiSubagentExtensionProvenanceFixture,
-) =>
+const verifyCacheEntry = (artifactDir: string, provenance: PiSubagentExtensionProvenanceFixture) =>
   verifyPiSubagentArtifact(artifactDir).then(
     (result) => {
       if (!result.valid) return undefined;
@@ -255,10 +243,7 @@ function cacheFailure(
   return new PiSubagentDevArtifactCacheError(code, message, cause);
 }
 
-function quarantineCacheEntry(
-  artifactDir: string,
-  cacheFs: PiSubagentDevArtifactCacheFs,
-): void {
+function quarantineCacheEntry(artifactDir: string, cacheFs: PiSubagentDevArtifactCacheFs): void {
   try {
     // rm on a symlink path removes the link only (lstat semantics), so a
     // hostile symlinked cache entry cannot delete content outside the cache.
@@ -479,16 +464,17 @@ export async function withPinLock<T>(
     break;
   }
 
+  const acquiredHandle = handle;
+  if (acquiredHandle === undefined) {
+    throw cacheFailure(
+      "lock_open_failed",
+      "Could not open the managed pi-subagents dev artifact lock.",
+    );
+  }
   try {
     return await run();
   } finally {
-    if (handle === undefined) {
-      throw cacheFailure(
-        "lock_open_failed",
-        "Could not open the managed pi-subagents dev artifact lock.",
-      );
-    }
-    await releasePinLock(lockPath, ownerToken, handle, cacheFs);
+    await releasePinLock(lockPath, ownerToken, acquiredHandle, cacheFs);
   }
 }
 

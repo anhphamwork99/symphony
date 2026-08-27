@@ -33,7 +33,6 @@ import {
 } from "./excalidrawTicket01Semantics";
 import type {
   SynaraExcalidrawDiagnostic,
-  SynaraExcalidrawHandle,
   SynaraSceneInput,
   SynaraSceneUpdate,
   SynaraSelectionObservation,
@@ -100,14 +99,10 @@ function mutableProgressScene(progress: number): SynaraSceneInput {
   return {
     elements: EXCALIDRAW_TICKET01_FIXTURE.elements.map((element) => ({
       ...element,
-      customData: { ...(element.customData ?? {}), progress },
+      customData: { ...element.customData, progress },
     })),
     files: EXCALIDRAW_TICKET01_FIXTURE.files as unknown as NonNullable<SynaraSceneInput["files"]>,
   };
-}
-
-function selectedElementIds(handle: SynaraExcalidrawHandle): readonly string[] {
-  return handle.captureScene().selectedElementIds;
 }
 
 function selectionUpdate(sequence: number, selectedIds: readonly string[]): SynaraSceneUpdate {

@@ -23,6 +23,12 @@ const read = (result: ReadResult, trace: string[]) => ({
 
 const toolResult = (text: string) => ({ content: [{ type: "text", text }] });
 
+const otherProviderError = async () => ({
+  isError: true,
+  diagnosticCode: "provider-secret-code",
+  content: [{ type: "text", text: "failed" }],
+});
+
 const invoke = (tool: any, params: Record<string, unknown>) =>
   tool.execute("call-1", params, undefined, undefined, undefined);
 
@@ -158,9 +164,7 @@ describe("Pi managed canonical routing", () => {
     expect(result.content[0].text).toContain("Execution ID: exec-missing-read");
     expect(result.content[0].text).toContain("State: running");
     expect(result.content[0].text).toContain("durable progress remains available");
-    expect(result.content[0].text).toContain(
-      "Diagnostics: pi_subagent_live_lifecycle_unavailable",
-    );
+    expect(result.content[0].text).toContain("Diagnostics: pi_subagent_live_lifecycle_unavailable");
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
   it("requires the exact routing capability in the managed handshake", () => {
@@ -530,17 +534,14 @@ describe("Pi managed canonical routing", () => {
   });
 
   it("applies a valid bounded controlled steer success", async () => {
-    const harness = liveManagedTool("steer_subagent", async () =>
-      toolResult("steered ack"),
-    );
+    const harness = liveManagedTool("steer_subagent", async () => toolResult("steered ack"));
     const result = await harness.invoke();
     expect(harness.state.providerCalls).toBe(1);
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain("Steer state: applied");
     expect(
       harness.state.traces.some(
-        (entry) =>
-          entry.event === "provider_acceptance" || entry.event === "return_applied",
+        (entry) => entry.event === "provider_acceptance" || entry.event === "return_applied",
       ),
     ).toBe(true);
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
@@ -588,9 +589,7 @@ describe("Pi managed canonical routing", () => {
     // marker. Text heuristics must be ignored: a success-shaped bounded
     // payload stays an applied steer.
     const harness = liveManagedTool("steer_subagent", async () =>
-      toolResult(
-        "pi_subagent_managed_execution_unavailable_live: Agent not found in text only",
-      ),
+      toolResult("pi_subagent_managed_execution_unavailable_live: Agent not found in text only"),
     );
     const result = await harness.invoke();
     expect(harness.state.providerCalls).toBe(1);
@@ -609,15 +608,11 @@ describe("Pi managed canonical routing", () => {
     expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
     expect(result.content[0].text).toContain("Execution ID: exec-live");
     expect(result.content[0].text).toContain("State: running");
-    expect(result.content[0].text).toContain(
-      "Diagnostics: pi_subagent_live_lifecycle_unavailable",
+    expect(result.content[0].text).toContain("Diagnostics: pi_subagent_live_lifecycle_unavailable");
+    expect(harness.state.traces.some((entry) => entry.event === "provider_acceptance")).toBe(false);
+    expect(harness.state.traces.some((entry) => entry.event === "return_outcome_unknown")).toBe(
+      false,
     );
-    expect(
-      harness.state.traces.some((entry) => entry.event === "provider_acceptance"),
-    ).toBe(false);
-    expect(
-      harness.state.traces.some((entry) => entry.event === "return_outcome_unknown"),
-    ).toBe(false);
     expect(JSON.stringify(result)).not.toContain("sk-secret");
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
@@ -628,16 +623,11 @@ describe("Pi managed canonical routing", () => {
     // other error shape, where control conservatively reports outcome
     // unknown (an effect may have linearized) while observation stays
     // unavailable (no acceptance boundary exists to lose).
-    const otherError = async () => ({
-      isError: true,
-      diagnosticCode: "provider-secret-code",
-      content: [{ type: "text", text: "failed" }],
-    });
-    const controlHarness = liveManagedTool("steer_subagent", otherError);
+    const controlHarness = liveManagedTool("steer_subagent", otherProviderError);
     const controlResult = await controlHarness.invoke();
     expect(controlResult.diagnosticCode).toBe("pi_subagent_live_lifecycle_outcome_unknown");
 
-    const observationHarness = liveManagedTool("get_subagent_result", otherError);
+    const observationHarness = liveManagedTool("get_subagent_result", otherProviderError);
     const observationResult = await observationHarness.invoke();
     expect(observationResult.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
     expect(observationResult.isError).toBeUndefined();
@@ -655,9 +645,7 @@ describe("Pi managed canonical routing", () => {
     expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain("State: running");
-    expect(
-      harness.state.traces.some((entry) => entry.event === "provider_acceptance"),
-    ).toBe(false);
+    expect(harness.state.traces.some((entry) => entry.event === "provider_acceptance")).toBe(false);
     expect(
       harness.state.traces.some(
         (entry) => entry.event === "return_unavailable" && entry.reason === "provider_inactive",

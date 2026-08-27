@@ -941,6 +941,27 @@ export interface AntigravityAdapterDependencies {
   readonly onRecoveryDiagnostic?: (name: string, fields: Readonly<Record<string, unknown>>) => void;
 }
 
+const boundedStopIdleInt = (
+  value: number | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number =>
+  value !== undefined && Number.isInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback;
+
+const clearStopIdleTimer = (context: AntigravitySessionContext): void => {
+  const stopIdle = context.stopIdle;
+  if (stopIdle?.timer !== undefined) {
+    clearTimeout(stopIdle.timer);
+    delete stopIdle.timer;
+  }
+};
+
+const stopIdleDrainMarker = (context: AntigravitySessionContext): string =>
+  `${context.processedHookBytes}:${context.processedTranscriptBytes}:${context.recovery.activityRevision}`;
+
 const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {}) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
@@ -960,15 +981,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       configuredRecoveryGraceMs <= 2_147_483_647
         ? configuredRecoveryGraceMs
         : DEFAULT_TERMINAL_RECOVERY_GRACE_MS;
-    const boundedStopIdleInt = (
-      value: number | undefined,
-      fallback: number,
-      minimum: number,
-      maximum: number,
-    ): number =>
-      value !== undefined && Number.isInteger(value) && value >= minimum && value <= maximum
-        ? value
-        : fallback;
     const stopIdleLifecycle =
       dependencies.stopIdleLifecycle ??
       serverConfig.antigravityStopIdleLifecycle ??
@@ -2277,14 +2289,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       } satisfies ProviderRuntimeEvent);
     };
 
-    const clearStopIdleTimer = (context: AntigravitySessionContext): void => {
-      const stopIdle = context.stopIdle;
-      if (stopIdle?.timer !== undefined) {
-        clearTimeout(stopIdle.timer);
-        delete stopIdle.timer;
-      }
-    };
-
     const armStopIdleTimer = (
       context: AntigravitySessionContext,
       ownership: RecoveryOwnership,
@@ -2378,9 +2382,6 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
       setIneligible(context, "stop-idle-observed", false);
       armStopIdleTimer(context, ownership, "close-wait");
     };
-
-    const stopIdleDrainMarker = (context: AntigravitySessionContext): string =>
-      `${context.processedHookBytes}:${context.processedTranscriptBytes}:${context.recovery.activityRevision}`;
 
     const drainStopIdleStableEof = async (
       context: AntigravitySessionContext,

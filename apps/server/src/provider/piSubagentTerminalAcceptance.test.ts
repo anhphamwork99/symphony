@@ -576,12 +576,10 @@ describe("Pi Subagent Journal-First Terminal Lifecycle Real-Pi Acceptance (Issue
 
     const runtimeEvents: any[] = [];
     let observedSession: any;
-    let observedCapability: any;
 
     const piAdapterLayer = makePiAdapterLive({
       onSubagentCapability: (event) => {
         observedSession = event.session;
-        observedCapability = event.capability;
       },
     }).pipe(
       Layer.provide(Layer.succeed(ServerConfig, serverConfig)),

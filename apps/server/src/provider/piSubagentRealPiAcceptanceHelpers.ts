@@ -197,12 +197,7 @@ function resolveVersionedExtensionDir(): string {
   return extDir;
 }
 
-export type UserPiHomeEntryType =
-  | "absent"
-  | "regular"
-  | "directory"
-  | "symlink"
-  | "other";
+export type UserPiHomeEntryType = "absent" | "regular" | "directory" | "symlink" | "other";
 
 export interface UserPiHomePathSnapshot {
   /** No file contents are retained in an isolation snapshot. */
@@ -297,6 +292,7 @@ function hashUserPiRegularFile(fullPath: string): string {
       `Unable to fingerprint user Pi home entry '${fullPath}': ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
+      { cause },
     );
   }
 }
@@ -313,6 +309,7 @@ function observeUserPiEntry(fullPath: string, allowAbsent = true): UserPiEntry {
       `Unable to inspect user Pi home entry '${fullPath}': ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
+      { cause },
     );
   }
   const type = userPiEntryType(stat);
@@ -334,6 +331,7 @@ function observeUserPiEntry(fullPath: string, allowAbsent = true): UserPiEntry {
         `Unable to read user Pi home symlink '${fullPath}': ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
+        { cause },
       );
     }
     return {
@@ -386,34 +384,35 @@ export function observeIsolationPaths(
   paths: Readonly<Record<string, string>>,
 ): Readonly<Record<string, IsolationPathObservation>> {
   return Object.fromEntries(
-      Object.entries(paths).map(([name, fullPath]) => {
-        const entry = observeUserPiEntry(fullPath);
-        const canonicalPath =
-          entry.type === "absent"
-            ? path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath))
-            : fs.realpathSync(fullPath);
-        return [
-          name,
-          {
-            path: fullPath,
-            realpath: canonicalPath,
-            exists: entry.type !== "absent",
-            type: entry.type,
-            symlinkTarget: entry.symlinkTarget,
-          },
+    Object.entries(paths).map(([name, fullPath]) => {
+      const entry = observeUserPiEntry(fullPath);
+      const canonicalPath =
+        entry.type === "absent"
+          ? path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath))
+          : fs.realpathSync(fullPath);
+      return [
+        name,
+        {
+          path: fullPath,
+          realpath: canonicalPath,
+          exists: entry.type !== "absent",
+          type: entry.type,
+          symlinkTarget: entry.symlinkTarget,
+        },
       ];
     }),
   );
 }
 
+const absentUserPiPathSnapshot = (): UserPiHomePathSnapshot => ({
+  exists: false,
+  type: "absent",
+  hash: null,
+  size: null,
+});
+
 /** Separate bounded witness for the writable agent dir and volatile model cache. */
 export function snapshotPiAgentRuntime(agentDir: string): PiAgentRuntimeSnapshot {
-  const absent = (): UserPiHomePathSnapshot => ({
-    exists: false,
-    type: "absent",
-    hash: null,
-    size: null,
-  });
   const observe = (name: string): UserPiEntry => observeUserPiEntry(path.join(agentDir, name));
   const auth = observe("auth.json");
   const models = observe("models.json");
@@ -423,11 +422,15 @@ export function snapshotPiAgentRuntime(agentDir: string): PiAgentRuntimeSnapshot
     throw new Error(`Pi agent models-store.json must be absent or regular: '${agentDir}'.`);
   }
   return {
-    authJson: auth.type === "absent" ? absent() : toUserPiPathSnapshot(auth),
-    modelsJson: models.type === "absent" ? absent() : toUserPiPathSnapshot(models),
-    settingsJson: settings.type === "absent" ? absent() : toUserPiPathSnapshot(settings),
+    authJson: auth.type === "absent" ? absentUserPiPathSnapshot() : toUserPiPathSnapshot(auth),
+    modelsJson:
+      models.type === "absent" ? absentUserPiPathSnapshot() : toUserPiPathSnapshot(models),
+    settingsJson:
+      settings.type === "absent" ? absentUserPiPathSnapshot() : toUserPiPathSnapshot(settings),
     modelsStore: {
-      ...(modelsStore.type === "absent" ? absent() : toUserPiPathSnapshot(modelsStore)),
+      ...(modelsStore.type === "absent"
+        ? absentUserPiPathSnapshot()
+        : toUserPiPathSnapshot(modelsStore)),
       mtimeMs: modelsStore.mtimeMs,
     },
   };
@@ -453,6 +456,7 @@ function snapshotUserPiResources(piHome: string): ReadonlyArray<UserPiHomeResour
         `Unable to enumerate user Pi resource directory '${fullDir}': ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
+        { cause },
       );
     }
     for (const name of names) {
@@ -480,18 +484,16 @@ function snapshotUserPiResources(piHome: string): ReadonlyArray<UserPiHomeResour
 
 function snapshotUserPiHomeState(): UserPiHomeSnapshot {
   const piHome = path.join(os.homedir(), ".pi");
-  const absentPath = (): UserPiHomePathSnapshot => ({
-    exists: false,
-    type: "absent",
-    hash: null,
-    size: null,
-  });
   if (!existsSync(piHome)) {
     return {
       digest: "absent",
-      sensitive: { authJson: absentPath(), modelsJson: absentPath(), settingsJson: absentPath() },
+      sensitive: {
+        authJson: absentUserPiPathSnapshot(),
+        modelsJson: absentUserPiPathSnapshot(),
+        settingsJson: absentUserPiPathSnapshot(),
+      },
       resources: [],
-      modelsStore: { ...absentPath(), mtimeMs: null },
+      modelsStore: { ...absentUserPiPathSnapshot(), mtimeMs: null },
     };
   }
 
@@ -507,6 +509,7 @@ function snapshotUserPiHomeState(): UserPiHomeSnapshot {
         `Unable to enumerate user Pi home directory '${dir}': ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
+        { cause },
       );
     }
     for (const name of names) {
@@ -866,7 +869,7 @@ export function createDeterministicModelServer(
         pendingSlowResponseCount: () => pendingSlowResponses.size,
         releaseSlowResponses: () => {
           holdSlowResponses = false;
-          for (const release of [...pendingSlowResponses]) release();
+          for (const release of pendingSlowResponses) release();
         },
         setManualTeardownCommand: (command) => {
           manualTeardownCommand = command;
@@ -875,7 +878,7 @@ export function createDeterministicModelServer(
         close: () =>
           new Promise<void>((done) => {
             holdSlowResponses = false;
-            for (const release of [...pendingSlowResponses]) release();
+            for (const release of pendingSlowResponses) release();
             server.close(() => done());
           }),
       });
@@ -1766,9 +1769,7 @@ export async function makeRealPiWsHarness(
   // of the harness options). Acceptance legs assert the mode the real
   // composition actually ran under (e.g. web-mode locator legs prove the
   // managed binding engaged while ServerConfig stayed in web mode).
-  const serverMode = (
-    await runtime.runPromise(Effect.service(ServerConfig))
-  ).mode;
+  const serverMode = (await runtime.runPromise(Effect.service(ServerConfig))).mode;
 
   // Start the real orchestration reactor and mark command-ready, mirroring
   // the WsOrchestrationHarness startup sequence.
