@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: post-Gate governance reassessment
-Triage: awaiting-post-gate-governance-reassessment
+Lifecycle: bounded native-image feasibility
+Triage: active-native-image-gate
 Tracker: Local Markdown
 
 ## Artifacts
@@ -22,6 +22,7 @@ Tracker: Local Markdown
 - [Remediated Ticket 02 fallback dual-history implementation plan](./plans/02-fallback-dual-history-implementation.md)
 - [Decision 0056 — Ticket 02 WP-GATE-only authorization](./decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
 - [Decision 0057 — Ticket 02 fallback WP-GATE PASS and post-Gate routing](./decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
+- [Decision 0058 — Ticket 02 WP-NATIVE-IMAGE-GATE authorization](./decisions/0058-ticket-02-native-image-gate-authorization.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
 
@@ -33,4 +34,4 @@ Current frontier: [02 — Prove exact AI edit-batch Undo and Redo](./issues/02-p
 
 Completed bounded phase: Ticket 02 fallback WP-GATE passed on measured source candidate `a483ed6a3e3d6fe832250c1ab170f7a350268feb`, with unit 18/18 and two stable-Chromium runs 4/4 at exit `0`. The source and evidence commits are preserved in main history, and an independent remediation re-review returned PASS. See [Decision 0057](./decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md) and the [Gate evidence](./evidence/ticket-02/fallback-gate.md).
 
-Current boundary: Ticket 02 is `awaiting-post-gate-governance-reassessment`. The bounded PASS proves only isolated-harness feasibility; it claims no AC and no Ticket 02 acceptance. All later work packages (outcomes/assets/failure, cap/lifecycle, accessibility, native-image gate, final integration), production WebSocket/lifecycle/persistence/navigation, final review and Supervisor acceptance, package/lockfile changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited until a new governance/implementation decision defines and authorizes the production seam and exact write set.
+Current boundary: Ticket 02 is `active-native-image-gate` under [Decision 0058](./decisions/0058-ticket-02-native-image-gate-authorization.md). Only one real-Chromium browser test and three exact-candidate evidence artifacts are authorized. No production runtime source may change. Production outcomes, assets, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.

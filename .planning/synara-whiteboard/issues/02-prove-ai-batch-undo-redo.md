@@ -2,11 +2,11 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md) — bounded WP-GATE PASS recorded; awaiting post-Gate governance reassessment — following [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md), [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md), [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), and [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md).
+**Bounded by:** [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md) — WP-NATIVE-IMAGE-GATE-only authorization — following [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), [Decision 0056](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
-**Status:** awaiting-post-gate-governance-reassessment
+**Status:** active-native-image-gate
 
-Decision 0057 records that Decision 0056's bounded isolated WP-GATE passed on measured candidate `a483ed6a3e3d6fe832250c1ab170f7a350268feb`, with exact-candidate unit and two stable-Chromium runs at exit `0` plus an independent remediation re-review PASS. The Gate claims no AC and no Ticket 02 acceptance. All later work packages, production WebSocket/lifecycle/persistence/navigation integration, final review and Supervisor acceptance, package/lockfile changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited until a post-Gate governance/implementation decision authorizes an exact production seam and write set.
+Decision 0058 authorizes only a real-Chromium proof of native image insertion, complete element/file closure, meaningful official SVG/PNG exports, native Undo recovery, native Redo removal, and second native Undo recovery. It allows one browser test and three evidence artifacts only. It claims no Ticket 02 AC and authorizes no production runtime, WebSocket, lifecycle, persistence, assets, accessibility, or final integration work.
 
 ## Acceptance criteria
 
@@ -48,6 +48,7 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 
 ## Current evidence and references
 
+- [Decision 0058 — WP-NATIVE-IMAGE-GATE authorization](../decisions/0058-ticket-02-native-image-gate-authorization.md)
 - [Decision 0057 — bounded WP-GATE PASS and post-Gate routing](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Fallback WP-GATE exact-candidate evidence](../evidence/ticket-02/fallback-gate.md)
 - [Decision 0056 — active WP-GATE-only implementation authorization](../decisions/0056-ticket-02-fallback-wp-gate-authorization.md)
@@ -61,6 +62,6 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
 - Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-**Routing:** `awaiting-post-gate-governance-reassessment`
+**Routing:** `active-native-image-gate`
 
-**Current authorization boundary:** [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md) records the bounded Gate PASS and ends Decision 0056's WP-GATE execution phase. It does not authorize a later work package. The next action is a governance reassessment that must decide the production WebSocket/browser seam, exact server/contracts/shared/web write set, production lifecycle owner, Decision 0047 integrated evidence route, and whether any later WP may begin. No AC is claimed by the Gate. Ticket 02 final acceptance remains a later exactly-once consultation after authorized integrated implementation, real-Chromium verification, and one independent feature-level review.
+**Current authorization boundary:** [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md) authorizes only the four-path native-image Gate and its exact-candidate two-run stable-Chromium evidence protocol. A bounded PASS returns to governance; a valid native-behavior failure returns to the owner to narrow or leave the native exact-image promise unaccepted; inability to measure without crossing the public/write boundary is a `BLOCKER`. No production implementation or AC claim follows by inference.
