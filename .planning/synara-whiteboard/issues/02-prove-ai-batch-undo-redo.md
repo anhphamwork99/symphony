@@ -2,11 +2,13 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md) — WP-NATIVE-IMAGE-DROP-GATE-only authorization — following the file-chooser [Decision 0059](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md), [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
+**Bounded by:** [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), as amended by [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md) — WP-NATIVE-IMAGE-DROP-GATE-only authorization — following the file-chooser [Decision 0059](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md), [Decision 0058](../decisions/0058-ticket-02-native-image-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
 **Status:** active-native-image-drop-gate
 
 Decision 0060 authorizes only a replacement real-Chromium Gate through Excalidraw's actual drag-and-drop handler. It permits standard `File`, `DataTransfer`, `DragEvent`, and `dispatchEvent` on the real `.excalidraw` container, while preserving all direct-insertion, runtime, config, package, and private-API prohibitions. The Gate must prove complete image/file closure, meaningful official SVG and PNG exports, user Delete, native Undo recovery, native Redo removal, and second native Undo recovery in two exact-candidate runs.
+
+Decision 0061 clarifies package normalization: source bytes/hash/dimensions/MIME/colors prove the dropped sentinel, while the verified package-normalized stored bytes/hash become the exact native-history baseline. Undo and second Undo must restore that same stored closure exactly; source pixel semantics must remain unchanged.
 
 ## Acceptance criteria
 
@@ -51,6 +53,7 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - [Decision 0058 — WP-NATIVE-IMAGE-GATE authorization](../decisions/0058-ticket-02-native-image-gate-authorization.md)
 - [Decision 0059 — native-image Gate BLOCKER and governance routing](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md)
 - [Decision 0060 — native-image drag-and-drop Gate authorization](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md)
+- [Decision 0061 — native-image package-normalization amendment](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md)
 - [Native-image Gate BLOCKER exact-candidate evidence](../evidence/ticket-02/native-image-gate.md)
 - [Decision 0057 — bounded WP-GATE PASS and post-Gate routing](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Fallback WP-GATE exact-candidate evidence](../evidence/ticket-02/fallback-gate.md)
@@ -67,4 +70,4 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 
 **Routing:** `active-native-image-drop-gate`
 
-**Current authorization boundary:** [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md) authorizes only the four-path drag-and-drop native-image Gate and exact-candidate two-run evidence protocol. No production implementation, later work package, AC claim, feature review, or final acceptance follows by inference.
+**Current authorization boundary:** [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), as amended by [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md), authorizes only the four-path drag-and-drop native-image Gate and exact-candidate two-run evidence protocol. No production implementation, later work package, AC claim, feature review, or final acceptance follows by inference.
