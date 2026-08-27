@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: bounded native-image drag-and-drop feasibility
-Triage: active-native-image-drop-gate
+Lifecycle: native-image Gate passed; post-Gate governance reassessment required
+Triage: awaiting-post-native-image-gate-governance-reassessment
 Tracker: Local Markdown
 
 ## Artifacts
@@ -26,6 +26,7 @@ Tracker: Local Markdown
 - [Decision 0059 — Ticket 02 native-image Gate BLOCKER and governance routing](./decisions/0059-ticket-02-native-image-gate-blocked-routing.md)
 - [Decision 0060 — Ticket 02 native-image drag-and-drop Gate authorization](./decisions/0060-ticket-02-native-image-drop-gate-authorization.md)
 - [Decision 0061 — Ticket 02 native-image package-normalization amendment](./decisions/0061-ticket-02-native-image-drop-normalization-amendment.md)
+- [Decision 0062 — Ticket 02 native-image drop Gate PASS and governance routing](./decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
 - [Ticket 02 native-image Gate BLOCKER evidence](./evidence/ticket-02/native-image-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
@@ -40,4 +41,6 @@ Completed bounded phase: Ticket 02 fallback WP-GATE passed on measured source ca
 
 Completed bounded phase: Ticket 02 WP-NATIVE-IMAGE-GATE stopped as a valid `BLOCKER` on measured source candidate `209ca21370415afcea5e860474ca8fdefd166bae`. Two stable-Chromium runs reproducibly reached the package File System Access chooser branch but could not supply a file through the authorized public Vitest Browser surface. The independent read-only review returned `PASS-BLOCKER` with high confidence. Native image behavior was not measured.
 
-Current boundary: Ticket 02 is `active-native-image-drop-gate` under [Decision 0060](./decisions/0060-ticket-02-native-image-drop-gate-authorization.md), as amended by [Decision 0061](./decisions/0061-ticket-02-native-image-drop-normalization-amendment.md). Only the existing native-image browser test and three evidence files may change. The Gate must use the real Excalidraw drag-and-drop handler with an in-test deterministic PNG. Source pixel semantics must survive package ingestion; the package-normalized stored bytes/hash must then remain exact across native Undo/Redo. No production runtime or later work package is authorized.
+Completed bounded phase: Ticket 02's native-image drag-and-drop Gate passed on measured source `c37dbf1b3f8ccc8cc6fc2ad16057a1fb337247a2`. Two stable-Chromium runs passed 1/1 at exit `0`, and independent remediation re-review returned `PASS` with high confidence. The result proves bounded native package behavior only; it does not pass AC6 or Ticket 02.
+
+Current boundary: Ticket 02 is `awaiting-post-native-image-gate-governance-reassessment` under [Decision 0062](./decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md). No production runtime or later work package is authorized. Production operation transport/outcomes, AI assets/restore/failure, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
