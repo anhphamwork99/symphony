@@ -87,6 +87,41 @@ export interface SynaraSceneUpdate extends SynaraSceneInput {
   readonly sequence?: number;
 }
 
+/**
+ * Adapter-owned opaque synthetic write scope (Ticket 02 plan §4.2). The
+ * coordinator receives only this opaque handle and a stable diagnostic
+ * correlation ID — never a forgeable provenance token.
+ */
+export interface SynaraSyntheticWriteScopeHandle {
+  readonly issue: (input: {
+    readonly operationLocalSequence: number;
+    readonly apply: () => void;
+  }) => { readonly adapterGlobalSyntheticSequence: number; readonly correlationId: string };
+  readonly drain: () => Promise<void>;
+  readonly close: () => Promise<void>;
+  readonly abort: (reason: string) => void;
+  readonly context: {
+    readonly purpose: string;
+    readonly operationId: string;
+    readonly operationGeneration: number;
+  };
+}
+
+export interface SynaraSyntheticScopeDiagnostics {
+  readonly lastAdapterSyntheticSequence: () => number;
+  readonly lastAdapterCallbackSequence: () => number;
+  readonly hasOpenScope: () => boolean;
+  readonly tombstoneCount: () => number;
+}
+
+/** Public host observation consumed by human settlement (plan §5.1). */
+export interface SynaraHostBoundaryObservation {
+  readonly adapterCallbackSequence: number;
+  readonly scopeActive: boolean;
+  readonly tombstoneCount: number;
+  readonly editingTextActive: boolean;
+}
+
 export interface SynaraExcalidrawHandle {
   readonly getIdentity: () => { readonly mountId: number; readonly apiId: string | null };
   readonly captureScene: () => SynaraSceneSnapshot;
@@ -98,8 +133,16 @@ export interface SynaraExcalidrawHandle {
   readonly captureViewport: () => SynaraViewport;
   readonly restoreViewport: (viewport: SynaraViewport) => void;
   readonly clearNativeHistory: () => void;
-  readonly isNativeHistorySettlementPending?: () => boolean;
   readonly restoreScene: (snapshot: SynaraSceneSnapshot) => void;
+  readonly openSyntheticWriteScope: (context: {
+    readonly purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback";
+    readonly operationId: string;
+    readonly operationGeneration: number;
+    readonly sessionEpoch: number;
+    readonly routeEpoch: number;
+  }) => SynaraSyntheticWriteScopeHandle;
+  readonly observeHostBoundary: () => SynaraHostBoundaryObservation;
+  readonly isEditingTextActive: () => boolean;
 }
 
 export interface SynaraExcalidrawAdapterProps {
@@ -123,14 +166,16 @@ export interface SynaraExcalidrawAdapterProps {
   readonly onSettledSelection?: (observation: SynaraSelectionObservation) => void;
   readonly onViewportChange?: (viewport: SynaraViewport) => void;
   /**
-   * Ticket 02 gate opt-in. Existing Ticket 01 consumers retain native undo
-   * semantics until they explicitly own the Synara history boundary.
+   * Ticket 02 human-settlement observation (plan §5.1). The adapter forwards
+   * package public pointer observations; it never calls preventDefault,
+   * stopPropagation, or dispatches history.
    */
-  readonly containNativeHistory?: boolean;
-  /**
-   * The adapter clears the package history before exposing this callback. The
-   * callback is intentionally scene-shaped and never receives the package API.
-   */
+  readonly onPointerActivity?: (kind: "pointer-down" | "pointer-up" | "pointer-cancel") => void;
+  readonly onKeyboardCandidate?: (key: string) => void;
+  /** Fail-closed notification for an uncorrelatable callback inside a scope. */
+  readonly onUncorrelatableCallback?: () => void;
+  /** Test-policy injection for the bounded synthetic drain/tombstone window. */
+  readonly syntheticDrainWindowMs?: number;
   readonly onSceneChange?: (snapshot: SynaraSceneSnapshot) => void;
 }
 
@@ -201,6 +246,228 @@ export function normalizeSynaraScene(scene: SynaraSceneInput): SynaraSceneInput 
     appState: restored.appState as unknown as JsonObject,
     files: restored.files as unknown as Readonly<Record<string, SynaraSceneFile>>,
   };
+}
+
+type AdapterSyntheticCallback =
+  | { readonly kind: "correlated"; readonly correlationId: string }
+  | { readonly kind: "duplicate-after-close"; readonly correlationId: string }
+  | { readonly kind: "extra-in-scope" }
+  | { readonly kind: "human-or-unknown" };
+
+interface AdapterScopeContext {
+  readonly purpose: string;
+  readonly operationId: string;
+  readonly operationGeneration: number;
+  readonly sessionEpoch: number;
+  readonly routeEpoch: number;
+}
+
+interface AdapterPendingWriteRecord {
+  readonly correlationId: string;
+  readonly scopeId: number;
+  readonly operationLocalSequence: number;
+  readonly adapterGlobalSyntheticSequence: number;
+  readonly expectedCallbackSequence: number;
+  readonly context: AdapterScopeContext;
+  settle: () => void;
+  failWith: (reason: Error) => void;
+}
+
+let nextScopePrivateId = 0;
+
+/**
+ * Adapter-owned synthetic provenance registry (plan \u00a74.2). Correlation is
+ * by adapter-owned invocation order (FIFO over registered pending records),
+ * the callback sequence window, and scope state \u2014 never by fingerprint
+ * equality. The coordinator sees only the opaque scope handle and stable
+ * correlation IDs, never a forgeable provenance token.
+ */
+class SynaraSyntheticScopeRegistry {
+  private readonly pending: AdapterPendingWriteRecord[] = [];
+  private readonly closedScopes = new Map<
+    number,
+    { readonly correlationIds: readonly string[]; readonly closedAt: number }
+  >();
+  private openScopeId: number | null = null;
+  private openScopeContext: AdapterScopeContext | null = null;
+  private nextLocalSequence = 1;
+
+  public constructor(
+    private readonly syntheticSequenceRef: { current: number },
+    private readonly callbackSequenceRef: { current: number },
+    private readonly emitDiagnostic: (code: string, expected: string, observed: string) => void,
+    private readonly boundedWindowMs: () => number,
+  ) {}
+
+  public open(context: AdapterScopeContext): SynaraSyntheticWriteScopeHandle {
+    if (this.openScopeId !== null) {
+      throw new Error("only one mutation-capable synthetic scope may be open at a time");
+    }
+    const scopeId = ++nextScopePrivateId;
+    this.openScopeId = scopeId;
+    this.openScopeContext = context;
+    this.nextLocalSequence = 1;
+    const registry = this;
+    return {
+      context: {
+        purpose: context.purpose,
+        operationId: context.operationId,
+        operationGeneration: context.operationGeneration,
+      },
+      issue: (input) => registry.issue(scopeId, input),
+      drain: () => registry.drain(scopeId),
+      close: () => registry.close(scopeId),
+      abort: (reason) => registry.abort(scopeId, reason),
+    };
+  }
+
+  private issue(
+    scopeId: number,
+    input: { readonly operationLocalSequence: number; readonly apply: () => void },
+  ): { readonly adapterGlobalSyntheticSequence: number; readonly correlationId: string } {
+    if (this.openScopeId !== scopeId) throw new Error("synthetic scope is not open");
+    if (input.operationLocalSequence !== this.nextLocalSequence) {
+      this.emitDiagnostic(
+        "synthetic-sequence-mismatch",
+        `contiguous operation-local sequence ${this.nextLocalSequence} before any scene write`,
+        `received ${input.operationLocalSequence}`,
+      );
+      throw new Error(
+        `expected operation-local sequence ${this.nextLocalSequence}, received ${input.operationLocalSequence}`,
+      );
+    }
+    this.nextLocalSequence += 1;
+    this.syntheticSequenceRef.current += 1;
+    const correlationId = `synthetic-${scopeId}-${this.syntheticSequenceRef.current}`;
+    const record: AdapterPendingWriteRecord = {
+      correlationId,
+      scopeId,
+      operationLocalSequence: input.operationLocalSequence,
+      adapterGlobalSyntheticSequence: this.syntheticSequenceRef.current,
+      expectedCallbackSequence: this.callbackSequenceRef.current + 1,
+      context: this.openScopeContext!,
+      settle: () => {},
+      failWith: () => {},
+    };
+    // Registration happens strictly before the public write so the arriving
+    // callback is correlated by invocation order and sequence window.
+    this.pending.push(record);
+    try {
+      input.apply();
+    } catch (error) {
+      this.removePending(correlationId);
+      record.failWith(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+    return {
+      adapterGlobalSyntheticSequence: this.syntheticSequenceRef.current,
+      correlationId,
+    };
+  }
+
+  private removePending(correlationId: string): void {
+    const index = this.pending.findIndex((record) => record.correlationId === correlationId);
+    if (index >= 0) this.pending.splice(index, 1);
+  }
+
+  private async drain(scopeId: number): Promise<void> {
+    if (this.openScopeId !== scopeId) throw new Error("synthetic scope is not open");
+    const deadline = Date.now() + this.boundedWindowMs();
+    while (this.pending.some((record) => record.scopeId === scopeId)) {
+      if (Date.now() >= deadline) {
+        const unresolved = this.pending
+          .filter((record) => record.scopeId === scopeId)
+          .map((record) => record.correlationId)
+          .join(", ");
+        this.emitDiagnostic(
+          "synthetic-scope-unresolved",
+          "every issued synthetic write reaches a correlated callback within the bounded window",
+          `unresolved: ${unresolved}`,
+        );
+        throw new Error(`synthetic scope drain timed out: ${unresolved}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  private async close(scopeId: number): Promise<void> {
+    await this.drain(scopeId);
+    if (this.openScopeId !== scopeId) throw new Error("synthetic scope is not open");
+    // Closed-scope correlation tombstones survive the delayed-callback
+    // horizon so a delayed duplicate is diagnosed and rejected without being
+    // reclassified as human.
+    this.closedScopes.set(scopeId, {
+      correlationIds: this.pending
+        .filter((record) => record.scopeId === scopeId)
+        .map((record) => record.correlationId),
+      closedAt: Date.now(),
+    });
+    for (const record of [...this.pending]) {
+      if (record.scopeId === scopeId) this.removePending(record.correlationId);
+    }
+    this.openScopeId = null;
+    this.openScopeContext = null;
+  }
+
+  private abort(scopeId: number, reason: string): void {
+    for (const record of [...this.pending]) {
+      if (record.scopeId !== scopeId) continue;
+      this.emitDiagnostic(
+        "synthetic-scope-unresolved",
+        "abort invalidates unissued work and reports unresolved callbacks",
+        `aborted: ${reason}`,
+      );
+      record.failWith(new Error(`synthetic scope aborted: ${reason}`));
+      this.removePending(record.correlationId);
+    }
+    if (this.openScopeId === scopeId) {
+      this.openScopeId = null;
+      this.openScopeContext = null;
+    }
+  }
+
+  /**
+   * Correlate one callback from the monotonic stream by invocation order,
+   * sequence window, and scope state. Never by fingerprint equality.
+   */
+  public associate(callbackSequence: number): AdapterSyntheticCallback {
+    void callbackSequence;
+    if (this.pending.length > 0) {
+      const record = this.pending.shift()!;
+      record.settle();
+      return { kind: "correlated", correlationId: record.correlationId };
+    }
+    if (this.openScopeId !== null) {
+      // An extra callback inside an open synthetic scope cannot be uniquely
+      // correlated; callers must fail closed as unknown provenance.
+      return { kind: "extra-in-scope" };
+    }
+    const horizon = this.boundedWindowMs();
+    for (const [scopeId, tombstone] of this.closedScopes) {
+      if (Date.now() - tombstone.closedAt > horizon) {
+        this.closedScopes.delete(scopeId);
+        continue;
+      }
+      if (tombstone.correlationIds.length > 0) {
+        const [delayedId] = tombstone.correlationIds;
+        const remaining = tombstone.correlationIds.slice(1);
+        if (remaining.length === 0) this.closedScopes.delete(scopeId);
+        else this.closedScopes.set(scopeId, { ...tombstone, correlationIds: remaining });
+        return { kind: "duplicate-after-close", correlationId: delayedId };
+      }
+    }
+    return { kind: "human-or-unknown" };
+  }
+
+  public get isOpen(): boolean {
+    return this.openScopeId !== null;
+  }
+
+  public get tombstoneCount(): number {
+    let count = 0;
+    for (const tombstone of this.closedScopes.values()) count += tombstone.correlationIds.length;
+    return count;
+  }
 }
 
 function toSnapshot(
@@ -322,9 +589,28 @@ export const SynaraExcalidrawAdapter = forwardRef<
   const lastSettledSelectionKeyRef = useRef<string | null>(null);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingNativeSettlementRef = useRef<SynaraSceneSnapshot | null>(null);
-  const nativeSettlementScheduledRef = useRef(false);
   const lastUpdateSequenceRef = useRef(0);
+  const adapterSyntheticSequenceRef = useRef(0);
+  const adapterCallbackSequenceRef = useRef(0);
+  const editingTextActiveRef = useRef(false);
+  const syntheticScopeRegistryRef = useRef<SynaraSyntheticScopeRegistry | null>(null);
+  if (syntheticScopeRegistryRef.current === null) {
+    syntheticScopeRegistryRef.current = new SynaraSyntheticScopeRegistry(
+      adapterSyntheticSequenceRef,
+      adapterCallbackSequenceRef,
+      (code, expected, observed) => {
+        report({
+          code,
+          ac: "AC8",
+          phase: "synthetic-scope",
+          expected,
+          observed,
+          recoverable: false,
+        });
+      },
+      () => callbacksRef.current.syntheticDrainWindowMs ?? 500,
+    );
+  }
   const [viewModeEnabled, setViewModeEnabled] = useState(props.viewModeEnabled ?? false);
   const [apiReady, setApiReady] = useState(false);
 
@@ -373,8 +659,6 @@ export const SynaraExcalidrawAdapter = forwardRef<
     return () => {
       if (selectionTimerRef.current !== null) clearTimeout(selectionTimerRef.current);
       if (selectionTimeoutRef.current !== null) clearTimeout(selectionTimeoutRef.current);
-      pendingNativeSettlementRef.current = null;
-      nativeSettlementScheduledRef.current = false;
       lifecycle({ kind: "unmounted", ...(apiIdRef.current ? { apiId: apiIdRef.current } : {}) });
     };
   }, [lifecycle]);
@@ -740,6 +1024,35 @@ export const SynaraExcalidrawAdapter = forwardRef<
     [report, requireApi],
   );
 
+  const openSyntheticWriteScope = useCallback<SynaraExcalidrawHandle["openSyntheticWriteScope"]>(
+    (context) => {
+      requireApi({
+        code: "adapter-not-ready",
+        ac: "AC1",
+        phase: "open-synthetic-scope",
+        expected: "the mounted editor API is available before opening a synthetic scope",
+        recoverable: true,
+      });
+      return syntheticScopeRegistryRef.current!.open(context);
+    },
+    [requireApi],
+  );
+
+  const observeHostBoundary = useCallback<SynaraExcalidrawHandle["observeHostBoundary"]>(
+    () => ({
+      adapterCallbackSequence: adapterCallbackSequenceRef.current,
+      scopeActive: syntheticScopeRegistryRef.current?.isOpen ?? false,
+      tombstoneCount: syntheticScopeRegistryRef.current?.tombstoneCount ?? 0,
+      editingTextActive: editingTextActiveRef.current,
+    }),
+    [],
+  );
+
+  const isEditingTextActive = useCallback<SynaraExcalidrawHandle["isEditingTextActive"]>(
+    () => editingTextActiveRef.current,
+    [],
+  );
+
   const handle = useMemo<SynaraExcalidrawHandle>(
     () => ({
       getIdentity: () => ({ mountId, apiId: apiIdRef.current }),
@@ -752,15 +1065,20 @@ export const SynaraExcalidrawAdapter = forwardRef<
       captureViewport,
       restoreViewport,
       clearNativeHistory,
-      isNativeHistorySettlementPending: () => pendingNativeSettlementRef.current !== null,
       restoreScene,
+      openSyntheticWriteScope,
+      observeHostBoundary,
+      isEditingTextActive,
     }),
     [
       captureScene,
       captureViewport,
       exportPng,
       exportSvg,
+      isEditingTextActive,
       mountId,
+      observeHostBoundary,
+      openSyntheticWriteScope,
       restoreViewport,
       clearNativeHistory,
       restoreScene,
@@ -873,24 +1191,43 @@ export const SynaraExcalidrawAdapter = forwardRef<
       const snapshot = toSnapshot(elements, appState, files);
       latestSnapshotRef.current = snapshot;
       latestViewportRef.current = snapshot.viewport;
-      if (!callbacksRef.current.containNativeHistory) {
+      adapterCallbackSequenceRef.current += 1;
+      editingTextActiveRef.current = appState.editingTextElement !== null;
+      const registry = syntheticScopeRegistryRef.current!;
+      const correlation = registry.associate(adapterCallbackSequenceRef.current);
+      if (correlation.kind === "correlated") {
+        // Synthetic writes are acknowledged through the scope contract and
+        // are never reclassified as human input. The host still observes the
+        // scene/viewport for presentation, but settlement excludes it.
         exposeSceneChange(snapshot);
         return;
       }
-      clearNativeHistory();
-      pendingNativeSettlementRef.current = snapshot;
-      if (nativeSettlementScheduledRef.current) return;
-      nativeSettlementScheduledRef.current = true;
-      queueMicrotask(() => {
-        nativeSettlementScheduledRef.current = false;
-        const settledSnapshot = pendingNativeSettlementRef.current;
-        pendingNativeSettlementRef.current = null;
-        if (settledSnapshot === null) return;
-        clearNativeHistory();
-        exposeSceneChange(settledSnapshot);
-      });
+      if (correlation.kind === "duplicate-after-close") {
+        report({
+          code: "duplicate-synthetic-callback",
+          ac: "AC8",
+          phase: "callback-correlation",
+          expected: "a delayed duplicate is diagnosed and rejected through the tombstone",
+          observed: `duplicate callback for ${correlation.correlationId} after scope close`,
+          recoverable: false,
+        });
+        return;
+      }
+      if (correlation.kind === "extra-in-scope") {
+        report({
+          code: "unknown-callback-provenance",
+          ac: "AC8",
+          phase: "callback-correlation",
+          expected: "each callback inside an open synthetic scope correlates to an issued write",
+          observed: "an extra callback could not be uniquely correlated; failing closed",
+          recoverable: false,
+        });
+        callbacksRef.current.onUncorrelatableCallback?.();
+        return;
+      }
+      exposeSceneChange(snapshot);
     },
-    [clearNativeHistory, exposeSceneChange],
+    [exposeSceneChange, report],
   );
 
   const onApiReady = useCallback(
@@ -915,6 +1252,17 @@ export const SynaraExcalidrawAdapter = forwardRef<
     [],
   );
 
+  // Public pointer observations only (plan \u00a75.1): the adapter forwards the
+  // package's own callbacks and never calls preventDefault, stopPropagation,
+  // or dispatches history.
+  const onPointerActivityDown = useCallback(() => {
+    callbacksRef.current.onPointerActivity?.("pointer-down");
+  }, []);
+
+  const onPointerActivityUp = useCallback(() => {
+    callbacksRef.current.onPointerActivity?.("pointer-up");
+  }, []);
+
   if (initialErrorRef.current) return <AdapterFailure diagnostic={initialErrorRef.current} />;
 
   return (
@@ -928,6 +1276,8 @@ export const SynaraExcalidrawAdapter = forwardRef<
         viewModeEnabled={viewModeEnabled}
         onChange={onChange}
         onScrollChange={onScrollChange}
+        onPointerDown={onPointerActivityDown}
+        onPointerUp={onPointerActivityUp}
         excalidrawAPI={onApiReady}
       />
     </div>
