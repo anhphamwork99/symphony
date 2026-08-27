@@ -1,0 +1,97 @@
+WP-01 workspace state — frozen candidate and deterministic producer record
+
+Capture timestamp (UTC): 2026-08-27T17:38:38Z
+Producer checkout: /Users/anhpham99/symphony
+Producer working directory: /Users/anhpham99/symphony/apps/server
+
+Candidate SHA:
+7521b92c7cb8a614346f994e963aa379175f540b
+
+Candidate subject:
+7521b92c7 docs(planning): plan Ticket 05 lifecycle recovery evidence
+
+Committed delta fa02c58ed100242dcaab1ce2aabf0ec8d6a9cef2..candidate:
+M	.planning/synara-pi-subagent-lifecycle-reliability/PROJECT.md
+M	.planning/synara-pi-subagent-lifecycle-reliability/issues/05-restart-reconnect-resume-and-crash-diagnostics.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-01-focused-deterministic-evidence.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-02-controlled-real-pi-and-implementation-report.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-03-ticket-closure-and-routing.md
+
+Delta classification:
+The only committed delta from the Ticket 04 closure baseline is the Ticket 05
+planning/routing transaction. No measured Ticket 05 production, contract, test,
+configuration, migration, manifest, lockfile, or Alfie seam changed.
+
+Pre-producer working paths:
+M  .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-01-focused-deterministic-evidence.md
+?? .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/evidence/
+ M apps/web/package.json
+ M apps/web/src/main.tsx
+ M bun.lock
+
+Pre-producer staged paths:
+(none)
+
+Protected owner WIP hash before producer:
+ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+Command: git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+
+Toolchain:
+Bun: 1.3.12
+Node: v24.14.1
+Vitest: 4.1.10
+
+Focused test-path existence checks:
+EXISTS: apps/server/src/provider/piSubagentRestartReconciliation.test.ts
+EXISTS: apps/server/src/provider/piSubagentStartupRecoveryOrder.test.ts
+EXISTS: apps/server/src/provider/piSubagentResumeCoordinator.test.ts
+EXISTS: apps/server/src/provider/piSubagentTerminalLifecycle.test.ts
+EXISTS: apps/server/src/provider/piSubagentWatchdogEscalation.test.ts
+EXISTS: apps/server/src/provider/piSubagentProcessTeardown.test.ts
+EXISTS: apps/server/src/provider/piSubagentCompletionOutbox.test.ts
+EXISTS: apps/server/src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts
+EXISTS: apps/server/src/wsSnapshotLiveStream.test.ts
+
+Producer command (one serialized unit invocation; set -o pipefail):
+bun run ../../node_modules/vitest/vitest.mjs run \
+  --project unit \
+  --maxWorkers=1 \
+  --no-file-parallelism \
+  src/provider/piSubagentRestartReconciliation.test.ts \
+  src/provider/piSubagentStartupRecoveryOrder.test.ts \
+  src/provider/piSubagentResumeCoordinator.test.ts \
+  src/provider/piSubagentTerminalLifecycle.test.ts \
+  src/provider/piSubagentWatchdogEscalation.test.ts \
+  src/provider/piSubagentProcessTeardown.test.ts \
+  src/provider/piSubagentCompletionOutbox.test.ts \
+  src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts \
+  src/wsSnapshotLiveStream.test.ts
+
+Producer result:
+Test Files  9 passed (9)
+Tests       118 passed (118)
+Start at    00:38:09 GMT+7
+Duration    13.90s (transform 1.18s, setup 0ms, import 3.69s, tests 9.58s, environment 1ms)
+Producer exit: 0
+
+Log binding:
+WP-01-focused-deterministic.log contains the complete producer stdout/stderr followed by
+CANDIDATE_SHA:7521b92c7cb8a614346f994e963aa379175f540b
+PRODUCER_EXIT:0
+
+Post-producer verification:
+- All nine files ran in the single serialized invocation above.
+- git diff --check: clean (exit 0).
+- Protected owner WIP hash after producer:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+  (unchanged).
+- Shared checkout contains no new source/test/config/contract/manifest/lockfile delta.
+- Ticket 05 delta is exactly the five allowed WP-01 paths: this workspace record,
+  the deterministic log, the AC/seam/diagnostic matrix, the structural no-replay
+  proof, and the WP-01 State/Result update.
+- Nothing was staged during the producer run.
+
+Staging note:
+The repository ignores *.log. Stage WP-01-focused-deterministic.log with git add -f;
+stage the other four allowed paths normally; do not stage the three protected owner paths.

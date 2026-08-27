@@ -1,12 +1,56 @@
 # WP-01 — focused deterministic T05 evidence
 
-**State:** ready
+**State:** completed
 
 **Owner role:** implementation worker
 
 **Dependencies:** persisted Ticket 05 plan; Project Home routes Ticket 05
 `ready-for-agent`; no Ticket 05 source/test/contract/configuration/migration/
 manifest/lockfile/Alfie delta.
+
+**Result (WP-01 execution, 2026-08-28):**
+
+- **Candidate frozen at Symphony `7521b92c7cb8a614346f994e963aa379175f540b`**
+  (HEAD). Committed delta `fa02c58e..candidate` = exactly the six Ticket 05
+  planning/routing files (commit `7521b92c7` "docs(planning): plan Ticket 05
+  lifecycle recovery evidence"); no measured Ticket 05 production/test/
+  contract/config/manifest/lockfile/Alfie seam changed since the planning
+  baseline. Owner WIP `apps/web/package.json`, `apps/web/src/main.tsx`,
+  `bun.lock` preserved byte-identical (diff hash
+  `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`,
+  re-verified pre- and post-run), modified-unstaged, never staged.
+- **Producer (exact WP command):** one serialized invocation —
+  `bun run ../../node_modules/vitest/vitest.mjs run --project unit
+  --maxWorkers=1 --no-file-parallelism` over the nine listed files, run from
+  `apps/server`. **`Test Files 9 passed (9)`, `Tests 118 passed (118)`,
+  producer exit 0** (Vitest 4.1.10, Bun 1.3.12, Node v24.14.1; duration
+  13.90s). Log: `evidence/WP-01-focused-deterministic.log`.
+- **Evidence artifacts:** `evidence/WP-01-workspace-state.txt` (frozen
+  candidate, status, committed delta, staged/working paths, toolchain
+  versions, nine test-path existence checks, owner diff hash + producer
+  command, producer exit), `evidence/WP-01-ac-seam-diagnostic-matrix.md`
+  (AC1–AC6 with positive + material-failure rows built from actual named
+  cases; reconnect/cursor/resume/crash matrices; zero work-creation
+  counters; 64/512 bounds and redaction verification),
+  `evidence/WP-01-no-replay-structural-proof.md` (six structural claims from
+  imports/caller traces/gating order, not comments).
+- **AC traceability:** AC1 reconnect bounded/no-dispatch (cursor snapshot
+  cases + zero counters), AC2 restart terminal/live/orphan truth (recovery
+  order + orphan diagnostic), AC3 stale evidence counted/history-only
+  (T07-AC4/T10-AC5/T14-AC2/T08-AC6/T16 stale rows), AC4 explicit Resume with
+  provider-inactive denial preceding adapter/coordinator (ProviderService
+  `allowRecovery:false` + `!routed.isActive` before adapter call), AC5 stage/
+  evidence-gap crash diagnostics with bounded/redacted metadata (512/512
+  caps, prompt/progressJson/transcript/result exclusions), AC6 no-replay
+  structural proof (sole explicit Resume chain; no Resume imports in
+  startup/hydration/watchdog/reconciliation/cleanup). Stale terminal is
+  counted and history-only; every required work-creation counter is zero on
+  reconnect/restart-projection paths.
+- **Write-set audit:** only the five allowed WP-01 paths changed (four
+  evidence files + this WP file's `State`/`Result` fields); `git diff
+  --check` clean; nothing staged during execution. Commit boundary remains
+  `test(pi): record Ticket 05 deterministic recovery evidence`, staging only
+  the five allowed paths.
 
 ## Objective and observable outcome
 
