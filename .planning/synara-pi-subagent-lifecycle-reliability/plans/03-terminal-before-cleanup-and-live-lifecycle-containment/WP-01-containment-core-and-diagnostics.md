@@ -1,6 +1,6 @@
 # WP-01 — containment core and diagnostic vocabulary
 
-**State:** pending
+**State:** completed (source `b4eef14c7`; causal remediation `98927c8f6`; independent review PASS)
 
 **Owner role:** implementation worker
 
@@ -80,3 +80,21 @@ Commit SHA, changed symbols, containment API, diagnostic matrix, dispatch counte
 ## Escalation
 
 Return `challenge` if the exact callback/session seam requires Alfie change, cannot distinguish pre/post acceptance, or requires global/durable routing, migration, public API, new capability, retry, or bootstrap.
+
+## Completion record
+
+- Source scaffold: `b4eef14c7 feat(pi): add exact live lifecycle containment proxy`.
+- Causal remediation: `98927c8f6 fix(pi): enforce live lifecycle acceptance boundaries`.
+- Final focused verification:
+  - server unit project: 4 files / 81 tests passed;
+  - contracts: 40/40 passed;
+  - `git diff --check` passed.
+- Final independent review: PASS. All prior blockers—phantom acceptance,
+  observation/control conflation, durable fallback loss, stale retirement,
+  timeout-late-value handling, tuple-key collision, boundedness, and status
+  classification—are closed.
+- No Alfie, PiAdapter lifecycle, terminal/repository, migration, watchdog,
+  teardown, public API, or provenance file changed.
+- WP-02 must retain the exact registration and trusted captured callback
+  together while adding sequence-2 activation, pre-ingest retirement, and
+  pre-disposal session clearing.
