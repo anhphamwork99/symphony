@@ -1,0 +1,70 @@
+WP-01 workspace state — frozen candidate snapshot (captured before focused run)
+
+Candidate SHA (git rev-parse HEAD):
+08b65ebb466470d71814c4467d74e68f43991138
+
+Ticket 04 plan commit:
+08b65ebb4 docs(planning): plan Ticket 04 cancellation settlement
+
+git status --short:
+ M apps/web/package.json
+ M apps/web/src/main.tsx
+ M bun.lock
+
+(No staged entries at capture time.)
+
+Committed delta 83620ab07760ac45cdf314a4d0df8d96f83a1300..candidate (git diff --name-status 83620ab07..HEAD):
+M	.planning/synara-pi-subagent-lifecycle-reliability/PROJECT.md
+M	.planning/synara-pi-subagent-lifecycle-reliability/issues/04-cancellation-watchdog-and-teardown-settlement.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/WP-01-focused-deterministic-evidence.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/WP-02-controlled-provider-and-implementation-report.md
+A	.planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/WP-03-ticket-closure-and-routing.md
+M	.planning/synara-whiteboard/PROJECT.md
+A	.planning/synara-whiteboard/decisions/0063-ticket-02-operation-transport-outcomes-authorization.md
+A	.planning/synara-whiteboard/decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md
+M	.planning/synara-whiteboard/issues/02-prove-ai-batch-undo-redo.md
+
+Delta classification: Ticket 04 planning/routing files plus unrelated Synara
+Whiteboard planning. No Ticket 04 production, contract, test, manifest,
+lockfile, Alfie, or lifecycle-planning authority path changed since router
+baseline 83620ab07. Proceeding is authorized.
+
+Unstaged owner working changes (git diff --name-only) — unrelated, prohibited, untouched:
+apps/web/package.json
+apps/web/src/main.tsx
+bun.lock
+
+Toolchain versions:
+Bun: 1.3.12
+Node: v24.4.1
+
+Focused test path existence (all must be true before run):
+EXISTS: apps/server/src/provider/piSubagentCancellationCoordinator.test.ts
+EXISTS: apps/server/src/provider/piSubagentWatchdogEscalation.test.ts
+EXISTS: apps/server/src/provider/piSubagentProcessTeardown.test.ts
+EXISTS: apps/server/src/provider/piSubagentWatchdogSweep.test.ts
+EXISTS: apps/server/src/provider/piSubagentProcessTeardownSweep.test.ts
+EXISTS: apps/server/src/provider/piSubagentBridge.test.ts
+EXISTS: apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+EXISTS: apps/server/src/provider/piSubagentChildOwnerTeardownWiring.test.ts
+EXISTS: apps/server/src/provider/piSubagentTeardownWiring.test.ts
+EXISTS: apps/server/src/provider/piSubagentCanonicalRouting.test.ts
+EXISTS: apps/server/src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts
+
+Producer command (run from apps/server, set -o pipefail; exit captured via ${PIPESTATUS[0]}; a green tee never masks a failed producer):
+bun run ../../node_modules/vitest/vitest.mjs run \
+  --project unit --maxWorkers=1 --no-file-parallelism \
+  src/provider/piSubagentCancellationCoordinator.test.ts \
+  src/provider/piSubagentWatchdogEscalation.test.ts \
+  src/provider/piSubagentProcessTeardown.test.ts \
+  src/provider/piSubagentWatchdogSweep.test.ts \
+  src/provider/piSubagentProcessTeardownSweep.test.ts \
+  src/provider/piSubagentBridge.test.ts \
+  src/provider/piSubagentLiveLifecycleContainment.test.ts \
+  src/provider/piSubagentChildOwnerTeardownWiring.test.ts \
+  src/provider/piSubagentTeardownWiring.test.ts \
+  src/provider/piSubagentCanonicalRouting.test.ts \
+  src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts
+
+Producer exit status: 0

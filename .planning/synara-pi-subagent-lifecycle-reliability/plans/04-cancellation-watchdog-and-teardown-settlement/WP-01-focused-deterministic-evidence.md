@@ -1,6 +1,8 @@
 # WP-01 — focused deterministic T04 evidence
 
-**State:** ready after plan persistence
+**State:** completed at frozen candidate `08b65ebb466470d71814c4467d74e68f43991138`
+
+**Result:** producer exit 0; Vitest 4.1.10 focused deterministic run: **11/11 test files passed, 177/177 tests passed** in 15.86s (`evidence/WP-01-focused-deterministic.log`, tail block L4–L8; totals at L5–L6). Criterion-level matrix `evidence/WP-01-ac-diagnostic-matrix.md` proves T04-AC1–AC5 normal and material failure/diagnostic surfaces from actual named cases at candidate HEAD, records bands 90/92, 70–74, 75/76/77/78, proves only 76 fences, records duplicate/replay effect counts, and distinguishes owner-death conjunction boundaries, persistence/dispatch/ack/stage failure diagnostics, teardown absent/thrown/timeout/malformed/mismatched-owner cases, survivor cap 16, non-terminal survivors/owner-unproven behavior, graceful skip, late terminals, and retired/cleared responses. Evidence files: `evidence/WP-01-workspace-state.txt` (candidate, all 11 paths, owner-file exclusions, command, exit 0), `evidence/WP-01-focused-deterministic.log`, `evidence/WP-01-ac-diagnostic-matrix.md`. **Residual note:** the `stopProviderSession` promise-rejection (`"failed"`) sub-branch has no dedicated named case in the focused set; it shares its entire proven code path with the timeout branch (`piSubagentWatchdogEscalation.ts:560`) proven by T15-AC6, and is carried forward to WP-02/the Implementation Report as residual uncertainty — no AC is left unsupported.
 
 **Dependencies:** plan persisted; Ticket 04 routed `ready-for-agent`; candidate and workspace snapshot captured.
 

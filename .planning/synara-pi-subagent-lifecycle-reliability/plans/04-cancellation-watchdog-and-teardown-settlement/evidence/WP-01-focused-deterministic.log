@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Users/anhpham99/symphony/apps/server
+
+
+ Test Files  11 passed (11)
+      Tests  177 passed (177)
+   Start at  21:34:17
+   Duration  15.86s (transform 1.15s, setup 0ms, import 4.00s, tests 11.18s, environment 1ms)
+
