@@ -1,23 +1,24 @@
-# Ticket 02 proposed fallback contract — dual human/AI history
+# Ticket 02 accepted fallback contract — dual human/AI history
 
-**Status: Proposed — awaiting owner approval**
+**Status: Accepted — owner-approved**
+**Decision:** [Decision 0055 — fallback dual-history contract approved](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md)
 **Date:** 2026-08-27
 **Ticket:** [02 — Prove exact AI edit-batch Undo and Redo](../issues/02-prove-ai-batch-undo-redo.md)
 **Activated direction:** [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), following [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md)
 **Supporting UX design:** `/tmp/synara-ticket02-fallback-ux-result.md`
 **Supporting independent challenge review:** `/tmp/synara-ticket02-fallback-review-result.md`
 
-> This is a fallback proposal for owner approval. It is not a binding product amendment, implementation authorization, or source design approval. `PRODUCT-CONTRACT.md`, `spec.md`, and the existing Ticket 02 acceptance criteria remain unchanged and binding until the owner accepts a subsequent decision that deliberately replaces the affected language.
+> The owner explicitly replied **`Đồng ý`** to all six rules in this contract. Decision 0055 makes this an accepted binding product amendment. It authorizes only bounded implementation planning; it does not authorize source, test, package, lockfile, evidence-log, or broad Ticket 02 implementation changes.
 
-## 1. Purpose and decision requested
+## 1. Purpose and approved boundary
 
 Decision 0054 records that the supported Excalidraw public surface cannot provide the previously required host-owned single history route. Direction 4 is therefore active for contract design only:
 
 - Excalidraw owns native human Undo/Redo.
 - Synara owns dedicated AI-batch Undo/Redo over verified snapshots.
-- The routes are deliberately separate; this proposal does not claim one stack, one cursor, or one mixed Version-history timeline.
+- The routes are deliberately separate; this contract does not claim one stack, one cursor, or one mixed Version-history timeline.
 
-The owner is asked to approve or reject this exact fallback boundary, including its explicit tradeoff: a committed AI route boundary clears all native human history, and the first settled semantic human mutation clears all Synara AI history. If approved, a later bounded implementation decision may revise the affected acceptance language and authorize source work. Until then, broad Ticket 02 work remains prohibited.
+The approved fallback boundary includes this explicit tradeoff: a committed AI route boundary clears all native human history, and the first settled semantic human mutation clears all Synara AI history. Decision 0055 revises the affected product and Ticket 02 acceptance language. A later bounded implementation-boundary decision is still required before source work; broad implementation remains prohibited.
 
 ## 2. User mental model
 
@@ -310,11 +311,11 @@ All rows require the real pinned Excalidraw embed in stable Chromium. Native-con
 | Cap and lifecycle | 21 AI events; 21 human events; remount/eviction; duplicate/import; restart/reload; same-instance conversation switch | Newest 20 AI events remain; no native cap claim; both routes empty at reset boundaries; same-instance conversation switch preserves history. |
 | Accessibility | 200% zoom, constrained width, keyboard-only, screen reader, Focus mode | Named `AI history` toolbar; exact labels/reasons; `aria-disabled`; Enter/Space and standard toolbar navigation; focus and announcements remain predictable. |
 
-## 13. Proposed replacement of promises — owner approval required
+## 13. Accepted replacement of promises — Decision 0055
 
-The following original promises are explicitly removed or replaced **only if this proposal is approved**:
+The following original promises are removed or replaced by Decision 0055:
 
-| Current promise | Proposed fallback replacement |
+| Superseded promise | Accepted fallback replacement |
 | --- | --- |
 | Human and AI edits share one ordered Undo/Redo history. | Native human history and Synara AI-batch history are separate routes with route epochs; no shared cursor is claimed. |
 | Toolbar Undo, toolbar Redo, and `Cmd/Ctrl+Z` use one coherent route. | Package-native human controls/shortcuts remain native; Synara uses only visible `Undo AI batch` / `Redo AI batch` actions. |
@@ -327,23 +328,23 @@ The following original promises are explicitly removed or replaced **only if thi
 
 The following obligations remain unchanged in substance for AI work: one event per mutated completed/interrupted/failed-partial batch; no progressive user-visible checkpoints; exact AI scene/file restoration; explicit failure/rollback behavior; no durable Version history; no private or undocumented integration.
 
-## 14. Approval boundary and prohibited work
+## 14. Accepted boundary and prohibited work
 
-Owner approval must explicitly accept or reject:
+Decision 0055 records the owner's approval of all six rules in this contract and authorizes only implementation planning. The approved rules are:
 
 1. all-native-history clearing at every committed AI boundary, including loss of prior native Undo;
 2. clearing all AI history on the first settled semantic human mutation;
 3. an AI-only, not combined, 20-event cap;
 4. no dedicated AI keyboard shortcut in the first release;
-5. native image Undo/Redo as a browser gate rather than an unqualified promise;
-6. both routes resetting on remount, reload, restart, and new identity.
+5. native image Undo/Redo as a real-Chromium gate rather than an unqualified promise;
+6. both routes resetting on remount, reload, restart, close/eviction, and new identity.
 
-Until approval is recorded in a new binding decision:
+The following remain prohibited until a separate bounded implementation decision authorizes source work:
 
-- do not edit source, tests, package manifests, lockfiles, or evidence logs;
-- do not change `PRODUCT-CONTRACT.md` or `spec.md`;
-- do not begin broad Ticket 02 implementation or WP-CORE;
-- do not claim AC4, AC7, or the Ticket 02 gate passed;
-- preserve protected Agentation work.
+- source, tests, package manifests, lockfiles, or evidence-log changes;
+- broad Ticket 02 implementation or WP-CORE;
+- private APIs, undocumented keys, native-stack inspection, DOM/CSS suppression, monkey-patching, package mutation, remount restore, package upgrade, or a fork;
+- claims that the native image gate, fallback acceptance criteria, AC4, AC7, or the Ticket 02 gate have passed;
+- changes to protected Agentation work.
 
-**Proposed disposition:** route project and Ticket 02 to `awaiting-owner-fallback-contract-approval`.
+**Accepted disposition:** route project and Ticket 02 to `ready-for-fallback-implementation-planning`.

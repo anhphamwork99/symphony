@@ -1,6 +1,6 @@
 # Synara Whiteboard product contract
 
-Status: confirmed by the owner on 2026-08-26.
+Status: amended and confirmed by the owner on 2026-08-27 under [Decision 0055](decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
 ## Outcome
 
@@ -45,13 +45,18 @@ Synara adds an Excalidraw-based, Project-owned Whiteboard tool to the Right side
 - Take Over preserves valid partial work, stops further updates, prevents retry, and ends the agent turn in a controlled way.
 - Every streamed update is fenced by operation identity so stale updates after Take Over, failure, or deletion are rejected.
 - An invalid operation is not applied; the edit stops, prior valid work remains, the board unlocks, and Retry and Undo remain available.
-- One completed, interrupted, or failed partial AI edit batch is one Undo event.
+- One completed, acknowledged interrupted, or failed-partial AI edit batch with valid semantic mutations is exactly one AI-batch event; progressive updates are not individual events.
+- Invalid operations are not applied, dependent operations stop, valid prior partial work remains, and explicit Retry/Undo diagnostics are provided.
 
 ## Undo and Redo
 
-- Each open canvas retains at most 20 recent Undo/Redo events in memory.
-- The limit covers both human actions and AI edit batches.
-- Undo/Redo is not restored after Synara restarts.
+- Excalidraw owns native human Undo/Redo, including its native toolbar and package-supported platform shortcuts. Synara does not shadow or reinterpret that route.
+- Synara owns only the explicitly labeled `Undo AI batch` and `Redo AI batch` actions over verified AI snapshots. There is no generic history dispatcher or first-release AI keyboard shortcut.
+- Every committed semantically mutated AI boundary, including successful AI Undo/Redo restore, clears all native Excalidraw Undo and Redo through the supported public history-clear boundary before the state is exposed.
+- The first settled semantic human mutation after an AI batch or AI-history action clears all AI Undo and Redo. Native human Undo/Redo count as human mutations; proven no-ops and presentation-only changes do not.
+- Synara retains at most 20 finalized AI-batch events per open canvas session. Event 21 evicts only the oldest AI event. Native capacity, grouping, and eviction are package-defined and unclaimed; there is no combined cap.
+- AI Undo/Redo preserves exact semantic scene and active image/file-reference recovery through asset preflight, public file loading, restore, and verification. Native human image Undo/Redo is a real-Chromium acceptance gate; if it fails, the native exact-image promise is narrowed or left unaccepted.
+- Remount, reload, restart, close/session termination, eviction, duplication/import as a new identity, conflict replacement, and recovery hydration reset both histories. Current durable content may be restored, but history is never durable or restored.
 - The product has no durable Version history.
 
 ## File canvases
@@ -105,10 +110,10 @@ Synara adds an Excalidraw-based, Project-owned Whiteboard tool to the Right side
 
 1. **Native board creation**: a Project without Whiteboards receives a clear diagram request → Synara creates and opens `board`, the agent streams a valid diagram, and the board Auto-saves.
 2. **Bidirectional context**: selecting three elements → three lightweight chips appear; deselecting one or closing one chip removes the corresponding selection without payload churn.
-3. **Agent containment**: while an agent streams updates → direct editing is locked, pan/zoom work, Take Over stops stale updates, partial content remains, and one Undo removes the batch.
-4. **Invalid agent operation**: a streamed operation fails validation → it is not applied, later dependent operations stop, prior valid work remains, and the board unlocks with diagnostic Retry and Undo.
-5. **Project continuity**: switching Main conversations within one Project → the same Whiteboard tabs and state remain; switching Projects → each Project's Whiteboards remain isolated.
-6. **Session history**: more than 20 edit events occur → only the newest 20 remain undoable; restarting Synara preserves current content but not Undo/Redo.
+3. **Agent containment and AI recovery**: while an agent streams updates → direct editing is locked, pan/zoom work, Take Over stops stale updates, partial content remains, and one labeled `Undo AI batch` restores the exact AI pre-batch state.
+4. **Invalid agent operation**: a streamed operation fails validation → it is not applied, later dependent operations stop, prior valid work remains, and the board unlocks with diagnostic Retry and `Undo AI batch`.
+5. **Dual-history boundaries**: a committed AI batch clears all native Undo/Redo; the first settled semantic human mutation clears all AI history; native human commands never invoke AI snapshots and AI commands never invoke native history.
+6. **Session history**: more than 20 AI-batch events occur → only the newest 20 AI events remain; native capacity is package-defined; remount, reload, restart, close/eviction, duplication/import as a new identity, and recovery hydration reset both histories while preserving only content covered by persistence.
 7. **File canvas persistence**: an agent edits an opened `.excalidraw` file → the canvas becomes temporarily Unsaved, host Auto-save writes the backing file atomically after changes settle, and Git may show the resulting change without a separate Save action.
 8. **External file conflict**: a backing file changes while local edits exist → Synara preserves local state and requires Reload, Save As, or Keep Editing rather than merging or overwriting.
 9. **Import/export**: importing creates a new native Whiteboard; exporting produces valid `.excalidraw`, PNG, and SVG, with grid inclusion opt-in for rendered formats.

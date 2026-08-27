@@ -2,8 +2,9 @@
 
 **Project:** synara-whiteboard
 **Project home:** [PROJECT.md](PROJECT.md)
-**Status:** ready-for-agent
+**Status:** ready-for-fallback-implementation-planning
 **Tracker:** Local Markdown
+**History amendment:** [Decision 0055](decisions/0055-ticket-02-fallback-dual-history-contract-approved.md)
 
 ## Problem Statement
 
@@ -19,7 +20,7 @@ Add an Excalidraw-based **Whiteboard tool** to the existing Right sidebar. Each 
 
 Whiteboard uses the existing Main conversation rather than creating another chat. Selected canvas elements appear as lightweight **Whiteboard selection chips** in the Main composer, while a selection above the measured safe threshold appears as one **Whiteboard selection-set chip**. Canvas selection and chips remain synchronized in both directions, and switching Main conversations clears all unsent Whiteboard chips and deselects their elements. Before send, chips contain bounded references only; at send, Synara resolves the latest current element state and creates immutable context snapshots with the minimum related visual context needed by the agent.
 
-Agents interact through a validated Synara-owned Whiteboard tool API instead of raw Excalidraw JSON. An **AI Whiteboard edit** streams ordered changes into the canvas while direct element editing is locked. The user can still pan and zoom, observe progress under an `Agent is working on it...` status bar, and use **Take Over** to contain the operation and resume control. A completed, interrupted, or failed partial **AI edit batch** is exactly one Undo event.
+Agents interact through a validated Synara-owned Whiteboard tool API instead of raw Excalidraw JSON. An **AI Whiteboard edit** streams ordered changes into the canvas while direct element editing is locked. The user can still pan and zoom, observe progress under an `Agent is working on it...` status bar, and use **Take Over** to contain the operation and resume control. A completed, acknowledged interrupted, or failed-partial **AI edit batch** with valid semantic mutations is exactly one Synara AI-batch event, recoverable through explicitly labeled `Undo AI batch` and `Redo AI batch` actions.
 
 The same editor also opens Project `.excalidraw` files as **File canvases**. File canvases remain file-backed and distinct from native Whiteboards. Human and agent edits participate in host-owned settled Auto-save to the backing Project file, so accepted canvas edits may create Git working-tree changes without a separate Save action.
 
@@ -98,13 +99,13 @@ The experience follows existing Right-sidebar ownership, sizing, tab, restoratio
 69. As a Project user, I want multi-element generated diagrams placed in named frames, so that generated results form understandable visual units.
 70. As a Project user, I want AI-generated diagrams to use restrained colors, clear contrast, and consistent styling, so that they remain readable.
 71. As a Project user, I want the camera to remain under my control during AI work, so that streamed updates do not unexpectedly move my viewport.
-72. As a Project user, I want one completed AI edit batch to be one Undo event, so that a multi-operation result can be reverted once.
-73. As a Project user, I want an interrupted or failed partial AI edit batch to remain one Undo event, so that partial agent work has the same recovery model.
-74. As a Project user, I want human edits and AI edit batches to share one ordered session history, so that Undo follows the visible editing sequence.
-75. As a Project user, I want each open canvas to retain at most 20 recent Undo/Redo events, so that history memory remains bounded.
-76. As a Project user, I want the oldest event discarded when the limit is exceeded, so that recent work remains recoverable.
-77. As a Project user, I want a new edit after Undo to clear the invalid Redo branch, so that session history remains deterministic.
-78. As a Project user, I want current content but not Undo/Redo history restored after restart, so that persistence does not become hidden Version history.
+72. As a Project user, I want one completed AI edit batch to be exactly one Synara AI-batch event, so that a multi-operation result can be reverted once through `Undo AI batch`.
+73. As a Project user, I want an acknowledged interrupted or failed-partial AI edit batch with valid mutations to remain exactly one AI-batch event, while progressive updates, no-ops, and zero-valid failures create none.
+74. As a Project user, I want Excalidraw's native toolbar and platform shortcuts to own human Undo/Redo, while Synara's explicitly labeled AI actions own AI-batch recovery, so that the routes cannot be confused; native exact image recovery is accepted only after a real-Chromium gate.
+75. As a Project user, I want every committed AI boundary to clear all native Undo/Redo, so that stale native history cannot be applied after an AI snapshot restore.
+76. As a Project user, I want the first settled semantic human mutation after AI activity to clear all AI Undo/Redo, while proven no-ops and presentation-only changes preserve it, so that stale AI snapshots cannot overwrite later manual work.
+77. As a Project user, I want at most 20 finalized AI-batch events retained per open canvas session, with event 21 evicting only the oldest AI event, while native capacity remains package-defined and unclaimed.
+78. As a Project user, I want both native and AI histories reset on remount, reload, restart, close or eviction, duplication/import as a new identity, conflict replacement, and recovery hydration, so that history remains session-only.
 79. As a Project user, I want no durable Version history surface, so that the first release remains a working canvas rather than a document-versioning product.
 80. As a Project user, I want opening a Project `.excalidraw` file to open a File canvas rather than raw JSON, so that I can work visually.
 81. As a Project user, I want a File canvas to remain backed by its Project file and separate from native Whiteboards, so that ownership is unambiguous.
@@ -195,11 +196,14 @@ The experience follows existing Right-sidebar ownership, sizing, tab, restoratio
 
 - Embed a pinned official `@excalidraw/excalidraw` release behind a Synara-owned integration boundary; do not fork Excalidraw.
 - Keep Excalidraw implementation details out of canonical domain persistence, composer context, and agent contracts.
-- Make the integration boundary responsible for hydration, restoration, normalized serialization, selection settlement, imperative scene updates, edit locking, viewport capture and restoration, image insertion, import/export, operation translation, and session-history coordination.
+- Make the integration boundary responsible for hydration, restoration, normalized serialization, selection settlement, imperative scene updates, edit locking, viewport capture and restoration, image insertion, import/export, operation translation, and the separate native-human/AI-batch history seams.
 - Drive progressive AI work through ordered imperative scene updates; do not remount the editor or repeatedly replace initial data.
 - Keep direct editing locked during AI ownership while retaining pan and zoom.
-- Do not rely on an undocumented Excalidraw history transaction for the exact one-event AI Undo guarantee; Synara owns the AI edit-batch recovery boundary.
-- Preserve standard Excalidraw editing shortcuts unless an existing Synara action has an explicit conflict rule.
+- Keep Excalidraw native Undo/Redo as the human route and expose only labeled `Undo AI batch`/`Redo AI batch` actions for AI snapshots; do not add a first-release AI keyboard shortcut or generic dispatcher.
+- Clear all native history after every committed AI boundary and clear all AI history after the first settled semantic human mutation.
+- Do not claim native history capacity or exact native image recovery without the required real-Chromium gate; AI image recovery remains exact through public asset preflight and verification.
+- Reset both histories at every approved mount, lifecycle, identity, and recovery boundary; neither history is durable.
+- Do not rely on an undocumented Excalidraw history transaction for AI exactness; Synara owns the AI edit-batch recovery boundary.
 
 ### Right-sidebar panes and canvas retention
 
@@ -279,15 +283,15 @@ The experience follows existing Right-sidebar ownership, sizing, tab, restoratio
 
 ### Undo and Redo
 
-- Maintain one ordered in-memory history per open canvas session, capped at 20 events.
-- Treat a settled human editing action as one history event according to actual Excalidraw interaction behavior.
-- Capture a Synara-owned pre-batch recovery boundary for every AI edit batch.
-- Progressive AI updates must not create individually exposed Undo events.
-- Finalize completed, interrupted, or failed partial AI work as exactly one Undo event.
-- Undo of an AI edit batch restores complete pre-batch content and relevant image-reference state.
-- Redo restores the finalized batch result unless a later edit invalidates the branch.
-- A new edit after Undo clears the Redo branch.
-- Reset history on duplication and application restart.
+- Keep native Excalidraw human Undo/Redo and Synara AI-batch Undo/Redo as separate in-memory routes per open canvas session; do not model them as one stack, cursor, or combined event list.
+- Excalidraw owns native human pointer, keyboard, text-edit, toolbar, Undo, and Redo behavior. Synara owns only labeled `Undo AI batch` and `Redo AI batch` actions; no AI keyboard shortcut is added in the first release.
+- After every committed semantically mutated AI batch or successful AI restore, clear all native Excalidraw Undo and Redo through the supported public history-clear seam before exposing or unlocking the resulting state.
+- After the first settled semantic human mutation following AI activity, clear all AI Undo and Redo. Native human Undo/Redo count as mutations; proven no-ops and presentation-only changes do not.
+- Retain at most 20 finalized AI-batch events per open canvas session. Event 21 evicts only the oldest AI event; native capacity, grouping, and eviction remain package-defined and unclaimed.
+- Capture immutable AI before/after snapshots. Progressive updates create no events; completed, acknowledged interrupted, and failed-partial mutated batches create exactly one; zero-mutation and successful rollback outcomes create none.
+- AI Undo/Redo restores exact semantic scene and active image/file references through public asset preflight, `addFiles`, `captureUpdate: "NEVER"`, and post-restore verification. Native human image recovery is a real-Chromium gate and must be narrowed if it fails.
+- After AI Undo, a new mutated AI batch clears only the AI Redo branch. Native branch behavior remains native.
+- Remount, reload, restart, close or eviction, duplication/import as a new identity, conflict replacement, and recovery hydration reset both histories. Neither route is persisted.
 
 ### File-canvas persistence and conflicts
 

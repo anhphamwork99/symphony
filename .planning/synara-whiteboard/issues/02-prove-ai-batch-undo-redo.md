@@ -1,65 +1,62 @@
-# 02 — Prove exact AI edit-batch Undo and Redo
+# 02 — Prove fallback dual-history Undo and Redo
 
-**What to build:** Prove with the pinned real Excalidraw embed that one completed, interrupted, or failed partial AI edit batch can be recovered as exactly one user-visible Undo/Redo event without exposing individual streamed updates.
+**What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md), following [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md) — the public-boundary research failed, so fallback direction 4 is active for contract design only.
+**Bounded by:** [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md), following [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md) and [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md).
 
-**Status:** awaiting-owner-fallback-contract-approval
+**Status:** ready-for-fallback-implementation-planning
 
-- [ ] **AC1:** Multiple progressive scene updates finalize as exactly one user-visible Undo event.
-- [ ] **AC2:** One Undo restores the complete pre-batch state for completed, Take-Over-interrupted, and invalid-operation partial batches.
-- [ ] **AC3:** Redo restores the finalized batch result, including relevant image references.
-- [ ] **AC4:** Toolbar Undo/Redo and `Cmd/Ctrl+Z` use one coherent history route.
-- [ ] **AC5:** A new edit after Undo invalidates the Redo branch deterministically.
-- [ ] **AC6:** Human events and AI edit batches share a bounded 20-event session history that resets after duplication or restart.
-- [ ] **AC7:** If exact one-event behavior cannot be achieved with the pinned package and a Synara-owned recovery boundary, the ticket fails with reproducible evidence and blocks broad implementation.
+Decision 0055 is the binding owner-approved product amendment. This ticket is routed to bounded implementation planning only. No source, tests, package manifests, lockfile, evidence-log, WP-CORE, or broad implementation work is authorized until a separate implementation-boundary decision approves the plan.
 
-## Testing Seams
+## Acceptance criteria
 
-Feature governance: [Decision 0047](../decisions/0047-testing-strategy-governance-reassessment.md).
+- [ ] **AC1 — Route ownership and labels:** In stable Chromium with the pinned real Excalidraw embed, native Excalidraw toolbar Undo/Redo and package-supported platform shortcuts mutate only human history. Synara exposes only visibly labeled, keyboard-accessible `Undo AI batch` and `Redo AI batch` actions for AI history. There is no generic dispatcher, mixed-history panel, shared cursor, or first-release AI keyboard shortcut; no native route invokes AI snapshots and no AI action invokes native Undo/Redo.
+- [ ] **AC2 — Exact AI event semantics:** A completed AI batch, an acknowledged Take Over interruption with valid partial mutations, and a failed-partial batch with valid earlier mutations each finalize as exactly one AI-batch event. Progressive updates never become user-visible events; zero-mutation, semantic no-op, zero-valid failure, and pre-batch capture failure create no AI event. Invalid operations are unapplied and dependent operations stop.
+- [ ] **AC3 — Exact AI Undo/Redo and assets:** AI Undo restores the verified pre-batch semantic scene and AI Redo restores the verified finalized scene, including active image/file references. Every restore preflights required binaries, uses public `addFiles`, writes with `captureUpdate: "NEVER"`, verifies the target before moving the AI cursor, and preserves command-start viewport/zoom without restoring transient presentation state.
+- [ ] **AC4 — Cross-route invalidation:** Every committed semantically mutated AI boundary, including successful AI Undo/Redo restore, clears all native Excalidraw Undo and Redo through the supported public history-clear seam before exposing or unlocking the result. After AI activity, the first settled semantic human mutation—including native human Undo/Redo—clears all AI Undo and Redo and releases unreferenced AI snapshot assets. Proven no-ops, selection-only changes, pan, zoom, tool changes, and focus changes do not clear AI history. After AI Undo, a new mutated AI batch clears only the AI Redo branch.
+- [ ] **AC5 — Separate retention cap:** At most 20 finalized AI-batch events are retained per open canvas session. Event 21 evicts only the oldest AI event. The test must not assert or implement a native 20-event cap, a combined cap, or a native exact capacity claim; native grouping and branch behavior remain package-defined.
+- [ ] **AC6 — Native image acceptance gate:** Real stable Chromium proves native human image add/delete/native Undo/Redo restores meaningful image element/file references and produces meaningful official SVG and PNG exports. If this gate fails, the native exact-image promise is narrowed or left unaccepted before Ticket 02 final acceptance; AI image recovery remains independently exact under AC3.
+- [ ] **AC7 — Lifecycle reset:** Remount, API or mount identity change, bounded-canvas eviction, reload/fresh hydration, application restart, close/session termination, duplication, import as a new identity, conflict replacement, and unrecoverable-fault recovery reset both native and AI histories. Current durable content may follow persistence rules, but neither history is restored or persisted. Same-instance Main-conversation switching does not reset history.
+- [ ] **AC8 — Failure, rollback, and diagnostics:** Missing/invalid assets, semantic mismatch, callback-provenance failure, restore failure, and rollback failure produce explicit diagnostics, never claim success, never hydrate an empty scene, never silently drop image data, and never advance the AI cursor without verified target state. Successful rollback leaves content and history unchanged; unrecoverable failure keeps editing locked with actionable recovery diagnostics. Take Over and containment acknowledgement are required before unlock.
+- [ ] **AC9 — Accessibility and focus seam:** The `AI history` group has exact labels, announced unavailable reasons, `aria-disabled="true"` rather than native disabled controls, keyboard activation through Enter/Space, standard toolbar navigation, predictable focus retention, polite completion/failure announcements, and no advertised AI key chord. The native route remains accessible and package-owned.
+- [ ] **AC10 — Browser evidence and prohibited integration:** Acceptance uses the real pinned Excalidraw embed in stable Chromium for route ownership, AI lock, completed/interrupted/failed-partial batches, no-ops and human settlement, cross-route invalidation, delayed/duplicate callbacks, assets/failures, native image gate, cap, lifecycle reset, constrained-width accessibility, and Focus mode. Test-only native-control observation is allowed, but runtime private DOM/CSS dependency is not. Private APIs/imports, undocumented action keys, native-stack inspection, monkey-patching, package mutation, remount restore, fork, package upgrade, and lockfile change are prohibited.
 
-**Approval status:** Approved — owner approved the proposed seams on 2026-08-26.
+## Required planning order
 
-- **AC1–AC6:** Actual embedded Excalidraw browser history boundary — prove toolbar, keyboard, progressive updates, Take Over, partial failure, images, and Redo behavior.
-- **AC2, AC3:** Synara-owned pre-batch recovery boundary — verify complete scene and image-reference restoration rather than relying on undocumented editor history assumptions.
-- **AC7:** Reproducible real-package feasibility report — no mocked editor may substitute for the blocking result.
+1. Define the bounded implementation work packages and browser fixtures for the two independent routes.
+2. Prove public route ownership, AI lock, and one completed AI batch with exact AI Undo/Redo before broad matrix work.
+3. Prove cross-route invalidation, failure/asset semantics, native image gate, cap, lifecycle reset, and accessibility seams.
+4. Record reproducible failure evidence and stop the affected work if any public-boundary, native-image, containment, asset, or exactness gate fails. Do not silently weaken the contract.
 
-## Current gate result
+## Testing seams
 
-- Binding direction: [Decision 0051](../decisions/0051-ticket-02-exact-batch-history-direction.md).
-- Bounded timing Reassessment: [Decision 0052](../decisions/0052-ticket-02-native-history-timing-probe.md).
-- Owner package/public-API reassessment: [Decision 0053](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md).
-- Public-history boundary research failure and fallback activation: [Decision 0054](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md).
-- Initial Gate source/evidence: `2d5103b60` / `cd69bc867`.
-- Timing-probe source/evidence: `49c679888` / `fe8fa88ed`.
-- Review: [Ticket 02 Gate failure verification](../reviews/ticket-02-gate-failure-review.md).
+Feature governance remains the accepted project-scoped [Testing Strategy Governance Reassessment](../decisions/0047-testing-strategy-governance-reassessment.md).
 
-Completed three-progress Synara Undo/Redo is retained as partial evidence. AC4 and AC7 fail because real Chromium observes package-native Undo becoming enabled after a human Delete despite both synchronous public `api.history.clear()` and the one authorized `queueMicrotask` post-commit clear:
+- **Route seam:** real embedded Excalidraw toolbar, human pointer/keyboard/text-edit behavior, and package-native shortcuts; test-only observation may verify native controls without becoming a runtime dependency.
+- **AI seam:** Synara-owned AI action group, immutable before/after snapshots, route epochs, revision/mount fencing, and exact AI cursor movement.
+- **Cross-route seam:** public `api.history.clear()` at committed AI boundaries and settled human-mutation invalidation of all AI events/assets.
+- **Asset/failure seam:** public `addFiles`, official restore/export, preflight, semantic comparison, rollback, containment acknowledgement, and actionable diagnostics.
+- **Lifecycle seam:** mount/identity/eviction/reload/restart/close/duplicate/import/conflict/recovery reset behavior with durable content kept separate from history.
+- **Accessibility seam:** named toolbar, exact labels, `aria-disabled`, focus, announcements, constrained width, keyboard-only, screen-reader, and Focus-mode behavior.
+- **Browser seam:** real stable Chromium against the pinned package; mocks cannot substitute for route ownership, native image, or blocking failure evidence.
 
-```text
-mutation:Undo:false:null
-```
+## Preserved obligations and prohibitions
 
-Broad WP-CORE and later work remains blocked. Decision 0054 records that the supported version/public-API research gate failed and activates the pre-authorized fallback: native Excalidraw Undo/Redo for human edits plus dedicated Synara `Undo AI batch`/`Redo AI batch` actions. No source implementation is active; the fallback contract must resolve its separate-route interaction, keyboard, cap, and cross-stack semantics first.
+This fallback changes only the mixed human/AI history boundary. It preserves exact AI batch semantics, progressive-update fencing, valid partial work, Take Over containment, no-op behavior, asset ownership and recovery, explicit failure/rollback diagnostics, session-only history, no durable Version history, and the existing File-canvas and persistence contracts.
 
-## Active fallback-contract phase
+Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package manifests, protected Agentation work, unrelated planning projects, or evidence logs under this planning-only route. Do not claim AC4, AC7, the native image gate, or the Ticket 02 gate passed before the required implementation and browser evidence exists.
 
-The public-boundary research required by Decision 0053 is complete and failed. This phase:
+## Current evidence and references
 
-1. designs a bounded fallback contract for separate native human history and Synara-owned AI-batch history;
-2. preserves exact AI-batch event, recovery, asset, no-op, and lifecycle obligations while making unresolved interaction semantics explicit for owner approval;
-3. does not modify product acceptance details in this ticket until the fallback contract is approved;
-4. does not upgrade `@excalidraw/excalidraw`, modify `bun.lock`, change runtime source, or begin broad Ticket 02 work.
+- [Decision 0055 — approved fallback dual-history contract](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md)
+- [Decision 0054 — research failure and fallback activation](../decisions/0054-ticket-02-public-history-boundary-research-failed-fallback-activated.md)
+- [Decision 0053 — package/public-API reassessment](../decisions/0053-ticket-02-owner-package-reassessment-with-ai-history-fallback.md)
+- [Decision 0051 — preserved historical single-route direction](../decisions/0051-ticket-02-exact-batch-history-direction.md)
+- [Accepted fallback design](../designs/ticket-02-fallback-dual-history-contract.md)
+- Initial Gate source/evidence: `2d5103b60` / `cd69bc867`
+- Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
+- Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-Decision 0054 records the research-fail result and activates the fallback direction. It does not itself rewrite the existing acceptance criteria or authorize source implementation.
+**Routing:** `ready-for-fallback-implementation-planning`
 
-## Proposed fallback contract — owner approval required
-
-- [Proposed dual-history contract](../designs/ticket-02-fallback-dual-history-contract.md)
-- [Fallback contract challenge review](../reviews/ticket-02-fallback-contract-challenge.md)
-
-The proposed contract is explicitly `Proposed — awaiting owner approval`. It preserves this ticket's current AC1–AC7 language until a binding owner decision deliberately replaces the affected shared-history, keyboard, cap, and native-image clauses. The proposal must not be treated as acceptance evidence or implementation authorization.
-
-**Routing:** `awaiting-owner-fallback-contract-approval`
-
-**Broad-work prohibition:** WP-CORE, the remaining Ticket 02 matrix, package/lockfile changes, private or undocumented integration, source implementation, and later-ticket implementation remain prohibited until the fallback contract is owner-approved, affected acceptance language is deliberately revised, and a bounded implementation route is authorized.
+**Next authorization boundary:** a separate bounded implementation decision must cite Decision 0055, accept the plan, and explicitly authorize source work. Ticket 02 final acceptance remains a later exactly-once consultation after implementation, real-Chromium verification, and one independent feature-level review.
