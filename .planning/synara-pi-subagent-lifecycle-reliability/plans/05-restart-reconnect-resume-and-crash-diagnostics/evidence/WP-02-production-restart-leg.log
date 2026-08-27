@@ -1,0 +1,42 @@
+
+ RUN  v4.1.10 /Users/anhpham99/symphony/apps/server
+
+ ❯ |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts [ src/provider/piSubagentRealPiAcceptance.test.ts ]
+ResolveMessage: No such built-in module: node:sqlite
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:42:57
+   Duration  141ms (transform 49ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+
+CANDIDATE_SHA:4090ccee8cf39b9164a9653fc41b239bc59b5173
+ALFIE_SHA:3fe340b401ca86bcbe8b55abd4de107e1d93482e
+PRODUCER_EXIT:1
+
+--- SUPPORTED NODE PRODUCER RETRY AFTER BUN PRE-COLLECTION FAILURE ---
+RUNNER:node v24.14.1
+
+ RUN  v4.1.10 /Users/anhpham99/symphony/apps/server
+
+(node:36322) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T17 slice 4 stage 5 pre-restart counters: executionId=exec_52728eaa-eda1-4b7d-870b-f53c1925705c attemptId=att_7cf20209-3dcc-4712-9735-80804020d8c7 generation=1 modelRequests=2 delegations=1 admissions=1 outbox=0 followUps=3
+T17 slice 4 stage 5 post-restart counters: executionId=exec_52728eaa-eda1-4b7d-870b-f53c1925705c attemptId=att_7cf20209-3dcc-4712-9735-80804020d8c7 generation=2 modelRequests=3 delegations=1 admissions=0 outbox=0 followUps=3
+T17 slice 4 stage 5 seam note: no late old-generation terminal can be induced here through public WS + durable-read seams after disposing the original live process; a real old-generation child dies with that process and this suite has no durable write seam to fabricate stale terminal evidence.
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 9 skipped (10)
+   Start at  00:44:52
+   Duration  12.18s (transform 2.20s, setup 0ms, import 2.81s, tests 9.29s, environment 0ms)
+
+
+SUPPORTED_PRODUCER_CANDIDATE_SHA:d12e1a2e071afcdc63f630fbff467b76779e7d42
+ALFIE_SHA:3fe340b401ca86bcbe8b55abd4de107e1d93482e
+SUPPORTED_PRODUCER_EXIT:0

@@ -1,0 +1,109 @@
+WP-02 controlled provider provenance — exact verification record (Ticket 05)
+
+Verification timestamp (UTC): 2026-08-28
+Symphony checkout: /Users/anhpham99/symphony (HEAD d12e1a2e071afcdc63f630fbff467b76779e7d42)
+Controlled Alfie checkout: /Users/anhpham99/alfie (read-only verification; nothing reset/cleaned/checked out/re-pinned)
+Classification: PASS — exact controlled provenance
+
+=======================================================================
+1. Candidate and current SHAs
+=======================================================================
+Ticket 05 planning baseline (Symphony): fa02c58ed100242dcaab1ce2aabf0ec8d6a9cef2
+WP-01 frozen evidence candidate:        7521b92c7cb8a614346f994e963aa379175f540b
+WP-02 deterministic-leg run commit:     4090ccee8cf39b9164a9653fc41b239bc59b5173  (WP-01 evidence commit; footer CANDIDATE_SHA in WP-02-restart-acceptance.log and WP-02-resume-acceptance.log)
+Runner-correction commit:               d12e1a2e071afcdc63f630fbff467b76779e7d42  (HEAD; authorizes Node producer for the production leg; footer SUPPORTED_PRODUCER_CANDIDATE_SHA in WP-02-production-restart-leg.log)
+Committed delta 7521b92c7..d12e1a2e0:   planning/evidence files only
+  (PLAN.md, WP-01-focused-deterministic-evidence.md, WP-02-controlled-real-pi-and-implementation-report.md,
+   four WP-01 evidence artifacts, commit 4090ccee8 + commit d12e1a2e0)
+Zero-delta assertion: git diff --name-only 7521b92c7..HEAD -- apps packages
+  -> 0 paths. Runtime/source/test/config identical across candidate and current HEAD.
+
+Controlled provider boundary (PLAN header):
+  Alfie pinned commit 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  @alfie/pi-subagents@0.15.0-alfie.6
+  Pi SDK @earendil-works/pi-coding-agent@0.83.0
+
+=======================================================================
+2. Alfie repository identity
+=======================================================================
+Command: git -C /Users/anhpham99/alfie rev-parse HEAD
+Actual:   3fe340b401ca86bcbe8b55abd4de107e1d93482e
+Expected: 3fe340b401ca86bcbe8b55abd4de107e1d93482e   -> MATCH (PASS)
+
+Command: git -C /Users/anhpham99/alfie remote get-url origin
+Actual:   https://github.com/anhphamwork99/alfie.git
+Expected (fixture expectedRepositoryUrl): https://github.com/anhphamwork99/alfie.git
+  -> MATCH (PASS)
+
+=======================================================================
+3. Controlled surface status and diff
+=======================================================================
+Command: git -C /Users/anhpham99/alfie status --short
+Actual: (empty output — clean worktree)                  -> PASS
+
+Command: git -C /Users/anhpham99/alfie diff -- \
+  package.json \
+  agent/extensions/pi-subagents/package.json \
+  agent/extensions/pi-subagents/src/index.ts \
+  agent/extensions/pi-subagents/src/agent-manager.ts \
+  agent/extensions/pi-subagents/src/agent-runner.ts \
+  agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+Actual: (empty output — zero controlled diff)            -> PASS
+
+Note: package.json at the Alfie repository root does not exist in this repo
+layout (agent/ is the root content tree). Its absence in an empty diff is the
+correct clean result; the five existing controlled surfaces are fully covered
+below.
+
+=======================================================================
+4. Package and Pi SDK versions
+=======================================================================
+Command: read agent/extensions/pi-subagents/package.json (name, version)
+Actual:   @alfie/pi-subagents 0.15.0-alfie.6
+Expected: @alfie/pi-subagents 0.15.0-alfie.6             -> MATCH (PASS)
+
+Command: read agent/extensions/pi-subagents/node_modules/@earendil-works/pi-coding-agent/package.json
+Actual:   @earendil-works/pi-coding-agent 0.83.0
+Expected: @earendil-works/pi-coding-agent 0.83.0         -> MATCH (PASS)
+(The installed Pi SDK runtime for the controlled extension lives ext-local
+under the extension's node_modules; bun.lock pins
+"@earendil-works/pi-coding-agent@0.83.0" for the Symphony workspace.)
+
+=======================================================================
+5. Fixture hash comparison (sha256)
+=======================================================================
+Fixture: apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json
+
+| Surface                                              | Expected (fixture)                                                              | Actual (sha256sum)                                                              | Result |
+|------------------------------------------------------|---------------------------------------------------------------------------------|---------------------------------------------------------------------------------|--------|
+| agent/extensions/pi-subagents/package.json           | 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f                | 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f                | MATCH  |
+| agent/extensions/pi-subagents/src/index.ts           | c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9                | c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9                | MATCH  |
+| agent/extensions/pi-subagents/src/agent-manager.ts   | 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783                | 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783                | MATCH  |
+| agent/extensions/pi-subagents/src/agent-runner.ts    | 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2                | 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2                | MATCH  |
+| agent/extensions/pi-subagents/src/child-bash-supervisor.ts | ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0          | ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0                | MATCH  |
+
+Hash command (one line per surface):
+  shasum -a 256 \
+    agent/extensions/pi-subagents/package.json \
+    agent/extensions/pi-subagents/src/index.ts \
+    agent/extensions/pi-subagents/src/agent-manager.ts \
+    agent/extensions/pi-subagents/src/agent-runner.ts \
+    agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+(run with cwd /Users/anhpham99/alfie)
+
+5/5 expected hashes match exactly. 0 mismatches, 0 dirty controlled surfaces.
+
+=======================================================================
+6. Pass classification
+=======================================================================
+- Pinned commit:        PASS (exact)
+- Origin remote:        PASS (exact)
+- Working-tree status:  PASS (clean)
+- Controlled diff:      PASS (empty over all six contracted surfaces)
+- Package version:      PASS (0.15.0-alfie.6)
+- Pi SDK version:       PASS (0.83.0)
+- Fixture hashes:       PASS (5/5 exact)
+
+Overall: EXACT CONTROLLED PROVENANCE — PASS. The controlled real-Pi legs in
+WP-02-nondestructive-real-pi-disposition.md ran against this verified
+provenance. No reset, clean, checkout, re-pin, or remediation was performed.
