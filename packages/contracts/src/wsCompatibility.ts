@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 
+import { WHITEBOARD_OPERATION_SESSION_CAPABILITY } from "./whiteboardOperation";
 import { PROJECT_WORKSPACE_CAPABILITY } from "./projectWorkspace";
 import { NonNegativeInt } from "./baseSchemas";
 
@@ -60,6 +61,11 @@ export const WS_SERVER_CAPABILITIES = [
   // staged v1→v2 workspace publication before command-ready. Older servers
   // omit it and a newer client keeps its legacy Thread-keyed reads.
   PROJECT_WORKSPACE_CAPABILITY,
+  // Optional feature capability (same rollout convention): the ephemeral
+  // Whiteboard operation-session seam (Ticket 02; Decision 0063). The browser
+  // bridge refuses to open a session when this capability is absent; older
+  // servers omit it without affecting any other client feature.
+  WHITEBOARD_OPERATION_SESSION_CAPABILITY,
   // Single-handshake connect: negotiation is available over plain HTTP at
   // WS_NEGOTIATE_HTTP_PATH, so a connect costs exactly one WebSocket upgrade.
   "transport.http-negotiate",

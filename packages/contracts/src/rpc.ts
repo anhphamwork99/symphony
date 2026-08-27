@@ -247,6 +247,20 @@ import {
 } from "./stats";
 import { WS_METHODS } from "./ws";
 import {
+  WhiteboardAcknowledgeApplicationInput,
+  WhiteboardAcknowledgeApplicationResult,
+  WhiteboardOperationAttachSessionInput,
+  WhiteboardOperationAttachSessionResult,
+  WhiteboardOperationReleaseSessionInput,
+  WhiteboardOperationReleaseSessionResult,
+  WhiteboardOperationRetryInput,
+  WhiteboardOperationRetryResult,
+  WhiteboardOperationSessionEvent,
+  WhiteboardOperationSubscribeInput,
+  WhiteboardOperationTakeOverInput,
+  WhiteboardOperationTakeOverResult,
+} from "./whiteboardOperation";
+import {
   WS_BOOTSTRAP_METHOD,
   WsBootstrapNegotiateInput,
   WsBootstrapNegotiateResult,
@@ -1329,6 +1343,61 @@ export const WsSubscribeAutomationEventsRpc = Rpc.make(WS_METHODS.subscribeAutom
   stream: true,
 });
 
+// ── Whiteboard operation-session seam (Ticket 02; Decision 0063 as amended
+// by Decision 0064). The six browser-callable descriptors join the canonical
+// WsFeatureRpcGroup below; the internal producer methods (admitOperation,
+// publishProgress, completeOperation, failOperation) are service methods on
+// the server session service and must never become RPC members.
+
+export const WsWhiteboardOperationAttachSessionRpc = Rpc.make(
+  WS_METHODS.whiteboardOperationAttachSession,
+  {
+    payload: WhiteboardOperationAttachSessionInput,
+    success: WhiteboardOperationAttachSessionResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsWhiteboardOperationSubscribeRpc = Rpc.make(
+  WS_METHODS.whiteboardOperationSubscribe,
+  {
+    payload: WhiteboardOperationSubscribeInput,
+    success: WhiteboardOperationSessionEvent,
+    error: WsRpcError,
+    stream: true,
+  },
+);
+
+export const WsWhiteboardOperationAcknowledgeApplicationRpc = Rpc.make(
+  WS_METHODS.whiteboardOperationAcknowledgeApplication,
+  {
+    payload: WhiteboardAcknowledgeApplicationInput,
+    success: WhiteboardAcknowledgeApplicationResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsWhiteboardOperationTakeOverRpc = Rpc.make(WS_METHODS.whiteboardOperationTakeOver, {
+  payload: WhiteboardOperationTakeOverInput,
+  success: WhiteboardOperationTakeOverResult,
+  error: WsRpcError,
+});
+
+export const WsWhiteboardOperationRetryRpc = Rpc.make(WS_METHODS.whiteboardOperationRetry, {
+  payload: WhiteboardOperationRetryInput,
+  success: WhiteboardOperationRetryResult,
+  error: WsRpcError,
+});
+
+export const WsWhiteboardOperationReleaseSessionRpc = Rpc.make(
+  WS_METHODS.whiteboardOperationReleaseSession,
+  {
+    payload: WhiteboardOperationReleaseSessionInput,
+    success: WhiteboardOperationReleaseSessionResult,
+    error: WsRpcError,
+  },
+);
+
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
 export const WsFeatureRpcGroup = RpcGroup.make(
@@ -1462,6 +1531,12 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsAutomationArchiveRunRpc,
   WsAutomationResolveProposalRpc,
   WsSubscribeAutomationEventsRpc,
+  WsWhiteboardOperationAttachSessionRpc,
+  WsWhiteboardOperationSubscribeRpc,
+  WsWhiteboardOperationAcknowledgeApplicationRpc,
+  WsWhiteboardOperationTakeOverRpc,
+  WsWhiteboardOperationRetryRpc,
+  WsWhiteboardOperationReleaseSessionRpc,
 );
 
 /** @deprecated Use WsFeatureRpcGroup. Bootstrap is intentionally a separate endpoint/group. */

@@ -303,6 +303,16 @@ export const WS_METHODS = {
   providerListModels: "provider.listModels",
   providerListAgents: "provider.listAgents",
 
+  // Whiteboard operation-session methods (Ticket 02; Decision 0063 as
+  // amended by Decision 0064 — descriptors join the canonical group in
+  // rpc.ts; the internal producer methods never appear here).
+  whiteboardOperationAttachSession: "whiteboard.operation.attachSession",
+  whiteboardOperationSubscribe: "whiteboard.operation.subscribe",
+  whiteboardOperationAcknowledgeApplication: "whiteboard.operation.acknowledgeApplication",
+  whiteboardOperationTakeOver: "whiteboard.operation.takeOver",
+  whiteboardOperationRetry: "whiteboard.operation.retry",
+  whiteboardOperationReleaseSession: "whiteboard.operation.releaseSession",
+
   // Automation methods
   automationList: "automation.list",
   automationGetMemory: "automation.getMemory",

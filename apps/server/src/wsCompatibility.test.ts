@@ -103,3 +103,24 @@ describe("WebSocket compatibility bootstrap", () => {
     });
   });
 });
+
+describe("Whiteboard operation-session capability advertisement", () => {
+  it("advertises the optional Whiteboard operation-session capability without requiring it of clients", async () => {
+    const { WHITEBOARD_OPERATION_SESSION_CAPABILITY } = await import("@synara/contracts");
+    const result = await Effect.runPromise(
+      negotiateWsCompatibility({
+        protocolEpoch: WS_PROTOCOL_EPOCH,
+        minRevision: WS_PROTOCOL_MIN_REVISION,
+        maxRevision: WS_PROTOCOL_MAX_REVISION,
+        clientBuild: "test-client",
+        requiredCapabilities: [...WS_SERVER_CAPABILITIES],
+      }),
+    );
+
+    expect(WS_SERVER_CAPABILITIES).toContain(WHITEBOARD_OPERATION_SESSION_CAPABILITY);
+    expect(result.capabilities).toContain(WHITEBOARD_OPERATION_SESSION_CAPABILITY);
+    expect(WS_CLIENT_REQUIRED_CAPABILITIES).not.toContain(
+      WHITEBOARD_OPERATION_SESSION_CAPABILITY,
+    );
+  });
+});

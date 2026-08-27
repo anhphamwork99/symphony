@@ -442,3 +442,22 @@ it.effect("decodes project device push events on their own channel", () =>
     assert.strictEqual(parsed.data.state.attachedDeviceUdid, "FAKE-0001");
   }),
 );
+
+it.effect("carries the six whiteboard operation-session method names additively", () =>
+  Effect.gen(function* () {
+    // Decision 0063 §2: the bounded browser RPC surface is exactly these six
+    // method names; the internal producer methods stay off the wire surface.
+    assert.strictEqual(WS_METHODS.whiteboardOperationAttachSession, "whiteboard.operation.attachSession");
+    assert.strictEqual(WS_METHODS.whiteboardOperationSubscribe, "whiteboard.operation.subscribe");
+    assert.strictEqual(
+      WS_METHODS.whiteboardOperationAcknowledgeApplication,
+      "whiteboard.operation.acknowledgeApplication",
+    );
+    assert.strictEqual(WS_METHODS.whiteboardOperationTakeOver, "whiteboard.operation.takeOver");
+    assert.strictEqual(WS_METHODS.whiteboardOperationRetry, "whiteboard.operation.retry");
+    assert.strictEqual(
+      WS_METHODS.whiteboardOperationReleaseSession,
+      "whiteboard.operation.releaseSession",
+    );
+  }),
+);
