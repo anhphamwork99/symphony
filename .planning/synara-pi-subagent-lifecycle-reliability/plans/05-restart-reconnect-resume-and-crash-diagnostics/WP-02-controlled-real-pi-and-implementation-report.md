@@ -1,6 +1,7 @@
 # WP-02 — controlled real-Pi evidence and Implementation Report
 
-**State:** blocked by WP-01
+**State:** ready — WP-01 committed at `4090ccee8`; producer correction below
+is authorized by measured `node:sqlite` runtime evidence
 
 **Owner role:** implementation worker
 
@@ -81,7 +82,7 @@ checkout, or re-pin.
 cd apps/server
 set -o pipefail
 ALFIE_REPO_DIR=/Users/anhpham99/alfie \
-bun run ../../node_modules/vitest/vitest.mjs run \
+node ../../node_modules/vitest/vitest.mjs run \
   --project wallclock \
   --maxWorkers=1 \
   --no-file-parallelism \
@@ -123,6 +124,13 @@ bun run ../../node_modules/vitest/vitest.mjs run \
 status=${PIPESTATUS[0]}
 exit "$status"
 ```
+
+`piSubagentRealPiAcceptance.test.ts` imports `DatabaseSync` from
+`node:sqlite`. The repository's supported Node runtime resolves that built-in;
+Bun 1.3.12 does not. Preserve any Bun pre-collection failure (`0 tests`) in the
+same log, then run the exact file/filter once with Node. Only the Node producer
+may supply behavioral evidence for this leg; record both exits without
+relabeling the Bun failure as a test failure.
 
 The filtered leg must prove fresh production WebSocket composition over the
 same isolated root/database after the old server is fully disposed; honest

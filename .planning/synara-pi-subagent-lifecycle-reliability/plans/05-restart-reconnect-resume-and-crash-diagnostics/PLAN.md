@@ -219,7 +219,14 @@ unexecuted command alone.
 
 ## 7. Verification and evidence policy
 
-- Use `bun run ../../node_modules/vitest/vitest.mjs`, never `bun test`.
+- Use the exact runner named by each WP and never `bun test`. WP-01 and the
+  restart/Resume real-Pi files may use
+  `bun run ../../node_modules/vitest/vitest.mjs`. The production-composition
+  real-Pi file imports Node's built-in `node:sqlite`, so its direct producer
+  must use `node ../../node_modules/vitest/vitest.mjs` under the repository's
+  supported Node engine (`>=24.10`). Bun 1.3.12 cannot resolve
+  `node:sqlite`; a Bun pre-collection failure with zero tests is environment
+  evidence, not a Ticket 05 behavior result.
 - Do not use `bun run test <paths>` for focused evidence; the package runner
   ignores positional filtering.
 - Unit evidence runs serialized with `--project unit --maxWorkers=1
