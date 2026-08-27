@@ -102,10 +102,13 @@ import { OrchestrationReactor } from "../orchestration/Services/OrchestrationRea
 import { recoverSynaraMcpPendingOperations } from "../orchestration/synaraMcpStartupRecovery.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import {
+  PiSubagentExecutionRepositoryLive,
+} from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { setPiSubagentExecutionLifecycleListener } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { ProviderRuntimeEventRepositoryLive } from "../persistence/Layers/ProviderRuntimeEvents.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
+import { toPersistenceSqlError } from "../persistence/Errors.ts";
 import { ProviderUnsupportedError } from "../provider/Errors.ts";
 import { ProviderDiscoveryServiceLive } from "../provider/Layers/ProviderDiscoveryService.ts";
 import { ProviderSessionDirectoryLive } from "../provider/Layers/ProviderSessionDirectory.ts";
@@ -120,6 +123,7 @@ import { PiAdapter } from "../provider/Services/PiAdapter.ts";
 import { ProviderAdapterRegistry } from "../provider/Services/ProviderAdapterRegistry.ts";
 import { makePiSubagentExecutionCardBridge } from "../provider/piSubagentExecutionCardBridge.ts";
 import { makePiSubagentParentEffectDispatcher } from "../provider/piSubagentParentEffectDispatcher.ts";
+import { makePiSubagentControlHealth } from "../provider/piSubagentControlHealth.ts";
 import {
   extractPiSubagentBridge,
   type PiSubagentActiveChild,
@@ -134,6 +138,7 @@ import { ServerSettingsLive } from "../serverSettings.ts";
 import { websocketRpcRouteLayer } from "../wsRpc.ts";
 import { PiSubagentExecutionRepository } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 import type { PiSubagentExecutionRepositoryShape } from "../persistence/Services/PiSubagentExecutionRepository.ts";
+import type { PiSubagentExecutionLifecycleNotification } from "../persistence/Services/PiSubagentExecutionRepository.ts";
 
 type ModelTool = { name?: string; function?: { name?: string } };
 
@@ -1257,6 +1262,10 @@ export interface MakeRealPiWsHarnessOptions {
   readonly deterministicSlowDelayMs?: number;
   /** Hold deterministic slow-model responses until the caller explicitly releases them. */
   readonly holdDeterministicSlowResponses?: boolean;
+  /** Test-only causal barrier immediately before the durable sequence-2 write. */
+  readonly beforeSequence2Commit?: () => Promise<void>;
+  /** Test-only causal barrier immediately before a real terminal band-40 write. */
+  readonly beforeTerminalCommit?: () => Promise<void>;
   /** Ticket 02: compose the desktop managed bootstrap (web mode when absent). */
   readonly desktopManaged?: RealPiWsHarnessDesktopManagedConfig;
 }
@@ -1265,6 +1274,11 @@ export interface ObservedSubagentAdmission {
   readonly threadId: ThreadId;
   readonly command: PiSubagentSpawnCommand;
   readonly result: PiSubagentSpawnResult;
+}
+
+export interface ObservedExtensionSteerEmission {
+  readonly threadId: ThreadId;
+  readonly payload: unknown;
 }
 
 export interface RealPiWsHarness {
@@ -1317,8 +1331,19 @@ export interface RealPiWsHarness {
   readonly observedSessions: () => ReadonlyMap<string, unknown>;
   /** Managed admission events observed by the real adapter. */
   readonly observedAdmissions: () => ReadonlyArray<ObservedSubagentAdmission>;
+  /** Actual pinned-extension `subagents:steered` event-bus emissions. */
+  readonly observedExtensionSteerEmissions: () =>
+    ReadonlyArray<ObservedExtensionSteerEmission>;
   /** PIDs spawned by the actual Pi supervisor-backed custom bash operations. */
   readonly observedSupervisorSpawnPids: () => ReadonlyArray<number>;
+  /** Notifications emitted only after the repository transaction commits. */
+  readonly observedLifecycleNotifications: () =>
+    ReadonlyArray<PiSubagentExecutionLifecycleNotification>;
+  /** Current state of the exact adapter-owned control-health instance. */
+  readonly observedControlHealth: () => Promise<{
+    readonly status: string;
+    readonly diagnosticCode: string | null;
+  }>;
   /** Stable operation diagnostics recorded by harness setup/dispose. */
   readonly lastOperationDiagnostics: () => ReadonlyArray<string>;
   /** True when the harness restored every process-env variable it set. */
@@ -1621,7 +1646,14 @@ export async function makeRealPiWsHarness(
   const observedCapabilityEvents = new Map<string, PiSubagentNegotiatedCapability>();
   const observedSessionObjects = new Map<string, unknown>();
   const admissionEvents: ObservedSubagentAdmission[] = [];
+  const extensionSteerEmissions: ObservedExtensionSteerEmission[] = [];
+  const extensionEventUnsubscribers = new Map<unknown, () => void>();
   const supervisorSpawnPids: number[] = [];
+  const lifecycleNotifications: PiSubagentExecutionLifecycleNotification[] = [];
+  // The adapter already creates this exact implementation internally. The
+  // explicit test override retains the same adapter-lifetime wiring while
+  // making its bounded status observable to acceptance assertions.
+  const observedControlHealth = await Effect.runPromise(makePiSubagentControlHealth());
 
   const completionDispatchBridge = makePiSubagentParentEffectDispatcher();
   const executionCardBridge = makePiSubagentExecutionCardBridge();
@@ -1629,7 +1661,41 @@ export async function makeRealPiWsHarness(
   const sqliteLayer = makeSqlitePersistenceLive(derivedDbPath).pipe(
     Layer.provide(NodeServices.layer),
   );
-  const piSubagentRepositoryLayer = PiSubagentExecutionRepositoryLive;
+  const piSubagentRepositoryLayer =
+    options.beforeSequence2Commit === undefined && options.beforeTerminalCommit === undefined
+      ? PiSubagentExecutionRepositoryLive
+      : Layer.effect(
+          PiSubagentExecutionRepository,
+          Effect.gen(function* () {
+            // Test-only barriers decorate the same production repository
+            // layer. Providing the live layer here preserves its dependency
+            // wiring and prevents a second repository/SQLite graph.
+            const base = yield* PiSubagentExecutionRepository;
+            return {
+              ...base,
+              recordLifecycleEvent: (input) =>
+                input.sequence !== 2 || options.beforeSequence2Commit === undefined
+                  ? base.recordLifecycleEvent(input)
+                  : Effect.gen(function* () {
+                      yield* Effect.tryPromise({
+                        try: options.beforeSequence2Commit!,
+                        catch: toPersistenceSqlError("test-only-sequence-2-barrier"),
+                      });
+                      return yield* base.recordLifecycleEvent(input);
+                    }),
+              recordTerminalEvent: (input) =>
+                options.beforeTerminalCommit === undefined
+                  ? base.recordTerminalEvent(input)
+                  : Effect.gen(function* () {
+                      yield* Effect.tryPromise({
+                        try: options.beforeTerminalCommit!,
+                        catch: toPersistenceSqlError("test-only-terminal-barrier"),
+                      });
+                      return yield* base.recordTerminalEvent(input);
+                    }),
+            } satisfies PiSubagentExecutionRepositoryShape;
+          }),
+        ).pipe(Layer.provide(PiSubagentExecutionRepositoryLive));
 
   // Late-bound MCP session authority for the PiAdapter's Decision-21
   // admission re-validation. The adapter layer is composed independently of
@@ -1657,6 +1723,7 @@ export async function makeRealPiWsHarness(
 
   const piAdapterLayer = makePiAdapterLive({
     completionDispatchBridge,
+    controlHealth: observedControlHealth,
     // Ticket 02 desktop managed harness leg (WP-A) / Ticket 04 WP1 seam:
     // production desktop gate env plus the explicit user agent dir. When the
     // caller supplied a COMPLETE desktop-derived backend env (Decision 0016),
@@ -1685,6 +1752,22 @@ export async function makeRealPiWsHarness(
     onSubagentCapability: (event) => {
       observedCapabilityEvents.set(String(event.threadId), event.capability);
       observedSessionObjects.set(String(event.threadId), event.session);
+      if (!extensionEventUnsubscribers.has(event.session)) {
+        // ResourceLoader owns the exact event bus passed to the pinned
+        // extension. This is a measurement-only test seam; it neither emits
+        // events nor changes extension/session behavior.
+        const eventBus = (event.session as any)?.resourceLoader?.eventBus as
+          | { on?: (channel: string, handler: (payload: unknown) => void) => () => void }
+          | undefined;
+        if (typeof eventBus?.on === "function") {
+          extensionEventUnsubscribers.set(
+            event.session,
+            eventBus.on("subagents:steered", (payload) => {
+              extensionSteerEmissions.push({ threadId: event.threadId, payload });
+            }),
+          );
+        }
+      }
     },
     onSubagentAdmission: (event) => {
       admissionEvents.push(event);
@@ -1760,9 +1843,11 @@ export async function makeRealPiWsHarness(
   completionDispatchBridge.bindOnce(engine);
   executionCardBridge.bindOnce(engine);
   const repository = await runtime.runPromise(Effect.service(PiSubagentExecutionRepository));
-  setPiSubagentExecutionLifecycleListener((notification) => {
+  const cardLifecycleListener = (notification: PiSubagentExecutionLifecycleNotification) => {
+    lifecycleNotifications.push(notification);
     executionCardBridge.handleNotification(repository, notification);
-  });
+  };
+  setPiSubagentExecutionLifecycleListener(cardLifecycleListener);
 
   // The LIVE composed ServerConfig's runtime mode (resolved from the same
   // ManagedRuntime every production service above consumed — not a mirror
@@ -2053,6 +2138,14 @@ export async function makeRealPiWsHarness(
     } catch (cause) {
       failures.push(cause);
     }
+    for (const unsubscribe of extensionEventUnsubscribers.values()) {
+      try {
+        unsubscribe();
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    extensionEventUnsubscribers.clear();
     await client.close().catch((cause) => failures.push(cause));
     await runtime
       .runPromise(Scope.close(serverScope, Exit.void))
@@ -2125,16 +2218,24 @@ export async function makeRealPiWsHarness(
     client,
     engine,
     restoreCardLifecycleListener: () => {
-      setPiSubagentExecutionLifecycleListener((notification) => {
-        executionCardBridge.handleNotification(repository, notification);
-      });
+      setPiSubagentExecutionLifecycleListener(cardLifecycleListener);
     },
     repository,
     connectNewClient: () => connectRealPiWsClient(port),
     observedCapabilities: () => new Map(observedCapabilityEvents),
     observedSessions: () => new Map(observedSessionObjects),
     observedAdmissions: () => [...admissionEvents],
+    observedExtensionSteerEmissions: () => [...extensionSteerEmissions],
     observedSupervisorSpawnPids: () => [...supervisorSpawnPids],
+    observedLifecycleNotifications: () => [...lifecycleNotifications],
+    observedControlHealth: async () => {
+      const health = await Effect.runPromise(observedControlHealth.getHealth());
+      return {
+        status: String(health.status),
+        diagnosticCode:
+          typeof health.diagnosticCode === "string" ? health.diagnosticCode : null,
+      };
+    },
     lastOperationDiagnostics: () => [...diagnostics],
     envWasRestored: () => envRestored,
     userHome: async () => os.homedir(),
