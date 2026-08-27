@@ -553,7 +553,9 @@ export class SynaraAiHistoryCoordinator {
           message: "a human semantic callback arrived while AI mutation was locked",
           expected: "only correlated synthetic callbacks while locked",
           observed: input.callbackProvenance ?? "human",
-          adapterCallbackSequence: input.adapterCallbackSequence,
+          ...(input.adapterCallbackSequence === undefined
+            ? {}
+            : { adapterCallbackSequence: input.adapterCallbackSequence }),
         });
         this.lockFault();
       }

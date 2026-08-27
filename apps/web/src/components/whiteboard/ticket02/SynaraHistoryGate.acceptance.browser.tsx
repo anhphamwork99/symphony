@@ -273,6 +273,7 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     // The selected ID is absent from the AI event's before/after elements and
     // must therefore be filtered during restore.
     handle.getAdapter().updateScene({
+      elements: handle.getAdapter().captureScene().elements,
       appState: { selectedElementIds: { [STALE_SELECTION_ID]: true } },
     });
     await vi.waitFor(() =>

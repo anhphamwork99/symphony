@@ -128,7 +128,7 @@ export const ExcalidrawTicket02Harness = forwardRef<
       canvasIdentity: "ticket-02-gate-canvas",
       scenario: props.scenario ?? "ticket-02-fallback-gate",
       settlementMaxWaitMs: props.settlementMaxWaitMs ?? 500,
-      onDiagnostic: props.onDiagnostic,
+      ...(props.onDiagnostic === undefined ? {} : { onDiagnostic: props.onDiagnostic }),
     });
     coordinatorRef.current = coordinator;
     for (const diagnostic of pendingAdapterDiagnosticsRef.current.splice(0)) {
