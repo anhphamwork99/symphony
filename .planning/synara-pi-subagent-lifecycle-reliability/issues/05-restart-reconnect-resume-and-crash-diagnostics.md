@@ -1,8 +1,9 @@
 # Ticket 05 — restart, reconnect, Resume, projection truth, and crash diagnostics
 
-**Status:** blocked
-**Blocked by:** Tickets 02–04 accepted; DG-5 and applicable inherited decisions
-**Implementation:** forbidden while blocked
+**Status:** ready-for-agent
+**Dependencies:** Tickets 02–04 accepted; local Decisions 0002/0006, applicable inherited decisions, and this evidence-first plan remain binding
+**Plan:** [`../plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md`](../plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md)
+**Execution authorization:** serial evidence-only WPs; no source/test/contract/configuration/migration/manifest/lockfile/Alfie remediation without the PLAN §9 challenge/replan gate
 
 ## Objective
 
