@@ -204,6 +204,27 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
       ),
     ).toBe(true);
 
+    // Plan §6.6 scenario 2: an explicit accessible activation attempt under the
+    // AI lock through public user interaction only. The Synara "Undo AI batch"
+    // surface is reached by stable role/name, receives real keyboard focus,
+    // and Enter/Space are pressed on it; with `busy` the guarded action must
+    // not mutate document content and must retain its aria-disabled state.
+    const lockedUndoButton = page.getByRole("button", { name: "Undo AI batch" });
+    await lockedUndoButton.focus();
+    expect(document.activeElement).toHaveAttribute("aria-label", "Undo AI batch");
+    expect(lockedUndoButton).toHaveAttribute("aria-disabled", "true");
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard(" ");
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    expect(
+      documentSnapshotsEqual(
+        lockedProjection,
+        captureDocumentSnapshot(handle.getAdapter().captureScene()),
+      ),
+    ).toBe(true);
+    expect(lockedUndoButton).toHaveAttribute("aria-disabled", "true");
+    expect(handle.getDiagnostics().filter((diagnostic) => diagnostic.severity === "critical")).toEqual([]);
+
     const lockedViewport = handle.getAdapter().captureViewport();
     await userEvent.wheel(canvas(), { delta: { y: 160 } });
     await vi.waitFor(() =>
@@ -275,7 +296,11 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     );
     expect(redo).not.toBeNull();
     await vi.waitFor(() => expect((redo as HTMLButtonElement).disabled).toBe(false));
-    await userEvent.click(page.getByRole("button", { name: "Redo AI batch" }));
+    // Plan §6.6 scenario 4: Redo by Enter/Space keyboard activation of the
+    // focused, plainly labeled public AI action. The button above was reached
+    // through the real user Undo pointer activation; Enter now activates it as
+    // a plain keyboard user would.
+    await userEvent.keyboard("{Enter}");
     await vi.waitFor(() =>
       expect(
         documentSnapshotsEqual(final, captureDocumentSnapshot(handle.getAdapter().captureScene())),
