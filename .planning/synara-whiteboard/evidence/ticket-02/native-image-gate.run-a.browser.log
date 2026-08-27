@@ -1,0 +1,78 @@
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx"
+
+ RUN  v4.1.10 /private/tmp/synara-t02-native-image-gate/apps/web
+
+The request id "/Users/anhpham99/symphony/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Regular.woff2" is outside of Vite serving allow list.
+
+- /private/tmp/synara-t02-native-image-gate/apps/web
+- /private/tmp/synara-t02-native-image-gate
+- /Users/anhpham99/symphony/node_modules/.bun/vitest@4.1.10+b675788e84e571f1/node_modules/vitest
+- /Users/anhpham99/symphony/node_modules/.bun/@vitest+browser@4.1.10+81ecffb7a7dc0e03/node_modules/@vitest/browser/dist
+- /Users/anhpham99/symphony/node_modules/.bun/vite@8.1.5+c07c6cebe09319b1/node_modules/vite/dist/client
+- /Users/anhpham99/symphony/node_modules/.bun/@vitest+browser-playwright@4.1.10+4ee149e80d5959ba/node_modules/@vitest/browser-playwright/dist/locators.js
+
+Refer to docs https://vite.dev/config/server-options.html#server-fs-allow for configurations and more details.
+
+The request id "/Users/anhpham99/symphony/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Medium.woff2" is outside of Vite serving allow list.
+stdout | src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx > WP-NATIVE-IMAGE-GATE file-chooser route probe in stable Chromium > drives the package file chooser through public test APIs only
+[gate-probe] mounting
+stdout | src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx > WP-NATIVE-IMAGE-GATE file-chooser route probe in stable Chromium > drives the package file chooser through public test APIs only
+[gate-probe] harness-ready
+stdout | src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx > WP-NATIVE-IMAGE-GATE file-chooser route probe in stable Chromium > drives the package file chooser through public test APIs only
+[gate-probe] bounded:toolbar-click:settled
+stdout | src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx > WP-NATIVE-IMAGE-GATE file-chooser route probe in stable Chromium > drives the package file chooser through public test APIs only
+[gate-probe-result] [
+ "sentinel-bytes=80",
+ "sentinel-sha256=f4c9aa77ea404b705139be6723be2d2cf74154a9b6a437868ebf8953a754187b",
+ "show-open-file-picker-typeof=function",
+ "pre-click-file-inputs=0",
+ "active-tool-before=via-toolbar-checked-count",
+ "image-tool-before=false",
+ "toolbar-click=TIMEOUT",
+ "connected-input-found=false",
+ "file-inputs-after-window=0",
+ "sightings=[]",
+ "scene-elements=5",
+ "image-elements=0",
+ "selection=[]"
+]
+ ❯ |chromium| src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx (1 test | 1 failed) 14424ms
+     × drives the package file chooser through public test APIs only 14419ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |chromium| src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx > WP-NATIVE-IMAGE-GATE file-chooser route probe in stable Chromium > drives the package file chooser through public test APIs only
+AssertionError: sentinel-bytes=80
+sentinel-sha256=f4c9aa77ea404b705139be6723be2d2cf74154a9b6a437868ebf8953a754187b
+show-open-file-picker-typeof=function
+pre-click-file-inputs=0
+active-tool-before=via-toolbar-checked-count
+image-tool-before=false
+toolbar-click=TIMEOUT
+connected-input-found=false
+file-inputs-after-window=0
+sightings=[]
+scene-elements=5
+image-elements=0
+selection=[]: expected 0 to be greater than 0
+
+Failure screenshot:
+  - src/components/whiteboard/ticket02/__screenshots__/SynaraNativeImageHistoryGate.acceptance.browser.tsx/WP-NATIVE-IMAGE-GATE-file-chooser-route-probe-in-stable-Chromium-drives-the-package-file-chooser-through-public-test-APIs-only-1.png
+
+ ❯ src/components/whiteboard/ticket02/SynaraNativeImageHistoryGate.acceptance.browser.tsx:174:39
+    172|     // Probe assertion: the real toolbar/chooser interaction must yiel…
+    173|     // image element for the Gate to be feasible through public APIs.
+    174|     expect(imageCount, log.join("\n")).toBeGreaterThan(0);
+       |                                       ^
+    175|   });
+    176| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:30:30
+   Duration  16.10s (transform 0ms, setup 0ms, import 529ms, tests 14.42s, environment 0ms)
+
+error: script "test:browser:stable" exited with code 1
