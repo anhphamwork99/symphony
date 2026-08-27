@@ -6,13 +6,24 @@ import {
   WHITEBOARD_OPERATION_ERROR,
   WHITEBOARD_OPERATION_SESSION_CAPABILITY,
   WhiteboardAcknowledgeApplicationInput,
+  WhiteboardAcknowledgeApplicationResult,
+  WhiteboardCompleteOperationInput,
+  WhiteboardContainmentResultEvent,
+  WhiteboardFailOperationInput,
+  WhiteboardOperationAdmittedEvent,
+  WhiteboardOperationAttachSessionInput,
+  WhiteboardOperationHandle,
   WhiteboardOperationProgressEvent,
+  WhiteboardOperationReleaseSessionResult,
+  WhiteboardOperationRetryInput,
+  WhiteboardOperationRetryResult,
   WhiteboardOperationSnapshotEvent,
   WhiteboardOperationTakeOverResult,
   WhiteboardOperationTerminalEvent,
   WhiteboardProgressMutation,
   WhiteboardPublishProgressInput,
   WhiteboardOperationSessionEvent,
+  WhiteboardTakeOverPendingEvent,
 } from "./whiteboardOperation";
 import { WS_METHODS } from "./ws";
 import { WsFeatureRpcGroup } from "./rpc";
@@ -77,6 +88,22 @@ const acknowledgementSummary = {
   lastAcceptedProducerSequence: 0,
 };
 
+const terminalRecordFromEvent = (event: Record<string, unknown>) => {
+  const {
+    kind: _kind,
+    serverInstanceId: _serverInstanceId,
+    operationSessionId: _operationSessionId,
+    sessionEpoch: _sessionEpoch,
+    projectId: _projectId,
+    documentKind: _documentKind,
+    documentId: _documentId,
+    canvasIdentity: _canvasIdentity,
+    serverSequence: _serverSequence,
+    ...terminal
+  } = event;
+  return terminal;
+};
+
 describe("Whiteboard operation-session contracts", () => {
   it("names exactly the six browser methods authorized by Decision 0063", () => {
     expect(WS_METHODS.whiteboardOperationAttachSession).toBe(
@@ -136,6 +163,29 @@ describe("Whiteboard operation-session contracts", () => {
     Effect.gen(function* () {
       const parsed = yield* decode(WhiteboardProgressMutation, validMutation);
       assert.strictEqual(parsed.elements.length, 1);
+    }),
+  );
+
+  it.effect("bounds Whiteboard project identity locally", () =>
+    Effect.gen(function* () {
+      yield* decode(WhiteboardOperationAttachSessionInput, {
+        projectId: "project-1",
+        documentKind: "untitled-canvas",
+        documentId: "doc-1",
+        canvasIdentity: "canvas-1",
+        expectedDocumentRevision: 0,
+      });
+
+      const exit = yield* Effect.exit(
+        decode(WhiteboardOperationAttachSessionInput, {
+          projectId: "p".repeat(257),
+          documentKind: "untitled-canvas",
+          documentId: "doc-1",
+          canvasIdentity: "canvas-1",
+          expectedDocumentRevision: 0,
+        }),
+      );
+      assert.strictEqual(exit._tag, "Failure");
     }),
   );
 
@@ -377,6 +427,48 @@ describe("Whiteboard operation-session contracts", () => {
         }),
       );
       assert.strictEqual(exitOversizedFingerprint._tag, "Failure");
+
+      for (const verifiedSemanticFingerprint of [
+        "data:image/png;base64,AAAA",
+        "DATA:application/octet-stream;base64,AAAA",
+      ]) {
+        const exit = yield* Effect.exit(
+          decode(WhiteboardAcknowledgeApplicationInput, {
+            ...sessionIdentity,
+            batchId: "batch-1",
+            operationId: "op-1",
+            generation: 1,
+            producerSequence: 1,
+            serverSequence: 1,
+            adapterCorrelationId: "corr-1",
+            applicationResult: "applied-semantic",
+            resultingMutationRevision: 1,
+            verifiedSemanticFingerprint,
+          }),
+        );
+        assert.strictEqual(exit._tag, "Failure");
+      }
+
+      const exitDataUrlText = yield* Effect.exit(
+        decode(WhiteboardProgressMutation, {
+          format: "synara.whiteboard.progress/v1",
+          elements: [
+            {
+              id: "text-1",
+              type: "text",
+              x: 0,
+              y: 0,
+              text: "DaTa:image/png;base64,AAAA",
+            },
+          ],
+        }),
+      );
+      assert.strictEqual(exitDataUrlText._tag, "Failure");
+
+      yield* decode(WhiteboardProgressMutation, {
+        format: "synara.whiteboard.progress/v1",
+        elements: [{ id: "text-1", type: "text", x: 0, y: 0, text: "data points" }],
+      });
     }),
   );
 
@@ -428,7 +520,7 @@ describe("Whiteboard operation-session contracts", () => {
     }),
   );
 
-  it.effect("enforces terminal zero-valid reasons in events and snapshots", () =>
+  it.effect("enforces the shared terminal record for every outcome", () =>
     Effect.gen(function* () {
       const terminalBase = {
         kind: "operation-terminal" as const,
@@ -437,7 +529,7 @@ describe("Whiteboard operation-session contracts", () => {
         batchId: "batch-1",
         operationId: "op-1",
         generation: 1,
-        acceptedSemanticCount: 0,
+        acceptedSemanticCount: 1,
         acceptedNoOpCount: 0,
         rejectedCount: 0,
         lastAcceptedProducerSequence: 0,
@@ -450,68 +542,132 @@ describe("Whiteboard operation-session contracts", () => {
         acknowledgementSummary,
       };
 
-      yield* decode(WhiteboardOperationTerminalEvent, {
-        ...terminalBase,
-        outcome: "zero-valid",
-        zeroValidReason: "zero-mutation",
-      });
-      yield* decode(WhiteboardOperationTerminalEvent, {
-        ...terminalBase,
-        outcome: "completed",
-      });
-      yield* decode(WhiteboardOperationSnapshotEvent, {
-        ...snapshotBase,
-        terminal: {
-          batchId: "batch-1",
-          operationId: "op-1",
-          generation: 1,
-          outcome: "zero-valid",
-          zeroValidReason: "semantic-no-op",
-        },
-      });
-      yield* decode(WhiteboardOperationSnapshotEvent, {
-        ...snapshotBase,
-        terminal: {
-          batchId: "batch-1",
-          operationId: "op-1",
-          generation: 1,
+      const validRecords = [
+        { ...terminalBase, outcome: "completed", terminalReason: "completed" },
+        {
+          ...terminalBase,
           outcome: "interrupted",
+          terminalReason: "take-over-acknowledged",
+          containmentResult: "acknowledged",
         },
-      });
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "producer-failed",
+        },
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "browser-application-failed",
+          containmentResult: "ack-timeout",
+        },
+        {
+          ...terminalBase,
+          outcome: "zero-valid",
+          terminalReason: "semantic-no-op",
+          zeroValidReason: "semantic-no-op",
+          acceptedSemanticCount: 0,
+          acceptedNoOpCount: 1,
+          lastAcceptedProducerSequence: 4,
+        },
+        {
+          ...terminalBase,
+          outcome: "zero-valid",
+          terminalReason: "zero-mutation",
+          zeroValidReason: "zero-mutation",
+          acceptedSemanticCount: 0,
+          containmentResult: "acknowledged",
+        },
+        {
+          ...terminalBase,
+          outcome: "zero-valid",
+          terminalReason: "all-operations-rejected",
+          zeroValidReason: "all-operations-rejected",
+          acceptedSemanticCount: 0,
+          containmentResult: "containment-failed",
+        },
+      ] as const;
+
+      for (const record of validRecords) {
+        yield* decode(WhiteboardOperationTerminalEvent, record);
+        yield* decode(WhiteboardOperationSnapshotEvent, {
+          ...snapshotBase,
+          terminal: terminalRecordFromEvent(record),
+        });
+      }
 
       const invalidTerminalStates = [
-        { ...terminalBase, outcome: "zero-valid" },
+        {
+          ...terminalBase,
+          outcome: "interrupted",
+          terminalReason: "take-over-acknowledged",
+        },
+        {
+          ...terminalBase,
+          outcome: "interrupted",
+          terminalReason: "take-over-acknowledged",
+          containmentResult: "containment-failed",
+        },
         {
           ...terminalBase,
           outcome: "completed",
+          terminalReason: "completed",
+          acceptedSemanticCount: 0,
+        },
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "validation-failed",
+          acceptedSemanticCount: 0,
+        },
+        {
+          ...terminalBase,
+          outcome: "completed",
+          terminalReason: "completed",
+          containmentResult: "acknowledged",
+        },
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "dependency-failed",
+          containmentResult: "acknowledged",
+        },
+        {
+          ...terminalBase,
+          outcome: "zero-valid",
+          terminalReason: "zero-mutation",
           zeroValidReason: "zero-mutation",
+          acceptedSemanticCount: 1,
+        },
+        {
+          ...terminalBase,
+          outcome: "zero-valid",
+          terminalReason: "zero-mutation",
+          zeroValidReason: "all-operations-rejected",
+          acceptedSemanticCount: 0,
+        },
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "arbitrary-failure",
+        },
+        {
+          ...terminalBase,
+          outcome: "completed",
+          terminalReason: "completed",
+          unknownTerminalField: true,
         },
       ];
       for (const terminal of invalidTerminalStates) {
         const exit = yield* Effect.exit(decode(WhiteboardOperationTerminalEvent, terminal));
         assert.strictEqual(exit._tag, "Failure");
-      }
-
-      const invalidSnapshotTerminals = [
-        {
-          batchId: "batch-1",
-          operationId: "op-1",
-          generation: 1,
-          outcome: "zero-valid",
-        },
-        {
-          batchId: "batch-1",
-          operationId: "op-1",
-          generation: 1,
-          outcome: "failed-partial",
-          zeroValidReason: "all-operations-rejected",
-        },
-      ];
-      for (const terminal of invalidSnapshotTerminals) {
-        const exit = yield* Effect.exit(
-          decode(WhiteboardOperationSnapshotEvent, { ...snapshotBase, terminal }),
+        const snapshotExit = yield* Effect.exit(
+          decode(WhiteboardOperationSnapshotEvent, {
+            ...snapshotBase,
+            terminal: terminalRecordFromEvent(terminal),
+          }),
         );
-        assert.strictEqual(exit._tag, "Failure");
+        assert.strictEqual(snapshotExit._tag, "Failure");
       }
     }),
   );
@@ -519,6 +675,7 @@ describe("Whiteboard operation-session contracts", () => {
   it.effect("enforces Take Over containment state in results and snapshots", () =>
     Effect.gen(function* () {
       const takeOverResultBase = {
+        ...sessionIdentity,
         batchId: "batch-1",
         operationId: "op-1",
         generation: 2,
@@ -539,12 +696,20 @@ describe("Whiteboard operation-session contracts", () => {
       });
       yield* decode(WhiteboardOperationTakeOverResult, {
         ...takeOverResultBase,
-        status: "contained",
+        status: "resolved",
         containmentResult: "acknowledged",
+      });
+      yield* decode(WhiteboardOperationTakeOverResult, {
+        ...takeOverResultBase,
+        status: "resolved",
+        containmentResult: "dispatch-failed",
       });
       yield* decode(WhiteboardOperationSnapshotEvent, {
         ...snapshotBase,
         takeOver: {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 2,
           takeOverRequestId: "take-over-1",
           requestedGeneration: 1,
           status: "pending",
@@ -553,19 +718,51 @@ describe("Whiteboard operation-session contracts", () => {
       yield* decode(WhiteboardOperationSnapshotEvent, {
         ...snapshotBase,
         takeOver: {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 2,
           takeOverRequestId: "take-over-1",
           requestedGeneration: 1,
-          status: "contained",
+          status: "resolved",
           containmentResult: "dispatch-failed",
         },
       });
 
+      yield* decode(WhiteboardTakeOverPendingEvent, {
+        kind: "take-over-pending",
+        ...sessionIdentity,
+        serverSequence: 4,
+        batchId: "batch-1",
+        operationId: "op-1",
+        generation: 2,
+        requestedGeneration: 1,
+        takeOverRequestId: "take-over-1",
+      });
+      yield* decode(WhiteboardContainmentResultEvent, {
+        kind: "containment-result",
+        ...sessionIdentity,
+        serverSequence: 5,
+        batchId: "batch-1",
+        operationId: "op-1",
+        generation: 2,
+        requestedGeneration: 1,
+        takeOverRequestId: "take-over-1",
+        result: "ack-timeout",
+      });
+
       for (const result of [
-        { ...takeOverResultBase, status: "contained" },
+        { ...takeOverResultBase, status: "resolved" },
         {
           ...takeOverResultBase,
           status: "pending",
           containmentResult: "acknowledged",
+        },
+        { ...takeOverResultBase, generation: 1, status: "pending" },
+        {
+          ...takeOverResultBase,
+          generation: 1,
+          requestedGeneration: 2,
+          status: "pending",
         },
       ]) {
         const exit = yield* Effect.exit(decode(WhiteboardOperationTakeOverResult, result));
@@ -574,15 +771,44 @@ describe("Whiteboard operation-session contracts", () => {
 
       for (const takeOver of [
         {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 2,
           takeOverRequestId: "take-over-1",
           requestedGeneration: 1,
-          status: "contained",
+          status: "resolved",
         },
         {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 2,
           takeOverRequestId: "take-over-1",
           requestedGeneration: 1,
           status: "pending",
           containmentResult: "acknowledged",
+        },
+        {
+          batchId: "batch-1",
+          generation: 2,
+          takeOverRequestId: "take-over-1",
+          requestedGeneration: 1,
+          status: "pending",
+        },
+        {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 1,
+          takeOverRequestId: "take-over-1",
+          requestedGeneration: 1,
+          status: "pending",
+        },
+        {
+          batchId: "batch-1",
+          operationId: "op-1",
+          generation: 1,
+          takeOverRequestId: "take-over-1",
+          requestedGeneration: 2,
+          status: "pending",
         },
       ]) {
         const exit = yield* Effect.exit(
@@ -590,6 +816,218 @@ describe("Whiteboard operation-session contracts", () => {
         );
         assert.strictEqual(exit._tag, "Failure");
       }
+
+      for (const generationState of [
+        { generation: 1, requestedGeneration: 1 },
+        { generation: 1, requestedGeneration: 2 },
+      ]) {
+        const pendingExit = yield* Effect.exit(
+          decode(WhiteboardTakeOverPendingEvent, {
+            kind: "take-over-pending",
+            ...sessionIdentity,
+            serverSequence: 5,
+            batchId: "batch-1",
+            operationId: "op-1",
+            ...generationState,
+            takeOverRequestId: "take-over-1",
+          }),
+        );
+        assert.strictEqual(pendingExit._tag, "Failure");
+
+        const containmentExit = yield* Effect.exit(
+          decode(WhiteboardContainmentResultEvent, {
+            kind: "containment-result",
+            ...sessionIdentity,
+            serverSequence: 5,
+            batchId: "batch-1",
+            operationId: "op-1",
+            ...generationState,
+            takeOverRequestId: "take-over-1",
+            result: "acknowledged",
+          }),
+        );
+        assert.strictEqual(containmentExit._tag, "Failure");
+      }
+    }),
+  );
+
+  it.effect("enforces initial and retry lineage across handles, events, and snapshots", () =>
+    Effect.gen(function* () {
+      const initialHandle = {
+        batchId: "batch-1",
+        operationId: "op-1",
+        generation: 1,
+        expectedDocumentRevision: 0,
+        retryAttempt: 0,
+      };
+      const retryHandle = {
+        batchId: "batch-1",
+        operationId: "op-2",
+        generation: 3,
+        expectedDocumentRevision: 1,
+        retryOfOperationId: "op-1",
+        retryOfGeneration: 1,
+        retryOfAttempt: 0,
+        retryAttempt: 1,
+      };
+
+      for (const handle of [initialHandle, retryHandle]) {
+        yield* decode(WhiteboardOperationHandle, handle);
+        yield* decode(WhiteboardOperationAdmittedEvent, {
+          kind: "operation-admitted",
+          ...sessionIdentity,
+          serverSequence: 2,
+          ...handle,
+        });
+        yield* decode(WhiteboardOperationSnapshotEvent, {
+          kind: "session-snapshot",
+          ...sessionIdentity,
+          serverSequence: 2,
+          documentRevision: 0,
+          activeOperation: handle,
+          acknowledgementSummary,
+        });
+      }
+
+      const invalidHandles = [
+        { ...initialHandle, retryOfOperationId: "op-0" },
+        { ...retryHandle, retryOfGeneration: undefined },
+        { ...retryHandle, retryOfAttempt: undefined },
+        { ...retryHandle, operationId: "op-1" },
+        { ...retryHandle, generation: 1 },
+        { ...retryHandle, retryAttempt: 2 },
+        { ...initialHandle, unknownLineageField: true },
+      ];
+      for (const handle of invalidHandles) {
+        const handleExit = yield* Effect.exit(decode(WhiteboardOperationHandle, handle));
+        assert.strictEqual(handleExit._tag, "Failure");
+
+        const eventExit = yield* Effect.exit(
+          decode(WhiteboardOperationAdmittedEvent, {
+            kind: "operation-admitted",
+            ...sessionIdentity,
+            serverSequence: 2,
+            ...handle,
+          }),
+        );
+        assert.strictEqual(eventExit._tag, "Failure");
+
+        const snapshotExit = yield* Effect.exit(
+          decode(WhiteboardOperationSnapshotEvent, {
+            kind: "session-snapshot",
+            ...sessionIdentity,
+            serverSequence: 2,
+            documentRevision: 0,
+            activeOperation: handle,
+            acknowledgementSummary,
+          }),
+        );
+        assert.strictEqual(snapshotExit._tag, "Failure");
+      }
+    }),
+  );
+
+  it.effect("binds retry input and result to explicit predecessor identity", () =>
+    Effect.gen(function* () {
+      yield* decode(WhiteboardOperationRetryInput, {
+        ...sessionIdentity,
+        batchId: "batch-1",
+        failedOperationId: "op-1",
+        failedGeneration: 2,
+        failedRetryAttempt: 0,
+      });
+
+      const retryResult = {
+        ...sessionIdentity,
+        batchId: "batch-1",
+        operationId: "op-2",
+        generation: 3,
+        expectedDocumentRevision: 7,
+        retryAttempt: 1,
+        retryOfOperationId: "op-1",
+        retryOfGeneration: 2,
+        retryOfAttempt: 0,
+      };
+      yield* decode(WhiteboardOperationRetryResult, retryResult);
+
+      for (const input of [
+        {
+          ...sessionIdentity,
+          batchId: "batch-1",
+          failedOperationId: "op-1",
+          failedRetryAttempt: 0,
+        },
+        {
+          ...sessionIdentity,
+          batchId: "batch-1",
+          failedOperationId: "op-1",
+          failedGeneration: 2,
+        },
+      ]) {
+        const exit = yield* Effect.exit(decode(WhiteboardOperationRetryInput, input));
+        assert.strictEqual(exit._tag, "Failure");
+      }
+
+      for (const result of [
+        { ...retryResult, operationId: "op-1" },
+        { ...retryResult, generation: 2 },
+        { ...retryResult, retryAttempt: 2 },
+        { ...retryResult, retryOfGeneration: undefined },
+      ]) {
+        const exit = yield* Effect.exit(decode(WhiteboardOperationRetryResult, result));
+        assert.strictEqual(exit._tag, "Failure");
+      }
+    }),
+  );
+
+  it.effect("binds producer terminal commands and recorded results to full identity", () =>
+    Effect.gen(function* () {
+      const producerCommand = {
+        ...sessionIdentity,
+        batchId: "batch-1",
+        operationId: "op-1",
+        generation: 2,
+      };
+      yield* decode(WhiteboardCompleteOperationInput, producerCommand);
+      yield* decode(WhiteboardFailOperationInput, producerCommand);
+
+      for (const schema of [
+        WhiteboardCompleteOperationInput,
+        WhiteboardFailOperationInput,
+      ] as const) {
+        const { generation: _generation, ...missingGeneration } = producerCommand;
+        const exit = yield* Effect.exit(decode(schema, missingGeneration));
+        assert.strictEqual(exit._tag, "Failure");
+      }
+
+      yield* decode(WhiteboardAcknowledgeApplicationResult, {
+        ...producerCommand,
+        producerSequence: 3,
+        serverSequence: 8,
+        acceptedSemanticCount: 1,
+        acceptedNoOpCount: 1,
+        rejectedCount: 0,
+      });
+      yield* decode(WhiteboardOperationReleaseSessionResult, {
+        ...sessionIdentity,
+        released: true,
+      });
+
+      const acknowledgementExit = yield* Effect.exit(
+        decode(WhiteboardAcknowledgeApplicationResult, {
+          producerSequence: 3,
+          serverSequence: 8,
+          acceptedSemanticCount: 1,
+          acceptedNoOpCount: 1,
+          rejectedCount: 0,
+        }),
+      );
+      assert.strictEqual(acknowledgementExit._tag, "Failure");
+
+      const releaseExit = yield* Effect.exit(
+        decode(WhiteboardOperationReleaseSessionResult, { released: true }),
+      );
+      assert.strictEqual(releaseExit._tag, "Failure");
     }),
   );
 
@@ -632,6 +1070,7 @@ describe("Whiteboard operation-session contracts", () => {
           operationId: "op-1",
           generation: 2,
           takeOverRequestId: "take-over-1",
+          requestedGeneration: 1,
           result: "acknowledged",
         },
         {
@@ -642,6 +1081,7 @@ describe("Whiteboard operation-session contracts", () => {
           operationId: "op-1",
           generation: 2,
           outcome: "completed",
+          terminalReason: "completed",
           acceptedSemanticCount: 1,
           acceptedNoOpCount: 0,
           rejectedCount: 0,

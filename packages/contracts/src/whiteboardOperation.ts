@@ -52,6 +52,13 @@ export type WhiteboardDocumentKind = typeof WhiteboardDocumentKind.Type;
 
 const BoundedId = (maxLength: number) => TrimmedNonEmptyString.check(Schema.isMaxLength(maxLength));
 
+const WhiteboardProjectId = ProjectId.check(Schema.isMaxLength(256));
+
+const IsNotDataUrl = Schema.makeFilter((value: string) => !/^data:/i.test(value));
+
+const ImageFreeWireString = (maxLength: number) =>
+  TrimmedNonEmptyString.check(Schema.isMaxLength(maxLength)).check(IsNotDataUrl);
+
 /** Fail-closed object boundary for every Whiteboard wire shape, including nested objects. */
 const StrictObject = <S extends Schema.Top>(schema: S) =>
   schema.annotate({ parseOptions: { onExcessProperty: "error" } });
@@ -64,7 +71,7 @@ export const WhiteboardOperationSessionIdentity = StrictStruct({
   serverInstanceId: BoundedId(64),
   operationSessionId: BoundedId(128),
   sessionEpoch: PositiveInt,
-  projectId: ProjectId,
+  projectId: WhiteboardProjectId,
   documentKind: WhiteboardDocumentKind,
   documentId: BoundedId(512),
   canvasIdentity: BoundedId(256),
@@ -73,7 +80,7 @@ export type WhiteboardOperationSessionIdentity = typeof WhiteboardOperationSessi
 
 /** Fields a browser supplies when opening a session; the server mints the rest. */
 export const WhiteboardOperationAttachSessionInput = StrictStruct({
-  projectId: ProjectId,
+  projectId: WhiteboardProjectId,
   documentKind: WhiteboardDocumentKind,
   documentId: BoundedId(512),
   canvasIdentity: BoundedId(256),
@@ -96,15 +103,42 @@ export const WhiteboardOperationSubscribeInput = StrictStruct({
 });
 export type WhiteboardOperationSubscribeInput = typeof WhiteboardOperationSubscribeInput.Type;
 
-/** One admitted operation's identity, generation, and retry lineage. */
-export const WhiteboardOperationHandle = StrictStruct({
+const WhiteboardOperationLineageFields = {
   batchId: BoundedId(128),
   operationId: BoundedId(128),
   generation: PositiveInt,
   expectedDocumentRevision: NonNegativeInt,
   retryOfOperationId: Schema.optional(BoundedId(128)),
+  retryOfGeneration: Schema.optional(PositiveInt),
+  retryOfAttempt: Schema.optional(NonNegativeInt),
   retryAttempt: NonNegativeInt,
-});
+} as const;
+
+const HasValidOperationLineage = Schema.makeFilter(
+  (operation: {
+    readonly operationId: string;
+    readonly generation: number;
+    readonly retryOfOperationId?: string;
+    readonly retryOfGeneration?: number;
+    readonly retryOfAttempt?: number;
+    readonly retryAttempt: number;
+  }) =>
+    operation.retryAttempt === 0
+      ? operation.retryOfOperationId === undefined &&
+        operation.retryOfGeneration === undefined &&
+        operation.retryOfAttempt === undefined
+      : operation.retryOfOperationId !== undefined &&
+        operation.retryOfGeneration !== undefined &&
+        operation.retryOfAttempt !== undefined &&
+        operation.operationId !== operation.retryOfOperationId &&
+        operation.generation > operation.retryOfGeneration &&
+        operation.retryAttempt === operation.retryOfAttempt + 1,
+);
+
+/** One admitted operation's identity, generation, and self-consistent retry lineage. */
+export const WhiteboardOperationHandle = StrictObject(
+  StrictStruct(WhiteboardOperationLineageFields).check(HasValidOperationLineage),
+);
 export type WhiteboardOperationHandle = typeof WhiteboardOperationHandle.Type;
 
 /** Strict bounded progress element patch. Image/file fields do not exist. */
@@ -129,7 +163,7 @@ export const WhiteboardProgressElement = StrictStruct({
   opacity: Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(Schema.isLessThanOrEqualTo(100))),
   strokeColor: Schema.optional(BoundedId(64)),
   backgroundColor: Schema.optional(BoundedId(64)),
-  text: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4_096))),
+  text: Schema.optional(ImageFreeWireString(4_096)),
   fontSize: Schema.optional(Schema.Number.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(512))),
   points: Schema.optional(
     Schema.Array(Schema.Tuple([FiniteNumber, FiniteNumber])).check(Schema.isMaxLength(1_024)),
@@ -179,7 +213,7 @@ export const WhiteboardAcknowledgeApplicationInput = StrictObject(
     adapterCorrelationId: BoundedId(128),
     applicationResult: WhiteboardApplicationResult,
     resultingMutationRevision: NonNegativeInt,
-    verifiedSemanticFingerprint: BoundedId(8_192),
+    verifiedSemanticFingerprint: ImageFreeWireString(8_192),
     diagnosticCode: Schema.optional(WhiteboardApplicationDiagnosticCode),
   }).check(
     Schema.makeFilter((input) =>
@@ -192,8 +226,13 @@ export const WhiteboardAcknowledgeApplicationInput = StrictObject(
 export type WhiteboardAcknowledgeApplicationInput =
   typeof WhiteboardAcknowledgeApplicationInput.Type;
 
-/** Acknowledgement result echoes the admission verdict for the caller. */
+/** Acknowledgement result echoes the admitted identity and verdict for the caller. */
 export const WhiteboardAcknowledgeApplicationResult = StrictStruct({
+  ...WhiteboardOperationSessionIdentity.fields,
+  batchId: BoundedId(128),
+  operationId: BoundedId(128),
+  generation: PositiveInt,
+  producerSequence: PositiveInt,
   serverSequence: PositiveInt,
   acceptedSemanticCount: NonNegativeInt,
   acceptedNoOpCount: NonNegativeInt,
@@ -220,22 +259,29 @@ export const WhiteboardContainmentResult = Schema.Literals([
 ]);
 export type WhiteboardContainmentResult = typeof WhiteboardContainmentResult.Type;
 
+const HasAdvancedTakeOverGeneration = Schema.makeFilter(
+  (state: { readonly generation: number; readonly requestedGeneration: number }) =>
+    state.generation > state.requestedGeneration,
+);
+
 /** Recorded Take Over state returned for repeated equivalent requests. */
 export const WhiteboardOperationTakeOverResult = StrictObject(
   StrictStruct({
+    ...WhiteboardOperationSessionIdentity.fields,
     batchId: BoundedId(128),
     operationId: BoundedId(128),
     generation: PositiveInt,
     takeOverRequestId: BoundedId(128),
     requestedGeneration: PositiveInt,
-    status: Schema.Literals(["pending", "contained"]),
+    status: Schema.Literals(["pending", "resolved"]),
     containmentResult: Schema.optional(WhiteboardContainmentResult),
   }).check(
     Schema.makeFilter((result) =>
-      result.status === "contained"
+      result.status === "resolved"
         ? result.containmentResult !== undefined
         : result.containmentResult === undefined,
     ),
+    HasAdvancedTakeOverGeneration,
   ),
 );
 export type WhiteboardOperationTakeOverResult = typeof WhiteboardOperationTakeOverResult.Type;
@@ -245,16 +291,21 @@ export const WhiteboardOperationRetryInput = StrictStruct({
   ...WhiteboardOperationSessionIdentity.fields,
   batchId: BoundedId(128),
   failedOperationId: BoundedId(128),
+  failedGeneration: PositiveInt,
+  failedRetryAttempt: NonNegativeInt,
 });
 export type WhiteboardOperationRetryInput = typeof WhiteboardOperationRetryInput.Type;
 
-export const WhiteboardOperationRetryResult = StrictStruct({
-  batchId: BoundedId(128),
-  operationId: BoundedId(128),
-  generation: PositiveInt,
-  retryOfOperationId: BoundedId(128),
-  retryAttempt: PositiveInt,
-});
+export const WhiteboardOperationRetryResult = StrictObject(
+  StrictStruct({
+    ...WhiteboardOperationSessionIdentity.fields,
+    ...WhiteboardOperationHandle.fields,
+    retryOfOperationId: BoundedId(128),
+    retryOfGeneration: PositiveInt,
+    retryOfAttempt: NonNegativeInt,
+    retryAttempt: PositiveInt,
+  }).check(HasValidOperationLineage),
+);
 export type WhiteboardOperationRetryResult = typeof WhiteboardOperationRetryResult.Type;
 
 export const WhiteboardOperationReleaseSessionInput = StrictStruct({
@@ -264,6 +315,7 @@ export type WhiteboardOperationReleaseSessionInput =
   typeof WhiteboardOperationReleaseSessionInput.Type;
 
 export const WhiteboardOperationReleaseSessionResult = StrictStruct({
+  ...WhiteboardOperationSessionIdentity.fields,
   released: Schema.Boolean,
 });
 export type WhiteboardOperationReleaseSessionResult =
@@ -288,6 +340,102 @@ export const WhiteboardZeroValidReason = Schema.Literals([
 ]);
 export type WhiteboardZeroValidReason = typeof WhiteboardZeroValidReason.Type;
 
+export const WhiteboardFailedPartialTerminalReason = Schema.Literals([
+  "producer-failed",
+  "validation-failed",
+  "dependency-failed",
+  "browser-application-failed",
+]);
+export type WhiteboardFailedPartialTerminalReason =
+  typeof WhiteboardFailedPartialTerminalReason.Type;
+
+/** Closed terminal reason vocabulary derived from Decision 0063 §7. */
+export const WhiteboardTerminalReason = Schema.Literals([
+  "completed",
+  "take-over-acknowledged",
+  "producer-failed",
+  "validation-failed",
+  "dependency-failed",
+  "browser-application-failed",
+  "zero-mutation",
+  "semantic-no-op",
+  "pre-batch-capture-failed",
+  "invalid-first-operation",
+  "all-operations-rejected",
+  "application-rejected-before-first-valid",
+]);
+export type WhiteboardTerminalReason = typeof WhiteboardTerminalReason.Type;
+
+const FailedContainmentResults = new Set<WhiteboardContainmentResult>([
+  "dispatch-failed",
+  "ack-timeout",
+  "containment-failed",
+]);
+
+const WhiteboardTerminalRecordFields = {
+  batchId: BoundedId(128),
+  operationId: BoundedId(128),
+  generation: PositiveInt,
+  outcome: WhiteboardTerminalOutcome,
+  terminalReason: WhiteboardTerminalReason,
+  zeroValidReason: Schema.optional(WhiteboardZeroValidReason),
+  acceptedSemanticCount: NonNegativeInt,
+  acceptedNoOpCount: NonNegativeInt,
+  rejectedCount: NonNegativeInt,
+  lastAcceptedProducerSequence: NonNegativeInt,
+  containmentResult: Schema.optional(WhiteboardContainmentResult),
+} as const;
+
+const HasValidTerminalRecord = Schema.makeFilter(
+  (terminal: {
+    readonly outcome: WhiteboardTerminalOutcome;
+    readonly terminalReason: WhiteboardTerminalReason;
+    readonly zeroValidReason?: WhiteboardZeroValidReason;
+    readonly acceptedSemanticCount: number;
+    readonly containmentResult?: WhiteboardContainmentResult;
+  }) => {
+    switch (terminal.outcome) {
+      case "completed":
+        return (
+          terminal.terminalReason === "completed" &&
+          terminal.acceptedSemanticCount >= 1 &&
+          terminal.zeroValidReason === undefined &&
+          terminal.containmentResult === undefined
+        );
+      case "interrupted":
+        return (
+          terminal.terminalReason === "take-over-acknowledged" &&
+          terminal.acceptedSemanticCount >= 1 &&
+          terminal.zeroValidReason === undefined &&
+          terminal.containmentResult === "acknowledged"
+        );
+      case "failed-partial":
+        return (
+          WhiteboardFailedPartialTerminalReason.literals.includes(
+            terminal.terminalReason as WhiteboardFailedPartialTerminalReason,
+          ) &&
+          terminal.acceptedSemanticCount >= 1 &&
+          terminal.zeroValidReason === undefined &&
+          (terminal.containmentResult === undefined ||
+            FailedContainmentResults.has(terminal.containmentResult))
+        );
+      case "zero-valid":
+        return (
+          terminal.zeroValidReason !== undefined &&
+          terminal.terminalReason === terminal.zeroValidReason &&
+          terminal.acceptedSemanticCount === 0
+        );
+    }
+  },
+);
+
+/** Shared terminal record used by stream events and snapshot state. */
+export const WhiteboardOperationTerminalRecord = StrictObject(
+  StrictStruct(WhiteboardTerminalRecordFields).check(HasValidTerminalRecord),
+);
+export type WhiteboardOperationTerminalRecord =
+  typeof WhiteboardOperationTerminalRecord.Type;
+
 /** Bounded progress element patch delivered inside a progress event. */
 const ProducerSequenceFields = {
   operationId: BoundedId(128),
@@ -303,17 +451,17 @@ const HasValidProducerDependencies = Schema.makeFilter(
 );
 
 /** Stream event emitted when the producer admits a new operation. */
-export const WhiteboardOperationAdmittedEvent = StrictStruct({
-  kind: Schema.Literal("operation-admitted"),
-  ...WhiteboardOperationSessionIdentity.fields,
-  serverSequence: PositiveInt,
-  batchId: BoundedId(128),
-  operationId: BoundedId(128),
-  generation: PositiveInt,
-  expectedDocumentRevision: NonNegativeInt,
-  retryOfOperationId: Schema.optional(BoundedId(128)),
-  retryAttempt: NonNegativeInt,
-});
+export const WhiteboardOperationAdmittedEvent = StrictObject(
+  WhiteboardOperationHandle.mapFields(
+    (fields) => ({
+      kind: Schema.Literal("operation-admitted"),
+      ...WhiteboardOperationSessionIdentity.fields,
+      serverSequence: PositiveInt,
+      ...fields,
+    }),
+    { unsafePreserveChecks: true },
+  ),
+);
 export type WhiteboardOperationAdmittedEvent = typeof WhiteboardOperationAdmittedEvent.Type;
 
 /** Stream event carrying one admitted, sequenced progress mutation. */
@@ -328,58 +476,51 @@ export const WhiteboardOperationProgressEvent = StrictObject(
     dependsOnProducerSequences: Schema.Array(PositiveInt).check(Schema.isMaxLength(16)),
     expectedBeforeRevision: NonNegativeInt,
     expectedAfterRevision: NonNegativeInt,
-    expectedSemanticFingerprint: BoundedId(8_192),
+    expectedSemanticFingerprint: ImageFreeWireString(8_192),
     mutation: WhiteboardProgressMutation,
   }).check(HasValidProducerDependencies),
 );
 export type WhiteboardOperationProgressEvent = typeof WhiteboardOperationProgressEvent.Type;
 
 /** Stream event emitted when Take Over is recorded and the fence advanced. */
-export const WhiteboardTakeOverPendingEvent = StrictStruct({
-  kind: Schema.Literal("take-over-pending"),
-  ...WhiteboardOperationSessionIdentity.fields,
-  serverSequence: PositiveInt,
-  batchId: BoundedId(128),
-  ...ProducerSequenceFields,
-  takeOverRequestId: BoundedId(128),
-  requestedGeneration: PositiveInt,
-});
+export const WhiteboardTakeOverPendingEvent = StrictObject(
+  StrictStruct({
+    kind: Schema.Literal("take-over-pending"),
+    ...WhiteboardOperationSessionIdentity.fields,
+    serverSequence: PositiveInt,
+    batchId: BoundedId(128),
+    ...ProducerSequenceFields,
+    takeOverRequestId: BoundedId(128),
+    requestedGeneration: PositiveInt,
+  }).check(HasAdvancedTakeOverGeneration),
+);
 export type WhiteboardTakeOverPendingEvent = typeof WhiteboardTakeOverPendingEvent.Type;
 
 /** Stream event carrying exactly one authoritative containment result. */
-export const WhiteboardContainmentResultEvent = StrictStruct({
-  kind: Schema.Literal("containment-result"),
-  ...WhiteboardOperationSessionIdentity.fields,
-  serverSequence: PositiveInt,
-  batchId: BoundedId(128),
-  ...ProducerSequenceFields,
-  takeOverRequestId: BoundedId(128),
-  result: WhiteboardContainmentResult,
-});
+export const WhiteboardContainmentResultEvent = StrictObject(
+  StrictStruct({
+    kind: Schema.Literal("containment-result"),
+    ...WhiteboardOperationSessionIdentity.fields,
+    serverSequence: PositiveInt,
+    batchId: BoundedId(128),
+    ...ProducerSequenceFields,
+    takeOverRequestId: BoundedId(128),
+    requestedGeneration: PositiveInt,
+    result: WhiteboardContainmentResult,
+  }).check(HasAdvancedTakeOverGeneration),
+);
 export type WhiteboardContainmentResultEvent = typeof WhiteboardContainmentResultEvent.Type;
 
 /** Stream event carrying exactly one terminal outcome for an operation. */
 export const WhiteboardOperationTerminalEvent = StrictObject(
-  StrictStruct({
-    kind: Schema.Literal("operation-terminal"),
-    ...WhiteboardOperationSessionIdentity.fields,
-    serverSequence: PositiveInt,
-    batchId: BoundedId(128),
-    operationId: BoundedId(128),
-    generation: PositiveInt,
-    outcome: WhiteboardTerminalOutcome,
-    zeroValidReason: Schema.optional(WhiteboardZeroValidReason),
-    acceptedSemanticCount: NonNegativeInt,
-    acceptedNoOpCount: NonNegativeInt,
-    rejectedCount: NonNegativeInt,
-    lastAcceptedProducerSequence: NonNegativeInt,
-    containmentResult: Schema.optional(WhiteboardContainmentResult),
-  }).check(
-    Schema.makeFilter((event) =>
-      event.outcome === "zero-valid"
-        ? event.zeroValidReason !== undefined
-        : event.zeroValidReason === undefined,
-    ),
+  WhiteboardOperationTerminalRecord.mapFields(
+    (fields) => ({
+      kind: Schema.Literal("operation-terminal"),
+      ...WhiteboardOperationSessionIdentity.fields,
+      serverSequence: PositiveInt,
+      ...fields,
+    }),
+    { unsafePreserveChecks: true },
   ),
 );
 export type WhiteboardOperationTerminalEvent = typeof WhiteboardOperationTerminalEvent.Type;
@@ -397,28 +538,25 @@ export const WhiteboardOperationSnapshotEvent = StrictStruct({
   serverSequence: PositiveInt,
   documentRevision: NonNegativeInt,
   activeOperation: Schema.optional(
-    StrictStruct({
-      batchId: BoundedId(128),
-      operationId: BoundedId(128),
-      generation: PositiveInt,
-      expectedDocumentRevision: NonNegativeInt,
-      retryOfOperationId: Schema.optional(BoundedId(128)),
-      retryAttempt: NonNegativeInt,
-    }),
+    WhiteboardOperationHandle,
   ),
   takeOver: Schema.optional(
     StrictObject(
       StrictStruct({
+        batchId: BoundedId(128),
+        operationId: BoundedId(128),
+        generation: PositiveInt,
         takeOverRequestId: BoundedId(128),
         requestedGeneration: PositiveInt,
-        status: Schema.Literals(["pending", "contained"]),
+        status: Schema.Literals(["pending", "resolved"]),
         containmentResult: Schema.optional(WhiteboardContainmentResult),
       }).check(
         Schema.makeFilter((state) =>
-          state.status === "contained"
+          state.status === "resolved"
             ? state.containmentResult !== undefined
             : state.containmentResult === undefined,
         ),
+        HasAdvancedTakeOverGeneration,
       ),
     ),
   ),
@@ -428,24 +566,7 @@ export const WhiteboardOperationSnapshotEvent = StrictStruct({
     rejectedCount: NonNegativeInt,
     lastAcceptedProducerSequence: NonNegativeInt,
   }),
-  terminal: Schema.optional(
-    StrictObject(
-      StrictStruct({
-        batchId: BoundedId(128),
-        operationId: BoundedId(128),
-        generation: PositiveInt,
-        outcome: WhiteboardTerminalOutcome,
-        zeroValidReason: Schema.optional(WhiteboardZeroValidReason),
-        containmentResult: Schema.optional(WhiteboardContainmentResult),
-      }).check(
-        Schema.makeFilter((terminal) =>
-          terminal.outcome === "zero-valid"
-            ? terminal.zeroValidReason !== undefined
-            : terminal.zeroValidReason === undefined,
-        ),
-      ),
-    ),
-  ),
+  terminal: Schema.optional(WhiteboardOperationTerminalRecord),
 });
 export type WhiteboardOperationSnapshotEvent = typeof WhiteboardOperationSnapshotEvent.Type;
 
@@ -484,7 +605,7 @@ export const WhiteboardPublishProgressInput = StrictObject(
     dependsOnProducerSequences: Schema.Array(PositiveInt).check(Schema.isMaxLength(16)),
     expectedBeforeRevision: NonNegativeInt,
     expectedAfterRevision: NonNegativeInt,
-    expectedSemanticFingerprint: BoundedId(8_192),
+    expectedSemanticFingerprint: ImageFreeWireString(8_192),
     mutation: WhiteboardProgressMutation,
   }).check(HasValidProducerDependencies),
 );
@@ -495,6 +616,7 @@ export const WhiteboardCompleteOperationInput = StrictStruct({
   ...WhiteboardOperationSessionIdentity.fields,
   batchId: BoundedId(128),
   operationId: BoundedId(128),
+  generation: PositiveInt,
 });
 export type WhiteboardCompleteOperationInput = typeof WhiteboardCompleteOperationInput.Type;
 
@@ -507,5 +629,6 @@ export const WhiteboardFailOperationInput = StrictStruct({
   ...WhiteboardOperationSessionIdentity.fields,
   batchId: BoundedId(128),
   operationId: BoundedId(128),
+  generation: PositiveInt,
 });
 export type WhiteboardFailOperationInput = typeof WhiteboardFailOperationInput.Type;
