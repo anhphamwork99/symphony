@@ -300,10 +300,13 @@ describe("Ticket 02 fallback dual-history Gate in stable Chromium", () => {
     );
     expect(redo).not.toBeNull();
     await vi.waitFor(() => expect((redo as HTMLButtonElement).disabled).toBe(false));
+    await vi.waitFor(() => expect((redo as HTMLButtonElement).getAttribute("aria-disabled")).toBe("false"));
     // Plan §6.6 scenario 4: Redo by Enter/Space keyboard activation of the
-    // focused, plainly labeled public AI action. The button above was reached
-    // through the real user Undo pointer activation; Enter now activates it as
-    // a plain keyboard user would.
+    // plainly labeled public AI action. A real keyboard user reaches the
+    // focused Redo surface and presses Enter; on a native button this fires
+    // its public click activation. No pointer event is used for Redo.
+    (redo as HTMLButtonElement).focus();
+    expect(document.activeElement).toBe(redo);
     await userEvent.keyboard("{Enter}");
     await vi.waitFor(() =>
       expect(
