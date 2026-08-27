@@ -127,6 +127,12 @@ import {
   type PiSubagentManagedToolReadService,
 } from "../piSubagentManagedRuntimeBinding.ts";
 import {
+  makePiSubagentLiveLifecycleContainment,
+  type PiSubagentLiveLifecycleContainment,
+  type PiSubagentLiveLifecycleDiagnosticCode,
+  type PiSubagentLiveLifecycleRegistration,
+} from "../piSubagentLiveLifecycleContainment.ts";
+import {
   enablePiSynaraMcpSession,
   PI_SYNARA_MCP_ENABLE_UNAVAILABLE_DETAIL,
 } from "../piSynaraMcpEnable.ts";
@@ -438,6 +444,25 @@ const loadPiCodingAgentModule: () => Promise<PiCodingAgentModule> = lazyModule(
   () => import("@earendil-works/pi-coding-agent"),
 );
 
+/**
+ * Ticket 03 (Decision 0006) session-scoped volatile live lifecycle containment
+ * state. One instance per managed Pi session, keyed by the exact opaque
+ * `runtime.session` object identity. Registrations are captured at admission,
+ * activated ONLY after the durable sequence-2 `started` persistence commits,
+ * retired synchronously BEFORE `ingestPiSubagentTerminal`, and the whole
+ * session is cleared before runtime disposal. The retained registration map
+ * is the exact-handle lookup the managed wrappers consume; it never queues,
+ * replays, or reconstructs a retired route.
+ */
+interface PiSubagentLiveLifecycleSessionState {
+  readonly containment: PiSubagentLiveLifecycleContainment;
+  readonly session: object;
+  /** Exact registration handles by tuple key; identity is the only authority. */
+  readonly registrations: Map<string, PiSubagentLiveLifecycleRegistration>;
+  /** Observational late-applied diagnostic counter (bounded by distinct tuples). */
+  lateAppliedDiagnosticCount: number;
+}
+
 interface PiSessionContext {
   harnessPolicyDelivered?: boolean;
   readonly gatewayControlAvailable: boolean;
@@ -475,6 +500,13 @@ interface PiSessionContext {
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   /** Ticket 23: session-scoped progress observation coalescer, when managed. */
   subagentProgressCoalescer?: PiSubagentProgressCoalescer;
+  /**
+   * Ticket 03: session-scoped live lifecycle containment state, present only
+   * for managed sessions with a repository. `disposeSessionContext` clears
+   * the exact session before the runtime disposal so late responses become
+   * stale-ignored rather than mutating retired routes.
+   */
+  subagentLiveLifecycle?: PiSubagentLiveLifecycleSessionState;
   /**
    * Ticket 14: captured managed Agent-tool launcher for explicit resume.
    * Present only when the session wrapped a managed Agent tool; resume
@@ -2940,6 +2972,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       context.pendingUserInputs.clear();
       context.stopped = true;
       markPiSubagentOwnedTeardownOwnerStopped(context);
+      // Ticket 03 (Decision 0006): clear the exact volatile live lifecycle
+      // session BEFORE the runtime disposal. Every registration in this
+      // session becomes a cleared tombstone, so a late provider response
+      // revalidates as stale-ignored with zero current mutation, and a
+      // disposed session can never re-enter an exact callback.
+      if (context.subagentLiveLifecycle !== undefined) {
+        context.subagentLiveLifecycle.containment.clearSession(
+          context.subagentLiveLifecycle.session,
+        );
+        context.subagentLiveLifecycle.registrations.clear();
+      }
       let runtimeFailure: unknown;
       try {
         await context.runtime.dispose();
@@ -3881,6 +3924,34 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           });
           context.subagentProgressCoalescer = subagentProgressCoalescer;
 
+          // Ticket 03 (Decision 0006 / WP-02): one volatile live lifecycle
+          // containment instance per managed Pi session, keyed by the exact
+          // `runtime.session` object identity. It owns only volatile exact
+          // registration handles: capture happens at admission (before the
+          // child starts), activation happens ONLY after the durable
+          // sequence-2 `started` persistence commits, and retirement happens
+          // synchronously before terminal ingest. No route reconstruction,
+          // buffering, replay, or provider-side effect is possible here.
+          const subagentLiveLifecycle: PiSubagentLiveLifecycleSessionState = {
+            containment: makePiSubagentLiveLifecycleContainment(),
+            session: runtime.session,
+            registrations: new Map(),
+            lateAppliedDiagnosticCount: 0,
+          };
+          context.subagentLiveLifecycle = subagentLiveLifecycle;
+          // Exact-handle tuple lookup for the managed wrappers. A tuple with
+          // no retained exact registration resolves `undefined`, which the
+          // containment classifies as bounded unavailable with zero provider
+          // dispatch — never a lookup by public tuple alone.
+          const registrationForTuple = (tuple: {
+            readonly executionId: string;
+            readonly attemptId: string;
+            readonly generation: number;
+          }): PiSubagentLiveLifecycleRegistration | undefined =>
+            subagentLiveLifecycle.registrations.get(
+              JSON.stringify([tuple.executionId, tuple.attemptId, tuple.generation]),
+            );
+
           // Ticket 14: per-attempt observation runtime factory — shared by the
           // spawn path (post-admission identities) and the explicit resume
           // launcher (resumed identities). One code path journals every
@@ -3893,6 +3964,22 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ) => {
             let startedPromise: Promise<void> | undefined;
             let detachedPromise: Promise<void> | undefined;
+            // Ticket 03 (Decision 0006 / WP-02): capture the exact volatile
+            // registration for this attempt at admission time. Capture alone
+            // does NOT activate: the route stays `provider_inactive` until
+            // the durable sequence-2 `started` persistence commits below. A
+            // `capture` result of `undefined` (session already cleared or a
+            // retired tombstone for the same tuple) leaves no route at all.
+            const liveRegistration = subagentLiveLifecycle.containment.capture({
+              tuple: { ...identities },
+              session: subagentLiveLifecycle.session,
+            });
+            if (liveRegistration !== undefined) {
+              subagentLiveLifecycle.registrations.set(
+                JSON.stringify([identities.executionId, identities.attemptId, identities.generation]),
+                liveRegistration,
+              );
+            }
 
             const recordHeartbeatObservation = (occurredAt: string): void => {
               // Fire-and-forget lease refresh (T23-AC3): heartbeat is
@@ -3951,6 +4038,27 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     "Invalid terminal observation: expected state 'succeeded'|'failed' and a string summary",
                   );
                 }
+                // Ticket 03 (Decision 0006 / WP-02): retire the exact live
+                // route SYNCHRONOUSLY before the terminal ingest reaches the
+                // repository. From this point the managed wrappers can no
+                // longer enter the provider callback for this tuple, so no
+                // live control can race the journal transaction. Retirement
+                // is permanent and is never reconstructed on persistence
+                // failure: the bounded retry path re-ingests the same
+                // terminal evidence through this same observation seam while
+                // the route stays retired.
+                const retireRoute = (): void => {
+                  if (liveRegistration === undefined) return;
+                  subagentLiveLifecycle.containment.retire(liveRegistration);
+                  subagentLiveLifecycle.registrations.delete(
+                    JSON.stringify([
+                      identities.executionId,
+                      identities.attemptId,
+                      identities.generation,
+                    ]),
+                  );
+                };
+                retireRoute();
                 let durableOrdinaryTerminal:
                   | {
                       readonly executionId: string;
@@ -3987,6 +4095,41 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                             : undefined,
                       },
                       onTerminalPersisted: (event) => {
+                        // Ticket 03 (Decision 0006): the optional observational
+                        // late-applied diagnostic. It fires ONLY after a
+                        // current first-applicable terminal committed AND the
+                        // volatile route was already retired synchronously
+                        // before this ingest began — exactly the "same-
+                        // generation terminal applied after route retirement"
+                        // case. It is observational only: never a lifecycle
+                        // state, never a delay, never a notification gate.
+                        if (
+                          event.result.kind === "recorded" &&
+                          liveRegistration !== undefined
+                        ) {
+                          subagentLiveLifecycle.lateAppliedDiagnosticCount += 1;
+                          offerRuntimeEvent({
+                            ...makeEventBase(context),
+                            type: "runtime.warning",
+                            payload: {
+                              message: `Pi subagent terminal applied after live route retirement [${event.result.execution.executionId}]`,
+                              detail: {
+                                executionId: event.result.execution.executionId,
+                                attemptId: event.result.execution.attemptId,
+                                generation: event.result.execution.generation,
+                              },
+                            },
+                            raw: {
+                              source: "pi.sdk.event",
+                              method: "subagents/terminal-late-applied",
+                              payload: {
+                                executionId: event.result.execution.executionId,
+                                attemptId: event.result.execution.attemptId,
+                                generation: event.result.execution.generation,
+                              },
+                            },
+                          } satisfies ProviderRuntimeEvent);
+                        }
                         // Decision 0033 review follow-up: capture the exact
                         // committed aggregate below. `onTerminalPersisted` is
                         // the post-commit seam (it fires ONLY for a `recorded`
@@ -4251,6 +4394,28 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     const err = new Error("pi_subagent_lifecycle_persistence_failed");
                     (err as any).diagnosticCode = "pi_subagent_lifecycle_persistence_failed";
                     throw err;
+                  }
+                  // Ticket 03 (Decision 0006 / WP-02): the exact volatile
+                  // route becomes active ONLY here — after the durable
+                  // sequence-2 `started` lifecycle row committed. Sequence-2
+                  // persistence failure leaves the route captured-but-
+                  // inactive (bounded unavailable with zero provider effect)
+                  // and the existing degraded-health/rejection behavior is
+                  // unchanged above.
+                  if (
+                    liveRegistration !== undefined &&
+                    !subagentLiveLifecycle.containment.activate(liveRegistration)
+                  ) {
+                    // The registration was displaced or the session was
+                    // cleared concurrently; keep the route inactive rather
+                    // than re-capturing (no reconstruction).
+                    subagentLiveLifecycle.registrations.delete(
+                      JSON.stringify([
+                        identities.executionId,
+                        identities.attemptId,
+                        identities.generation,
+                      ]),
+                    );
                   }
                 })();
                 return startedPromise;
@@ -4680,6 +4845,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
                     context.subagentCapability === subagentCapability &&
                     context.runtime.session === runtime.session &&
                     !context.stopped,
+                  // Ticket 03 (Decision 0006 / WP-02): the wrappers receive
+                  // this session's exact containment instance plus the
+                  // retained-registration lookup. The wrapper resolves the
+                  // durable current tuple first and only then looks up the
+                  // exact registration handle for that tuple in THIS
+                  // session; a missing, replaced, retired, or cleared handle
+                  // is bounded unavailable with zero provider dispatch.
+                  liveLifecycle: {
+                    containment: subagentLiveLifecycle.containment,
+                    session: subagentLiveLifecycle.session,
+                    registrationForTuple,
+                  },
                 });
               }
             }
