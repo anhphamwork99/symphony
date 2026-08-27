@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: native-image Gate passed; post-Gate governance reassessment required
-Triage: awaiting-post-native-image-gate-governance-reassessment
+Lifecycle: operation transport/outcomes implementation active
+Triage: active-operation-transport-outcomes
 Tracker: Local Markdown
 
 ## Artifacts
@@ -27,6 +27,7 @@ Tracker: Local Markdown
 - [Decision 0060 — Ticket 02 native-image drag-and-drop Gate authorization](./decisions/0060-ticket-02-native-image-drop-gate-authorization.md)
 - [Decision 0061 — Ticket 02 native-image package-normalization amendment](./decisions/0061-ticket-02-native-image-drop-normalization-amendment.md)
 - [Decision 0062 — Ticket 02 native-image drop Gate PASS and governance routing](./decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md)
+- [Decision 0063 — Ticket 02 operation transport/outcomes authorization](./decisions/0063-ticket-02-operation-transport-outcomes-authorization.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
 - [Ticket 02 native-image Gate BLOCKER evidence](./evidence/ticket-02/native-image-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
@@ -43,4 +44,4 @@ Completed bounded phase: Ticket 02 WP-NATIVE-IMAGE-GATE stopped as a valid `BLOC
 
 Completed bounded phase: Ticket 02's native-image drag-and-drop Gate passed on measured source `c37dbf1b3f8ccc8cc6fc2ad16057a1fb337247a2`. Two stable-Chromium runs passed 1/1 at exit `0`, and independent remediation re-review returned `PASS` with high confidence. The result proves bounded native package behavior only; it does not pass AC6 or Ticket 02.
 
-Current boundary: Ticket 02 is `awaiting-post-native-image-gate-governance-reassessment` under [Decision 0062](./decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md). No production runtime or later work package is authorized. Production operation transport/outcomes, AI assets/restore/failure, cap/lifecycle, accessibility, RightDock, persistence, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
+Current boundary: Ticket 02 is `active-operation-transport-outcomes` under [Decision 0063](./decisions/0063-ticket-02-operation-transport-outcomes-authorization.md). Only the exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set in Decision 0063 is authorized. AI assets/restore/failure, cap/lifecycle, accessibility, RightDock, persistence, provider/UI mounting, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.

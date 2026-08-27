@@ -2,15 +2,17 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0062](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md) — bounded native-image PASS and post-Gate governance routing — following [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md), the file-chooser [Decision 0059](../decisions/0059-ticket-02-native-image-gate-blocked-routing.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
+**Bounded by:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md) — exact image-free operation transport/outcomes implementation authority — following [Decision 0062](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md), [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md), [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
-**Status:** awaiting-post-native-image-gate-governance-reassessment
+**Status:** active-operation-transport-outcomes
 
 Decision 0060 authorizes only a replacement real-Chromium Gate through Excalidraw's actual drag-and-drop handler. It permits standard `File`, `DataTransfer`, `DragEvent`, and `dispatchEvent` on the real `.excalidraw` container, while preserving all direct-insertion, runtime, config, package, and private-API prohibitions. The Gate must prove complete image/file closure, meaningful official SVG and PNG exports, user Delete, native Undo recovery, native Redo removal, and second native Undo recovery in two exact-candidate runs.
 
 Decision 0061 clarifies package normalization: source bytes/hash/dimensions/MIME/colors prove the dropped sentinel, while the verified package-normalized stored bytes/hash become the exact native-history baseline. Undo and second Undo must restore that same stored closure exactly; source pixel semantics must remain unchanged.
 
 Decision 0062 records `TICKET 02 NATIVE IMAGE DROP GATE: BOUNDED PASS` on exact source `c37dbf1b3f8ccc8cc6fc2ad16057a1fb337247a2`. Two stable-Chromium runs passed and independent remediation re-review returned PASS. This does not pass AC6 or Ticket 02 and authorizes no production work.
+
+Decision 0063 authorizes `WP-OPERATION-TRANSPORT-OUTCOMES` with the minimal image-free ephemeral operation-session seam across strict contracts, server authority, production WebSocket RPC/stream, truthful browser acknowledgement, and the existing AI-history coordinator. Web-only operation ownership is rejected. AI assets/restore/failure remains a separate deferred package.
 
 ## Acceptance criteria
 
@@ -57,6 +59,7 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - [Decision 0060 — native-image drag-and-drop Gate authorization](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md)
 - [Decision 0061 — native-image package-normalization amendment](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md)
 - [Decision 0062 — native-image drop Gate PASS and governance routing](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md)
+- [Decision 0063 — operation transport/outcomes authorization](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md)
 - [Native-image Gate BLOCKER exact-candidate evidence](../evidence/ticket-02/native-image-gate.md)
 - [Decision 0057 — bounded WP-GATE PASS and post-Gate routing](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md)
 - [Fallback WP-GATE exact-candidate evidence](../evidence/ticket-02/fallback-gate.md)
@@ -71,6 +74,6 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
 - Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-**Routing:** `awaiting-post-native-image-gate-governance-reassessment`
+**Routing:** `active-operation-transport-outcomes`
 
-**Current authorization boundary:** [Decision 0062](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md) records the bounded native-package PASS and authorizes no implementation. The next step is a governance reassessment that may separately authorize a production package with an exact write set. No production implementation, later work package, AC claim, feature review, or final acceptance follows by inference.
+**Current authorization boundary:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md) authorizes only its exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set. Assets, lifecycle/cap, accessibility, RightDock, persistence, provider/UI mounting, workspace gates, later work packages, AC claims, feature review, and final acceptance do not follow by inference.
