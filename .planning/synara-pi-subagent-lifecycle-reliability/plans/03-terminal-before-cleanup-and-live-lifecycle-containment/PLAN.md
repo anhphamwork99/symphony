@@ -1,6 +1,6 @@
 # Ticket 03 Plan — terminal-before-cleanup and live lifecycle containment
 
-**State:** in progress (WP-01 complete; WP-02 is the current package frontier)
+**State:** in progress (WP-01 and WP-02 complete; WP-03 is the current package frontier)
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -91,7 +91,7 @@ All packages are serial. No parallel write overlap is permitted.
 | Order | Package | Primary output |
 | --- | --- | --- |
 | 01 | [Containment core and diagnostics](WP-01-containment-core-and-diagnostics.md) | **complete** — reusable registry, managed binding integration, diagnostics, unit evidence |
-| 02 | [Production lifecycle integration](WP-02-production-lifecycle-integration.md) | PiAdapter activation/retirement/disposal, deterministic lifecycle races |
+| 02 | [Production lifecycle integration](WP-02-production-lifecycle-integration.md) | **complete** — PiAdapter activation/retirement/disposal and deterministic lifecycle races |
 | 03 | [Controlled and real-Pi evidence/report](WP-03-controlled-and-real-pi-acceptance-report.md) | unchanged `.6` proof, isolated real-Pi evidence, Ticket 03 report |
 | 04 | [Independent review](WP-04-independent-review.md) | criterion-level review artifact and disposition |
 | 05 | [Ticket closure and routing](WP-05-ticket-closure-and-routing.md) | accepted Ticket 03 and Ticket 04 frontier, only after PASS |

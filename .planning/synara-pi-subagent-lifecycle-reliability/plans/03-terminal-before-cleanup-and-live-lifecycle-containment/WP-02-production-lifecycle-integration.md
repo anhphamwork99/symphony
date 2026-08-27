@@ -1,6 +1,6 @@
 # WP-02 — production lifecycle integration and deterministic race proof
 
-**State:** pending
+**State:** complete
 
 **Owner role:** implementation worker
 
@@ -84,3 +84,63 @@ Commit SHA, changed symbols, activation/retirement/disposal traces, complete det
 ## Escalation
 
 Return `challenge` if activation cannot follow sequence 2, retirement cannot precede terminal ingest, clearing cannot precede disposal, retry requires route recreation, repository authority is contradicted, or repair would widen into later-ticket scope.
+
+## Completion record
+
+**Source commits**
+
+- `648f5e569` — compose one exact-session containment instance into `PiAdapter`, capture at admission, activate after durable sequence 2, retire before terminal ingest, and clear before runtime disposal.
+- `0e5a48369` — add production-composition evidence, reject handled terminal-persistence failures, and remove the non-causal ordinary-terminal late-applied warning.
+
+**Causal evidence**
+
+- Before sequence 2, steer returned
+  `pi_subagent_live_lifecycle_unavailable` with zero provider calls.
+- After sequence 2 committed, the exact tuple entered the provider once.
+- An injected sequence-2 persistence failure left journal sequence `[1]`,
+  kept the route inactive, and made no additional provider call.
+- While `recordTerminalEvent` was held in flight, the exact route was already
+  retired; steer returned unavailable before the band-40 commit.
+- An injected terminal persistence failure produced no terminal notification
+  and no completion-outbox row, left the route retired, and rejected the
+  producer with `pi_subagent_terminal_persistence_failed`.
+- The existing bounded terminal retry committed `[1, 2, 40]` and its outbox
+  row without provider access or route reconstruction.
+- Clearing the session before runtime disposal caused an in-flight provider
+  response to revalidate as `pi_subagent_live_lifecycle_stale_ignored`; a
+  post-stop call made no second provider action.
+
+**Deterministic verification**
+
+```text
+piSubagentLifecycleContainmentWiring.test.ts: 4/4
+focused affected unit suite: 7 files, 96/96
+git diff --check: pass
+```
+
+The focused suite included the WP-01 containment tests and the existing
+terminal, teardown, repository, foreground, progress, and canonical-routing
+coverage. Those existing tests remain the lower-level authority for
+first-applicable terminal ownership, stale generations, bands 74/75/77/78
+remaining non-fencing, and band 76 alone advancing the cleanup fence. A
+second duplicate race harness was therefore not added.
+
+**Review disposition**
+
+Independent review returned **PASS WITH GAPS** on the semantics. Its
+fix-before-commit findings were closed:
+
+- the new managed-tool results now have an explicit test result type instead
+  of producing new `unknown` property-access errors;
+- the sequence-2 failure seam is now exercised causally.
+
+The optional `pi_subagent_terminal_late_applied` event was deliberately not
+emitted. Pre-ingest retirement is the normal ordering for every terminal, so
+the proposed condition would have warned on every ordinary terminal rather
+than identify a distinct late callback. The diagnostic remains reserved in
+the contract vocabulary for now; WP-05 must either document that reservation
+or remove it under an explicit contracts write-set amendment.
+
+`bun fmt`, `bun lint`, and `bun typecheck` were not run because project policy
+requires explicit owner authorization. They remain a Ticket 03 closure gate,
+not a WP-02 semantic gate.
