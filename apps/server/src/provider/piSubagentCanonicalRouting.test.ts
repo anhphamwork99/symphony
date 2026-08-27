@@ -98,6 +98,34 @@ describe("Pi managed canonical routing", () => {
     expect(trace.indexOf("durable_authorization")).toBeGreaterThanOrEqual(0);
   });
 
+  it("fails closed before provider execution when a nonterminal durable tuple is incomplete", async () => {
+    let providerCalls = 0;
+    const tool = {
+      execute: async () => {
+        providerCalls += 1;
+        return toolResult("must not run");
+      },
+    };
+    wrapPiSubagentManagedTool(tool, "get_subagent_result", {
+      readService: {
+        readResult: () =>
+          Effect.succeed({
+            executionId: "exec-incomplete",
+            attemptId: "attempt-incomplete",
+            observedState: "running" as const,
+            terminalState: null,
+            summary: null,
+            summaryTruncated: false,
+          }),
+      },
+      isCapabilityBound: () => true,
+    });
+
+    const result = await invoke(tool, { execution_id: "exec-incomplete" });
+    expect(result.diagnosticCode).toBe("pi_subagent_read_missing_durable_evidence");
+    expect(providerCalls).toBe(0);
+  });
+
   it("does not enter the provider when the exact live registration is absent", async () => {
     const session = {};
     const containment = makePiSubagentLiveLifecycleContainment();

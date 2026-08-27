@@ -562,6 +562,12 @@ export function wrapPiSubagentManagedTool(
         `Managed control unavailable [pi_subagent_read_live_record_unavailable] for execution ${read.executionId}.`,
       );
     }
+    if (read.attemptId === undefined || read.generation === undefined) {
+      return managedRoutingFailure(
+        "pi_subagent_read_missing_durable_evidence",
+        `Managed execution read rejected [pi_subagent_read_missing_durable_evidence].`,
+      );
+    }
     const providerParams: Record<string, unknown> = {
       ...params,
       execution_id: read.executionId,

@@ -17,6 +17,7 @@ import {
   PI_SUBAGENT_ARTIFACT_REQUIRED_CAPABILITIES,
   ProjectId,
   ThreadId,
+  type PiSubagentResultReadResult,
 } from "@synara/contracts";
 
 import {
@@ -83,15 +84,9 @@ function assertNoProviderIdentity(value: unknown): void {
   }
 }
 
-type DurableRead = {
-  executionId: string;
-  attemptId: string;
-  generation: number;
-  observedState: "accepted" | "running" | "succeeded" | "failed";
-  terminalState: "succeeded" | "failed" | null;
-  summary: string | null;
-  summaryTruncated: boolean;
-  diagnostics?: string[];
+type DurableRead = PiSubagentResultReadResult & {
+  readonly attemptId: NonNullable<PiSubagentResultReadResult["attemptId"]>;
+  readonly generation: NonNullable<PiSubagentResultReadResult["generation"]>;
 };
 
 const runningRead: DurableRead = {
@@ -734,7 +729,7 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     void turnStart.catch(() => undefined);
 
     const capability = await waitFor(
-      () => harness.observedCapabilities().get(thread),
+      () => harness!.observedCapabilities().get(thread),
       (value) => value !== undefined,
       "production managed capability negotiation",
     );
@@ -748,7 +743,7 @@ async function runRealPiSteerRace(mode: RealRaceMode): Promise<void> {
     }
 
     const observedSessions = await waitFor(
-      () => harness.observedSessions(),
+      () => harness!.observedSessions(),
       (value) => value.size > 0,
       "observed production parent session",
     );

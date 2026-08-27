@@ -282,7 +282,7 @@ function userPiRelative(piHome: string, fullPath: string): string {
   return path.relative(piHome, fullPath).split(path.sep).join("/");
 }
 
-function userPiEntryType(stat: ReturnType<typeof lstatSync>): UserPiHomeEntryType {
+function userPiEntryType(stat: NonNullable<ReturnType<typeof lstatSync>>): UserPiHomeEntryType {
   if (stat.isFile()) return "regular";
   if (stat.isDirectory()) return "directory";
   if (stat.isSymbolicLink()) return "symlink";
@@ -303,7 +303,7 @@ function hashUserPiRegularFile(fullPath: string): string {
 }
 
 function observeUserPiEntry(fullPath: string, allowAbsent = true): UserPiEntry {
-  let stat: ReturnType<typeof lstatSync>;
+  let stat: NonNullable<ReturnType<typeof lstatSync>>;
   try {
     stat = lstatSync(fullPath);
   } catch (cause) {
@@ -1520,8 +1520,12 @@ export async function makeRealPiWsHarness(
   const modelServer =
     options.modelServer ??
     (await createDeterministicModelServer({
-      slowDelayMs: options.deterministicSlowDelayMs,
-      holdSlowModelResponses: options.holdDeterministicSlowResponses,
+      ...(options.deterministicSlowDelayMs === undefined
+        ? {}
+        : { slowDelayMs: options.deterministicSlowDelayMs }),
+      ...(options.holdDeterministicSlowResponses === undefined
+        ? {}
+        : { holdSlowModelResponses: options.holdDeterministicSlowResponses }),
     }));
   writeAgentDirWithModels(parentAgentDir, modelServer.baseUrl);
   writeAgentDirWithModels(childAgentDir, modelServer.baseUrl);
