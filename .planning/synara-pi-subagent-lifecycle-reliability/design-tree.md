@@ -57,14 +57,14 @@
 
 ## 5. Acceptance evidence map
 
-| Gate | Required evidence | Owner |
-| --- | --- | --- |
-| G1 incident | reproduction and source seam map; no source edits | Ticket 01 |
-| G2 identity | public/hidden/durable identity matrix and chosen contract | Ticket 02 + decision gate |
-| G3 lifecycle | terminal-before-cleanup race matrix and containment proof | Ticket 03 |
-| G4 controls | cancellation/watchdog/teardown retries and failure diagnostics | Ticket 04 |
-| G5 recovery | restart/reconnect/Resume truth and crash diagnostics | Ticket 05 |
-| G6 integrated | pinned real-Pi, deterministic, and approved manual boundaries | Ticket 06 |
+| Gate          | Required evidence                                              | Owner                     |
+| ------------- | -------------------------------------------------------------- | ------------------------- |
+| G1 incident   | reproduction and source seam map; no source edits              | Ticket 01                 |
+| G2 identity   | public/hidden/durable identity matrix and chosen contract      | Ticket 02 + decision gate |
+| G3 lifecycle  | terminal-before-cleanup race matrix and containment proof      | Ticket 03                 |
+| G4 controls   | cancellation/watchdog/teardown retries and failure diagnostics | Ticket 04                 |
+| G5 recovery   | restart/reconnect/Resume truth and crash diagnostics           | Ticket 05                 |
+| G6 integrated | pinned real-Pi, deterministic, and approved manual boundaries  | Ticket 06                 |
 
 ## Material decision gates
 

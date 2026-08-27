@@ -537,12 +537,7 @@ function writeResearcherSlowPreference(piHomeDir: string): void {
 async function expectManagedArtifactUnchanged(artifactDir: string, managedAgentDir: string) {
   const verified = await verifyPiSubagentArtifact(artifactDir);
   expect(verified.valid).toBe(true);
-  for (const relativePath of [
-    "auth.json",
-    "models.json",
-    "models-store.json",
-    "settings.json",
-  ]) {
+  for (const relativePath of ["auth.json", "models.json", "models-store.json", "settings.json"]) {
     expect(existsSync(join(managedAgentDir, relativePath))).toBe(false);
   }
 }
@@ -616,8 +611,7 @@ describe("Ticket 02 WP-C real controlled desktop artifact acceptance", () => {
         "Reply with a short acknowledgment only. Do not delegate.",
       );
       await waitFor(
-        async () =>
-          (await harness.client.getThreadDetailSnapshot(String(threadId))) ?? undefined,
+        async () => (await harness.client.getThreadDetailSnapshot(String(threadId))) ?? undefined,
         (value) => value.thread.latestTurn?.state === "completed",
         90_000,
         "managed session terminal success",

@@ -28,7 +28,9 @@ describe("COMPOSER_PICKER_MENU_OPTION_CLASS_NAME", () => {
 
   it("preserves option row semantics: highlight, opacity, and layout classes", () => {
     // Keyboard/hover highlight fill + text color.
-    expect(classes).toContain("data-highlighted:bg-[var(--color-background-button-secondary-hover)]");
+    expect(classes).toContain(
+      "data-highlighted:bg-[var(--color-background-button-secondary-hover)]",
+    );
     expect(classes).toContain("data-highlighted:text-[var(--color-text-foreground)]");
     // Disabled dimming.
     expect(classes).toContain("data-disabled:opacity-64");

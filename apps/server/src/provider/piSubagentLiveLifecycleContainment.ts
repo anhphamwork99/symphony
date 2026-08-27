@@ -238,7 +238,12 @@ export function makePiSubagentLiveLifecycleContainment(
   const capture = (
     input: PiSubagentLiveLifecycleCaptureInput,
   ): PiSubagentLiveLifecycleRegistration | undefined => {
-    if (!input || !isValidTuple(input.tuple) || !input.session || typeof input.session !== "object") {
+    if (
+      !input ||
+      !isValidTuple(input.tuple) ||
+      !input.session ||
+      typeof input.session !== "object"
+    ) {
       return undefined;
     }
     if (clearedSessions.has(input.session)) return undefined;
@@ -416,16 +421,16 @@ export function makePiSubagentLiveLifecycleContainment(
     if (unknownReason !== undefined) {
       // A marked response loss means the returned value cannot be trusted as
       // the provider-owned outcome, even if some value came back.
-      return returnFailure(classifyFailure(kind, accepted, timedOut, unavailableReason, unknownReason));
+      return returnFailure(
+        classifyFailure(kind, accepted, timedOut, unavailableReason, unknownReason),
+      );
     }
     if (timedOut) {
       // A bounded deadline remains authoritative even if the provider later
       // resolves a value. Before acceptance it is unavailable; after a
       // control acceptance point it is outcome-unknown. A late value is never
       // exposed as applied merely because it eventually arrived.
-      return returnFailure(
-        classifyFailure(kind, accepted, true, unavailableReason, unknownReason),
-      );
+      return returnFailure(classifyFailure(kind, accepted, true, unavailableReason, unknownReason));
     }
     if (kind === "control" && !accepted) {
       // Pure control is never reported as applied when the provider-owned

@@ -274,57 +274,57 @@ describe("evaluatePiSubagentDesktopArtifactGate", () => {
   });
 
   /**
- * Local web/dev path (dev-runner prepared cache): a WEB-mode server started
- * with a NON-EMPTY launcher-derived locator is verified exactly like
- * desktop and receives the SAME trusted managed binding; an invalid locator
- * fails closed with the verifier's closed category. A web-mode server
- * without a locator keeps the historical pass-through (covered above).
- */
-describe("web mode with a non-empty launcher-derived locator (local dev path)", () => {
-  it("verifies the locator and returns the trusted managed binding", async () => {
-    const { verifier, calls } = verifierReturning(validVerification);
-    const result = await evaluatePiSubagentDesktopArtifactGate("web", {
-      env: desktopEnv("/synara-home/dev-pi-subagent-artifacts/aa6fa4a8"),
-      verify: verifier,
-    });
-    expect(calls).toEqual(["/synara-home/dev-pi-subagent-artifacts/aa6fa4a8"]);
-    expect(result).toEqual({
-      kind: "pass",
-      managed: {
-        agentDir: path.join("/synara-home/dev-pi-subagent-artifacts/aa6fa4a8", "agent"),
-        metadata: validVerification.metadata,
-      },
-    });
-  });
-
-  it.for(VERIFIER_CATEGORIES)(
-    "fails closed on an invalid locator with the closed category %s",
-    async (category) => {
-      const { verifier, calls } = verifierReturning({ valid: false, category });
+   * Local web/dev path (dev-runner prepared cache): a WEB-mode server started
+   * with a NON-EMPTY launcher-derived locator is verified exactly like
+   * desktop and receives the SAME trusted managed binding; an invalid locator
+   * fails closed with the verifier's closed category. A web-mode server
+   * without a locator keeps the historical pass-through (covered above).
+   */
+  describe("web mode with a non-empty launcher-derived locator (local dev path)", () => {
+    it("verifies the locator and returns the trusted managed binding", async () => {
+      const { verifier, calls } = verifierReturning(validVerification);
       const result = await evaluatePiSubagentDesktopArtifactGate("web", {
-        env: desktopEnv(ABSOLUTE_ROOT),
+        env: desktopEnv("/synara-home/dev-pi-subagent-artifacts/aa6fa4a8"),
         verify: verifier,
       });
-      expect(result.kind).toBe("unavailable");
-      if (result.kind !== "unavailable") return;
-      expect(result.reason).toBe(category);
-      expect(result.detail).toMatch(/^managed pi artifact verification failed: /);
-      expect(result.detail).not.toContain(ABSOLUTE_ROOT);
-      expect(calls.length).toBe(1);
-    },
-  );
-
-  it("trims a whitespace-padded web locator before verifying", async () => {
-    const { verifier, calls } = verifierReturning(validVerification);
-    await evaluatePiSubagentDesktopArtifactGate("web", {
-      env: desktopEnv("  /dev-cache/entry  \n"),
-      verify: verifier,
+      expect(calls).toEqual(["/synara-home/dev-pi-subagent-artifacts/aa6fa4a8"]);
+      expect(result).toEqual({
+        kind: "pass",
+        managed: {
+          agentDir: path.join("/synara-home/dev-pi-subagent-artifacts/aa6fa4a8", "agent"),
+          metadata: validVerification.metadata,
+        },
+      });
     });
-    expect(calls).toEqual(["/dev-cache/entry"]);
-  });
-});
 
-describe("the result surface itself is bounded and stable", () => {
+    it.for(VERIFIER_CATEGORIES)(
+      "fails closed on an invalid locator with the closed category %s",
+      async (category) => {
+        const { verifier, calls } = verifierReturning({ valid: false, category });
+        const result = await evaluatePiSubagentDesktopArtifactGate("web", {
+          env: desktopEnv(ABSOLUTE_ROOT),
+          verify: verifier,
+        });
+        expect(result.kind).toBe("unavailable");
+        if (result.kind !== "unavailable") return;
+        expect(result.reason).toBe(category);
+        expect(result.detail).toMatch(/^managed pi artifact verification failed: /);
+        expect(result.detail).not.toContain(ABSOLUTE_ROOT);
+        expect(calls.length).toBe(1);
+      },
+    );
+
+    it("trims a whitespace-padded web locator before verifying", async () => {
+      const { verifier, calls } = verifierReturning(validVerification);
+      await evaluatePiSubagentDesktopArtifactGate("web", {
+        env: desktopEnv("  /dev-cache/entry  \n"),
+        verify: verifier,
+      });
+      expect(calls).toEqual(["/dev-cache/entry"]);
+    });
+  });
+
+  describe("the result surface itself is bounded and stable", () => {
     it("an unavailable result exposes exactly kind, reason, detail", async () => {
       const { verifier } = verifierReturning({ valid: false, category: "path_escape" });
       const result = await evaluatePiSubagentDesktopArtifactGate("desktop", {

@@ -125,17 +125,17 @@ The inherited Ticket 01 adapter may retain its previously accepted asset-readine
 
 The existing prototype encodes the superseded combined route and must be replaced, not wrapped.
 
-| Current behavior | Required replacement |
-| --- | --- |
-| Mixed `human` and `ai-batch` events | AI-only coordinator; humans are settlement/invalidation inputs, never events. |
-| Generic `undo`/`redo` dispatcher | Explicit `undoAiBatch()` and `redoAiBatch()`; no native dispatch. |
-| Wrapper `Cmd/Ctrl+Z` capture | Delete entirely; native shortcuts pass untouched. |
-| `Synara Undo` / `Synara Redo` | `AI history`, `Undo AI batch`, `Redo AI batch`. |
-| Per-callback native clear/containment | One explicit public clear invoked only at committed AI boundaries. |
-| Fingerprint suppression/provenance | Adapter-owned opaque synthetic write scopes; fingerprints verify content only. |
-| Shallow/raw snapshots | Deep-owned canonical semantic snapshots and explicit active-file references. |
+| Current behavior                        | Required replacement                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Mixed `human` and `ai-batch` events     | AI-only coordinator; humans are settlement/invalidation inputs, never events.                                  |
+| Generic `undo`/`redo` dispatcher        | Explicit `undoAiBatch()` and `redoAiBatch()`; no native dispatch.                                              |
+| Wrapper `Cmd/Ctrl+Z` capture            | Delete entirely; native shortcuts pass untouched.                                                              |
+| `Synara Undo` / `Synara Redo`           | `AI history`, `Undo AI batch`, `Redo AI batch`.                                                                |
+| Per-callback native clear/containment   | One explicit public clear invoked only at committed AI boundaries.                                             |
+| Fingerprint suppression/provenance      | Adapter-owned opaque synthetic write scopes; fingerprints verify content only.                                 |
+| Shallow/raw snapshots                   | Deep-owned canonical semantic snapshots and explicit active-file references.                                   |
 | One global sequence with restore bypass | Operation-local producer sequence plus adapter-global synthetic write sequence covering every synthetic write. |
-| Event epoch equality as applicability | Immutable event provenance separated from current command applicability. |
+| Event epoch equality as applicability   | Immutable event provenance separated from current command applicability.                                       |
 
 ### 4.1 Deep canonical snapshot ownership
 
@@ -547,18 +547,18 @@ No diagnostic may claim acceptance, report local unlock as containment acknowled
 
 ## 13. AC traceability and authorization status
 
-| AC | WP-GATE bounded evidence | Final owner/status |
-| --- | --- | --- |
-| AC1 | Native route ownership, explicit AI actions, no chord in isolated real embed | Gate partial; deferred accessibility/integrated UI final proof. |
-| AC2 | Completed fake-produced batch only | **Not finalizable by Gate**; production WebSocket operation boundary required. |
-| AC3 | Image-free exact canonical Undo/Redo and empty file closure | Deferred assets/integrated proof required. |
-| AC4 | Initial browser-observed clear, ordered Undo/Redo clear trace, human settlement | Gate bounded proof; later regressions/integration required. |
-| AC5 | None | Deferred cap WP. |
-| AC6 | None | Deferred sentinel native-image Gate. |
-| AC7 | None beyond possible coordinator input API shape | **Not finalizable by simulated signals**; production lifecycle triggers required. |
-| AC8 | Scope-provenance fail-closed diagnostics only | **Not finalizable by Gate**; production operation, assets, rollback, containment required. |
-| AC9 | Exact Gate labels/basic focus partial | Deferred full accessibility and first-use UI proof. |
-| AC10 | Real pinned embed and prohibited-technique Gate audit | **Not finalizable by Gate**; production integrated path/full matrix required. |
+| AC   | WP-GATE bounded evidence                                                        | Final owner/status                                                                         |
+| ---- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| AC1  | Native route ownership, explicit AI actions, no chord in isolated real embed    | Gate partial; deferred accessibility/integrated UI final proof.                            |
+| AC2  | Completed fake-produced batch only                                              | **Not finalizable by Gate**; production WebSocket operation boundary required.             |
+| AC3  | Image-free exact canonical Undo/Redo and empty file closure                     | Deferred assets/integrated proof required.                                                 |
+| AC4  | Initial browser-observed clear, ordered Undo/Redo clear trace, human settlement | Gate bounded proof; later regressions/integration required.                                |
+| AC5  | None                                                                            | Deferred cap WP.                                                                           |
+| AC6  | None                                                                            | Deferred sentinel native-image Gate.                                                       |
+| AC7  | None beyond possible coordinator input API shape                                | **Not finalizable by simulated signals**; production lifecycle triggers required.          |
+| AC8  | Scope-provenance fail-closed diagnostics only                                   | **Not finalizable by Gate**; production operation, assets, rollback, containment required. |
+| AC9  | Exact Gate labels/basic focus partial                                           | Deferred full accessibility and first-use UI proof.                                        |
+| AC10 | Real pinned embed and prohibited-technique Gate audit                           | **Not finalizable by Gate**; production integrated path/full matrix required.              |
 
 No AC is accepted by Decision 0056 or WP-GATE. Later ownership is directional until a post-Gate decision authorizes exact write sets and verification.
 

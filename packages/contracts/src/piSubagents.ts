@@ -729,9 +729,7 @@ export const PiSubagentResultReadResult = Schema.Struct({
   /** Continuation pointer when transcript evidence exists (T12-AC4). */
   transcriptRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Stable, closed diagnostics emitted by the durable read boundary. */
-  diagnostics: Schema.optional(
-    Schema.Array(PiSubagentDiagnosticCode).check(Schema.isMaxLength(8)),
-  ),
+  diagnostics: Schema.optional(Schema.Array(PiSubagentDiagnosticCode).check(Schema.isMaxLength(8))),
 });
 export type PiSubagentResultReadResult = typeof PiSubagentResultReadResult.Type;
 

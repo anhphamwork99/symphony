@@ -151,9 +151,7 @@ describe("RightDock header Add-panel placement (user feedback 1500x805)", () => 
     // The Add trigger is the LAST strip child: immediately after the mapped
     // tabs, with nothing between it and the strip's trailing edge.
     const lastTabRowItem = stripChildFor(strip, addTrigger);
-    expect(Array.from(strip.children).indexOf(lastTabRowItem)).toBe(
-      strip.children.length - 1,
-    );
+    expect(Array.from(strip.children).indexOf(lastTabRowItem)).toBe(strip.children.length - 1);
 
     // Real overflow geometry: strip content is wider than the visible box, so
     // the Add trigger (after the last tab) is clipped until the strip scrolls.

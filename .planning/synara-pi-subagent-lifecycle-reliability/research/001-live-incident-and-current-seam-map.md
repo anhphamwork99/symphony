@@ -56,16 +56,16 @@ Symphony at base `a7827cae7`:
 
 ## Seam map
 
-| Layer | Current seam | Reliability risk to investigate |
-| --- | --- | --- |
-| Alfie public Agent result | `executionId` in detached result | Must be accepted by all public read/control calls. |
-| Alfie hidden details | `agentId` and renderer metadata | Can diverge from durable identity. |
-| Alfie GET_RESULT | strict Manager lookup | Cannot read durable terminal after eviction/restart. |
-| Symphony admission | mints/persists execution identity | Must become canonical and remain bounded. |
-| Symphony lifecycle repository | terminal/outbox/journal | Must expose result continuity without weakening auth/fencing. |
-| Restart reconciliation | terminal/live-owner/orphan | Must not replay and must explain Resume limits. |
-| Watchdog/teardown | 70–78 evidence bands | Uncertainty must not be relabeled terminal. |
-| Provider session | runtime may be inactive | Resume/control dispatch failure must remain truthful. |
+| Layer                         | Current seam                      | Reliability risk to investigate                               |
+| ----------------------------- | --------------------------------- | ------------------------------------------------------------- |
+| Alfie public Agent result     | `executionId` in detached result  | Must be accepted by all public read/control calls.            |
+| Alfie hidden details          | `agentId` and renderer metadata   | Can diverge from durable identity.                            |
+| Alfie GET_RESULT              | strict Manager lookup             | Cannot read durable terminal after eviction/restart.          |
+| Symphony admission            | mints/persists execution identity | Must become canonical and remain bounded.                     |
+| Symphony lifecycle repository | terminal/outbox/journal           | Must expose result continuity without weakening auth/fencing. |
+| Restart reconciliation        | terminal/live-owner/orphan        | Must not replay and must explain Resume limits.               |
+| Watchdog/teardown             | 70–78 evidence bands              | Uncertainty must not be relabeled terminal.                   |
+| Provider session              | runtime may be inactive           | Resume/control dispatch failure must remain truthful.         |
 
 ## Reproduction recipe for Ticket 01
 

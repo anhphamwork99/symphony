@@ -102,9 +102,7 @@ import { OrchestrationReactor } from "../orchestration/Services/OrchestrationRea
 import { recoverSynaraMcpPendingOperations } from "../orchestration/synaraMcpStartupRecovery.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import {
-  PiSubagentExecutionRepositoryLive,
-} from "../persistence/Layers/PiSubagentExecutionRepository.ts";
+import { PiSubagentExecutionRepositoryLive } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { setPiSubagentExecutionLifecycleListener } from "../persistence/Layers/PiSubagentExecutionRepository.ts";
 import { ProviderRuntimeEventRepositoryLive } from "../persistence/Layers/ProviderRuntimeEvents.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../persistence/Layers/ProviderSessionRuntime.ts";
@@ -1332,13 +1330,11 @@ export interface RealPiWsHarness {
   /** Managed admission events observed by the real adapter. */
   readonly observedAdmissions: () => ReadonlyArray<ObservedSubagentAdmission>;
   /** Actual pinned-extension `subagents:steered` event-bus emissions. */
-  readonly observedExtensionSteerEmissions: () =>
-    ReadonlyArray<ObservedExtensionSteerEmission>;
+  readonly observedExtensionSteerEmissions: () => ReadonlyArray<ObservedExtensionSteerEmission>;
   /** PIDs spawned by the actual Pi supervisor-backed custom bash operations. */
   readonly observedSupervisorSpawnPids: () => ReadonlyArray<number>;
   /** Notifications emitted only after the repository transaction commits. */
-  readonly observedLifecycleNotifications: () =>
-    ReadonlyArray<PiSubagentExecutionLifecycleNotification>;
+  readonly observedLifecycleNotifications: () => ReadonlyArray<PiSubagentExecutionLifecycleNotification>;
   /** Current state of the exact adapter-owned control-health instance. */
   readonly observedControlHealth: () => Promise<{
     readonly status: string;
@@ -2236,8 +2232,7 @@ export async function makeRealPiWsHarness(
       const health = await Effect.runPromise(observedControlHealth.getHealth());
       return {
         status: String(health.status),
-        diagnosticCode:
-          typeof health.diagnosticCode === "string" ? health.diagnosticCode : null,
+        diagnosticCode: typeof health.diagnosticCode === "string" ? health.diagnosticCode : null,
       };
     },
     lastOperationDiagnostics: () => [...diagnostics],

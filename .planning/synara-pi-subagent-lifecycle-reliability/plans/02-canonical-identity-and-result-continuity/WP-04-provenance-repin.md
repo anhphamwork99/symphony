@@ -55,12 +55,12 @@ bounded two-commit remediation:
    `73bc7744f8fbbd12206302de2df8230b29a49178`, package
    `@alfie/pi-subagents@0.15.0-alfie.5`, and these SHA-256 manifest hashes:
 
-   | Manifest-owned file | SHA-256 |
-   | --- | --- |
-   | `agent/extensions/pi-subagents/package.json` | `e10f46399233ecd2d9af4bd8ad369171a9234a88454e27b3ae96f2d7442f2289` |
-   | `agent/extensions/pi-subagents/src/index.ts` | `4e33ef5ea36b249b41e63583ecb2c1cfa23bff5ecd73a05cedfc121eb3b00855` |
-   | `agent/extensions/pi-subagents/src/agent-manager.ts` | `9c635818970b286d691fffaa0f01bb95ee0b6f9ee2a11a015036617494f29e1a` |
-   | `agent/extensions/pi-subagents/src/agent-runner.ts` | `98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2` |
+   | Manifest-owned file                                          | SHA-256                                                            |
+   | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+   | `agent/extensions/pi-subagents/package.json`                 | `e10f46399233ecd2d9af4bd8ad369171a9234a88454e27b3ae96f2d7442f2289` |
+   | `agent/extensions/pi-subagents/src/index.ts`                 | `4e33ef5ea36b249b41e63583ecb2c1cfa23bff5ecd73a05cedfc121eb3b00855` |
+   | `agent/extensions/pi-subagents/src/agent-manager.ts`         | `9c635818970b286d691fffaa0f01bb95ee0b6f9ee2a11a015036617494f29e1a` |
+   | `agent/extensions/pi-subagents/src/agent-runner.ts`          | `98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2` |
    | `agent/extensions/pi-subagents/src/child-bash-supervisor.ts` | `ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0` |
 
 2. `14f3d2a4371a3ea4050b2e54fa026995fd81f706`

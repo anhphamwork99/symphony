@@ -380,15 +380,15 @@ describe("Ticket 11 active-strip card helpers", () => {
   });
 
   it("formats bounded and unbounded turn labels, including edge counts", () => {
-    expect(
-      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 1, maxTurns: 3 })),
-    ).toBe("1/3 turns");
-    expect(
-      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 3, maxTurns: 3 })),
-    ).toBe("3/3 turns");
-    expect(
-      piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 4, maxTurns: 3 })),
-    ).toBe("4 turns");
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 1, maxTurns: 3 }))).toBe(
+      "1/3 turns",
+    );
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 3, maxTurns: 3 }))).toBe(
+      "3/3 turns",
+    );
+    expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 4, maxTurns: 3 }))).toBe(
+      "4 turns",
+    );
     expect(piSubagentExecutionCardTurnLabel(makeCard({ turnCount: 1, maxTurns: null }))).toBe(
       "1 turn",
     );

@@ -7,8 +7,7 @@
 
 ## Objective
 
-Implement and prove the binding identity/result-read contract from Decision
-0002. A managed execution has one public `executionId` from admission through
+Implement and prove the binding identity/result-read contract from Decision 0002. A managed execution has one public `executionId` from admission through
 result lookup, live observation/control, terminal settlement, reconnect, and
 restart. Provider-local Alfie `agentId` remains an internal correlation key and
 never becomes a second managed public identity.
@@ -189,14 +188,14 @@ calls. Missing exact live steer returns
 
 ### Acceptance matrix
 
-| Criterion | Normal direction | Failure/diagnostic direction | Result |
-| --- | --- | --- | --- |
-| T02-AC1 | Admission, detached output, result reads, hook observations, and durable journal use one `executionId`; attempt/generation remain fences. | Recursive no-provider-identity scans cover managed payloads, diagnostics, and hook events; older replay cards remain compatible. | PASS |
-| T02-AC2 | Canonical `execution_id` and the deprecated public-ID `agent_id` alias resolve the same exact tuple-indexed live record. | Provider-local IDs, conflicting aliases, stale attempt/generation, another session, and another tuple fail closed. | PASS |
-| T02-AC3 | Authorized durable reads survive live eviction/restart; exact sequence-40 terminal truth wins over live nonterminal fallback. | Unauthorized scope, missing durable evidence, stale tuple, incoherent snapshot, and oversized diagnostics return bounded stable results before provider access. | PASS |
-| T02-AC4 | Exact live state supplements nonterminal durable state; enqueue-first steer performs exactly one synchronous SDK insertion and returns `applied`. | Terminal-first retirement before the manager guard returns bounded unavailable control with zero session call/insertion; no valid handle becomes `Agent not found`. | PASS |
-| T02-AC5 | Legacy/unmanaged bypass behavior remains covered; controlled Alfie proves cancellation fencing and post-await generation validation. | Capability absence/mismatch, stale tuple, unavailable live control, provider-ID input, oversized output, and invalid cancellation are bounded. Resume/bootstrap/reconstruction/queue-replay/new-child are source-structurally absent from the exact manager steer path, not claimed as runtime-observed counters. | PASS |
-| T02-AC6 | Deterministic, controlled-Alfie, and isolated real-Pi evidence are reported separately against the exact `.6` artifact and Pi SDK `.83.0`. | Negative fixtures remain intentional; user configuration, ambient resources, controlled artifact, paths, environment, hook/session state, and roots are checked and cleaned fail-closed. | PASS; project-level T06 final acceptance remains pending |
+| Criterion | Normal direction                                                                                                                                  | Failure/diagnostic direction                                                                                                                                                                                                                                                                                      | Result                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| T02-AC1   | Admission, detached output, result reads, hook observations, and durable journal use one `executionId`; attempt/generation remain fences.         | Recursive no-provider-identity scans cover managed payloads, diagnostics, and hook events; older replay cards remain compatible.                                                                                                                                                                                  | PASS                                                     |
+| T02-AC2   | Canonical `execution_id` and the deprecated public-ID `agent_id` alias resolve the same exact tuple-indexed live record.                          | Provider-local IDs, conflicting aliases, stale attempt/generation, another session, and another tuple fail closed.                                                                                                                                                                                                | PASS                                                     |
+| T02-AC3   | Authorized durable reads survive live eviction/restart; exact sequence-40 terminal truth wins over live nonterminal fallback.                     | Unauthorized scope, missing durable evidence, stale tuple, incoherent snapshot, and oversized diagnostics return bounded stable results before provider access.                                                                                                                                                   | PASS                                                     |
+| T02-AC4   | Exact live state supplements nonterminal durable state; enqueue-first steer performs exactly one synchronous SDK insertion and returns `applied`. | Terminal-first retirement before the manager guard returns bounded unavailable control with zero session call/insertion; no valid handle becomes `Agent not found`.                                                                                                                                               | PASS                                                     |
+| T02-AC5   | Legacy/unmanaged bypass behavior remains covered; controlled Alfie proves cancellation fencing and post-await generation validation.              | Capability absence/mismatch, stale tuple, unavailable live control, provider-ID input, oversized output, and invalid cancellation are bounded. Resume/bootstrap/reconstruction/queue-replay/new-child are source-structurally absent from the exact manager steer path, not claimed as runtime-observed counters. | PASS                                                     |
+| T02-AC6   | Deterministic, controlled-Alfie, and isolated real-Pi evidence are reported separately against the exact `.6` artifact and Pi SDK `.83.0`.        | Negative fixtures remain intentional; user configuration, ambient resources, controlled artifact, paths, environment, hook/session state, and roots are checked and cleaned fail-closed.                                                                                                                          | PASS; project-level T06 final acceptance remains pending |
 
 ### Synchronized real-Pi F5 evidence
 
@@ -291,11 +290,11 @@ non-excluded Pi-home digest are strict. Only `agent/sessions/**` and exact
 
 Bounded cache diagnostics from the final run:
 
-| Strand/location | Before | After | Classification |
-| --- | --- | --- | --- |
-| terminal-first isolated writable agent | absent | regular, SHA-256 `44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`, 2 bytes, mtime `1787779274333.2708` | non-causal provider-catalogue cache |
-| enqueue-first isolated writable agent | absent | regular, SHA-256 `44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`, 2 bytes, mtime `1787779311074.8462` | non-causal provider-catalogue cache |
-| ambient `~/.pi`, both strands | regular, SHA-256 `2fad69a78eb3ba73000c29d2dd94e516b57e67d0af1f3b7d22f7f7b5ce362985`, 97,088 bytes, mtime `1787771966420.924` | unchanged | non-causal provider-catalogue cache |
+| Strand/location                        | Before                                                                                                                       | After                                                                                                                    | Classification                      |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| terminal-first isolated writable agent | absent                                                                                                                       | regular, SHA-256 `44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`, 2 bytes, mtime `1787779274333.2708` | non-causal provider-catalogue cache |
+| enqueue-first isolated writable agent  | absent                                                                                                                       | regular, SHA-256 `44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`, 2 bytes, mtime `1787779311074.8462` | non-causal provider-catalogue cache |
+| ambient `~/.pi`, both strands          | regular, SHA-256 `2fad69a78eb3ba73000c29d2dd94e516b57e67d0af1f3b7d22f7f7b5ce362985`, 97,088 bytes, mtime `1787771966420.924` | unchanged                                                                                                                | non-causal provider-catalogue cache |
 
 Cleanup unconditionally releases both barriers, disposes the first-owner hook,
 restores the exact wrapped session method, disposes the harness/listeners,

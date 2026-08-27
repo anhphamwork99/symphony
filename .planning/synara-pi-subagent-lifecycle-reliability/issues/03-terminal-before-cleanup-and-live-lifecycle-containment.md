@@ -58,12 +58,12 @@ acceptance requires it.
   - controlled extension tree: clean, excluding ignored `node_modules`.
 - Verified controlled-artifact SHA-256 values:
 
-  | File | SHA-256 |
-  | --- | --- |
-  | `agent/extensions/pi-subagents/package.json` | `954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f` |
-  | `agent/extensions/pi-subagents/src/index.ts` | `c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9` |
-  | `agent/extensions/pi-subagents/src/agent-manager.ts` | `1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783` |
-  | `agent/extensions/pi-subagents/src/agent-runner.ts` | `98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2` |
+  | File                                                         | SHA-256                                                            |
+  | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+  | `agent/extensions/pi-subagents/package.json`                 | `954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f` |
+  | `agent/extensions/pi-subagents/src/index.ts`                 | `c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9` |
+  | `agent/extensions/pi-subagents/src/agent-manager.ts`         | `1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783` |
+  | `agent/extensions/pi-subagents/src/agent-runner.ts`          | `98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2` |
   | `agent/extensions/pi-subagents/src/child-bash-supervisor.ts` | `ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0` |
 
 No Alfie source, package, provenance, runtime, or pin changed.
@@ -138,25 +138,25 @@ callback can be reconstructed.
 
 ### AC evidence matrix and failure diagnostics
 
-| Criterion | Normal-path evidence | Failure/race evidence | Disposition |
-| --- | --- | --- | --- |
-| T03-AC1 terminal persisted before notification | Real-Pi terminal retry commits sequence 40 before exactly one lifecycle notification; terminal card/read truth follows durable state. | Held terminal write has no sequence 40, notification, or outbox. First persistence failure leaves `[1,2,3]`, nonterminal state, and no notification/outbox. | Proven. |
-| T03-AC2 deterministic terminal/cleanup/current/stale outcomes | Controlled and real-Pi route retirement does not prevent the current same-generation band-40 retry from recording. | Live-repository fixtures record terminal before 76; after proven 76 increments generation, the old-generation terminal is `ignored_stale`. First-terminal ownership and stale/replaced response classification remain covered by the deterministic core/wiring suites. | Proven across evidence classes. |
-| T03-AC3 bands 70–78 preserve uncertainty/proof separation | Dedicated fixtures on the same live repository observe bands 74, 75, 77, and 78 with `observedState=cancelling` and generation 1. | Same-generation terminal before 76 is `recorded`; proven 76 settles `cancelled`, advances generation to 2, and makes the old terminal stale. | Proven; no real destructive teardown claim. |
-| T03-AC4 exact owned runtime only | Exact owner call yields one extension steer emission; sibling call is `pi_subagent_read_unauthorized_or_out_of_scope`; public results expose no `agentId`. | Pre-sequence-2 and retired calls are unavailable with zero additional extension steer emission; measured admissions/delegated requests remain one and supervisor custom-bash spawns remain zero. | Proven at controlled/real-Pi boundary. |
-| T03-AC5 stable inactive/loss/persistence/late diagnostics | Held sequence 2 gives `pi_subagent_live_lifecycle_unavailable`; terminal failure gives `pi_subagent_terminal_persistence_failed`; durable retry settles independently. | `pi_subagent_live_lifecycle_outcome_unknown` and `pi_subagent_live_lifecycle_stale_ignored` require injected post-acceptance loss/replaced-response barriers and remain causally proven by deterministic containment tests rather than fabricated with elapsed time in real Pi. | Proven with explicit evidence-class limitation. |
+| Criterion                                                     | Normal-path evidence                                                                                                                                                   | Failure/race evidence                                                                                                                                                                                                                                                           | Disposition                                     |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| T03-AC1 terminal persisted before notification                | Real-Pi terminal retry commits sequence 40 before exactly one lifecycle notification; terminal card/read truth follows durable state.                                  | Held terminal write has no sequence 40, notification, or outbox. First persistence failure leaves `[1,2,3]`, nonterminal state, and no notification/outbox.                                                                                                                     | Proven.                                         |
+| T03-AC2 deterministic terminal/cleanup/current/stale outcomes | Controlled and real-Pi route retirement does not prevent the current same-generation band-40 retry from recording.                                                     | Live-repository fixtures record terminal before 76; after proven 76 increments generation, the old-generation terminal is `ignored_stale`. First-terminal ownership and stale/replaced response classification remain covered by the deterministic core/wiring suites.          | Proven across evidence classes.                 |
+| T03-AC3 bands 70–78 preserve uncertainty/proof separation     | Dedicated fixtures on the same live repository observe bands 74, 75, 77, and 78 with `observedState=cancelling` and generation 1.                                      | Same-generation terminal before 76 is `recorded`; proven 76 settles `cancelled`, advances generation to 2, and makes the old terminal stale.                                                                                                                                    | Proven; no real destructive teardown claim.     |
+| T03-AC4 exact owned runtime only                              | Exact owner call yields one extension steer emission; sibling call is `pi_subagent_read_unauthorized_or_out_of_scope`; public results expose no `agentId`.             | Pre-sequence-2 and retired calls are unavailable with zero additional extension steer emission; measured admissions/delegated requests remain one and supervisor custom-bash spawns remain zero.                                                                                | Proven at controlled/real-Pi boundary.          |
+| T03-AC5 stable inactive/loss/persistence/late diagnostics     | Held sequence 2 gives `pi_subagent_live_lifecycle_unavailable`; terminal failure gives `pi_subagent_terminal_persistence_failed`; durable retry settles independently. | `pi_subagent_live_lifecycle_outcome_unknown` and `pi_subagent_live_lifecycle_stale_ignored` require injected post-acceptance loss/replaced-response barriers and remain causally proven by deterministic containment tests rather than fabricated with elapsed time in real Pi. | Proven with explicit evidence-class limitation. |
 
 Diagnostic/reason evidence:
 
-| Diagnostic | Causal boundary | Evidence class |
-| --- | --- | --- |
-| `pi_subagent_live_lifecycle_unavailable` / `provider_inactive` | exact registration captured but sequence 2 held; provider action not accepted; extension steer emissions remain zero | real Pi plus deterministic reason trace |
-| `pi_subagent_live_lifecycle_unavailable` / `callback_disposed` | route retired before terminal commit/failure; further control emits no second steer | controlled Alfie and real Pi plus deterministic reason trace |
-| `pi_subagent_live_lifecycle_outcome_unknown` / post-acceptance loss or timeout | accepted control loses/fails its response; no automatic retry | deterministic containment core |
-| `pi_subagent_live_lifecycle_stale_ignored` | in-flight response loses exact tuple/session registration during replacement or clear | deterministic containment core and WP-02 wiring |
-| `pi_subagent_terminal_persistence_failed` | first real terminal repository attempt fails after route retirement | real Pi; degraded adapter-owned control health, no sequence 40/notification/outbox |
-| `pi_subagent_terminal_stale_ignored` | old generation terminal arrives after proven band 76 advances the fence | live repository fixture |
-| `pi_subagent_event_sequence_gap` | invalid lifecycle sequencing | existing terminal/repository deterministic suites; no gap is intentionally created by the real-Pi happy path |
+| Diagnostic                                                                     | Causal boundary                                                                                                      | Evidence class                                                                                               |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `pi_subagent_live_lifecycle_unavailable` / `provider_inactive`                 | exact registration captured but sequence 2 held; provider action not accepted; extension steer emissions remain zero | real Pi plus deterministic reason trace                                                                      |
+| `pi_subagent_live_lifecycle_unavailable` / `callback_disposed`                 | route retired before terminal commit/failure; further control emits no second steer                                  | controlled Alfie and real Pi plus deterministic reason trace                                                 |
+| `pi_subagent_live_lifecycle_outcome_unknown` / post-acceptance loss or timeout | accepted control loses/fails its response; no automatic retry                                                        | deterministic containment core                                                                               |
+| `pi_subagent_live_lifecycle_stale_ignored`                                     | in-flight response loses exact tuple/session registration during replacement or clear                                | deterministic containment core and WP-02 wiring                                                              |
+| `pi_subagent_terminal_persistence_failed`                                      | first real terminal repository attempt fails after route retirement                                                  | real Pi; degraded adapter-owned control health, no sequence 40/notification/outbox                           |
+| `pi_subagent_terminal_stale_ignored`                                           | old generation terminal arrives after proven band 76 advances the fence                                              | live repository fixture                                                                                      |
+| `pi_subagent_event_sequence_gap`                                               | invalid lifecycle sequencing                                                                                         | existing terminal/repository deterministic suites; no gap is intentionally created by the real-Pi happy path |
 
 `pi_subagent_terminal_late_applied` is not claimed: WP-02 established that
 ordinary pre-ingest route retirement is the normal terminal order and not a
@@ -164,28 +164,28 @@ causally distinct warning.
 
 ### Band allocation compatibility
 
-| Band | WP-03 observation | Terminal? | Fences generation? |
-| --- | --- | --- | --- |
-| 40 | current same-tuple terminal transaction/retry | yes | no |
-| 70–73 | unchanged watchdog allocation; regression suites remain green | no | no |
-| 74 | teardown handoff fixture stays `cancelling`, generation 1 | no | no |
-| 75 | teardown request fixture stays `cancelling`, generation 1 | no | no |
-| 76 | repository-seam `proven` settles `cancelled`, advances 1 → 2 | guarded settlement | yes |
-| 77 | survivors fixture stays `cancelling`, generation 1 | no | no |
-| 78 | owner-unproven fixture stays `cancelling`, generation 1 | no | no |
+| Band  | WP-03 observation                                             | Terminal?          | Fences generation? |
+| ----- | ------------------------------------------------------------- | ------------------ | ------------------ |
+| 40    | current same-tuple terminal transaction/retry                 | yes                | no                 |
+| 70–73 | unchanged watchdog allocation; regression suites remain green | no                 | no                 |
+| 74    | teardown handoff fixture stays `cancelling`, generation 1     | no                 | no                 |
+| 75    | teardown request fixture stays `cancelling`, generation 1     | no                 | no                 |
+| 76    | repository-seam `proven` settles `cancelled`, advances 1 → 2  | guarded settlement | yes                |
+| 77    | survivors fixture stays `cancelling`, generation 1            | no                 | no                 |
+| 78    | owner-unproven fixture stays `cancelling`, generation 1       | no                 | no                 |
 
 No migration, band, state, public identity, API, or timeout configuration was
 added.
 
 ### Evidence classes and verification
 
-| Evidence class | Command/result | What it proves |
-| --- | --- | --- |
-| Deterministic containment/routing/repository | direct Node Vitest, 5 files, **73/73** in **3.41s** | pre/post acceptance classification, inactive/missing/disposed/mismatched routes, outcome unknown, stale response, persistence failure/retry, first-terminal ownership, journal and fencing behavior |
-| Controlled Alfie `.6` | `piSubagentLifecycleContainmentAcceptance.test.ts`, **1/1** in **27.84s** | exact owner/sibling routing, one real extension steer insertion, retire-before-band-40, no public `agentId`, unchanged provenance and isolated cleanup |
-| Controlled extension provenance | `piSubagentRealExtension.test.ts -t 'T19-AC1, T19-AC7'`, **1 passed / 10 skipped** in **1.81s** | production session loads the pinned real extension and negotiates the controlled capability boundary |
-| Isolated real Pi | Node Vitest `wallclock`, **1/1** in **28.12s** (test body **25.78s**) | public WS → production server/repository/PiAdapter → pinned extension → real child; sequence-2 gate, exact steer, sibling isolation, retire-before-failed terminal, degraded health, durable retry, band ordering, cleanup |
-| Contracts | `packages/contracts/src/piSubagents.test.ts`, **40/40** in **179ms** | shared protocol and public schema remain unchanged |
+| Evidence class                               | Command/result                                                                                  | What it proves                                                                                                                                                                                                             |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deterministic containment/routing/repository | direct Node Vitest, 5 files, **73/73** in **3.41s**                                             | pre/post acceptance classification, inactive/missing/disposed/mismatched routes, outcome unknown, stale response, persistence failure/retry, first-terminal ownership, journal and fencing behavior                        |
+| Controlled Alfie `.6`                        | `piSubagentLifecycleContainmentAcceptance.test.ts`, **1/1** in **27.84s**                       | exact owner/sibling routing, one real extension steer insertion, retire-before-band-40, no public `agentId`, unchanged provenance and isolated cleanup                                                                     |
+| Controlled extension provenance              | `piSubagentRealExtension.test.ts -t 'T19-AC1, T19-AC7'`, **1 passed / 10 skipped** in **1.81s** | production session loads the pinned real extension and negotiates the controlled capability boundary                                                                                                                       |
+| Isolated real Pi                             | Node Vitest `wallclock`, **1/1** in **28.12s** (test body **25.78s**)                           | public WS → production server/repository/PiAdapter → pinned extension → real child; sequence-2 gate, exact steer, sibling isolation, retire-before-failed terminal, degraded health, durable retry, band ordering, cleanup |
+| Contracts                                    | `packages/contracts/src/piSubagents.test.ts`, **40/40** in **179ms**                            | shared protocol and public schema remain unchanged                                                                                                                                                                         |
 
 The primary WP-03 matrix (deterministic + controlled + real Pi + contracts)
 passed **115/115** tests. The supplemental focused extension-provenance witness

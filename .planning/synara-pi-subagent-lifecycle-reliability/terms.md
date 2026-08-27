@@ -1,25 +1,25 @@
 # Terms — Synara Pi subagent lifecycle reliability
 
-| Term | Meaning | Non-meaning / invariant |
-| --- | --- | --- |
-| `executionId` | Stable durable public identity for one logical managed execution. | Not necessarily Alfie's in-memory `agentId`; not a PID. |
-| `agentId` | Alfie AgentManager's provider-local record key at the pinned seam. | Not the project's durable public identity unless an accepted compatibility contract says so. |
-| `attemptId` | Identity of one concrete spawn or explicit Resume attempt. | Does not replace `executionId`. |
-| generation | Monotonic fence for ownership/control and stale callbacks. | Not evidence that a process is alive or dead. |
-| public result | Agent tool payload visible to the model/user, including detached handle data. | Must not expose an unresolvable identity. |
-| hidden details | Structured provider/UI metadata carried in a tool result or notification. | Not a durable read authority. |
-| terminal evidence | Durable, identity-matched evidence that an execution reached a terminal outcome. | Not inferred from timeout, disconnect, missing owner, or cleanup uncertainty. |
-| cleanup proof | Evidence that the owned process tree is dead under the approved owner boundary. | Not equivalent to a successful kill API return. |
-| `cleanup_uncertain` | Watchdog/teardown evidence that cleanup could not yet be proven. | Non-terminal; never automatic cancellation proof. |
-| `survivors` | Owned teardown ran but one or more bounded survivors remain. | Non-terminal; retryable evidence, not permission to kill unrelated processes. |
-| `owner_unproven` | No live identity-capturing owner can be proven for teardown. | Non-terminal; no kill and no `cancelled` settlement. |
-| orphaned | Restart/owner-loss projection state when live owner and terminal evidence cannot be proven. | Not success, failure, cancellation, or permission to replay. |
-| explicit Resume | User-authorized creation of a new attempt under the same execution identity. | Not startup replay, hydration, watchdog recovery, or provider bootstrap. |
-| journal-first | Persist lifecycle/terminal evidence before notification or delivery. | Not a best-effort log after side effects. |
-| proof-before-fence | Fence generation only after the accepted proof boundary commits. | Not a timer, observation guess, or owner receipt alone. |
-| current attempt | Attempt/generation tuple accepted by the current durable aggregate. | Late events from older tuples are history/stale evidence only. |
-| bounded payload | Size-limited summary, transcript reference, diagnostics, and telemetry. | Never raw unbounded transcript in lifecycle events. |
-| controlled artifact | Release-owned/pinned Alfie extension closure selected by the handshake-first project. | Not mutable global extension discovery. |
-| real-Pi evidence | Evidence from the pinned runtime and isolated composition. | Not provider-fake success or fixture evidence relabeled as real-Pi. |
-| supporting evidence | Research or source observations used to ground work. | Cannot accept architecture or advance status. |
-| material decision gate | A question whose answer changes authority, identity, safety, scope, or acceptance evidence. | Not an implementer preference. |
+| Term                   | Meaning                                                                                     | Non-meaning / invariant                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `executionId`          | Stable durable public identity for one logical managed execution.                           | Not necessarily Alfie's in-memory `agentId`; not a PID.                                      |
+| `agentId`              | Alfie AgentManager's provider-local record key at the pinned seam.                          | Not the project's durable public identity unless an accepted compatibility contract says so. |
+| `attemptId`            | Identity of one concrete spawn or explicit Resume attempt.                                  | Does not replace `executionId`.                                                              |
+| generation             | Monotonic fence for ownership/control and stale callbacks.                                  | Not evidence that a process is alive or dead.                                                |
+| public result          | Agent tool payload visible to the model/user, including detached handle data.               | Must not expose an unresolvable identity.                                                    |
+| hidden details         | Structured provider/UI metadata carried in a tool result or notification.                   | Not a durable read authority.                                                                |
+| terminal evidence      | Durable, identity-matched evidence that an execution reached a terminal outcome.            | Not inferred from timeout, disconnect, missing owner, or cleanup uncertainty.                |
+| cleanup proof          | Evidence that the owned process tree is dead under the approved owner boundary.             | Not equivalent to a successful kill API return.                                              |
+| `cleanup_uncertain`    | Watchdog/teardown evidence that cleanup could not yet be proven.                            | Non-terminal; never automatic cancellation proof.                                            |
+| `survivors`            | Owned teardown ran but one or more bounded survivors remain.                                | Non-terminal; retryable evidence, not permission to kill unrelated processes.                |
+| `owner_unproven`       | No live identity-capturing owner can be proven for teardown.                                | Non-terminal; no kill and no `cancelled` settlement.                                         |
+| orphaned               | Restart/owner-loss projection state when live owner and terminal evidence cannot be proven. | Not success, failure, cancellation, or permission to replay.                                 |
+| explicit Resume        | User-authorized creation of a new attempt under the same execution identity.                | Not startup replay, hydration, watchdog recovery, or provider bootstrap.                     |
+| journal-first          | Persist lifecycle/terminal evidence before notification or delivery.                        | Not a best-effort log after side effects.                                                    |
+| proof-before-fence     | Fence generation only after the accepted proof boundary commits.                            | Not a timer, observation guess, or owner receipt alone.                                      |
+| current attempt        | Attempt/generation tuple accepted by the current durable aggregate.                         | Late events from older tuples are history/stale evidence only.                               |
+| bounded payload        | Size-limited summary, transcript reference, diagnostics, and telemetry.                     | Never raw unbounded transcript in lifecycle events.                                          |
+| controlled artifact    | Release-owned/pinned Alfie extension closure selected by the handshake-first project.       | Not mutable global extension discovery.                                                      |
+| real-Pi evidence       | Evidence from the pinned runtime and isolated composition.                                  | Not provider-fake success or fixture evidence relabeled as real-Pi.                          |
+| supporting evidence    | Research or source observations used to ground work.                                        | Cannot accept architecture or advance status.                                                |
+| material decision gate | A question whose answer changes authority, identity, safety, scope, or acceptance evidence. | Not an implementer preference.                                                               |

@@ -382,18 +382,20 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect("scrubs an inherited locator even for server-launching modes when nothing was prepared", () =>
-      Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          ...baseLocatorEnvInput,
-          mode: "dev",
-          baseEnv: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "/inherited/unverified/locator" },
-        });
+    it.effect(
+      "scrubs an inherited locator even for server-launching modes when nothing was prepared",
+      () =>
+        Effect.gen(function* () {
+          const env = yield* createDevRunnerEnv({
+            ...baseLocatorEnvInput,
+            mode: "dev",
+            baseEnv: { [SYNARA_PI_SUBAGENT_ARTIFACT_DIR]: "/inherited/unverified/locator" },
+          });
 
-        // Undefined preparation means "scrub any inherited value" — never
-        // "keep whatever the terminal had".
-        assert.equal(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR], undefined);
-      }),
+          // Undefined preparation means "scrub any inherited value" — never
+          // "keep whatever the terminal had".
+          assert.equal(env[SYNARA_PI_SUBAGENT_ARTIFACT_DIR], undefined);
+        }),
     );
 
     it.effect("scrubs a whitespace-only inherited locator for non-server-launching modes", () =>

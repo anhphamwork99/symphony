@@ -160,15 +160,16 @@ export function createSettlementObserver(options?: {
     const family = open;
     if (family === null) return null;
     open = null;
-    if (family.lastCallbackSequence !== null) lastSettledCallbackSequence = family.lastCallbackSequence;
+    if (family.lastCallbackSequence !== null)
+      lastSettledCallbackSequence = family.lastCallbackSequence;
     if (forcedReason !== undefined || family.uncertainReason !== null) {
       return {
         ...result(
-        family.family,
-        family.startFingerprint,
-        endSnapshot,
-        "uncertain",
-        forcedReason ?? family.uncertainReason!,
+          family.family,
+          family.startFingerprint,
+          endSnapshot,
+          "uncertain",
+          forcedReason ?? family.uncertainReason!,
         ),
         trace: Object.freeze([...family.trace]),
       };
@@ -176,13 +177,13 @@ export function createSettlementObserver(options?: {
     const changed = family.startFingerprint !== endSnapshot.semanticFingerprint;
     return {
       ...result(
-      family.family,
-      family.startFingerprint,
-      endSnapshot,
-      changed ? "changed" : "no-op",
-      changed
-        ? "final canonical projection differs from the pre-mutation start"
-        : "final canonical projection equals the pre-mutation start",
+        family.family,
+        family.startFingerprint,
+        endSnapshot,
+        changed ? "changed" : "no-op",
+        changed
+          ? "final canonical projection differs from the pre-mutation start"
+          : "final canonical projection equals the pre-mutation start",
       ),
       trace: Object.freeze([...family.trace]),
     };
@@ -207,8 +208,18 @@ export function createSettlementObserver(options?: {
     };
   };
 
-  const markUncertain = (reason: string, snapshot: SynaraDocumentSnapshot): SynaraSettlementResult | null => {
-    if (open === null) return result("generic-native-command", snapshot.semanticFingerprint, snapshot, "uncertain", reason);
+  const markUncertain = (
+    reason: string,
+    snapshot: SynaraDocumentSnapshot,
+  ): SynaraSettlementResult | null => {
+    if (open === null)
+      return result(
+        "generic-native-command",
+        snapshot.semanticFingerprint,
+        snapshot,
+        "uncertain",
+        reason,
+      );
     open = {
       ...open,
       uncertainReason: open.uncertainReason ?? reason,
@@ -243,12 +254,23 @@ export function createSettlementObserver(options?: {
       }
 
       if (input.kind === "pointer-down") {
-        if (open !== null) return markUncertain("overlapping human settlement families", input.snapshot);
+        if (open !== null)
+          return markUncertain("overlapping human settlement families", input.snapshot);
         openFamily("pointer-gesture", input.snapshot);
         return null;
       }
-      if (input.kind === "pointer-up" || input.kind === "pointer-cancel" || input.kind === "pointer-lost-capture") {
-        if (open?.family === "pointer-gesture") open = { ...open, pointerTerminated: true, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+      if (
+        input.kind === "pointer-up" ||
+        input.kind === "pointer-cancel" ||
+        input.kind === "pointer-lost-capture"
+      ) {
+        if (open?.family === "pointer-gesture")
+          open = {
+            ...open,
+            pointerTerminated: true,
+            latestSnapshot: input.snapshot,
+            trace: [...open.trace, input.kind],
+          };
         return null;
       }
       if (input.kind === "keyboard-candidate") {
@@ -260,48 +282,72 @@ export function createSettlementObserver(options?: {
             family: "discrete-keyboard-mutation",
             trace: [...open.trace, "promoted-to-keyboard-family"],
           };
-        }
-        else if (open.family !== "discrete-keyboard-mutation") return markUncertain("overlapping human settlement families", input.snapshot);
+        } else if (open.family !== "discrete-keyboard-mutation")
+          return markUncertain("overlapping human settlement families", input.snapshot);
         return null;
       }
       if (input.kind === "keyboard-keyup") {
-        if (open?.family === "discrete-keyboard-mutation") open = { ...open, keyboardTerminated: true, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+        if (open?.family === "discrete-keyboard-mutation")
+          open = {
+            ...open,
+            keyboardTerminated: true,
+            latestSnapshot: input.snapshot,
+            trace: [...open.trace, input.kind],
+          };
         return null;
       }
       if (input.kind === "text-edit-active" || input.kind === "composition-start") {
         if (open === null) openFamily("text-edit-composition", input.snapshot);
-        else if (
-          open.family === "generic-native-command" ||
-          open.family === "pointer-gesture"
-        ) {
+        else if (open.family === "generic-native-command" || open.family === "pointer-gesture") {
           open = {
             ...open,
             family: "text-edit-composition",
             trace: [...open.trace, "promoted-to-text-family"],
           };
-        }
-        else if (open.family !== "text-edit-composition") return markUncertain("overlapping human settlement families", input.snapshot);
-        if (open !== null) open = { ...open, compositionStarted: open.compositionStarted || input.kind === "composition-start", latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+        } else if (open.family !== "text-edit-composition")
+          return markUncertain("overlapping human settlement families", input.snapshot);
+        if (open !== null)
+          open = {
+            ...open,
+            compositionStarted: open.compositionStarted || input.kind === "composition-start",
+            latestSnapshot: input.snapshot,
+            trace: [...open.trace, input.kind],
+          };
         return null;
       }
       if (input.kind === "composition-end") {
-        if (open?.family === "text-edit-composition") open = { ...open, compositionEnded: true, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+        if (open?.family === "text-edit-composition")
+          open = {
+            ...open,
+            compositionEnded: true,
+            latestSnapshot: input.snapshot,
+            trace: [...open.trace, input.kind],
+          };
         return null;
       }
       if (input.kind === "text-edit-inactive") {
-        if (open?.family === "text-edit-composition") open = { ...open, textInactive: true, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+        if (open?.family === "text-edit-composition")
+          open = {
+            ...open,
+            textInactive: true,
+            latestSnapshot: input.snapshot,
+            trace: [...open.trace, input.kind],
+          };
         return null;
       }
       if (input.kind === "semantic-callback") {
         if (open === null) {
-          if (input.beforeSnapshot === undefined) return markUncertain("missing pre-mutation start snapshot", input.snapshot);
+          if (input.beforeSnapshot === undefined)
+            return markUncertain("missing pre-mutation start snapshot", input.snapshot);
           openFamily("generic-native-command", input.beforeSnapshot);
-        } else if (![
-          "generic-native-command",
-          "pointer-gesture",
-          "discrete-keyboard-mutation",
-          "text-edit-composition",
-        ].includes(open.family)) {
+        } else if (
+          ![
+            "generic-native-command",
+            "pointer-gesture",
+            "discrete-keyboard-mutation",
+            "text-edit-composition",
+          ].includes(open.family)
+        ) {
           return markUncertain("overlapping human settlement families", input.snapshot);
         }
         open = {
@@ -309,13 +355,17 @@ export function createSettlementObserver(options?: {
           callbackCount: open!.callbackCount + 1,
           lastCallbackSequence: input.adapterCallbackSequence ?? open!.lastCallbackSequence,
           latestSnapshot: input.snapshot,
-          trace: [...open!.trace, `${input.kind}${input.adapterCallbackSequence === undefined ? "" : `#${input.adapterCallbackSequence}`}`],
+          trace: [
+            ...open!.trace,
+            `${input.kind}${input.adapterCallbackSequence === undefined ? "" : `#${input.adapterCallbackSequence}`}`,
+          ],
         };
         return null;
       }
       // Presentation, focus, and composition updates are observable but not
       // mutation termination. Keep the latest projection for diagnostics.
-      if (open !== null) open = { ...open, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
+      if (open !== null)
+        open = { ...open, latestSnapshot: input.snapshot, trace: [...open.trace, input.kind] };
       return null;
     },
     forceSettle(reason) {
@@ -324,8 +374,10 @@ export function createSettlementObserver(options?: {
     },
     settle(endSnapshot) {
       if (open === null) return null;
-      if (!isTerminated()) return close(endSnapshot, "required public termination was not observed");
-      if (Date.now() - open.openedAt > maxWaitMs) return close(endSnapshot, "human settlement exceeded the bounded drain deadline");
+      if (!isTerminated())
+        return close(endSnapshot, "required public termination was not observed");
+      if (Date.now() - open.openedAt > maxWaitMs)
+        return close(endSnapshot, "human settlement exceeded the bounded drain deadline");
       return close(endSnapshot);
     },
     hasOpenFamily() {

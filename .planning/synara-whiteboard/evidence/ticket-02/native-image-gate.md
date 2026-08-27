@@ -151,13 +151,13 @@ The package file cache may retain an unreferenced file after deletion; the Gate'
 
 ## Native history state matrix
 
-| Stage | Element/file closure | Official SVG | Official PNG | AI history |
-|---|---|---|---|---|
-| Initial drop | Exactly one image; complete normalized closure; selected | Embedded image present | Decodable; all sentinel colors present | 0 events, unlocked |
-| User Delete | No active image/reference | No image payload | Sentinel colors absent | 0 events, unlocked |
-| Native Undo | Same element ID, file ID, normalized hash, dimensions, MIME, colors | Image payload restored | All sentinel colors restored | 0 events, unlocked |
-| Native Redo | No active image/reference | No image payload | Sentinel colors absent | 0 events, unlocked |
-| Second native Undo | Same element ID, file ID, normalized hash, dimensions, MIME, colors | Image payload restored again | All sentinel colors restored again | 0 events, unlocked |
+| Stage              | Element/file closure                                                | Official SVG                 | Official PNG                           | AI history         |
+| ------------------ | ------------------------------------------------------------------- | ---------------------------- | -------------------------------------- | ------------------ |
+| Initial drop       | Exactly one image; complete normalized closure; selected            | Embedded image present       | Decodable; all sentinel colors present | 0 events, unlocked |
+| User Delete        | No active image/reference                                           | No image payload             | Sentinel colors absent                 | 0 events, unlocked |
+| Native Undo        | Same element ID, file ID, normalized hash, dimensions, MIME, colors | Image payload restored       | All sentinel colors restored           | 0 events, unlocked |
+| Native Redo        | No active image/reference                                           | No image payload             | Sentinel colors absent                 | 0 events, unlocked |
+| Second native Undo | Same element ID, file ID, normalized hash, dimensions, MIME, colors | Image payload restored again | All sentinel colors restored again     | 0 events, unlocked |
 
 The user-deletion path focuses the real editor, selects the inserted image through a real pointer click on the interactive canvas, then presses `{Delete}` through public `userEvent.keyboard`.
 
@@ -169,10 +169,10 @@ Every state asserts Synara AI history remains at zero events with lock state `un
 
 Both ports were checked free before execution. Both runs used candidate `c37dbf1b3f8ccc8cc6fc2ad16057a1fb337247a2`, separate logs, Bash `set -o pipefail`, and explicit `${PIPESTATUS[0]}` capture.
 
-| Run | Port | Result | Test count | Log SHA-256 |
-|---|---:|---:|---:|---|
-| A | `52631` | exit `0` | 1/1 pass | `dcfee7fed0e106ca6f165cdc33cfa47c456a1819237df572cbb5b55a0ac62189` |
-| B | `52642` | exit `0` | 1/1 pass | `10b37aca3b6e57b0a8b4389c3f6c7dcc73623a00f5b6516fd4ec0f9a3ca88e5c` |
+| Run |    Port |   Result | Test count | Log SHA-256                                                        |
+| --- | ------: | -------: | ---------: | ------------------------------------------------------------------ |
+| A   | `52631` | exit `0` |   1/1 pass | `dcfee7fed0e106ca6f165cdc33cfa47c456a1819237df572cbb5b55a0ac62189` |
+| B   | `52642` | exit `0` |   1/1 pass | `10b37aca3b6e57b0a8b4389c3f6c7dcc73623a00f5b6516fd4ec0f9a3ca88e5c` |
 
 Command shape:
 

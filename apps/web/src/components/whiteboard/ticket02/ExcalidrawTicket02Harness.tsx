@@ -17,10 +17,7 @@ import type {
   SynaraSceneObservation,
 } from "../ticket01/SynaraExcalidrawAdapter";
 import { SynaraAiHistoryActions } from "./SynaraAiHistoryActions";
-import {
-  SynaraAiHistoryCoordinator,
-  type SynaraAiHistoryHost,
-} from "./SynaraAiHistoryCoordinator";
+import { SynaraAiHistoryCoordinator, type SynaraAiHistoryHost } from "./SynaraAiHistoryCoordinator";
 import {
   captureDocumentSnapshot,
   documentSnapshotsEqual,
@@ -115,10 +112,7 @@ export const ExcalidrawTicket02Harness = forwardRef<
   const pendingAdapterDiagnosticsRef = useRef<SynaraExcalidrawDiagnostic[]>([]);
   const [, rerender] = useState(0);
 
-  const getAdapter = useCallback(
-    () => adapterRef.current ?? unavailable("adapter"),
-    [],
-  );
+  const getAdapter = useCallback(() => adapterRef.current ?? unavailable("adapter"), []);
 
   const ensureCoordinator = useCallback((): SynaraAiHistoryCoordinator => {
     if (coordinatorRef.current !== null) return coordinatorRef.current;
@@ -151,15 +145,14 @@ export const ExcalidrawTicket02Harness = forwardRef<
   const scheduleSettlement = useCallback(() => {
     if (settlementScheduledRef.current) return;
     settlementScheduledRef.current = true;
-    settlementPromiseRef.current = settlementPromiseRef.current.then(
-      () =>
-        ensureCoordinator()
-          .settleHumanMutation()
-          .then(() => undefined)
-          .finally(() => {
+    settlementPromiseRef.current = settlementPromiseRef.current.then(() =>
+      ensureCoordinator()
+        .settleHumanMutation()
+        .then(() => undefined)
+        .finally(() => {
           settlementScheduledRef.current = false;
           rerender((value) => value + 1);
-          }),
+        }),
     );
   }, [ensureCoordinator]);
 
@@ -249,23 +242,20 @@ export const ExcalidrawTicket02Harness = forwardRef<
     [ensureCoordinator, snapshotNow],
   );
 
-  const onAdapterDiagnostic = useCallback(
-    (diagnostic: SynaraExcalidrawDiagnostic) => {
-      const coordinator = coordinatorRef.current;
-      if (coordinator === null) {
-        pendingAdapterDiagnosticsRef.current.push(diagnostic);
-      } else if (REQUIRED_ADAPTER_CODES.has(diagnostic.code as SynaraHistoryDiagnosticCode)) {
-        coordinator.recordAdapterDiagnostic({
-          code: diagnostic.code as SynaraHistoryDiagnosticCode,
-          phase: diagnostic.phase,
-          expected: diagnostic.expected,
-          observed: diagnostic.observed,
-        });
-      }
-      rerender((value) => value + 1);
-    },
-    [],
-  );
+  const onAdapterDiagnostic = useCallback((diagnostic: SynaraExcalidrawDiagnostic) => {
+    const coordinator = coordinatorRef.current;
+    if (coordinator === null) {
+      pendingAdapterDiagnosticsRef.current.push(diagnostic);
+    } else if (REQUIRED_ADAPTER_CODES.has(diagnostic.code as SynaraHistoryDiagnosticCode)) {
+      coordinator.recordAdapterDiagnostic({
+        code: diagnostic.code as SynaraHistoryDiagnosticCode,
+        phase: diagnostic.phase,
+        expected: diagnostic.expected,
+        observed: diagnostic.observed,
+      });
+    }
+    rerender((value) => value + 1);
+  }, []);
 
   const observePointer = useCallback(
     (kind: "pointer-down" | "pointer-up" | "pointer-cancel") => {
@@ -301,7 +291,8 @@ export const ExcalidrawTicket02Harness = forwardRef<
         openHumanFamilyRef.current = "text";
         coordinator.observeSettlementInput({ kind: "text-edit-active", snapshot });
       }
-      const candidate = key === "Delete" || key === "Backspace" || (primaryModifier && /[zy]/i.test(key));
+      const candidate =
+        key === "Delete" || key === "Backspace" || (primaryModifier && /[zy]/i.test(key));
       if (!candidate || editingTextRef.current) return;
       const coordinator = ensureCoordinator();
       const snapshot = snapshotNow();
@@ -424,8 +415,7 @@ export const ExcalidrawTicket02Harness = forwardRef<
     onDiagnostic: onAdapterDiagnostic,
     onSceneObservation,
     onPointerActivity: observePointer,
-    onKeyboardActivity: (kind, key, primaryModifier) =>
-      observeKeyboard(kind, key, primaryModifier),
+    onKeyboardActivity: (kind, key, primaryModifier) => observeKeyboard(kind, key, primaryModifier),
     onCompositionActivity: observeComposition,
     onFocusActivity: () => observePresentation("focus"),
     onPresentationActivity: observePresentation,
@@ -465,7 +455,14 @@ export const ExcalidrawTicket02Harness = forwardRef<
         data-ticket02-cancelled-pointer-probe="true"
         onPointerDown={() => observePointer("pointer-down")}
         onPointerCancel={() => observePointer("pointer-cancel")}
-        style={{ height: 1, opacity: 0, overflow: "hidden", padding: 0, position: "absolute", width: 1 }}
+        style={{
+          height: 1,
+          opacity: 0,
+          overflow: "hidden",
+          padding: 0,
+          position: "absolute",
+          width: 1,
+        }}
       />
       <Suspense fallback={<div data-ticket02-status="loading">Loading whiteboard editor…</div>}>
         <LazyAdapter ref={adapterRef} {...adapterProps} />

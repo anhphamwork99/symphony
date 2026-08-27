@@ -62,9 +62,11 @@ const render = (cards: ReadonlyArray<PiSubagentExecutionCard>) =>
   );
 
 function dotGridOpeningTag(markup: string, state: "animated" | "static"): string {
-  return markup.match(
-    new RegExp(`<span class="[^"]*"[^>]*data-pi-subagent-dot-grid="${state}"[^>]*>`),
-  )?.[0] ?? "";
+  return (
+    markup.match(
+      new RegExp(`<span class="[^"]*"[^>]*data-pi-subagent-dot-grid="${state}"[^>]*>`),
+    )?.[0] ?? ""
+  );
 }
 
 describe("PiSubagentExecutionCardStrip", () => {

@@ -473,9 +473,7 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
         "realpi_sibling",
       );
       expect(siblingRefusal.isError).toBe(true);
-      expect(siblingRefusal.diagnosticCode).toBe(
-        "pi_subagent_read_unauthorized_or_out_of_scope",
-      );
+      expect(siblingRefusal.diagnosticCode).toBe("pi_subagent_read_unauthorized_or_out_of_scope");
       assertNoPublicAgentId(JSON.parse(JSON.stringify(siblingRefusal)));
       expect(harness.observedExtensionSteerEmissions()).toHaveLength(1);
       trace.push("sibling-refused-without-extension-emission");
@@ -495,8 +493,7 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
         harness
           .observedLifecycleNotifications()
           .filter(
-            (event) =>
-              event.executionId === identity.executionId && event.journalSequence === 40,
+            (event) => event.executionId === identity.executionId && event.journalSequence === 40,
           ),
       ).toHaveLength(0);
       expect(await harness.durable.getCompletionOutboxEntry(identity.executionId)).toBeUndefined();
@@ -525,14 +522,15 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
         observedState: "running",
       });
       expect(
-        (await harness.durable.listJournalEvents(identity.executionId)).map((event) => event.sequence),
+        (await harness.durable.listJournalEvents(identity.executionId)).map(
+          (event) => event.sequence,
+        ),
       ).toEqual([1, 2, 3]);
       expect(
         harness
           .observedLifecycleNotifications()
           .filter(
-            (event) =>
-              event.executionId === identity.executionId && event.journalSequence === 40,
+            (event) => event.executionId === identity.executionId && event.journalSequence === 40,
           ),
       ).toHaveLength(0);
       expect(await harness.durable.getCompletionOutboxEntry(identity.executionId)).toBeUndefined();
@@ -542,9 +540,7 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
         "realpi_retired_after_failure",
       );
       expect(retiredAfterFailure.isError).toBe(true);
-      expect(retiredAfterFailure.diagnosticCode).toBe(
-        "pi_subagent_live_lifecycle_unavailable",
-      );
+      expect(retiredAfterFailure.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
       assertNoPublicAgentId(JSON.parse(JSON.stringify(retiredAfterFailure)));
       expect(harness.observedExtensionSteerEmissions()).toHaveLength(1);
       trace.push(
@@ -580,8 +576,7 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
         () => harness.observedLifecycleNotifications(),
         (events) =>
           events.some(
-            (event) =>
-              event.executionId === identity.executionId && event.journalSequence === 40,
+            (event) => event.executionId === identity.executionId && event.journalSequence === 40,
           ),
         "post-retry lifecycle notification",
       );
@@ -624,8 +619,9 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
 
       const observedCounts = {
         admissions: harness.observedAdmissions().length,
-        delegatedModelRequests: harness.modelServer.requests().filter((request) => request.delegated)
-          .length,
+        delegatedModelRequests: harness.modelServer
+          .requests()
+          .filter((request) => request.delegated).length,
         supervisorSpawns: harness.observedSupervisorSpawnPids().length,
         extensionSteerEmissions: harness.observedExtensionSteerEmissions().length,
         providerTerminalCommitAttempts: terminalCommitAttempts,
@@ -666,7 +662,10 @@ describe.sequential("Ticket 03 isolated real-Pi lifecycle containment acceptance
       harness.modelServer.releaseSlowResponses();
       try {
         await Promise.allSettled([
-          settleBounded(turnStart?.catch(() => undefined), "real-Pi owner turn"),
+          settleBounded(
+            turnStart?.catch(() => undefined),
+            "real-Pi owner turn",
+          ),
           ownerThreadId === undefined
             ? Promise.resolve()
             : settleBounded(

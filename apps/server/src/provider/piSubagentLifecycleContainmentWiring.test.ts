@@ -409,9 +409,7 @@ describe("Pi subagent lifecycle containment wiring (Ticket 03 / WP-02)", () => {
       expect(probe.steerProviderCalls.count).toBe(0);
       expect(preSeq2.isError).toBe(true);
       expect(preSeq2.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
-      expect(String(preSeq2.content[0]?.text)).toContain(
-        "pi_subagent_live_lifecycle_unavailable",
-      );
+      expect(String(preSeq2.content[0]?.text)).toContain("pi_subagent_live_lifecycle_unavailable");
 
       // The durable seq2 `started` commit happens only through the
       // observation seam (reportObservation); before it, the journal holds

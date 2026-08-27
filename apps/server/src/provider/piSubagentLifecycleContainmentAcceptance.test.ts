@@ -252,7 +252,10 @@ describe("Ticket 03 controlled-Alfie live lifecycle containment acceptance", () 
       harness.modelServer.releaseSlowResponses();
       try {
         await Promise.allSettled([
-          settleBounded(turnStart?.catch(() => undefined), "controlled owner turn"),
+          settleBounded(
+            turnStart?.catch(() => undefined),
+            "controlled owner turn",
+          ),
           ownerThreadId === undefined
             ? Promise.resolve()
             : settleBounded(

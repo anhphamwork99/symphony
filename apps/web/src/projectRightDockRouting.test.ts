@@ -267,9 +267,7 @@ describe("Project-owned dock routing — deep-link bootstrap scoping", () => {
     expect(b.ownerProjectId).toBe(projectB);
     expect(appliedKeyB).not.toBe(appliedKeyA);
     expect(
-      useRightDockStore.getState().dockStateByProjectId[projectB]!.panes.map(
-        (pane) => pane.kind,
-      ),
+      useRightDockStore.getState().dockStateByProjectId[projectB]!.panes.map((pane) => pane.kind),
     ).toEqual(["browser"]);
     // Project A's dock is untouched by B's application.
     expect(

@@ -100,10 +100,7 @@ function canonicalizeValue(value: unknown, active: WeakSet<object>): unknown {
     }
     if (value instanceof Map) {
       return [...value.entries()]
-        .map(([key, nested]) => [
-          canonicalizeValue(key, active),
-          canonicalizeValue(nested, active),
-        ])
+        .map(([key, nested]) => [canonicalizeValue(key, active), canonicalizeValue(nested, active)])
         .toSorted(([left], [right]) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
     }
     if (value instanceof Set) {
@@ -185,8 +182,7 @@ export function canonicalSemanticProjection(
       // metadata and can be stale/malformed; never confuse it with fileId.
       return {
         fileId,
-        mimeType:
-          typeof record.mimeType === "string" ? record.mimeType : null,
+        mimeType: typeof record.mimeType === "string" ? record.mimeType : null,
         created:
           typeof record.created === "number" && Number.isFinite(record.created)
             ? record.created
@@ -254,7 +250,9 @@ export function toSceneSnapshot(snapshot: SynaraDocumentSnapshot): SynaraSceneSn
   const thawed = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(thawed);
     if (isPlainObject(value)) {
-      return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, thawed(nested)]));
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [key, thawed(nested)]),
+      );
     }
     return value;
   };

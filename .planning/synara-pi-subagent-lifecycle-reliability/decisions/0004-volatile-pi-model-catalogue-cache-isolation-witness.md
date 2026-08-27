@@ -127,7 +127,7 @@ isolation failure.
    fingerprint:** rejected because a provider catalogue cache is volatile
    ambient state and can change as a normal side effect of model discovery;
    doing so would conflate cache churn with user/configuration mutation.
-2. **Exclude all of `agent/**`, all model files, or every JSON file:**
+2. **Exclude all of `agent/**`, all model files, or every JSON file:\*\*
    rejected because it hides sensitive configuration, extension/skill
    mutation, sibling leakage, and artifact contamination.
 3. **Ignore any cache mutation or accept any cache entry type:** rejected.

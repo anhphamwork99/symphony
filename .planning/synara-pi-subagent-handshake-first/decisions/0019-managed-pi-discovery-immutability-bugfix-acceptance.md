@@ -111,8 +111,7 @@ The accepted bugfix preserves the following binding invariants:
   authority, non-terminal uncertainty, explicit-only Resume, and durable
   execution-card truth remain unchanged; and
 - the broader web/dev boundary remains governed by Decision 0018, while the
-  original packaged desktop production chain remains governed by Decision
-  0017.
+  original packaged desktop production chain remains governed by Decision 0017.
 
 ## Accepted residuals
 

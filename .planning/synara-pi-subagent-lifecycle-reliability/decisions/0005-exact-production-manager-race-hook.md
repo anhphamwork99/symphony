@@ -75,7 +75,7 @@ SYNARA_PI_SUBAGENT_INTERNAL_TEST_RUN_ID=<per-run nonce>
 It is registered at:
 
 ```ts
-Symbol.for("pi-subagents:internal-test:canonical-steer-race-v1")
+Symbol.for("pi-subagents:internal-test:canonical-steer-race-v1");
 ```
 
 Missing, malformed, or mismatched gate values expose no hook. The hook is not a

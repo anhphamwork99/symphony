@@ -21,15 +21,15 @@ it does not select or authorize an implementation.
 
 ### Criterion-level evidence
 
-| Criterion | Grounding result | Exact evidence locators |
-| --- | --- | --- |
-| T01-AC1 | **PASS.** Symphony base is `a7827cae7` (the Project Home routing base; this worktree was clean before the planning edit). Pinned Alfie is commit `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`; the isolated Alfie checkout was clean. | Project Home routing metadata; `git rev-parse HEAD`; `/Users/anhpham99/alfie` `git rev-parse HEAD` and `git status --porcelain`; Symphony `apps/server/src/provider/Layers/PiAdapter.ts:4174-4235,4268-4435`. |
-| T01-AC2 | **PASS.** The detached public result exposes durable `executionId`, while hidden/provider details also retain provider-local `agentId`. Pinned Alfie `get_subagent_result` and `steer_subagent` use the strict `agentId`-keyed Manager map; passing the public execution identity therefore yields `Agent not found`. The child may continue, so this is an identity/read-continuity failure, not termination proof. | Alfie `agent/extensions/pi-subagents/src/index.ts:1284-1287,2080-2089,2227-2255,2333-2377`; `agent/extensions/pi-subagents/src/agent-manager.ts:326`; `agent/extensions/pi-subagents/src/agent-runner.ts:388-625`; supporting incident [research/001](../research/001-live-incident-and-current-seam-map.md). |
-| T01-AC3 | **PASS.** Durable admission, terminal/outbox, restart, watchdog, and owned teardown seams are mapped, including watchdog bands 70–74, teardown bands 75–78, and proof-before-fence. | Symphony `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts:715-1125`; `apps/server/src/provider/piSubagentRestartReconciliation.ts:21-56,183-482`; `apps/server/src/provider/piSubagentWatchdogEscalation.ts:21-59,196-238`; `apps/server/src/provider/piSubagentProcessTeardown.ts:15-65,205-265`. |
-| T01-AC4 | **PASS.** The matrix below covers active progress, terminal success/failure, provider-record eviction, restart orphaning, stale evidence, unauthorized reads/controls, inactive-provider Resume, and cleanup uncertainty. | Matrix in [Failure and diagnostic matrix](#failure-and-diagnostic-matrix); durable identity/event contracts at `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts:18-20,72-76,196-207,262-290,510-560,595-628,676-686`. |
-| T01-AC5 | **PASS.** Settled invariants are separated from open gates and the four candidate directions are retained without selection. | [Decision classification](#decision-classification); [research/002](../research/002-candidate-solution-contract.md). |
-| T01-AC6 | **PASS.** Ticket-02 delegation inputs, required decision questions, minimum test seams, and failure/diagnostic assertions are recorded below and in the named handoff. | [Downstream delegation inputs](#downstream-delegation-inputs); [handoff](../handoffs/01-canonical-identity-decision-gate.md). |
-| T01-AC7 | **PASS.** No Symphony source, test, configuration, Alfie, or other project file was edited. | [No-source scope audit](#no-source-scope-audit); final planning-only diff. |
+| Criterion | Grounding result                                                                                                                                                                                                                                                                                                                                                                                                     | Exact evidence locators                                                                                                                                                                                                                                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| T01-AC1   | **PASS.** Symphony base is `a7827cae7` (the Project Home routing base; this worktree was clean before the planning edit). Pinned Alfie is commit `aa6fa4a8540644d2509b10d6df854486ddc67d1d`, `@alfie/pi-subagents@0.15.0-alfie.4`; the isolated Alfie checkout was clean.                                                                                                                                            | Project Home routing metadata; `git rev-parse HEAD`; `/Users/anhpham99/alfie` `git rev-parse HEAD` and `git status --porcelain`; Symphony `apps/server/src/provider/Layers/PiAdapter.ts:4174-4235,4268-4435`.                                                                                                            |
+| T01-AC2   | **PASS.** The detached public result exposes durable `executionId`, while hidden/provider details also retain provider-local `agentId`. Pinned Alfie `get_subagent_result` and `steer_subagent` use the strict `agentId`-keyed Manager map; passing the public execution identity therefore yields `Agent not found`. The child may continue, so this is an identity/read-continuity failure, not termination proof. | Alfie `agent/extensions/pi-subagents/src/index.ts:1284-1287,2080-2089,2227-2255,2333-2377`; `agent/extensions/pi-subagents/src/agent-manager.ts:326`; `agent/extensions/pi-subagents/src/agent-runner.ts:388-625`; supporting incident [research/001](../research/001-live-incident-and-current-seam-map.md).            |
+| T01-AC3   | **PASS.** Durable admission, terminal/outbox, restart, watchdog, and owned teardown seams are mapped, including watchdog bands 70–74, teardown bands 75–78, and proof-before-fence.                                                                                                                                                                                                                                  | Symphony `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts:715-1125`; `apps/server/src/provider/piSubagentRestartReconciliation.ts:21-56,183-482`; `apps/server/src/provider/piSubagentWatchdogEscalation.ts:21-59,196-238`; `apps/server/src/provider/piSubagentProcessTeardown.ts:15-65,205-265`. |
+| T01-AC4   | **PASS.** The matrix below covers active progress, terminal success/failure, provider-record eviction, restart orphaning, stale evidence, unauthorized reads/controls, inactive-provider Resume, and cleanup uncertainty.                                                                                                                                                                                            | Matrix in [Failure and diagnostic matrix](#failure-and-diagnostic-matrix); durable identity/event contracts at `apps/server/src/persistence/Services/PiSubagentExecutionRepository.ts:18-20,72-76,196-207,262-290,510-560,595-628,676-686`.                                                                              |
+| T01-AC5   | **PASS.** Settled invariants are separated from open gates and the four candidate directions are retained without selection.                                                                                                                                                                                                                                                                                         | [Decision classification](#decision-classification); [research/002](../research/002-candidate-solution-contract.md).                                                                                                                                                                                                     |
+| T01-AC6   | **PASS.** Ticket-02 delegation inputs, required decision questions, minimum test seams, and failure/diagnostic assertions are recorded below and in the named handoff.                                                                                                                                                                                                                                               | [Downstream delegation inputs](#downstream-delegation-inputs); [handoff](../handoffs/01-canonical-identity-decision-gate.md).                                                                                                                                                                                            |
+| T01-AC7   | **PASS.** No Symphony source, test, configuration, Alfie, or other project file was edited.                                                                                                                                                                                                                                                                                                                          | [No-source scope audit](#no-source-scope-audit); final planning-only diff.                                                                                                                                                                                                                                               |
 
 ### Incident and identity finding
 
@@ -66,66 +66,66 @@ fabricated here.
 
 ### Current and target seam summary
 
-| Concern | Current seam / evidence | Target contract input (not implementation) |
-| --- | --- | --- |
-| Public identity | Detached result renders `executionId`; provider details retain `agentId`. | Bind one public logical identity, or an explicit bounded compatibility mapping, before Ticket 02 implementation. |
-| Live result/control | Alfie `get_subagent_result` / `steer_subagent` look up `agentId` in the Manager map. | Define whether provider calls alias/map to `executionId`, or whether Symphony exposes a durable LLM-callable read/control boundary. |
-| Durable continuity | Symphony persists `executionId`, attempt, generation, lifecycle, terminal, outbox, restart, watchdog, and teardown evidence. | Authorized, bounded reads must survive provider-record eviction/restart when terminal evidence exists and must remain honest when it does not. |
-| Terminal/cleanup | Journal/outbox and bands 70–78 preserve uncertainty; restart is read-only and can settle orphan. | Keep terminal outcome separate from cleanup proof; preserve proof-before-fence and stale-generation diagnostics. |
-| Resume/runtime | Runtime inactivity can cause an offered Resume to reject. | Explicit Resume must be authorized and eligibility-gated; no bootstrap/replay is implied by this report. |
+| Concern             | Current seam / evidence                                                                                                      | Target contract input (not implementation)                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public identity     | Detached result renders `executionId`; provider details retain `agentId`.                                                    | Bind one public logical identity, or an explicit bounded compatibility mapping, before Ticket 02 implementation.                               |
+| Live result/control | Alfie `get_subagent_result` / `steer_subagent` look up `agentId` in the Manager map.                                         | Define whether provider calls alias/map to `executionId`, or whether Symphony exposes a durable LLM-callable read/control boundary.            |
+| Durable continuity  | Symphony persists `executionId`, attempt, generation, lifecycle, terminal, outbox, restart, watchdog, and teardown evidence. | Authorized, bounded reads must survive provider-record eviction/restart when terminal evidence exists and must remain honest when it does not. |
+| Terminal/cleanup    | Journal/outbox and bands 70–78 preserve uncertainty; restart is read-only and can settle orphan.                             | Keep terminal outcome separate from cleanup proof; preserve proof-before-fence and stale-generation diagnostics.                               |
+| Resume/runtime      | Runtime inactivity can cause an offered Resume to reject.                                                                    | Explicit Resume must be authorized and eligibility-gated; no bootstrap/replay is implied by this report.                                       |
 
 ### Failure and diagnostic matrix
 
-| Scenario | Evidence/current behavior | Required truth/diagnostic for downstream contract |
-| --- | --- | --- |
-| Active progress | Live progress is reported through managed execution observations while the child remains active; a public result read can fail on identity mismatch without stopping progress. | Read/control failure must not be rendered as terminal; progress and identity must remain correlated by execution/attempt/generation. |
-| Terminal success | Terminal/outbox repository seam exists; provider result is available only while its Manager record is resolvable. | Durable terminal evidence must be readable by authorized `executionId` after provider eviction. |
-| Terminal failure | Alfie runtime status/error is provider-local; Symphony terminal evidence is separately journaled. | Preserve failure status and diagnostic; never fabricate successful output or cleanup proof. |
-| Provider record eviction | Strict `manager.getRecord(agent_id)` returns `Agent not found` after the in-memory record is absent. | Distinguish missing live record from missing durable evidence; bounded durable fallback is a decision gate. |
-| Restart orphaning | Restart reconciliation does not dispatch; without terminal or proven owner evidence it records an honest orphan/uncertainty path. | Keep `owner_unproven` fail-closed and diagnostic; do not auto-replay or auto-Resume. |
-| Stale evidence | Attempt/generation are carried through durable records and stale-generation outcomes. | Reject stale reads/controls deterministically without changing the logical execution identity. |
-| Unauthorized read/control | Authorization remains a required repository/service boundary; no public identity choice may weaken it. | Stable bounded denial diagnostic; no identity alias may bypass auth or project/thread scope. |
-| Inactive provider Resume | Resume can be offered and then rejected when provider runtime is inactive. | Eligibility must be checked before offering/dispatching; absence must remain actionable and truthful. |
-| Cleanup uncertainty | Watchdog bands 70–74 and teardown bands 75–78 record uncertainty; proof-before-fence prevents treating it as termination proof. | `cleanup_uncertain`, `survivors`, and `owner_unproven` stay separate from terminal `cancelled`/success. |
-| Missing server exit reason | Incident evidence lacks a durable root exit reason. | Report unknown/unconfirmed, not a guessed cause; add diagnostics only through a later accepted contract. |
+| Scenario                   | Evidence/current behavior                                                                                                                                                      | Required truth/diagnostic for downstream contract                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Active progress            | Live progress is reported through managed execution observations while the child remains active; a public result read can fail on identity mismatch without stopping progress. | Read/control failure must not be rendered as terminal; progress and identity must remain correlated by execution/attempt/generation. |
+| Terminal success           | Terminal/outbox repository seam exists; provider result is available only while its Manager record is resolvable.                                                              | Durable terminal evidence must be readable by authorized `executionId` after provider eviction.                                      |
+| Terminal failure           | Alfie runtime status/error is provider-local; Symphony terminal evidence is separately journaled.                                                                              | Preserve failure status and diagnostic; never fabricate successful output or cleanup proof.                                          |
+| Provider record eviction   | Strict `manager.getRecord(agent_id)` returns `Agent not found` after the in-memory record is absent.                                                                           | Distinguish missing live record from missing durable evidence; bounded durable fallback is a decision gate.                          |
+| Restart orphaning          | Restart reconciliation does not dispatch; without terminal or proven owner evidence it records an honest orphan/uncertainty path.                                              | Keep `owner_unproven` fail-closed and diagnostic; do not auto-replay or auto-Resume.                                                 |
+| Stale evidence             | Attempt/generation are carried through durable records and stale-generation outcomes.                                                                                          | Reject stale reads/controls deterministically without changing the logical execution identity.                                       |
+| Unauthorized read/control  | Authorization remains a required repository/service boundary; no public identity choice may weaken it.                                                                         | Stable bounded denial diagnostic; no identity alias may bypass auth or project/thread scope.                                         |
+| Inactive provider Resume   | Resume can be offered and then rejected when provider runtime is inactive.                                                                                                     | Eligibility must be checked before offering/dispatching; absence must remain actionable and truthful.                                |
+| Cleanup uncertainty        | Watchdog bands 70–74 and teardown bands 75–78 record uncertainty; proof-before-fence prevents treating it as termination proof.                                                | `cleanup_uncertain`, `survivors`, and `owner_unproven` stay separate from terminal `cancelled`/success.                              |
+| Missing server exit reason | Incident evidence lacks a durable root exit reason.                                                                                                                            | Report unknown/unconfirmed, not a guessed cause; add diagnostics only through a later accepted contract.                             |
 
 ### Decision classification
 
 **Confirmed / accepted facts**
 
 - `executionId` is the intended durable public identity, with `attemptId` and
-generation for stale-event fencing.
+  generation for stale-event fencing.
 - The public/hidden Alfie identity mismatch and strict GET_RESULT failure are
-confirmed; GET_RESULT and steer are `agentId`-Map operations.
+  confirmed; GET_RESULT and steer are `agentId`-Map operations.
 - Durable admission, lifecycle, terminal/outbox, restart, watchdog, and teardown
-seams exist; bands 70–78 and proof-before-fence semantics remain in force.
+  seams exist; bands 70–78 and proof-before-fence semantics remain in force.
 - Detached records are not prematurely GC'd; provider-record absence is not
-terminal proof.
+  terminal proof.
 - Restart orphan / `owner_unproven` is the accepted fail-closed outcome when
-proof is unavailable; no automatic replay or Resume is accepted.
+  proof is unavailable; no automatic replay or Resume is accepted.
 
 **Intentional / preserved boundaries**
 
 - No source, Alfie, test, configuration, public API, or runtime behavior is
-changed by Ticket 01.
+  changed by Ticket 01.
 - Provider-local `agentId` remains a correlation detail unless a later decision
-binds a compatibility mapping.
+  binds a compatibility mapping.
 - Terminal outcome, cleanup proof, owner proof, authorization, and runtime
-eligibility remain separate axes.
+  eligibility remain separate axes.
 - One integrated review and exactly one Supervisor final acceptance govern the
-whole project; this report is not an architecture decision.
+  whole project; this report is not an architecture decision.
 
 **Unconfirmed / material open questions**
 
 - The server-exit root cause is unconfirmed because durable exit reason is
-missing.
+  missing.
 - The exact public identity/read contract is not selected: minimal visible
-`agentId`/text fix, an `executionId` alias in Alfie, and/or a Symphony durable
-LLM-callable result tool remain alternatives for Supervisor consultation.
+  `agentId`/text fix, an `executionId` alias in Alfie, and/or a Symphony durable
+  LLM-callable result tool remain alternatives for Supervisor consultation.
 - The exact post-eviction result payload, partial-output semantics, live
-containment boundary, and inactive-runtime Resume eligibility remain open.
+  containment boundary, and inactive-runtime Resume eligibility remain open.
 - Crash guardian, orphan-terminal exception, durable post-restart owner receipt,
-and provider-bootstrap Resume remain candidate directions only.
+  and provider-bootstrap Resume remain candidate directions only.
 
 ### Downstream delegation inputs
 

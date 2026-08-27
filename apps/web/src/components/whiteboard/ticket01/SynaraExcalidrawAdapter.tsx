@@ -672,7 +672,11 @@ export class SynaraSyntheticScopeRegistry {
             `${record.context.mountIdentity}/${record.context.apiIdentity}`,
             `${identity.mountIdentity}/${identity.apiIdentity}`,
           ],
-          ["stale-session-epoch", String(record.context.sessionEpoch), String(identity.sessionEpoch)],
+          [
+            "stale-session-epoch",
+            String(record.context.sessionEpoch),
+            String(identity.sessionEpoch),
+          ],
           ["stale-route-epoch", String(record.context.routeEpoch), String(identity.routeEpoch)],
           [
             "stale-mutation-revision",

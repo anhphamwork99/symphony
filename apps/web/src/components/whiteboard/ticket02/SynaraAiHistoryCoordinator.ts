@@ -38,7 +38,12 @@ export interface SynaraAiHistoryHost {
   readonly clearNativeHistory: () => void;
   readonly setViewModeEnabled: (enabled: boolean) => void;
   readonly openSyntheticWriteScope: (context: {
-    readonly purpose: "ai-batch-progress" | "ai-batch-finalize" | "ai-undo" | "ai-redo" | "rollback";
+    readonly purpose:
+      | "ai-batch-progress"
+      | "ai-batch-finalize"
+      | "ai-undo"
+      | "ai-redo"
+      | "rollback";
     readonly canvasIdentity: string;
     readonly mountIdentity: string;
     readonly apiIdentity: string;
@@ -343,10 +348,7 @@ export class SynaraAiHistoryCoordinator {
       }
       await batch.scope.close();
       this.assertOperationLock("ai-batch", "ai-batch-complete");
-      if (
-        batch.acceptedSyntheticWriteCount === 0 ||
-        documentSnapshotsEqual(batch.before, after)
-      ) {
+      if (batch.acceptedSyntheticWriteCount === 0 || documentSnapshotsEqual(batch.before, after)) {
         this.activeBatch = null;
         this.host.setViewModeEnabled(false);
         this.lockState = "unlocked";
@@ -492,7 +494,9 @@ export class SynaraAiHistoryCoordinator {
       this.host.setViewModeEnabled(false);
       this.lockState = "unlocked";
       push("lock-released");
-      this.traces.push(Object.freeze({ command, eventId: event.id, steps: Object.freeze(traceSteps) }));
+      this.traces.push(
+        Object.freeze({ command, eventId: event.id, steps: Object.freeze(traceSteps) }),
+      );
       return true;
     } catch (error) {
       scope.abort(error instanceof Error ? error.message : String(error));
@@ -505,7 +509,8 @@ export class SynaraAiHistoryCoordinator {
     command: "undo-ai-batch" | "redo-ai-batch",
     reportFailure: boolean,
   ): SynaraAiHistoryEvent | null {
-    const event = command === "undo-ai-batch" ? this.events[this.cursor - 1] : this.events[this.cursor];
+    const event =
+      command === "undo-ai-batch" ? this.events[this.cursor - 1] : this.events[this.cursor];
     const expectedSide = command === "undo-ai-batch" ? "after" : "before";
     const invalid =
       this.lockState !== "unlocked" ||
@@ -524,7 +529,8 @@ export class SynaraAiHistoryCoordinator {
     if (reportFailure) {
       this.report("coordinator", "cursor-not-actionable", {
         phase: command,
-        message: "current identity, lineage, cursor, revision side, and projection must be actionable",
+        message:
+          "current identity, lineage, cursor, revision side, and projection must be actionable",
         expected: `${expectedSide} side of one cursor-selected AI event`,
         observed: `lock=${this.lockState}, cursor=${this.cursor}, events=${this.events.length}, side=${this.applicableSide?.side ?? "none"}`,
         ...(event === undefined ? {} : { eventId: event.id }),

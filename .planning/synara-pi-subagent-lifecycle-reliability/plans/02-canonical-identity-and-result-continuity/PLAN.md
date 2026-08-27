@@ -139,26 +139,26 @@ routes Ticket 03 as the next frontier pending DG-3/DG-4 disposition.
 
 ## Dependency graph and work packages
 
-| Order | Work package | Repository | Depends on | Owns |
-| --- | --- | --- | --- | --- |
-| 01 | [Alfie canonical live routing](WP-01-alfie-canonical-live-routing.md) | `/Users/anhpham99/alfie` | none | exact tuple index, managed public shape, canonical/alias inputs, live result/control seam, extension tests, package version `0.15.0-alfie.5`, one immutable Alfie commit |
-| 02 | [Symphony durable read contract](WP-02-symphony-durable-read-contract.md) | Symphony | WP-01 contract shape | authorized durable lookup, current-tuple/fencing, terminal precedence, bounded read result/diagnostics, repository/read tests |
-| 03 | [Symphony managed-tool routing](WP-03-symphony-managed-tool-routing.md) | Symphony | WP-02 and WP-01 | capability gate, managed adapter dispatch, live supplement/steer routing, legacy isolation, integration tests |
-| 04 | [Provenance re-pin](WP-04-provenance-repin.md) | Symphony | WP-01 immutable Alfie commit/version and WP-03 candidate | **complete** — exact `ALFIE_T02_COMMIT`/version, provenance manifest, hashes, and bounded pin/capability fixture reconciliation |
-| 05 | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md) | Symphony | WP-04 | **complete** — active fixture reconciliation, isolated real-Pi F5 proof, evidence split, and Issue 02 Implementation Report |
+| Order | Work package                                                              | Repository               | Depends on                                               | Owns                                                                                                                                                                     |
+| ----- | ------------------------------------------------------------------------- | ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 01    | [Alfie canonical live routing](WP-01-alfie-canonical-live-routing.md)     | `/Users/anhpham99/alfie` | none                                                     | exact tuple index, managed public shape, canonical/alias inputs, live result/control seam, extension tests, package version `0.15.0-alfie.5`, one immutable Alfie commit |
+| 02    | [Symphony durable read contract](WP-02-symphony-durable-read-contract.md) | Symphony                 | WP-01 contract shape                                     | authorized durable lookup, current-tuple/fencing, terminal precedence, bounded read result/diagnostics, repository/read tests                                            |
+| 03    | [Symphony managed-tool routing](WP-03-symphony-managed-tool-routing.md)   | Symphony                 | WP-02 and WP-01                                          | capability gate, managed adapter dispatch, live supplement/steer routing, legacy isolation, integration tests                                                            |
+| 04    | [Provenance re-pin](WP-04-provenance-repin.md)                            | Symphony                 | WP-01 immutable Alfie commit/version and WP-03 candidate | **complete** — exact `ALFIE_T02_COMMIT`/version, provenance manifest, hashes, and bounded pin/capability fixture reconciliation                                          |
+| 05    | [Real-Pi acceptance and report](WP-05-real-pi-acceptance-and-report.md)   | Symphony                 | WP-04                                                    | **complete** — active fixture reconciliation, isolated real-Pi F5 proof, evidence split, and Issue 02 Implementation Report                                              |
 
 No WP may be started out of order, and no WP may modify another WP's owned files without a reported dependency repair.
 
 ## Acceptance traceability
 
-| Ticket criterion | Required proof | Owning WP(s) |
-| --- | --- | --- |
-| T02-AC1 canonical public identity | detached output/details/result/diagnostic use only `executionId`; tuple stable; provider `agentId` absent | WP-01, WP-03, WP-05 |
-| T02-AC2 exact routing and compatibility | `execution_id`; bounded observable alias equal-only; exact tuple index; provider `agentId` rejection | WP-01, WP-03, WP-05 |
-| T02-AC3 durable-first authorized continuity | auth/scope/current tuple before provider; terminal precedence; eviction/restart fallback | WP-02, WP-03, WP-05 |
-| T02-AC4 live supplement and control | exact live supplement only; missing-live durable fallback; unavailable exact-live steer; no replay/bootstrap | WP-01, WP-02, WP-03, WP-05 |
-| T02-AC5 failure/fencing/legacy | stale, unauthorized, missing evidence, oversized, unavailable control, capability failure, legacy bypass | WP-02, WP-03, WP-05 |
-| T02-AC6 evidence/provenance | deterministic + controlled Alfie + isolated real-Pi evidence, exact pins and reports | WP-04, WP-05 |
+| Ticket criterion                            | Required proof                                                                                               | Owning WP(s)               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| T02-AC1 canonical public identity           | detached output/details/result/diagnostic use only `executionId`; tuple stable; provider `agentId` absent    | WP-01, WP-03, WP-05        |
+| T02-AC2 exact routing and compatibility     | `execution_id`; bounded observable alias equal-only; exact tuple index; provider `agentId` rejection         | WP-01, WP-03, WP-05        |
+| T02-AC3 durable-first authorized continuity | auth/scope/current tuple before provider; terminal precedence; eviction/restart fallback                     | WP-02, WP-03, WP-05        |
+| T02-AC4 live supplement and control         | exact live supplement only; missing-live durable fallback; unavailable exact-live steer; no replay/bootstrap | WP-01, WP-02, WP-03, WP-05 |
+| T02-AC5 failure/fencing/legacy              | stale, unauthorized, missing evidence, oversized, unavailable control, capability failure, legacy bypass     | WP-02, WP-03, WP-05        |
+| T02-AC6 evidence/provenance                 | deterministic + controlled Alfie + isolated real-Pi evidence, exact pins and reports                         | WP-04, WP-05               |
 
 Each evidence row must identify normal and failure directions, exact command, exit code/test count, and source locator. A passing compile/typecheck alone is not evidence.
 

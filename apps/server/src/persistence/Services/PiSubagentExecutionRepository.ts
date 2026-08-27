@@ -759,7 +759,10 @@ export interface PiSubagentExecutionRepositoryShape {
   /** Ticket 02 durable aggregate + terminal evidence read, side-effect free. */
   readonly getExecutionReadSnapshot?: (
     executionId: string,
-  ) => Effect.Effect<Option.Option<PiSubagentExecutionReadSnapshot>, PiSubagentExecutionRepositoryError>;
+  ) => Effect.Effect<
+    Option.Option<PiSubagentExecutionReadSnapshot>,
+    PiSubagentExecutionRepositoryError
+  >;
   readonly getByCommandId: (
     commandId: string,
   ) => Effect.Effect<Option.Option<PiSubagentExecutionRecord>, PiSubagentExecutionRepositoryError>;

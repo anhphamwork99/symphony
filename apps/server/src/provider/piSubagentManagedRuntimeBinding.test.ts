@@ -42,7 +42,9 @@ const bridgeWith = (handshake: (request: PiSubagentHandshakeRequest) => unknown)
 
 describe("PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES", () => {
   it("is exactly the mandatory desktop profile in spec order", () => {
-    expect([...PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES]).toEqual([...REQUIRED_CAPABILITIES]);
+    expect([...PI_SUBAGENT_DESKTOP_MANAGED_REQUIRED_CAPABILITIES]).toEqual([
+      ...REQUIRED_CAPABILITIES,
+    ]);
   });
 
   it("contains only closed-vocabulary capabilities", () => {

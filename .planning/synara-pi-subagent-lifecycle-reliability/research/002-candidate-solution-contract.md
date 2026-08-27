@@ -17,17 +17,17 @@ This is a candidate contract to test, not an implementation authorization.
 
 ## Candidate directions requiring gates
 
-| Direction | Potential benefit | Material risk / gate |
-| --- | --- | --- |
-| canonical `executionId` alias at provider boundary | fixes public/read mismatch with small surface | alias may hide incompatible provider record semantics; DG-1/G2 |
-| durable-terminal-first result read | survives Manager eviction/restart for terminal work | must bound payloads, preserve auth, and distinguish partial output; DG-2 |
-| terminal-before-cleanup ordering | prevents cleanup uncertainty from erasing outcome | must settle same-generation races and preserve bands 70–78; DG-3 |
-| live lifecycle containment adapter | keeps progress/control truthful while provider lives | cannot create kill authority or claim owner from stale evidence; DG-4 |
-| truthful Resume eligibility | avoids offer-then-reject UX and replay ambiguity | provider bootstrap may become hidden automatic replay; DG-5 |
-| crash guardian | may improve observation after disconnect | ownership, liveness, and scope can become a new unaccepted authority; DG-6 |
-| orphan-terminal exception | may reduce visible orphan states | risks fabricating terminal truth from uncertainty; DG-6 |
-| durable post-restart owner receipt | may improve restart cleanup | receipt cannot replace live identity-capturing owner proof; DG-4/6 |
-| provider-bootstrap Resume | may restore inactive runtime | risks turning recovery into automatic side-effect replay; DG-5 |
+| Direction                                          | Potential benefit                                    | Material risk / gate                                                       |
+| -------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| canonical `executionId` alias at provider boundary | fixes public/read mismatch with small surface        | alias may hide incompatible provider record semantics; DG-1/G2             |
+| durable-terminal-first result read                 | survives Manager eviction/restart for terminal work  | must bound payloads, preserve auth, and distinguish partial output; DG-2   |
+| terminal-before-cleanup ordering                   | prevents cleanup uncertainty from erasing outcome    | must settle same-generation races and preserve bands 70–78; DG-3           |
+| live lifecycle containment adapter                 | keeps progress/control truthful while provider lives | cannot create kill authority or claim owner from stale evidence; DG-4      |
+| truthful Resume eligibility                        | avoids offer-then-reject UX and replay ambiguity     | provider bootstrap may become hidden automatic replay; DG-5                |
+| crash guardian                                     | may improve observation after disconnect             | ownership, liveness, and scope can become a new unaccepted authority; DG-6 |
+| orphan-terminal exception                          | may reduce visible orphan states                     | risks fabricating terminal truth from uncertainty; DG-6                    |
+| durable post-restart owner receipt                 | may improve restart cleanup                          | receipt cannot replace live identity-capturing owner proof; DG-4/6         |
+| provider-bootstrap Resume                          | may restore inactive runtime                         | risks turning recovery into automatic side-effect replay; DG-5             |
 
 ## Required contract tests before design acceptance
 

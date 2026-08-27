@@ -16,19 +16,13 @@ import {
   type SynaraSyntheticTraceEntry,
   type SynaraViewport,
 } from "../ticket01/SynaraExcalidrawAdapter";
-import {
-  SynaraAiHistoryCoordinator,
-  type SynaraAiHistoryHost,
-} from "./SynaraAiHistoryCoordinator";
+import { SynaraAiHistoryCoordinator, type SynaraAiHistoryHost } from "./SynaraAiHistoryCoordinator";
 import {
   captureDocumentSnapshot,
   documentSnapshotsEqual,
   semanticFingerprint,
 } from "./SynaraDocumentSnapshot";
-import {
-  createSettlementObserver,
-  settleFamily,
-} from "./SynaraHumanMutationSettlement";
+import { createSettlementObserver, settleFamily } from "./SynaraHumanMutationSettlement";
 
 function element(progress = 0) {
   return {
@@ -135,9 +129,11 @@ describe("Ticket 02 deep canonical document snapshot", () => {
     (source.selectedElementIds as string[]).push("other");
 
     expect(
-      ((snapshot.elements[0] as Record<string, unknown>).customData as {
-        nested: { retained: boolean };
-      }).nested.retained,
+      (
+        (snapshot.elements[0] as Record<string, unknown>).customData as {
+          nested: { retained: boolean };
+        }
+      ).nested.retained,
     ).toBe(true);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.elements)).toBe(true);
@@ -227,7 +223,9 @@ describe("Ticket 02 adapter-owned opaque synthetic scope", () => {
     expect(syntheticSequence.current).toBe(1);
     expect(registry.tombstoneCount).toBe(1);
     locked = false;
-    expect(registry.associate(2, "delayed-target")).toMatchObject({ kind: "duplicate-after-close" });
+    expect(registry.associate(2, "delayed-target")).toMatchObject({
+      kind: "duplicate-after-close",
+    });
     await closing;
     horizonMs = 0;
     expect(registry.associate(3, "delayed-target")).toMatchObject({
@@ -350,7 +348,11 @@ describe("Ticket 02 AI-only coordinator", () => {
     });
     const before = captureDocumentSnapshot(host.current);
     const viewport = host.captureViewport();
-    await coordinator.beginAiOperation({ batchId: "batch-1", operationId: "op-1", operationGeneration: 1 });
+    await coordinator.beginAiOperation({
+      batchId: "batch-1",
+      operationId: "op-1",
+      operationGeneration: 1,
+    });
     for (const sequence of [1, 2, 3]) {
       coordinator.applyAiProgress({
         batchId: "batch-1",
@@ -420,7 +422,11 @@ describe("Ticket 02 AI-only coordinator", () => {
       canvasIdentity: "canvas-1",
       scenario: "unit-stale-generation",
     });
-    await coordinator.beginAiOperation({ batchId: "batch", operationId: "op", operationGeneration: 2 });
+    await coordinator.beginAiOperation({
+      batchId: "batch",
+      operationId: "op",
+      operationGeneration: 2,
+    });
     expect(() =>
       coordinator.applyAiProgress({
         batchId: "batch",
@@ -453,7 +459,11 @@ describe("Ticket 02 AI-only coordinator", () => {
       scenario: "unit-human-settlement",
       settlementMaxWaitMs: 100,
     });
-    await coordinator.beginAiOperation({ batchId: "batch", operationId: "op", operationGeneration: 1 });
+    await coordinator.beginAiOperation({
+      batchId: "batch",
+      operationId: "op",
+      operationGeneration: 1,
+    });
     coordinator.applyAiProgress({
       batchId: "batch",
       operationGeneration: 1,

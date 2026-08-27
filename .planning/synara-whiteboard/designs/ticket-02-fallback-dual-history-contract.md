@@ -74,20 +74,20 @@ The Synara labels are always exactly:
 
 They must not be shortened to `AI Undo`, `Undo AI`, `Undo changes`, or `Undo`.
 
-| State | Visible label | Tooltip / accessible description |
-| --- | --- | --- |
-| AI Undo enabled | `Undo AI batch` | `Undo the latest AI batch. Manual undo is separate.` |
-| AI Redo enabled | `Redo AI batch` | `Redo the last undone AI batch. Manual redo is separate.` |
-| Empty Undo | `Undo AI batch` | `No AI batch to undo.` |
-| Empty Redo | `Redo AI batch` | `No AI batch to redo.` |
-| Cleared by human mutation | `Undo AI batch` | `Unavailable because manual edits started after the AI change.` |
-| Redo cleared by human mutation | `Redo AI batch` | `Unavailable because manual edits started after the undone AI change.` |
-| Redo cleared by new AI batch | `Redo AI batch` | `Unavailable because a new AI batch replaced the redo branch.` |
-| AI operation active or Take Over pending | both unchanged | `Available after the agent finishes or Take Over is confirmed.` |
-| Undo running | `Undoing AI batch…` | `Undoing the latest AI batch.` |
-| Redo running | `Redoing AI batch…` | `Redoing the last undone AI batch.` |
-| Recoverable restore error | normal label | `AI batch was not undone. Try again.` / `AI batch was not redone. Try again.` |
-| Faulted recovery or unrestored canvas | normal label | `Unavailable while Whiteboard recovery needs attention.` / `Unavailable until the Whiteboard is restored.` |
+| State                                    | Visible label       | Tooltip / accessible description                                                                           |
+| ---------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| AI Undo enabled                          | `Undo AI batch`     | `Undo the latest AI batch. Manual undo is separate.`                                                       |
+| AI Redo enabled                          | `Redo AI batch`     | `Redo the last undone AI batch. Manual redo is separate.`                                                  |
+| Empty Undo                               | `Undo AI batch`     | `No AI batch to undo.`                                                                                     |
+| Empty Redo                               | `Redo AI batch`     | `No AI batch to redo.`                                                                                     |
+| Cleared by human mutation                | `Undo AI batch`     | `Unavailable because manual edits started after the AI change.`                                            |
+| Redo cleared by human mutation           | `Redo AI batch`     | `Unavailable because manual edits started after the undone AI change.`                                     |
+| Redo cleared by new AI batch             | `Redo AI batch`     | `Unavailable because a new AI batch replaced the redo branch.`                                             |
+| AI operation active or Take Over pending | both unchanged      | `Available after the agent finishes or Take Over is confirmed.`                                            |
+| Undo running                             | `Undoing AI batch…` | `Undoing the latest AI batch.`                                                                             |
+| Redo running                             | `Redoing AI batch…` | `Redoing the last undone AI batch.`                                                                        |
+| Recoverable restore error                | normal label        | `AI batch was not undone. Try again.` / `AI batch was not redone. Try again.`                              |
+| Faulted recovery or unrestored canvas    | normal label        | `Unavailable while Whiteboard recovery needs attention.` / `Unavailable until the Whiteboard is restored.` |
 
 AI controls use `aria-disabled="true"`, not native HTML `disabled`, so the unavailable action remains discoverable and its exact reason can be announced. Activation while unavailable is inert. Persistent recoverable diagnostics include **Try again** and **Copy diagnostics**; a critical diagnostic says:
 
@@ -298,33 +298,33 @@ A same-instance Main-conversation switch clears unsent chips and selection accor
 
 All rows require the real pinned Excalidraw embed in stable Chromium. Native-control observation is test-only; it must not become a runtime DOM dependency.
 
-| Scenario | Required sequence | Required assertions |
-| --- | --- | --- |
-| Native route and focus | Human pointer edit, Delete, text edit, native toolbar Undo/Redo, native platform shortcuts | No Synara AI event; native route changes human content; text-edit Undo is not redirected; native shortcuts remain package-owned. |
-| AI lock | Progressive AI update; attempt native toolbar, pointer edit, native Undo/Redo shortcuts, and accessibility activation during streaming/Take Over pending | No native document mutation; pan/zoom remain usable; both routes unlock only after completion, acknowledgement, or failure containment. |
-| AI outcomes | Completed, acknowledged Take Over partial, failed-partial, and zero-valid failure | Each mutated outcome creates exactly one AI event; progressive checkpoints and zero-valid outcomes create none; dedicated AI Undo/Redo are exact. |
-| Cross-route invalidation | `H1 → A1 → AI Undo → native Redo`; `A1 → AI Undo → H2 → AI Redo`; `H1 → native Undo → A2` | Every committed AI boundary clears all native history; first settled semantic human mutation clears all AI history; stale branches cannot mutate content. |
-| Synthetic restore fence | AI Undo/Redo with delayed/duplicate callbacks and revision/epoch changes | Every write uses `captureUpdate: NEVER`; synthetic callbacks cannot become human events; unknown provenance fails closed; cursor advances only after verification. |
-| No-op and settlement | Selection/pan/zoom; cancelled pointer gesture; multi-callback gesture; Delete; text-edit session | Proven no-ops preserve AI Redo; one settled semantic human mutation clears AI history; raw callback count is not the event model; uncertain settlement takes conservative invalidation. |
-| Assets and failure | AI image batch Undo/Redo; missing/invalid binary; semantic mismatch; rollback failure; SVG/PNG export | Required assets are preflighted; AI image references/export are exact; failures make no partial claim; rollback/lock diagnostics are explicit. |
-| Native image gate | Human image add/delete/native Undo/Redo and export | Native image recovery either proves meaningful file references and export or the native exact-image promise remains narrowed/unaccepted. |
-| Cap and lifecycle | 21 AI events; 21 human events; remount/eviction; duplicate/import; restart/reload; same-instance conversation switch | Newest 20 AI events remain; no native cap claim; both routes empty at reset boundaries; same-instance conversation switch preserves history. |
-| Accessibility | 200% zoom, constrained width, keyboard-only, screen reader, Focus mode | Named `AI history` toolbar; exact labels/reasons; `aria-disabled`; Enter/Space and standard toolbar navigation; focus and announcements remain predictable. |
+| Scenario                 | Required sequence                                                                                                                                        | Required assertions                                                                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native route and focus   | Human pointer edit, Delete, text edit, native toolbar Undo/Redo, native platform shortcuts                                                               | No Synara AI event; native route changes human content; text-edit Undo is not redirected; native shortcuts remain package-owned.                                                        |
+| AI lock                  | Progressive AI update; attempt native toolbar, pointer edit, native Undo/Redo shortcuts, and accessibility activation during streaming/Take Over pending | No native document mutation; pan/zoom remain usable; both routes unlock only after completion, acknowledgement, or failure containment.                                                 |
+| AI outcomes              | Completed, acknowledged Take Over partial, failed-partial, and zero-valid failure                                                                        | Each mutated outcome creates exactly one AI event; progressive checkpoints and zero-valid outcomes create none; dedicated AI Undo/Redo are exact.                                       |
+| Cross-route invalidation | `H1 → A1 → AI Undo → native Redo`; `A1 → AI Undo → H2 → AI Redo`; `H1 → native Undo → A2`                                                                | Every committed AI boundary clears all native history; first settled semantic human mutation clears all AI history; stale branches cannot mutate content.                               |
+| Synthetic restore fence  | AI Undo/Redo with delayed/duplicate callbacks and revision/epoch changes                                                                                 | Every write uses `captureUpdate: NEVER`; synthetic callbacks cannot become human events; unknown provenance fails closed; cursor advances only after verification.                      |
+| No-op and settlement     | Selection/pan/zoom; cancelled pointer gesture; multi-callback gesture; Delete; text-edit session                                                         | Proven no-ops preserve AI Redo; one settled semantic human mutation clears AI history; raw callback count is not the event model; uncertain settlement takes conservative invalidation. |
+| Assets and failure       | AI image batch Undo/Redo; missing/invalid binary; semantic mismatch; rollback failure; SVG/PNG export                                                    | Required assets are preflighted; AI image references/export are exact; failures make no partial claim; rollback/lock diagnostics are explicit.                                          |
+| Native image gate        | Human image add/delete/native Undo/Redo and export                                                                                                       | Native image recovery either proves meaningful file references and export or the native exact-image promise remains narrowed/unaccepted.                                                |
+| Cap and lifecycle        | 21 AI events; 21 human events; remount/eviction; duplicate/import; restart/reload; same-instance conversation switch                                     | Newest 20 AI events remain; no native cap claim; both routes empty at reset boundaries; same-instance conversation switch preserves history.                                            |
+| Accessibility            | 200% zoom, constrained width, keyboard-only, screen reader, Focus mode                                                                                   | Named `AI history` toolbar; exact labels/reasons; `aria-disabled`; Enter/Space and standard toolbar navigation; focus and announcements remain predictable.                             |
 
 ## 13. Accepted replacement of promises — Decision 0055
 
 The following original promises are removed or replaced by Decision 0055:
 
-| Superseded promise | Accepted fallback replacement |
-| --- | --- |
-| Human and AI edits share one ordered Undo/Redo history. | Native human history and Synara AI-batch history are separate routes with route epochs; no shared cursor is claimed. |
-| Toolbar Undo, toolbar Redo, and `Cmd/Ctrl+Z` use one coherent route. | Package-native human controls/shortcuts remain native; Synara uses only visible `Undo AI batch` / `Redo AI batch` actions. |
-| Every open canvas has a combined maximum of 20 events with oldest-event eviction. | Only Synara AI history has a 20-finalized-AI-event cap; native capacity is package-defined and unclaimed. |
-| A generic new-edit-after-Undo rule applies globally. | A settled semantic human mutation clears all AI history; a new mutated AI batch after AI Undo clears only the AI Redo branch; native package branching remains native. |
-| AI Undo remains available after arbitrary later human edits. | The first settled semantic human mutation clears AI Undo and Redo to prevent stale full-snapshot overwrite. |
-| Native human image Undo/Redo is exact. | Native exact image recovery is a browser-gated promise; until proven, it is narrowed/unaccepted. AI image recovery remains exact by asset preflight and verification. |
-| Undo history survives remount or bounded-instance eviction. | Both routes reset on remount/eviction, reload, restart, and new identity; current durable content follows existing persistence rules. |
-| `Cmd/Ctrl+Z` undoes the most recent AI batch. | Native shortcuts undo only package-owned human history; AI recovery is explicit and labeled. |
+| Superseded promise                                                                | Accepted fallback replacement                                                                                                                                          |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Human and AI edits share one ordered Undo/Redo history.                           | Native human history and Synara AI-batch history are separate routes with route epochs; no shared cursor is claimed.                                                   |
+| Toolbar Undo, toolbar Redo, and `Cmd/Ctrl+Z` use one coherent route.              | Package-native human controls/shortcuts remain native; Synara uses only visible `Undo AI batch` / `Redo AI batch` actions.                                             |
+| Every open canvas has a combined maximum of 20 events with oldest-event eviction. | Only Synara AI history has a 20-finalized-AI-event cap; native capacity is package-defined and unclaimed.                                                              |
+| A generic new-edit-after-Undo rule applies globally.                              | A settled semantic human mutation clears all AI history; a new mutated AI batch after AI Undo clears only the AI Redo branch; native package branching remains native. |
+| AI Undo remains available after arbitrary later human edits.                      | The first settled semantic human mutation clears AI Undo and Redo to prevent stale full-snapshot overwrite.                                                            |
+| Native human image Undo/Redo is exact.                                            | Native exact image recovery is a browser-gated promise; until proven, it is narrowed/unaccepted. AI image recovery remains exact by asset preflight and verification.  |
+| Undo history survives remount or bounded-instance eviction.                       | Both routes reset on remount/eviction, reload, restart, and new identity; current durable content follows existing persistence rules.                                  |
+| `Cmd/Ctrl+Z` undoes the most recent AI batch.                                     | Native shortcuts undo only package-owned human history; AI recovery is explicit and labeled.                                                                           |
 
 The following obligations remain unchanged in substance for AI work: one event per mutated completed/interrupted/failed-partial batch; no progressive user-visible checkpoints; exact AI scene/file restoration; explicit failure/rollback behavior; no durable Version history; no private or undocumented integration.
 

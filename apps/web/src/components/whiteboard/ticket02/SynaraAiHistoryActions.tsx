@@ -28,7 +28,9 @@ export function SynaraAiHistoryActions(props: SynaraAiHistoryActionsProps) {
       <button
         type="button"
         aria-label={UNDO_LABEL}
-        title={undoEnabled ? "Undo the latest AI batch. Manual undo is separate." : props.undoReason}
+        title={
+          undoEnabled ? "Undo the latest AI batch. Manual undo is separate." : props.undoReason
+        }
         aria-disabled={!undoEnabled}
         data-ticket02-action="undo-ai-batch"
         data-ticket02-reason={props.undoReason}
@@ -42,7 +44,9 @@ export function SynaraAiHistoryActions(props: SynaraAiHistoryActionsProps) {
       <button
         type="button"
         aria-label={REDO_LABEL}
-        title={redoEnabled ? "Redo the last undone AI batch. Manual redo is separate." : props.redoReason}
+        title={
+          redoEnabled ? "Redo the last undone AI batch. Manual redo is separate." : props.redoReason
+        }
         aria-disabled={!redoEnabled}
         data-ticket02-action="redo-ai-batch"
         data-ticket02-reason={props.redoReason}

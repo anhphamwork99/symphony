@@ -145,7 +145,9 @@ export function createPiSubagentManagedHandshakeRequest(): PiSubagentHandshakeRe
   return {
     ...base,
     requiredCapabilities,
-    optionalCapabilities: PI_SUBAGENT_CAPABILITIES.filter((capability) => !required.has(capability)),
+    optionalCapabilities: PI_SUBAGENT_CAPABILITIES.filter(
+      (capability) => !required.has(capability),
+    ),
   };
 }
 
@@ -171,10 +173,7 @@ export async function negotiatePiSubagentManagedBridge(
 
 export type PiSubagentManagedToolName = "get_subagent_result" | "steer_subagent";
 
-export type PiSubagentManagedToolReadService = Pick<
-  PiSubagentExecutionReadService,
-  "readResult"
->;
+export type PiSubagentManagedToolReadService = Pick<PiSubagentExecutionReadService, "readResult">;
 
 export interface PiSubagentManagedToolRouterOptions {
   readonly readService: PiSubagentManagedToolReadService;
@@ -219,8 +218,7 @@ function containsProviderIdentity(value: unknown, seen = new Set<object>()): boo
   seen.add(value);
   if (Array.isArray(value)) return value.some((item) => containsProviderIdentity(item, seen));
   return Object.entries(value).some(
-    ([key, entry]) =>
-      PROVIDER_IDENTITY_PATTERN.test(key) || containsProviderIdentity(entry, seen),
+    ([key, entry]) => PROVIDER_IDENTITY_PATTERN.test(key) || containsProviderIdentity(entry, seen),
   );
 }
 
@@ -377,9 +375,9 @@ interface ManagedControlRunContext {
  *   pi_subagent_managed_execution_unavailable_live` → `markUnavailable(provider_inactive)`;
  * - a valid bounded controlled success object → `markAccepted` then the
  *   value flows through post-response revalidation;
-   * - anything malformed, any other error shape, or a throw → conservative
-   *   outcome-unknown via `markAccepted` followed by failure classification
-   *   (an effect may have linearized; zero-effect is never claimed).
+ * - anything malformed, any other error shape, or a throw → conservative
+ *   outcome-unknown via `markAccepted` followed by failure classification
+ *   (an effect may have linearized; zero-effect is never claimed).
  */
 async function classifyAndRunManagedControl(
   toolCallId: string,
@@ -400,10 +398,10 @@ async function classifyAndRunManagedControl(
     );
   } catch {
     // The provider transport threw after the call was issued. An effect may
-      // have linearized; the conservative bounded classification is outcome
-      // unknown, never a zero-effect claim.
-      context.markAccepted();
-      throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+    // have linearized; the conservative bounded classification is outcome
+    // unknown, never a zero-effect claim.
+    context.markAccepted();
+    throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
   }
   if (
     providerResult?.isError === true &&
@@ -415,9 +413,9 @@ async function classifyAndRunManagedControl(
   }
   if (providerResult?.isError === true) {
     // Any other provider error after dispatch may follow a linearized
-      // effect, so it stays conservative outcome-unknown.
-      context.markAccepted();
-      throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+    // effect, so it stays conservative outcome-unknown.
+    context.markAccepted();
+    throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
   }
   if (isBoundedControlledSuccess(providerResult)) {
     // Decision 0003: the managed steer insertion boundary is synchronous and
@@ -427,9 +425,9 @@ async function classifyAndRunManagedControl(
     return providerResult;
   }
   // Malformed response: acceptance may have occurred before the malformed
-    // payload was produced, so this stays conservative outcome-unknown too.
-    context.markAccepted();
-    throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
+  // payload was produced, so this stays conservative outcome-unknown too.
+  context.markAccepted();
+  throw new Error("pi_subagent_live_lifecycle_outcome_unknown");
 }
 
 /**
@@ -480,11 +478,11 @@ async function observeManagedResult(
     // bounded unavailable snapshot, not outcome-unknown.
     throw new Error("pi_subagent_live_lifecycle_unavailable");
   }
-    if (providerResult?.isError === true) {
-      if (providerResult?.diagnosticCode === MANAGED_LIVE_UNAVAILABLE_CODE) {
-        markUnavailable("provider_inactive");
-      }
-      throw new Error("pi_subagent_live_lifecycle_unavailable");
+  if (providerResult?.isError === true) {
+    if (providerResult?.diagnosticCode === MANAGED_LIVE_UNAVAILABLE_CODE) {
+      markUnavailable("provider_inactive");
+    }
+    throw new Error("pi_subagent_live_lifecycle_unavailable");
   }
   if (!isBoundedControlledSuccess(providerResult)) {
     throw new Error("pi_subagent_live_lifecycle_unavailable");
@@ -538,10 +536,7 @@ export function wrapPiSubagentManagedTool(
     );
     if (durable._tag === "Failure") {
       const code = readFailureCode(durable.failure);
-      return managedRoutingFailure(
-        code,
-        `Managed execution read rejected [${code}].`,
-      );
+      return managedRoutingFailure(code, `Managed execution read rejected [${code}].`);
     }
     const read = durable.success;
     const terminal = read.terminalState !== null && read.terminalState !== undefined;
@@ -636,10 +631,7 @@ export function wrapPiSubagentManagedTool(
             : liveResult.status === "stale"
               ? "stale response ignored"
               : "unavailable";
-        return managedRoutingFailure(
-          code,
-          `Managed live lifecycle ${classification} [${code}].`,
-        );
+        return managedRoutingFailure(code, `Managed live lifecycle ${classification} [${code}].`);
       }
       providerResult = liveResult.value;
     } else {
