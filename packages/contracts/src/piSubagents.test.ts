@@ -28,6 +28,23 @@ import {
   PiSubagentTranscriptReadResult,
 } from "./piSubagents";
 
+describe("Pi subagent live lifecycle diagnostics (Ticket 03)", () => {
+  it("accepts the four fixed live lifecycle/late-terminal diagnostic codes", () => {
+    for (const code of [
+      "pi_subagent_live_lifecycle_unavailable",
+      "pi_subagent_live_lifecycle_outcome_unknown",
+      "pi_subagent_live_lifecycle_stale_ignored",
+      "pi_subagent_terminal_late_applied",
+    ]) {
+      expect(Schema.decodeSync(PiSubagentDiagnosticCode)(code)).toBe(code);
+    }
+  });
+
+  it("rejects provider-shaped diagnostic additions", () => {
+    expect(() => Schema.decodeSync(PiSubagentDiagnosticCode)("provider_secret" as never)).toThrow();
+  });
+});
+
 describe("Pi subagent durable read contract (Ticket 02)", () => {
   it("accepts canonical identity plus an equal-only deprecated alias and keeps output bounded", () => {
     const input = Schema.decodeSync(PiSubagentExecutionReadInput)({

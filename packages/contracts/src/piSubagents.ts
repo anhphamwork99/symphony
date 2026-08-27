@@ -104,6 +104,10 @@ export const PiSubagentDiagnosticCode = Schema.Literals([
   "pi_subagent_transcript_corrupt",
   "pi_subagent_transcript_entry_truncated",
   "pi_subagent_transcript_page_truncated",
+  "pi_subagent_live_lifecycle_unavailable",
+  "pi_subagent_live_lifecycle_outcome_unknown",
+  "pi_subagent_live_lifecycle_stale_ignored",
+  "pi_subagent_terminal_late_applied",
 ]);
 export type PiSubagentDiagnosticCode = typeof PiSubagentDiagnosticCode.Type;
 

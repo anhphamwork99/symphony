@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import type { PiSubagentResultReadResult } from "@synara/contracts";
 
+import { makePiSubagentLiveLifecycleContainment } from "./piSubagentLiveLifecycleContainment.ts";
+
 import {
   PI_SUBAGENT_EXECUTION_IDENTITY_ROUTING_CAPABILITY,
   createPiSubagentManagedHandshakeRequest,
@@ -41,6 +43,86 @@ const assertNoProviderIdentity = (value: unknown): void => {
 };
 
 describe("Pi managed canonical routing", () => {
+  it("delegates only an authorized nonterminal tuple through exact live containment", async () => {
+    const trace: string[] = [];
+    const session = {};
+    const containment = makePiSubagentLiveLifecycleContainment({
+      trace: ({ event }) => trace.push(event),
+    });
+    const registration = containment.capture({
+      tuple: { executionId: "exec-live", attemptId: "attempt-live", generation: 1 },
+      session,
+    })!;
+    containment.activate(registration);
+    let providerCalls = 0;
+    const tool = {
+      execute: async (_id: string, params: Record<string, unknown>) => {
+        providerCalls += 1;
+        return toolResult(`live ${String(params.execution_id)}`);
+      },
+    };
+    const readTrace: string[] = [];
+    wrapPiSubagentManagedTool(tool, "get_subagent_result", {
+      readService: {
+        readResult: (input) => {
+          readTrace.push(`read:${String((input as any).executionId)}`);
+          return Effect.succeed({
+            executionId: "exec-live",
+            attemptId: "attempt-live",
+            generation: 1,
+            observedState: "running" as const,
+            terminalState: null,
+            summary: null,
+            summaryTruncated: false,
+          });
+        },
+      },
+      isCapabilityBound: () => true,
+      liveLifecycle: {
+        containment,
+        session,
+        registration,
+      },
+    });
+
+    const result = await invoke(tool, { execution_id: "exec-live" });
+    expect(readTrace).toEqual(["read:exec-live"]);
+    expect(providerCalls).toBe(1);
+    expect(result.content[0].text).toContain("Live supplement");
+    expect(trace.indexOf("durable_authorization")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("does not enter the provider when the exact live registration is absent", async () => {
+    const session = {};
+    const containment = makePiSubagentLiveLifecycleContainment();
+    let providerCalls = 0;
+    const tool = {
+      execute: async () => {
+        providerCalls += 1;
+        return toolResult("must not run");
+      },
+    };
+    wrapPiSubagentManagedTool(tool, "steer_subagent", {
+      readService: {
+        readResult: () =>
+          Effect.succeed({
+            executionId: "exec-missing",
+            attemptId: "attempt-missing",
+            generation: 1,
+            observedState: "running" as const,
+            terminalState: null,
+            summary: null,
+            summaryTruncated: false,
+          }),
+      },
+      isCapabilityBound: () => true,
+      liveLifecycle: { containment, session },
+    });
+
+    const result = await invoke(tool, { execution_id: "exec-missing", task: "steer" });
+    expect(providerCalls).toBe(0);
+    expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
+  });
   it("requires the exact routing capability in the managed handshake", () => {
     expect(createPiSubagentManagedHandshakeRequest().requiredCapabilities).toContain(
       PI_SUBAGENT_EXECUTION_IDENTITY_ROUTING_CAPABILITY,

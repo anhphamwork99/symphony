@@ -22,6 +22,10 @@ import {
 } from "@synara/contracts";
 import { Effect, Schema } from "effect";
 import type { PiSubagentExecutionReadService } from "./piSubagentExecutionReadService.ts";
+import type {
+  PiSubagentLiveLifecycleContainment,
+  PiSubagentLiveLifecycleRegistration,
+} from "./piSubagentLiveLifecycleContainment.ts";
 
 import {
   createDefaultHandshakeRequest,
@@ -175,6 +179,23 @@ export interface PiSubagentManagedToolRouterOptions {
   readonly readService: PiSubagentManagedToolReadService;
   /** Bound to the exact runtime session which exposed the tool. */
   readonly isCapabilityBound: () => boolean;
+  /**
+   * Optional WP-01 live route. Durable authorization remains above this
+   * boundary; when present, only the resolved nonterminal tuple is delegated
+   * to this exact session-local containment instance.
+   */
+  readonly liveLifecycle?: {
+    readonly containment: PiSubagentLiveLifecycleContainment;
+    readonly session: object;
+    readonly registration?: PiSubagentLiveLifecycleRegistration | undefined;
+    readonly registrationForTuple?:
+      | ((tuple: {
+          readonly executionId: string;
+          readonly attemptId: string;
+          readonly generation: number;
+        }) => PiSubagentLiveLifecycleRegistration | undefined)
+      | undefined;
+  };
 }
 
 const MANAGED_ROUTING_MAX_OUTPUT_CHARS = 4_000;
@@ -407,13 +428,65 @@ export function wrapPiSubagentManagedTool(
     delete providerParams.agent_id;
     delete providerParams.agentId;
     let providerResult: any;
-    let providerThrew = false;
-    try {
-      providerResult = await originalExecute(toolCallId, providerParams, signal, onUpdate, ctx);
-    } catch {
-      // Provider-local failures are not public managed diagnostics. A live
-      // callback failure is the same bounded fallback as record eviction.
-      providerThrew = true;
+    let providerUnavailable = false;
+    let providerDiagnosticCode: string | undefined;
+    const liveLifecycle = options.liveLifecycle;
+    if (liveLifecycle !== undefined) {
+      const tuple = {
+        executionId: read.executionId,
+        attemptId: read.attemptId,
+        generation: read.generation,
+      };
+      const registration =
+        liveLifecycle.registrationForTuple?.(tuple) ?? liveLifecycle.registration;
+      const liveResult = await (toolName === "steer_subagent"
+        ? liveLifecycle.containment.control({
+            tuple,
+            session: liveLifecycle.session,
+            registration,
+            invoke: ({ markAccepted }) => {
+              // Decision 0003: the managed steer insertion boundary is
+              // synchronous and occurs before the async provider call can
+              // settle. A later response loss is therefore outcome-unknown.
+              markAccepted();
+              return originalExecute(toolCallId, providerParams, signal, onUpdate, ctx);
+            },
+          })
+        : liveLifecycle.containment.observe({
+            tuple,
+            session: liveLifecycle.session,
+            registration,
+            invoke: () => originalExecute(toolCallId, providerParams, signal, onUpdate, ctx),
+          }));
+      if (liveResult.status !== "applied") {
+        const code = liveResult.diagnosticCode ?? "pi_subagent_live_lifecycle_unavailable";
+        return managedRoutingFailure(
+          code,
+          `Managed live lifecycle unavailable [${code}].`,
+        );
+      }
+      providerResult = liveResult.value;
+    } else {
+      let providerThrew = false;
+      try {
+        providerResult = await originalExecute(toolCallId, providerParams, signal, onUpdate, ctx);
+      } catch {
+        // Legacy behavior remains bounded and provider-local failures are not
+        // public managed diagnostics.
+        providerThrew = true;
+      }
+      const providerText = Array.isArray(providerResult?.content)
+        ? providerResult.content
+            .filter((item: any) => item && item.type === "text")
+            .map((item: any) => item.text)
+            .join("\n")
+        : "";
+      providerUnavailable =
+        providerThrew ||
+        providerResult?.isError === true ||
+        providerResult?.diagnosticCode === "pi_subagent_managed_execution_unavailable_live" ||
+        providerText.includes("pi_subagent_managed_execution_unavailable_live") ||
+        providerText.includes("Agent not found");
     }
     const providerText = Array.isArray(providerResult?.content)
       ? providerResult.content
@@ -421,12 +494,10 @@ export function wrapPiSubagentManagedTool(
           .map((item: any) => item.text)
           .join("\n")
       : "";
-    const providerUnavailable =
-      providerThrew ||
-      providerResult?.isError === true ||
-      providerResult?.diagnosticCode === "pi_subagent_managed_execution_unavailable_live" ||
-      providerText.includes("pi_subagent_managed_execution_unavailable_live") ||
-      providerText.includes("Agent not found");
+    providerUnavailable ||= providerResult?.isError === true;
+    providerDiagnosticCode = isPiSubagentDiagnosticCode(providerResult?.diagnosticCode)
+      ? providerResult.diagnosticCode
+      : undefined;
     const diagnostics = Array.isArray(read.diagnostics) ? [...read.diagnostics] : [];
     if (providerUnavailable) diagnostics.push("pi_subagent_read_live_record_unavailable");
     const boundedProviderText = providerUnavailable ? "" : managedRoutingText(providerText);
@@ -434,9 +505,6 @@ export function wrapPiSubagentManagedTool(
       toolName === "steer_subagent"
         ? `Execution ID: ${read.executionId}\nSteer state: ${providerUnavailable ? "unavailable-control" : "applied"}`
         : `${durableReadText({ ...read, diagnostics })}\n\nLive supplement:\n${boundedProviderText || "Unavailable."}`;
-    const providerDiagnosticCode = isPiSubagentDiagnosticCode(providerResult?.diagnosticCode)
-      ? providerResult.diagnosticCode
-      : undefined;
     return managedRoutingResult(
       output,
       {
