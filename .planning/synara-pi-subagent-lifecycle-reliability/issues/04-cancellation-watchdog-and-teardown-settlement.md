@@ -1,8 +1,9 @@
 # Ticket 04 — cancellation, watchdog, and owned teardown retry settlement
 
-**Status:** blocked
-**Blocked by:** Ticket 03 accepted; inherited Decisions 0021–0034; DG-4
-**Implementation:** forbidden while blocked
+**Status:** ready-for-agent
+**Dependencies:** Ticket 03 accepted; inherited Decisions 0021–0034, DG-4, and this evidence-first plan remain binding
+**Plan:** [`../plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md`](../plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md)
+**Execution authorization:** evidence-only WPs below; no source/test remediation is authorized without the PLAN §9 challenge/replan gate
 
 ## Objective
 
