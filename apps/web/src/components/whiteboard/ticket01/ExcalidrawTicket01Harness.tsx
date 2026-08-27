@@ -20,6 +20,7 @@ import type {
   SynaraSceneInput,
   SynaraSceneSnapshot,
   SynaraSceneUpdate,
+  SynaraSyntheticScopeContext,
   SynaraSelectionObservation,
   SynaraViewport,
 } from "./SynaraExcalidrawAdapter";
@@ -167,6 +168,23 @@ export const ExcalidrawTicket01Harness = forwardRef<
         if (!adapter) return unavailable("restore-viewport");
         adapter.restoreViewport(viewport);
       },
+      clearNativeHistory: () => {
+        const adapter = adapterRef.current;
+        if (!adapter) return unavailable("clear-native-history");
+        adapter.clearNativeHistory();
+      },
+      restoreScene: (snapshot: SynaraSceneSnapshot) => {
+        const adapter = adapterRef.current;
+        if (!adapter) return unavailable("restore-scene");
+        adapter.restoreScene(snapshot);
+      },
+      openSyntheticWriteScope: (context: SynaraSyntheticScopeContext) =>
+        adapterRef.current?.openSyntheticWriteScope(context) ??
+        unavailable("open-synthetic-write-scope"),
+      observeHostBoundary: () =>
+        adapterRef.current?.observeHostBoundary() ?? unavailable("observe-host-boundary"),
+      getSyntheticTrace: () =>
+        adapterRef.current?.getSyntheticTrace() ?? unavailable("get-synthetic-trace"),
       getDiagnostics: () => diagnosticsRef.current,
       getLifecycleEvents: () => lifecycleRef.current,
     }),

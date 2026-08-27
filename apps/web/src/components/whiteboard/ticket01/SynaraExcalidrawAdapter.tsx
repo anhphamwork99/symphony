@@ -665,20 +665,22 @@ export class SynaraSyntheticScopeRegistry {
         return { kind: "rejected", code: "unknown-callback-provenance", reason };
       }
       const identity = this.currentIdentity();
-      const fenceFailure = [
+      const fenceFailure = (
         [
-          "stale-mount-identity",
-          `${record.context.mountIdentity}/${record.context.apiIdentity}`,
-          `${identity.mountIdentity}/${identity.apiIdentity}`,
-        ],
-        ["stale-session-epoch", String(record.context.sessionEpoch), String(identity.sessionEpoch)],
-        ["stale-route-epoch", String(record.context.routeEpoch), String(identity.routeEpoch)],
-        [
-          "stale-mutation-revision",
-          String(record.expectedBeforeRevision),
-          String(identity.mutationRevision),
-        ],
-      ].find(([, expected, observed]) => observed !== "undefined" && expected !== observed);
+          [
+            "stale-mount-identity",
+            `${record.context.mountIdentity}/${record.context.apiIdentity}`,
+            `${identity.mountIdentity}/${identity.apiIdentity}`,
+          ],
+          ["stale-session-epoch", String(record.context.sessionEpoch), String(identity.sessionEpoch)],
+          ["stale-route-epoch", String(record.context.routeEpoch), String(identity.routeEpoch)],
+          [
+            "stale-mutation-revision",
+            String(record.expectedBeforeRevision),
+            String(identity.mutationRevision),
+          ],
+        ] as const
+      ).find(([, expected, observed]) => observed !== "undefined" && expected !== observed);
       if (fenceFailure !== undefined) {
         const [code, expected, observed] = fenceFailure;
         const reason = `${code}: expected ${expected}, observed ${observed}`;
