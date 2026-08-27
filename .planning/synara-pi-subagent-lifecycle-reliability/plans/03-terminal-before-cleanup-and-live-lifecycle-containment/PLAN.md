@@ -1,6 +1,6 @@
 # Ticket 03 Plan — terminal-before-cleanup and live lifecycle containment
 
-**State:** in progress (WP-01 and WP-02 complete; WP-03 is the current package frontier)
+**State:** completed — Ticket 03 accepted at frozen candidate `5a1ff1d42`
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -92,9 +92,9 @@ All packages are serial. No parallel write overlap is permitted.
 | ----- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | 01    | [Containment core and diagnostics](WP-01-containment-core-and-diagnostics.md)               | **complete** — reusable registry, managed binding integration, diagnostics, unit evidence |
 | 02    | [Production lifecycle integration](WP-02-production-lifecycle-integration.md)               | **complete** — PiAdapter activation/retirement/disposal and deterministic lifecycle races |
-| 03    | [Controlled and real-Pi evidence/report](WP-03-controlled-and-real-pi-acceptance-report.md) | unchanged `.6` proof, isolated real-Pi evidence, Ticket 03 report                         |
-| 04    | [Independent review](WP-04-independent-review.md)                                           | criterion-level review artifact and disposition                                           |
-| 05    | [Ticket closure and routing](WP-05-ticket-closure-and-routing.md)                           | accepted Ticket 03 and Ticket 04 frontier, only after PASS                                |
+| 03    | [Controlled and real-Pi evidence/report](WP-03-controlled-and-real-pi-acceptance-report.md) | **complete** — unchanged `.6` proof, isolated real-Pi evidence, Ticket 03 report          |
+| 04    | [Independent review](WP-04-independent-review.md)                                           | **complete** — PASS review `c3dbc328a`; zero blocking/reopening findings                  |
+| 05    | [Ticket closure and routing](WP-05-ticket-closure-and-routing.md)                           | **complete** — Ticket 03 accepted; Ticket 04 routed as sole frontier                      |
 
 ## Acceptance traceability
 
@@ -110,7 +110,10 @@ All packages are serial. No parallel write overlap is permitted.
 
 Use `bun run test`, never `bun test`. Start with the smallest owning feature and failure proofs. Real-Pi runs use Node Vitest, isolated roots/home/agent/database/workspace, loopback model endpoint, and serialized wallclock execution.
 
-Repository policy requires `bun fmt`, `bun lint`, and `bun typecheck` before Ticket 03 closure. Current project instructions prohibit running them without explicit owner authorization, so WP-03 must request that authorization at the final verification gate; WP-05 remains blocked until they pass.
+Repository policy requires `bun fmt`, `bun lint`, and `bun typecheck` before
+Ticket 03 closure. The owner explicitly authorized completing Ticket 03. The
+final clean candidate gate passed: formatter clean, lint 0 warnings/0 errors,
+and typecheck 7/7.
 
 ## Rollback and reopening
 

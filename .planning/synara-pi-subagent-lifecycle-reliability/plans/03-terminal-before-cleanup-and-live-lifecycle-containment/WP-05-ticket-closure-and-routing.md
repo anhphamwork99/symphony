@@ -1,6 +1,6 @@
 # WP-05 — Ticket 03 closure and project routing
 
-**State:** pending
+**State:** completed
 
 **Owner role:** planning/report worker
 
@@ -54,6 +54,21 @@ docs(planning): accept Ticket 03 lifecycle containment
 ## Handoff
 
 Closure SHA, accepted candidate/evidence/review SHAs, final AC matrix, next frontier, Ticket 04 inherited risks, and status.
+
+## Completion record
+
+- Frozen accepted candidate: `5a1ff1d42`
+- Exact-tuple/type-boundary remediation: `1913a9a61`
+- Controlled/real-Pi evidence: `1a92d1cfa`
+- Implementation Report: `db27626b7`
+- Independent PASS review: `c3dbc328a`
+- Final gates: fmt clean; lint 0 warnings/0 errors; typecheck 7/7
+- Ticket 03: accepted
+- Sole next frontier: Ticket 04
+- Preserved Ticket 04 risks: exact-owner-only dispatch, bands 70–78,
+  proof-before-fence, no parent/PID fallback, no fabricated cancellation
+- Project-level integrated review and exactly one Supervisor final acceptance:
+  still reserved
 
 ## Escalation
 

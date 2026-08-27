@@ -1,6 +1,6 @@
 # WP-04 — independent Ticket 03 implementation review
 
-**State:** pending
+**State:** completed — PASS at review commit `c3dbc328a`
 
 **Owner role:** independent reviewer, distinct from implementation worker
 
@@ -43,7 +43,21 @@ cd ../../packages/contracts
 bun run test src/piSubagents.test.ts
 ```
 
-The reviewer may rely on recorded fmt/lint/typecheck only when source has not changed since that evidence.
+The reviewer may rely on recorded fmt/lint/typecheck only when source has not
+changed since that evidence. Final review covered frozen candidate
+`5a1ff1d42`; no source change followed before closure.
+
+## Completion record
+
+- Review artifact:
+  [`../../reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md`](../../reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md)
+- Disposition: **PASS**
+- Findings: 0 BLOCKING, 0 MATERIAL REOPENING, 0 remediation-required
+  NONBLOCKING
+- Additional inherited-band reproduction:
+  `piSubagentWatchdogEscalation.test.ts` plus
+  `piSubagentProcessTeardown.test.ts`, 35/35 passed
+- WP-05: unblocked
 
 ## Commit boundary
 

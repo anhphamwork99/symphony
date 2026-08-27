@@ -1,6 +1,6 @@
 # Ticket 03 — terminal-before-cleanup and live lifecycle containment
 
-**Status:** ready-for-agent
+**Status:** accepted
 **Dependencies:** Tickets 01–02 accepted
 **Authoritative decision:** [Decision 0006 — live lifecycle containment linearization contract](../decisions/0006-live-lifecycle-containment-linearization-contract.md)
 **Implementation:** authorized within Decision 0006's bounded source and evidence contract
@@ -270,9 +270,54 @@ classification remain deliberately deterministic-only because WP-03 forbids
 fabricating them with elapsed time or adding a production callback-injection
 seam.
 
-This report records implementation evidence only. WP-04 still owns the one
-independent Ticket 03 review; this section does not accept Ticket 03 or change
-the project frontier.
+This report section records WP-03 implementation evidence only. Acceptance and
+frontier routing are recorded separately below after WP-04 review.
+
+### Final review and closure
+
+Independent WP-04 review is persisted at
+[`../reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md`](../reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md)
+in commit `c3dbc328a`. It reviewed frozen candidate `5a1ff1d42` and returned
+**PASS** with:
+
+- zero BLOCKING findings;
+- zero unresolved MATERIAL REOPENING findings;
+- T03-AC1–AC5 all PASS with normal and failure evidence;
+- controlled Alfie unchanged at
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+  `@alfie/pi-subagents@0.15.0-alfie.6`;
+- exact-tuple/type-boundary remediation `1913a9a61` verified fail-closed with
+  zero provider execution when nonterminal durable evidence is incomplete;
+- controlled Alfie, isolated real-Pi, deterministic, watchdog, teardown, and
+  final workspace gates passing.
+
+Accepted Ticket 03 artifacts:
+
+| Artifact                                 | Commit      |
+| ---------------------------------------- | ----------- |
+| Frozen reviewed candidate                | `5a1ff1d42` |
+| Exact-tuple/type-boundary remediation    | `1913a9a61` |
+| Controlled and isolated real-Pi evidence | `1a92d1cfa` |
+| Implementation Report                    | `db27626b7` |
+| Independent PASS review                  | `c3dbc328a` |
+
+Final closure verification on the frozen candidate:
+
+```text
+bun fmt       PASS — 3,102 files; no resulting diff
+bun lint      PASS — 0 warnings, 0 errors on 2,658 files
+bun typecheck PASS — 7/7 tasks
+focused Ticket 03 deterministic tests       74/74
+controlled Alfie lifecycle containment       1/1
+isolated real-Pi lifecycle containment        1/1
+watchdog + process-teardown regression       35/35
+git diff --check                              PASS
+```
+
+Ticket 03 is accepted. Ticket 04 is routed by `PROJECT.md` as the sole next
+frontier. This closure does not consume the project's reserved integrated
+review or final Supervisor consultation and grants no push, release, deploy,
+PID-kill, automatic Resume, replay, or provider-bootstrap authority.
 
 ### Residual uncertainty and reopening conditions
 
@@ -292,11 +337,9 @@ the project frontier.
   steer emissions, journal bands, lifecycle notifications, outbox rows,
   control health, and supervisor-backed custom-bash spawns, plus the unchanged
   source boundary.
-- Workspace `bun typecheck` remains a later Ticket 03 closure blocker from
-  unrelated Whiteboard and pre-existing acceptance-helper typing described in
-  the WP-03 handoff. WP-03 did not run or claim the final
-  `bun fmt`/`bun lint`/`bun typecheck` gate. WP-05 must not close the ticket
-  until that bundled gate passes.
+- The earlier workspace typecheck blockers were repaired before the frozen
+  candidate review. The final bundled `bun fmt`/`bun lint`/`bun typecheck`
+  gate passes; no closure blocker remains.
 - Reopen Decision 0006 only on its listed material triggers: inability to bind
   exact tuple/session identity against `.6`, inability to distinguish
   pre-acceptance absence from possible post-acceptance loss, violation of
@@ -306,6 +349,6 @@ the project frontier.
 
 ## Unlock gate
 
-Discharged. Tickets 01–02 are accepted; binding Decision 0006 settles DG-3
+Discharged. Tickets 01–03 are accepted; binding Decision 0006 is implemented
 through the exact-tuple Alternative A proxy and preserves the inherited closed
-DG-4 owner boundary. Ticket 03 is the sole implementation frontier.
+DG-4 owner boundary. Ticket 04 is the sole next frontier.

@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Ticket 02 accepted; Ticket 03 WP-01/WP-02 complete; WP-03 evidence is active
+- **Triage status:** Tickets 01–03 accepted; Ticket 04 is the sole frontier
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -150,8 +150,7 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Current frontier: Ticket 03 is the sole source implementation frontier.**
-Ticket 01 is
+**Current frontier: Ticket 04 is the sole project frontier.** Ticket 01 is
 accepted as the read-only grounding report. Ticket 02 is accepted at Symphony
 candidate `cb023e587` plus Implementation Report `d77a566e0`, against
 controlled Alfie
@@ -162,21 +161,31 @@ report-only closure introduced no material reopening, so no second review or
 ticket-level Supervisor final-acceptance consultation is required. Binding
 [Decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md)
 settles DG-3 through an exact-tuple live lifecycle proxy and preserves the
-already-closed DG-4 owner boundary. Ticket 03 WP-01 and WP-02 are complete at
-source commits `b4eef14c7`, `98927c8f6`, `648f5e569`, and `0e5a48369`;
-controlled-Alfie and isolated real-Pi evidence/report WP-03 is now active.
-Tickets 04–06 remain serially blocked behind Ticket 03 and their listed
-dependency gates. The single Supervisor final-acceptance consultation remains
-reserved for the complete integrated project candidate.
+already-closed DG-4 owner boundary. Ticket 03 is accepted at frozen Symphony
+candidate `5a1ff1d42`, including exact-tuple remediation `1913a9a61`,
+controlled/real-Pi evidence `1a92d1cfa`, Implementation Report `db27626b7`,
+and independent PASS review `c3dbc328a`. Its final gate passed `bun fmt`,
+`bun lint` with 0 warnings/0 errors, and `bun typecheck` 7/7. Ticket 04's
+Ticket-03 dependency is therefore discharged and it is now the sole frontier;
+its own planning and inherited DG-4 authority still govern implementation.
+Tickets 05–06 remain serially blocked behind their listed dependency gates.
+The single Supervisor final-acceptance consultation remains reserved for the
+complete integrated project candidate.
 
-| Ticket                                                                    | Status                         | Dependency / unlock                                                                                           |
-| ------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| [01](issues/01-baseline-reproduction-and-decision-matrix.md)              | **accepted**                   | grounding report accepted; no source edits                                                                    |
-| [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                   | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
-| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **in progress — WP-03 active** | WP-01 containment core and WP-02 production integration complete; controlled/real-Pi evidence and report next |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | blocked                        | Ticket 03 lifecycle boundary settled                                                                          |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | blocked                        | Tickets 02–04 accepted seams                                                                                  |
-| [06](issues/06-integrated-real-pi-acceptance.md)                          | blocked                        | Tickets 01–05 accepted; all provenance and evidence gates                                                     |
+| Ticket                                                                    | Status                                 | Dependency / unlock                                                                                           |
+| ------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [01](issues/01-baseline-reproduction-and-decision-matrix.md)              | **accepted**                           | grounding report accepted; no source edits                                                                    |
+| [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                           | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
+| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted**                           | Decision 0006 implemented, evidenced, reviewed, and closed at frozen candidate `5a1ff1d42`                    |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | **ready-for-planning — sole frontier** | Ticket 03 dependency discharged; inherited Decisions 0021–0034 and DG-4 remain binding                        |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | blocked                                | Tickets 02–04 accepted seams                                                                                  |
+| [06](issues/06-integrated-real-pi-acceptance.md)                          | blocked                                | Tickets 01–05 accepted; all provenance and evidence gates                                                     |
+
+Ticket 04's issue-local `blocked` marker describes its pre-Ticket-03 unlock
+condition. Under the Router rule, this Project Home now discharges that
+dependency and routes Ticket 04 for planning. `ready-for-planning` does not by
+itself authorize source implementation; Ticket 04's own accepted plan and
+inherited authority gates remain required.
 
 The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
 is discharged by Decision 0002. It remains a historical consultation link;
@@ -216,8 +225,6 @@ Settled and inherited:
 
 Open, material design points:
 
-- how live lifecycle containment handles provider runtime inactivity without
-  inventing owner proof;
 - the truthful Resume eligibility and provider-bootstrap boundary;
 - whether any crash guardian or durable owner receipt is needed at all.
 
@@ -277,20 +284,19 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [decision 0001](decisions/0001-project-charter-and-inherited-authority.md) — project charter and inherited authority.
 - [decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md) — binding canonical identity and durable result-read contract for Ticket 02.
 - [decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md) — binding live lifecycle observation/control linearization contract for Ticket 03 DG-3; preserves DG-4.
-- [Ticket 03 plan](plans/03-terminal-before-cleanup-and-live-lifecycle-containment/PLAN.md) — serial implementation, evidence, review, and closure work packages for the current frontier.
-- [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — current candidate, verification state, blockers, and exact next-agent evidence assignment.
+- [Ticket 03 plan](plans/03-terminal-before-cleanup-and-live-lifecycle-containment/PLAN.md) — completed serial implementation, evidence, review, and closure packages.
+- [Ticket 03 review](reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md) — independent criterion-level PASS review of frozen candidate `5a1ff1d42`.
+- [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
-Tickets 01 and 02 are accepted. Ticket 02's implementation lineage, exact
-controlled Alfie `.6` provenance, criterion evidence, race traces, limitations,
-and review disposition are recorded in
-[Ticket 02](issues/02-canonical-identity-and-result-continuity.md). Ticket 03
-is now the sole source implementation frontier. WP-01 and WP-02 are complete;
-WP-03 controlled-Alfie and isolated real-Pi evidence/report is active.
-Decision 0006 settles DG-3 with the exact-tuple Alternative A proxy and
-preserves the inherited closed DG-4 owner boundary. The one integrated
-project review and exactly one Supervisor final-acceptance consultation remain
-reserved for the complete project candidate.
+Tickets 01–03 are accepted. Ticket 03 implements Decision 0006's exact-tuple
+Alternative A proxy, preserves the inherited closed DG-4 owner boundary, and
+is closed at frozen candidate `5a1ff1d42` with PASS review `c3dbc328a`.
+Ticket 04 is now the sole frontier. Its cancellation/watchdog/owned-teardown
+work must preserve bands 70–78, proof-before-fence, and exact-owner-only
+authority. Tickets 05–06 remain blocked. The one integrated project review and
+exactly one Supervisor final-acceptance consultation remain reserved for the
+complete project candidate.

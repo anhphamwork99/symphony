@@ -1,6 +1,6 @@
 # WP-02 — production lifecycle integration and deterministic race proof
 
-**State:** complete
+**State:** completed
 
 **Owner role:** implementation worker
 

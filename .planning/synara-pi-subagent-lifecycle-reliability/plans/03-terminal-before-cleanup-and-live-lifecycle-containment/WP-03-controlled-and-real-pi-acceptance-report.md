@@ -1,6 +1,6 @@
 # WP-03 — controlled-Alfie, isolated real-Pi acceptance, and report
 
-**State:** pending
+**State:** completed (`1a92d1cfa` evidence; `db27626b7` Implementation Report)
 
 **Owner role:** implementation/evidence worker
 
