@@ -275,6 +275,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [decision 0001](decisions/0001-project-charter-and-inherited-authority.md) — project charter and inherited authority.
 - [decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md) — binding canonical identity and durable result-read contract for Ticket 02.
 - [decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md) — binding live lifecycle observation/control linearization contract for Ticket 03 DG-3; preserves DG-4.
+- [Ticket 03 plan](plans/03-terminal-before-cleanup-and-live-lifecycle-containment/PLAN.md) — serial implementation, evidence, review, and closure work packages for the current frontier.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
