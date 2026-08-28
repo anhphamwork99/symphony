@@ -1,0 +1,281 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:99027) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T02-F5 terminal-first ambient cache diagnostic: {"before":{"exists":false,"type":"absent","hash":null,"size":null,"mtimeMs":null},"after":{"exists":false,"type":"absent","hash":null,"size":null,"mtimeMs":null},"classification":"non-causal-provider-catalogue-cache"}
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[17:11:11.572] INFO (#85): Running all migrations...
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[17:11:11.611] INFO (#85): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[17:11:11.702] INFO (#138): orchestration projection pipeline bootstrapped { projectors: 10 }
+[17:11:11.703] INFO (#138): orchestration engine started { sequence: 0 }
+
+T02-F5 enqueue-first ambient cache diagnostic: {"before":{"exists":false,"type":"absent","hash":null,"size":null,"mtimeMs":null},"after":{"exists":false,"type":"absent","hash":null,"size":null,"mtimeMs":null},"classification":"non-causal-provider-catalogue-cache"}
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[17:11:22.234] INFO (#3017): Running all migrations...
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[17:11:22.270] INFO (#3017): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[17:11:22.283] INFO (#3070): orchestration projection pipeline bootstrapped { projectors: 10 }
+[17:11:22.283] INFO (#3070): orchestration engine started { sequence: 0 }
+
+ ❯ |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts (9 tests | 2 failed) 25607ms
+     × proves terminal-first through the registered production steer_subagent tool and exact record session 11398ms
+     × proves enqueue-first through the registered production steer_subagent tool and exact record session 14204ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+AssertionError: expected 'pi_subagent_live_lifecycle_stale_igno…' to be 'pi_subagent_read_live_record_unavaila…' // Object.is equality
+
+Expected: "pi_subagent_read_live_record_unavailable"
+Received: "pi_subagent_live_lifecycle_stale_ignored"
+
+ ❯ runRealPiSteerRace src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:913:37
+    911|     const eventTypes = observedHook.events.map((event) => event.type);
+    912|     if (mode === "terminal-first") {
+    913|       expect(result.diagnosticCode).toBe("pi_subagent_read_live_record…
+       |                                     ^
+    914|       expect(result.content?.[0]?.text).not.toContain("Agent not found…
+    915|       expect(observedHook.counters["session-steer-invocation"] ?? 0).t…
+ ❯ src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:1151:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+AssertionError: expected 'Managed live lifecycle stale response…' to contain 'Steer state: applied'
+
+Expected: "Steer state: applied"
+Received: "Managed live lifecycle stale response ignored [pi_subagent_live_lifecycle_stale_ignored]."
+
+ ❯ runRealPiSteerRace src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:924:41
+    922|       ]);
+    923|     } else {
+    924|       expect(result.content?.[0]?.text).toContain("Steer state: applie…
+       |                                         ^
+    925|       expect(observedHook.counters["session-steer-invocation"]).toBe(1…
+    926|       expect(observedHook.counters["sdk-insertion"]).toBe(1);
+ ❯ src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:1155:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 passed (9)
+   Start at  17:11:02
+   Duration  27.97s (transform 1.72s, setup 0ms, import 2.30s, tests 25.61s, environment 0ms)
+

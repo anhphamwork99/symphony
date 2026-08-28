@@ -1,6 +1,6 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is **PASS** at 19/19 files and 296/296 tests with zero skips, and renewed WP-02 is ready for exactly one full five-file attempt. Historical evidence remains supporting only; no WP-02, WP-03, WP-04, manual, quality, or review work was run here.
+**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is **PASS** at 19/19 files and 296/296 tests with zero skips. The renewed WP-02 attempt started exactly once: integrated passed, canonical-identity failed, and the atomic attempt stopped before lifecycle/restart/resume. WP-02 is **CHALLENGED**, with no current PASS and no retry; WP-03 and WP-04 remain blocked. The renewed raw logs are preserved immutably; no producer is run by this evidence transaction.
 
 **Historical base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`. Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is its sole-parent exact two-file child. Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` has parents Package A `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; it is integration provenance only.
 
@@ -259,9 +259,9 @@ gate changes.
 ## 7b. Historical attempt outcome (supporting only)
 
 Attempt 2 remains an environment/isolation challenge and attempt 3 remains a
-failed historical run. Neither supplies current D/R evidence. No renewed run
-has started; the focused red/green correction logs are diagnostics only and do
-not constitute a D or R PASS.
+failed historical run. Neither supplies current D/R evidence. The renewed
+attempt is recorded in §7e below; its integrated PASS and canonical-identity
+failure do not constitute a complete WP-02 PASS.
 
 ## 7c. Current downstream gate status
 
@@ -286,12 +286,44 @@ count was observed. Preserve exit 1, the stopped status, and all raw attempt
 logs byte-for-byte unchanged. Do not infer a production duplicate-follow-up
 defect from this failure.
 
+## 7e. Renewed WP-02 attempt — canonical-identity challenge (2026-08-28)
+
+The renewed complete WP-02 attempt started exactly once under the frozen
+candidate and the authorized process-level HOME isolation. It ran only two
+standalone legs before the atomic attempt stopped:
+
+- **Integrated leg — PASS, exit 0.** Node v24.14.1, fresh outer HOME
+  `tmp.gLZPdTzMaC` (removed; absence verified), `ALFIE_REPO_DIR` pointed at the
+  pinned Alfie worktree, and `env -u SYNARA_T17_MANUAL_TEARDOWN` was used. The
+  log records 1/1 file passed, 10 tests passed, and exactly 1 expected manual
+  skip. The T17-AC4 exact-two fixture barrier was accepted with `accepted=2`
+  and `pending=2`.
+- **Canonical-identity leg — FAILED, exit 1.** Node v24.14.1, fresh outer HOME
+  `tmp.wX79oSZqVb` (removed; absence verified), same candidate/Alfie and manual
+  exclusion. The log records 1 file failed, 2 tests failed, and 7 passed. The
+  terminal-first row at `:913` expected
+  `pi_subagent_read_live_record_unavailable` but observed
+  `pi_subagent_live_lifecycle_stale_ignored`; the enqueue-first row at `:924`
+  expected `Steer state: applied` but observed
+  `Managed live lifecycle stale response ignored`.
+- **Not run after the canonical failure:** lifecycle-containment,
+  restart, and resume. The renewed attempt is not a five-leg PASS and no
+  lifecycle/restart/resume conclusion is inferred.
+
+The two renewed logs are immutable evidence under `evidence/` and their
+SHA-256 values are recorded in the renewed provenance artifact. No current
+WP-02 PASS exists. The no-retry rule is spent for this attempt; source
+diagnosis is pending a fresh owner decision. WP-03 remains blocked on a
+renewed five-leg WP-02 PASS plus fresh authorization; WP-04 remains blocked on
+a newly authorized WP-03 PASS. No destructive, quality, review, or Supervisor
+work was run.
+
 ## 8. Authorization gates and no-retry rule
 
 | Gate | Current status |
 |---|---|
 | Renewed WP-01 | **PASS** at frozen candidate `ffd45bd`; same 19 files, 296/296; zero failed/skipped |
-| Renewed WP-02 | **ready** after renewed WP-01 PASS; exactly one full five-file run only |
+| Renewed WP-02 | **CHALLENGED**; integrated leg passed, canonical-identity leg failed, and the atomic attempt stopped; no retry |
 | WP-03 | blocked; fresh owner authorization required after renewed WP-02 PASS; old authorization unspent/non-transferable/not executable |
 | WP-04 | blocked; fresh owner authorization required after the newly authorized WP-03 PASS; old authorization unspent/non-transferable/not executable |
 | WP-05 | one integrated review reservation unused; after complete current package |
