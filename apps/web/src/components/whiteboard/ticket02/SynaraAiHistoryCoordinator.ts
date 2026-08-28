@@ -21,6 +21,7 @@ import {
 import type {
   SynaraAiCommandTrace,
   SynaraAiCommandTraceStep,
+  SynaraAiEventOutcome,
   SynaraAiHistoryEvent,
   SynaraAiHistoryState,
   SynaraEditLockState,
@@ -338,7 +339,22 @@ export class SynaraAiHistoryCoordinator {
   }
 
   public async completeAiOperation(batchId: string): Promise<SynaraAiHistoryEvent | null> {
-    const batch = this.requireBatch(batchId);
+    return this.finalizeAiOperation({ batchId, outcome: "completed" });
+  }
+
+  /**
+   * WP-B2 settlement seam: settles the active batch under one server terminal
+   * outcome. `completed` preserves the exact historical completion behavior;
+   * `interrupted` and `failed-partial` require the same verified partial
+   * state and produce exactly one event with the given outcome (Decision
+   * 0063 §7). Zero-valid outcomes never reach this method — the bridge
+   * aborts the batch without settlement instead.
+   */
+  public async finalizeAiOperation(input: {
+    readonly batchId: string;
+    readonly outcome: SynaraAiEventOutcome;
+  }): Promise<SynaraAiHistoryEvent | null> {
+    const batch = this.requireBatch(input.batchId);
     try {
       await batch.scope.drain();
       this.assertOperationLock("ai-batch", "ai-batch-complete");
@@ -356,7 +372,7 @@ export class SynaraAiHistoryCoordinator {
       }
       await this.clearAndProveStable(after, "ai-batch-complete");
       this.assertOperationLock("ai-batch", "ai-batch-complete");
-      const event = this.appendCompletedEvent(batch, after);
+      const event = this.appendOutcomeEvent(batch, after, input.outcome);
       this.activeBatch = null;
       this.routeEpoch += 1;
       this.applicableSide = {
@@ -375,9 +391,10 @@ export class SynaraAiHistoryCoordinator {
     }
   }
 
-  private appendCompletedEvent(
+  private appendOutcomeEvent(
     batch: ActiveAiBatch,
     after: SynaraDocumentSnapshot,
+    outcome: SynaraAiEventOutcome,
   ): SynaraAiHistoryEvent {
     const event: SynaraAiHistoryEvent = Object.freeze({
       id: `ai-event-${++this.eventCounter}`,
@@ -392,7 +409,7 @@ export class SynaraAiHistoryCoordinator {
         beforeRevision: batch.beforeRevision,
         afterRevision: this.mutationRevision,
       }),
-      outcome: "completed",
+      outcome,
       batchId: batch.batchId,
       acceptedSyntheticWriteCount: batch.acceptedSyntheticWriteCount,
       before: batch.before,
@@ -738,6 +755,88 @@ export class SynaraAiHistoryCoordinator {
   private lockFault(): void {
     this.lockState = "locked-fault";
     this.host.setViewModeEnabled(true);
+  }
+
+  /** WP-B2 proof API: the active batch's identity, or null when idle. */
+  public getActiveAiBatch(): {
+    readonly batchId: string;
+    readonly operationId: string;
+    readonly operationGeneration: number;
+    readonly acceptedSyntheticWriteCount: number;
+  } | null {
+    if (this.activeBatch === null) return null;
+    return {
+      batchId: this.activeBatch.batchId,
+      operationId: this.activeBatch.operationId,
+      operationGeneration: this.activeBatch.operationGeneration,
+      acceptedSyntheticWriteCount: this.activeBatch.acceptedSyntheticWriteCount,
+    };
+  }
+
+  /**
+   * WP-B2 proof API: the canonical projection of the current scene plus the
+   * current mutation revision. The bridge matches this proof against the
+   * acknowledged semantic evidence before any terminal settlement.
+   */
+  public captureCanonicalSceneProof(): {
+    readonly semanticFingerprint: string;
+    readonly mutationRevision: number;
+  } {
+    return {
+      semanticFingerprint: captureDocumentSnapshot(this.host.captureScene()).semanticFingerprint,
+      mutationRevision: this.mutationRevision,
+    };
+  }
+
+  /**
+   * WP-B2 zero-valid settlement: aborts the active batch without an event,
+   * native-history clear, or cursor movement and returns the coordinator to
+   * the unlocked idle state. The diagnostic preserves non-silent handling
+   * (Decision 0063 §7 zero-valid).
+   */
+  public abortAiOperationForZeroValid(input: {
+    readonly batchId: string;
+    readonly reason: string;
+    readonly code?: SynaraHistoryDiagnosticCode;
+  }): void {
+    const batch = this.requireBatch(input.batchId);
+    batch.scope.abort(input.reason);
+    this.activeBatch = null;
+    this.host.setViewModeEnabled(false);
+    this.lockState = "unlocked";
+    this.report("coordinator", input.code ?? "operation-not-applicable", {
+      phase: "zero-valid-settlement",
+      message: input.reason,
+      expected: "a server terminal outcome with at least one semantic acknowledgement",
+      observed: input.reason,
+      batchId: batch.batchId,
+      operationId: batch.operationId,
+      operationGeneration: batch.operationGeneration,
+      recoverability: "none",
+      severity: "warning",
+    });
+  }
+
+  /**
+   * WP-B2 protection seam: a lost active operation session — or an
+   * equivalent protection demand such as failed containment — keeps the AI
+   * edit lock in the protected fault state. No event is created, no native
+   * history is cleared, and no unlock claim is made.
+   */
+  public protectAiOperationOnSessionLoss(input: {
+    readonly reason: string;
+    readonly code?: SynaraHistoryDiagnosticCode;
+  }): void {
+    this.report("coordinator", input.code ?? "operation-session-lost", {
+      phase: "operation-session-loss",
+      message: input.reason,
+      expected: "the exact live session authority and settled containment truth",
+      observed: input.reason,
+      ...(this.activeBatch === null ? {} : { batchId: this.activeBatch.batchId }),
+      recoverability: "reset-required",
+      severity: "critical",
+    });
+    this.lockFault();
   }
 
   private assertOperationLock(

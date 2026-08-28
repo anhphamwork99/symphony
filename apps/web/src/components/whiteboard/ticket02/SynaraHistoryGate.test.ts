@@ -497,6 +497,152 @@ describe("Ticket 02 AI-only coordinator", () => {
   });
 });
 
+describe("Ticket 02 coordinator outcome seam (WP-B2)", () => {
+  it("finalizes an interrupted batch into one event with the interrupted outcome", async () => {
+    const host = new FakeGateHost();
+    const coordinator = new SynaraAiHistoryCoordinator(host, {
+      canvasIdentity: "canvas-1",
+      scenario: "unit-finalize-interrupted",
+      settlementMaxWaitMs: 50,
+    });
+    await coordinator.beginAiOperation({
+      batchId: "batch-1",
+      operationId: "op-1",
+      operationGeneration: 1,
+    });
+    coordinator.applyAiProgress({
+      batchId: "batch-1",
+      operationGeneration: 1,
+      operationLocalSequence: 1,
+      update: progressUpdate(1),
+    });
+    const proof = coordinator.captureCanonicalSceneProof();
+    expect(proof).toMatchObject({ mutationRevision: 1 });
+    expect(proof.semanticFingerprint).toBe(captureDocumentSnapshot(host.current).semanticFingerprint);
+
+    const event = await coordinator.finalizeAiOperation({ batchId: "batch-1", outcome: "interrupted" });
+    expect(event).not.toBeNull();
+    expect(event?.outcome).toBe("interrupted");
+    expect(coordinator.getState().events).toHaveLength(1);
+    expect(coordinator.getState().cursor).toBe(1);
+    expect(coordinator.getState().lockState).toBe("unlocked");
+    expect(host.nativeClearCount).toBe(1);
+    // The interrupted event is a first-class history event: undo/redo apply.
+    expect(await coordinator.undoAiBatch()).toBe(true);
+    expect(coordinator.getState().cursor).toBe(0);
+    expect(await coordinator.redoAiBatch()).toBe(true);
+    expect(coordinator.getState().cursor).toBe(1);
+  });
+
+  it("finalizes a failed-partial batch into one event without unlocking early", async () => {
+    const host = new FakeGateHost();
+    const coordinator = new SynaraAiHistoryCoordinator(host, {
+      canvasIdentity: "canvas-1",
+      scenario: "unit-finalize-failed-partial",
+      settlementMaxWaitMs: 50,
+    });
+    await coordinator.beginAiOperation({
+      batchId: "batch-2",
+      operationId: "op-2",
+      operationGeneration: 1,
+    });
+    expect(coordinator.getActiveAiBatch()).toMatchObject({
+      batchId: "batch-2",
+      operationId: "op-2",
+      operationGeneration: 1,
+    });
+    coordinator.applyAiProgress({
+      batchId: "batch-2",
+      operationGeneration: 1,
+      operationLocalSequence: 1,
+      update: progressUpdate(2),
+    });
+    const event = await coordinator.finalizeAiOperation({ batchId: "batch-2", outcome: "failed-partial" });
+    expect(event?.outcome).toBe("failed-partial");
+    expect(coordinator.getActiveAiBatch()).toBeNull();
+    expect(coordinator.getState().events[0]).toMatchObject({ outcome: "failed-partial" });
+  });
+
+  it("aborts a zero-valid batch without event, clear, or cursor movement", async () => {
+    const host = new FakeGateHost();
+    const coordinator = new SynaraAiHistoryCoordinator(host, {
+      canvasIdentity: "canvas-1",
+      scenario: "unit-zero-valid-abort",
+      settlementMaxWaitMs: 50,
+    });
+    await coordinator.beginAiOperation({
+      batchId: "batch-3",
+      operationId: "op-3",
+      operationGeneration: 1,
+    });
+    coordinator.abortAiOperationForZeroValid({
+      batchId: "batch-3",
+      reason: "server terminal outcome zero-valid",
+    });
+    const state = coordinator.getState();
+    expect(state.events).toHaveLength(0);
+    expect(state.cursor).toBe(0);
+    expect(state.lockState).toBe("unlocked");
+    expect(host.nativeClearCount).toBe(0);
+    expect(host.viewModeEnabled).toBe(false);
+    expect(coordinator.getDiagnostics()[0]).toMatchObject({
+      code: "operation-not-applicable",
+      phase: "zero-valid-settlement",
+      severity: "warning",
+    });
+  });
+
+  it("protects a lost active operation session without event, unlock, or clear", async () => {
+    const host = new FakeGateHost();
+    const coordinator = new SynaraAiHistoryCoordinator(host, {
+      canvasIdentity: "canvas-1",
+      scenario: "unit-session-loss-protection",
+      settlementMaxWaitMs: 50,
+    });
+    await coordinator.beginAiOperation({
+      batchId: "batch-4",
+      operationId: "op-4",
+      operationGeneration: 1,
+    });
+    coordinator.protectAiOperationOnSessionLoss({ reason: "stream failed while active" });
+    const state = coordinator.getState();
+    expect(state.events).toHaveLength(0);
+    expect(state.cursor).toBe(0);
+    expect(state.lockState).toBe("locked-fault");
+    expect(host.viewModeEnabled).toBe(true);
+    expect(host.nativeClearCount).toBe(0);
+    expect(coordinator.getDiagnostics()[0]).toMatchObject({
+      code: "operation-session-lost",
+      recoverability: "reset-required",
+      severity: "critical",
+      batchId: "batch-4",
+    });
+  });
+
+  it("keeps completeAiOperation behavior as the completed-outcome settlement", async () => {
+    const host = new FakeGateHost();
+    const coordinator = new SynaraAiHistoryCoordinator(host, {
+      canvasIdentity: "canvas-1",
+      scenario: "unit-complete-delegates",
+      settlementMaxWaitMs: 50,
+    });
+    await coordinator.beginAiOperation({
+      batchId: "batch-5",
+      operationId: "op-5",
+      operationGeneration: 1,
+    });
+    coordinator.applyAiProgress({
+      batchId: "batch-5",
+      operationGeneration: 1,
+      operationLocalSequence: 1,
+      update: progressUpdate(1),
+    });
+    const event = await coordinator.completeAiOperation("batch-5");
+    expect(event?.outcome).toBe("completed");
+    expect(coordinator.getState().events).toHaveLength(1);
+  });
+});
+
 describe("Ticket 02 human settlement families", () => {
   it.each([
     ["pointer-gesture", "pointer-down", "pointer-up"],

@@ -1,0 +1,629 @@
+// FILE: SynaraWhiteboardOperationBridge.ts
+// Purpose: Dormant browser bridge between the WP-B1 typed Whiteboard operation
+// transport and the AI-only history coordinator (Ticket 02, Decisions 0063–0065).
+// Layer: Web operation seam — not mounted in any production UI.
+
+import type {
+  WhiteboardAcknowledgeApplicationInput,
+  WhiteboardApplicationDiagnosticCode,
+  WhiteboardApplicationResult,
+  WhiteboardContainmentResult,
+  WhiteboardContainmentResultEvent,
+  WhiteboardOperationAdmittedEvent,
+  WhiteboardOperationAttachSessionResult,
+  WhiteboardOperationProgressEvent,
+  WhiteboardOperationSessionEvent,
+  WhiteboardOperationSessionIdentity,
+  WhiteboardOperationSnapshotEvent,
+  WhiteboardOperationTerminalEvent,
+  WhiteboardTakeOverPendingEvent,
+  WhiteboardTerminalOutcome,
+} from "@synara/contracts";
+
+import type {
+  SynaraSceneInput,
+  SynaraSyntheticWriteScopeHandle,
+  SynaraViewport,
+} from "../ticket01/SynaraExcalidrawAdapter";
+import type { SynaraAiHistoryEvent } from "./SynaraAiHistoryTypes";
+import {
+  SynaraAiHistoryCoordinator,
+  type SynaraAiHistoryHost,
+} from "./SynaraAiHistoryCoordinator";
+
+/**
+ * The exact transport surface this bridge consumes (WP-B1). Structural so a
+ * deterministic contract fixture can drive unit tests without a socket; the
+ * production value is the typed `WsTransport` instance.
+ */
+export interface SynaraWhiteboardOperationTransport {
+  readonly hasWhiteboardOperationCapability: () => boolean;
+  readonly onWhiteboardOperationFailure: (
+    listener: (failure: { readonly code: string; readonly operationSessionId?: string }) => void,
+  ) => () => void;
+  readonly whiteboardOperationAttachSession: (input: {
+    readonly projectId: string;
+    readonly documentKind: "file-canvas" | "untitled-canvas";
+    readonly documentId: string;
+    readonly canvasIdentity: string;
+    readonly expectedDocumentRevision: number;
+  }) => Promise<WhiteboardOperationAttachSessionResult>;
+  readonly whiteboardOperationSubscribe: (
+    input: WhiteboardOperationSessionIdentity & { readonly lastServerSequence: number },
+    listener: (event: WhiteboardOperationSessionEvent) => boolean | void,
+  ) => () => void;
+  readonly whiteboardOperationAcknowledgeApplication: (
+    input: WhiteboardAcknowledgeApplicationInput,
+  ) => Promise<unknown>;
+}
+
+export interface SynaraWhiteboardOperationBridgeOptions {
+  readonly projectId: string;
+  readonly documentKind: "file-canvas" | "untitled-canvas";
+  readonly documentId: string;
+  readonly canvasIdentity: string;
+  /** Expected document revision at attach time (server fences stale input). */
+  readonly expectedDocumentRevision: number;
+  /** Factory for the AI-only history coordinator (stays the sole owner). */
+  readonly createCoordinator: (host: SynaraAiHistoryHost) => SynaraAiHistoryCoordinator;
+  readonly host: SynaraAiHistoryHost;
+  readonly scenario?: string;
+  readonly onDiagnostic?: (diagnostic: unknown) => void;
+  readonly onOutcome?: (outcome: SynaraWhiteboardOperationOutcome) => void;
+}
+
+/** The immutable server-minted session identity held by the bridge. */
+export type SynaraWhiteboardSessionIdentity = WhiteboardOperationSessionIdentity;
+
+export interface SynaraWhiteboardOperationOutcome {
+  readonly kind: "terminal";
+  readonly outcome: WhiteboardTerminalOutcome;
+  readonly operationId: string;
+  readonly generation: number;
+  /** The exactly-one AI event created for completed/interrupted/failed-partial. */
+  readonly event: SynaraAiHistoryEvent | null;
+}
+
+export type SynaraWhiteboardBridgeState =
+  | "idle"
+  | "attaching"
+  | "subscribed"
+  | "operation-active"
+  | "take-over-pending"
+  | "settled"
+  | "protected";
+
+/** One applied, correlated, verified progress mutation. */
+interface AppliedProgressLedgerRecord {
+  readonly producerSequence: number;
+  readonly serverSequence: number;
+  readonly expectedSemanticFingerprint: string;
+  readonly adapterCorrelationId: string;
+  readonly applicationResult: WhiteboardApplicationResult;
+  readonly verifiedSemanticFingerprint: string;
+  readonly resultingMutationRevision: number;
+  /** "sent": delivered; "interrupted": transport-interrupted, resend on replay. */
+  ackState: "sent" | "interrupted";
+  readonly diagnosticCode?: WhiteboardApplicationDiagnosticCode;
+}
+
+function progressRecordEquivalent(
+  record: AppliedProgressLedgerRecord,
+  event: WhiteboardOperationProgressEvent,
+): boolean {
+  return (
+    record.producerSequence === event.producerSequence &&
+    record.serverSequence === event.serverSequence &&
+    record.expectedSemanticFingerprint === event.expectedSemanticFingerprint
+  );
+}
+
+/**
+ * Dormant operation bridge. Owns no AI history: `SynaraAiHistoryCoordinator`
+ * remains the sole AI-history owner. The bridge only correlates server truth
+ * (identity, sequencing, Take Over, containment, terminal outcomes) with
+ * truthful browser application evidence and forwards settlements.
+ */
+export class SynaraWhiteboardOperationBridge {
+  public state: SynaraWhiteboardBridgeState = "idle";
+  /** Exact server-minted identity from attach; null until attach succeeds. */
+  public sessionIdentity: SynaraWhiteboardSessionIdentity | null = null;
+  /** Resume cursor: the last server sequence this bridge accepted. */
+  public lastAcceptedServerSequence = 0;
+
+  private readonly transport: SynaraWhiteboardOperationTransport;
+  private readonly options: SynaraWhiteboardOperationBridgeOptions;
+  private coordinator: SynaraAiHistoryCoordinator | null = null;
+  private unsubscribe: (() => void) | null = null;
+  private offTransportFailure: (() => void) | null = null;
+  private disposed = false;
+
+  private activeOperation: {
+    readonly batchId: string;
+    readonly operationId: string;
+    readonly generation: number;
+  } | null = null;
+  private readonly ledger = new Map<number, AppliedProgressLedgerRecord>();
+  private lastVerifiedSemanticFingerprint: string | null = null;
+  private takeOverPending = false;
+  private containmentResult: WhiteboardContainmentResult | null = null;
+  private terminalOutcome: WhiteboardTerminalOutcome | null = null;
+  private terminalEventSettled = false;
+  private ackChain: Promise<void> = Promise.resolve();
+
+  public constructor(
+    transport: SynaraWhiteboardOperationTransport,
+    options: SynaraWhiteboardOperationBridgeOptions,
+  ) {
+    this.transport = transport;
+    this.options = options;
+  }
+
+  /**
+   * Opens the operation session. Refuses fail-closed when the negotiated
+   * server did not advertise the exact operation-session capability, before
+   * any attach request leaves the browser.
+   */
+  public async startSession(): Promise<SynaraWhiteboardSessionIdentity> {
+    if (this.state !== "idle") {
+      throw new Error(`bridge session already ${this.state}`);
+    }
+    if (!this.transport.hasWhiteboardOperationCapability()) {
+      throw new Error("whiteboard operation-session capability is missing");
+    }
+    this.state = "attaching";
+    const attached = await this.transport.whiteboardOperationAttachSession({
+      projectId: this.options.projectId,
+      documentKind: this.options.documentKind,
+      documentId: this.options.documentId,
+      canvasIdentity: this.options.canvasIdentity,
+      expectedDocumentRevision: this.options.expectedDocumentRevision,
+    });
+    if (this.disposed) throw new Error("bridge disposed during attach");
+    // Store the exact server-minted identity; never reconstruct or infer it.
+    this.sessionIdentity = {
+      serverInstanceId: attached.serverInstanceId,
+      operationSessionId: attached.operationSessionId,
+      sessionEpoch: attached.sessionEpoch,
+      projectId: attached.projectId,
+      documentKind: attached.documentKind,
+      documentId: attached.documentId,
+      canvasIdentity: attached.canvasIdentity,
+    };
+    this.lastAcceptedServerSequence = 0;
+    this.offTransportFailure = this.transport.onWhiteboardOperationFailure((failure) => {
+      this.handleTransportFailure(failure.code, failure.operationSessionId);
+    });
+    this.unsubscribe = this.transport.whiteboardOperationSubscribe(
+      { ...this.sessionIdentity, lastServerSequence: this.lastAcceptedServerSequence },
+      (event) => this.handleEvent(event),
+    );
+    this.state = "subscribed";
+    return this.sessionIdentity;
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.offTransportFailure?.();
+    this.offTransportFailure = null;
+  }
+
+  /** The coordinator, only after an admitted operation started it. */
+  public getCoordinator(): SynaraAiHistoryCoordinator | null {
+    return this.coordinator;
+  }
+
+  public getAppliedProgressCount(): number {
+    return this.ledger.size;
+  }
+
+  private handleTransportFailure(code: string, operationSessionId?: string): void {
+    if (this.disposed) return;
+    if (
+      this.sessionIdentity !== null &&
+      operationSessionId !== undefined &&
+      operationSessionId !== this.sessionIdentity.operationSessionId
+    ) {
+      return;
+    }
+    // A stream failure with an active operation is a lost session: remain
+    // protected, create no terminal truth and no unlock claim.
+    if (this.activeOperation !== null && this.coordinator !== null) {
+      this.coordinator.protectAiOperationOnSessionLoss({
+        reason: `operation session stream failed (${code}) while an operation was active`,
+      });
+    }
+    this.activeOperation = null;
+    this.state = "protected";
+  }
+
+  /**
+   * Order-gated event handling. The transport already guarantees strict
+   * serverSequence order, exact session identity, and duplicate-conflict
+   * fail-closed delivery; this gate serializes snapshot/replay/live into one
+   * ledger so replayed progress never re-applies.
+   */
+  private handleEvent(event: WhiteboardOperationSessionEvent): boolean {
+    if (this.disposed) return false;
+    const accepted = this.dispatch(event);
+    if (accepted && event.serverSequence > this.lastAcceptedServerSequence) {
+      // Keep the stored resume cursor truthful for accepted events.
+      this.lastAcceptedServerSequence = event.serverSequence;
+    }
+    return accepted;
+  }
+
+  private dispatch(event: WhiteboardOperationSessionEvent): boolean {
+    switch (event.kind) {
+      case "session-snapshot":
+        return this.handleSnapshot(event);
+      case "operation-admitted":
+        return this.handleAdmitted(event);
+      case "operation-progress":
+        return this.handleProgress(event);
+      case "take-over-pending":
+        return this.handleTakeOverPending(event);
+      case "containment-result":
+        return this.handleContainmentResult(event);
+      case "operation-terminal":
+        return this.handleTerminal(event);
+    }
+  }
+
+  private handleSnapshot(event: WhiteboardOperationSnapshotEvent): boolean {
+    if (event.terminal !== undefined && event.terminal.operationId !== undefined) {
+      // A resumed session whose operation already terminated: adopt the
+      // terminal state without re-running any coordinator settlement.
+      this.terminalOutcome = event.terminal.outcome;
+      this.terminalEventSettled = true;
+      this.activeOperation = null;
+      this.state = "settled";
+      return true;
+    }
+    if (event.takeOver !== undefined && event.takeOver.status === "pending") {
+      this.takeOverPending = true;
+      this.state = "take-over-pending";
+    }
+    return true;
+  }
+
+  private handleAdmitted(event: WhiteboardOperationAdmittedEvent): boolean {
+    if (this.terminalEventSettled) {
+      // Post-terminal work for the settled operation can never be admitted.
+      return this.protectConflicting("operation admitted after a terminal outcome", event.operationId);
+    }
+    if (this.activeOperation === null) {
+      if (this.coordinator !== null) {
+        return this.protectConflicting(
+          "another operation was admitted while the bridge already owned a coordinator",
+          event.operationId,
+        );
+      }
+      this.coordinator = this.options.createCoordinator(this.options.host);
+      this.activeOperation = {
+        batchId: event.batchId,
+        operationId: event.operationId,
+        generation: event.generation,
+      };
+      this.state = "operation-active";
+      // Starts the coordinator only now: an admitted operation exists.
+      void this.coordinator
+        .beginAiOperation({
+          batchId: event.batchId,
+          operationId: event.operationId,
+          operationGeneration: event.generation,
+        })
+        .catch(() => {
+          // beginAiOperation already reported and locked on failure.
+          this.state = "protected";
+        });
+      return true;
+    }
+    if (
+      this.activeOperation.operationId === event.operationId &&
+      this.activeOperation.generation === event.generation
+    ) {
+      // Equivalent replayed admission: idempotent.
+      return true;
+    }
+    return this.protectConflicting(
+      "a different operation was admitted while one was active",
+      event.operationId,
+    );
+  }
+
+  private handleProgress(event: WhiteboardOperationProgressEvent): boolean {
+    const active = this.activeOperation;
+    if (
+      active === null ||
+      event.operationId !== active.operationId ||
+      event.generation !== active.generation
+    ) {
+      // Stale or foreign-generation progress is fenced before any scene write.
+      return this.protectConflicting(
+        "progress for a stale or foreign operation/generation was fenced",
+        event.operationId,
+      );
+    }
+    if (this.takeOverPending) {
+      // Post-TakeOver producer work for the fenced generation is inapplicable.
+      return this.protectConflicting(
+        "progress arrived after Take Over fenced the operation generation",
+        event.operationId,
+      );
+    }
+
+    const existing = this.ledger.get(event.producerSequence);
+    if (existing !== undefined) {
+      if (!progressRecordEquivalent(existing, event)) {
+        // Canonical duplicate ledger: conflicting replay fails closed.
+        return this.protectConflicting(
+          "replayed progress conflicts with the applied ledger record",
+          event.operationId,
+        );
+      }
+      if (existing.ackState === "interrupted") {
+        // Identical replay after an interrupted acknowledgement: resend the
+        // exact same acknowledgement. Never reapply.
+        this.queueAck(existing, event);
+      }
+      return true;
+    }
+
+    const coordinator = this.coordinator;
+    if (coordinator === null) {
+      return this.protectConflicting(
+        "progress arrived without an admitted operation",
+        event.operationId,
+      );
+    }
+
+    // Image-free application through the coordinator and the real adapter
+    // scope. Element patches are mapped 1:1; no files, assets, or raw
+    // Excalidraw values cross this boundary.
+    const update: SynaraSceneInput = {
+      elements: event.mutation.elements.map((element) => ({ ...element })),
+      files: {},
+    };
+    let receipt: ReturnType<SynaraSyntheticWriteScopeHandle["issue"]> | null = null;
+    try {
+      receipt = coordinator.applyAiProgress({
+        batchId: active.batchId,
+        operationGeneration: event.generation,
+        operationLocalSequence: event.producerSequence,
+        update,
+      });
+    } catch {
+      // The coordinator already reported the diagnostic and faulted the lock.
+      this.state = "protected";
+      return true;
+    }
+
+    const expectedRevision = event.expectedAfterRevision;
+    const expectedFingerprint = event.expectedSemanticFingerprint;
+    void receipt.acknowledgement
+      .then(() => {
+        if (this.disposed) return;
+        const proof = coordinator.captureCanonicalSceneProof();
+        // Semantic proof: correlated callback received (acknowledgement
+        // resolved) and canonical verification of the expected target.
+        if (
+          proof.semanticFingerprint !== expectedFingerprint ||
+          proof.mutationRevision !== expectedRevision
+        ) {
+          this.protectConflicting(
+            "canonical semantic verification failed for the applied progress",
+            event.operationId,
+          );
+          return;
+        }
+        const record: AppliedProgressLedgerRecord = {
+          producerSequence: event.producerSequence,
+          serverSequence: event.serverSequence,
+          expectedSemanticFingerprint: expectedFingerprint,
+          adapterCorrelationId: receipt.correlationId,
+          applicationResult: "applied-semantic",
+          verifiedSemanticFingerprint: proof.semanticFingerprint,
+          resultingMutationRevision: proof.mutationRevision,
+          ackState: "interrupted",
+        };
+        this.ledger.set(record.producerSequence, record);
+        this.lastVerifiedSemanticFingerprint = proof.semanticFingerprint;
+        // Acknowledge only now: correlated callback + semantic proof exist.
+        this.queueAck(record, event);
+      })
+      .catch(() => {
+        // The adapter callback never correlated or verified; the coordinator
+        // faulted the lock and reported. Remain protected.
+        this.state = "protected";
+      });
+    return true;
+  }
+
+  private queueAck(
+    record: AppliedProgressLedgerRecord,
+    event: WhiteboardOperationProgressEvent,
+  ): void {
+    if (this.sessionIdentity === null) return;
+    const identity = this.sessionIdentity;
+    const input: WhiteboardAcknowledgeApplicationInput = {
+      ...identity,
+      batchId: event.batchId,
+      operationId: event.operationId,
+      generation: event.generation,
+      producerSequence: record.producerSequence,
+      serverSequence: record.serverSequence,
+      adapterCorrelationId: record.adapterCorrelationId,
+      applicationResult: record.applicationResult,
+      resultingMutationRevision: record.resultingMutationRevision,
+      verifiedSemanticFingerprint: record.verifiedSemanticFingerprint,
+    };
+    // Serialize acknowledgement sends so ordering stays deterministic.
+    this.ackChain = this.ackChain.then(async () => {
+      if (this.disposed) return;
+      try {
+        await this.transport.whiteboardOperationAcknowledgeApplication(input);
+        record.ackState = "sent";
+      } catch {
+        // Interrupted transport: the identical acknowledgement is resent when
+        // the same progress replays (ledger record stays "interrupted").
+        record.ackState = "interrupted";
+        this.options.onDiagnostic?.({
+          code: "ack-delivery-interrupted",
+          producerSequence: record.producerSequence,
+        });
+      }
+    });
+  }
+
+  private handleTakeOverPending(event: WhiteboardTakeOverPendingEvent): boolean {
+    this.takeOverPending = true;
+    this.state = "take-over-pending";
+    // The Take Over pending lock stays until a containment result resolves
+    // it; no coordinator unlock happens here.
+    return true;
+  }
+
+  private handleContainmentResult(event: WhiteboardContainmentResultEvent): boolean {
+    this.containmentResult = event.result;
+    if (event.result === "acknowledged") {
+      // Only acknowledged containment may lead to interrupted settlement;
+      // the terminal event itself still drives the coordinator settlement.
+      this.state = "operation-active";
+      return true;
+    }
+    // Failed containment: remain protected — no interrupted success, no
+    // unlock, no event.
+    if (this.coordinator !== null && this.activeOperation !== null) {
+      this.coordinator.protectAiOperationOnSessionLoss({
+        reason: `containment result ${event.result} keeps the operation protected`,
+        code: "operation-containment-unresolved",
+      });
+    }
+    this.state = "protected";
+    return true;
+  }
+
+  private handleTerminal(event: WhiteboardOperationTerminalEvent): boolean {
+    if (this.terminalEventSettled) {
+      if (
+        this.terminalOutcome === event.outcome &&
+        this.activeOperation === null
+      ) {
+        // Duplicate terminal for the already-settled operation: idempotent.
+        return true;
+      }
+      return this.protectConflicting(
+        "a conflicting terminal outcome arrived for a settled operation",
+        event.operationId,
+      );
+    }
+    if (
+      this.terminalOutcome !== null ||
+      (this.activeOperation !== null &&
+        (event.operationId !== this.activeOperation.operationId ||
+          event.generation !== this.activeOperation.generation))
+    ) {
+      return this.protectConflicting(
+        "a conflicting terminal outcome arrived for the active operation",
+        event.operationId,
+      );
+    }
+
+    if (event.outcome === "zero-valid") {
+      // Zero-valid: no AI event, no native-history clear, no cursor movement,
+      // and no silent success — the coordinator aborts with a diagnostic.
+      this.terminalOutcome = "zero-valid";
+      this.terminalEventSettled = true;
+      const coordinator = this.coordinator;
+      const active = this.activeOperation;
+      if (coordinator !== null && active !== null) {
+        coordinator.abortAiOperationForZeroValid({
+          batchId: active.batchId,
+          reason: `server terminal outcome zero-valid (${event.terminalReason})`,
+        });
+      }
+      this.activeOperation = null;
+      this.state = "settled";
+      this.options.onOutcome?.({
+        kind: "terminal",
+        outcome: "zero-valid",
+        operationId: event.operationId,
+        generation: event.generation,
+        event: null,
+      });
+      return true;
+    }
+
+    const coordinator = this.coordinator;
+    const active = this.activeOperation;
+    if (coordinator === null || active === null) {
+      return this.protectConflicting(
+        "a terminal outcome arrived without an admitted active operation",
+        event.operationId,
+      );
+    }
+    if (event.outcome === "interrupted" && this.containmentResult !== "acknowledged") {
+      // Interrupted finalization requires acknowledged containment.
+      coordinator.protectAiOperationOnSessionLoss({
+        reason: "interrupted terminal without acknowledged containment stays protected",
+        code: "operation-containment-unresolved",
+      });
+      this.state = "protected";
+      return true;
+    }
+    if (event.outcome !== "completed" && event.outcome !== "interrupted" && event.outcome !== "failed-partial") {
+      return this.protectConflicting("unknown terminal outcome", event.operationId);
+    }
+
+    // Local proof: the current canonical scene must still match the last
+    // verified semantic application of this operation.
+    const proof = coordinator.captureCanonicalSceneProof();
+    if (
+      this.lastVerifiedSemanticFingerprint !== null &&
+      proof.semanticFingerprint !== this.lastVerifiedSemanticFingerprint
+    ) {
+      coordinator.protectAiOperationOnSessionLoss({
+        reason: "local canonical proof no longer matches the verified application",
+      });
+      this.state = "protected";
+      return true;
+    }
+
+    this.terminalOutcome = event.outcome;
+    void coordinator
+      .finalizeAiOperation({ batchId: active.batchId, outcome: event.outcome })
+      .then((aiEvent) => {
+        if (this.disposed) return;
+        // Exactly one event — created after matching local proof and the
+        // coordinator's verified native-history clear.
+        this.terminalEventSettled = true;
+        this.activeOperation = null;
+        this.state = "settled";
+        this.options.onOutcome?.({
+          kind: "terminal",
+          outcome: event.outcome,
+          operationId: event.operationId,
+          generation: event.generation,
+          event: aiEvent,
+        });
+      })
+      .catch(() => {
+        // finalizeAiOperation reported and locked the fault.
+        this.state = "protected";
+      });
+    return true;
+  }
+
+  /** Fail-closed protection: keeps locks, reports, and never unlocks. */
+  private protectConflicting(message: string, operationId: string): boolean {
+    if (this.coordinator !== null) {
+      this.coordinator.protectAiOperationOnSessionLoss({ reason: message });
+    }
+    this.state = "protected";
+    this.options.onDiagnostic?.({ code: "operation-conflicting-terminal", message, operationId });
+    return true;
+  }
+}

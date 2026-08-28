@@ -28,7 +28,11 @@ export type SynaraHistoryDiagnosticCode =
   | "identity-changed-unexpectedly"
   | "human-settlement-uncertain"
   | "operation-not-applicable"
-  | "cursor-not-actionable";
+  | "cursor-not-actionable"
+  | "ack-delivery-interrupted"
+  | "operation-session-lost"
+  | "operation-containment-unresolved"
+  | "operation-conflicting-terminal";
 
 export type SynaraEditLockState = "unlocked" | "ai-batch" | "restore" | "locked-fault";
 
@@ -87,10 +91,17 @@ export interface SynaraAiEventProvenance {
   readonly afterRevision: number;
 }
 
+/**
+ * Terminal outcome of one AI history event. Only server terminal outcomes
+ * backed by acknowledged application evidence reach this union; `zero-valid`
+ * produces no event at all (Decision 0063 §7).
+ */
+export type SynaraAiEventOutcome = "completed" | "interrupted" | "failed-partial";
+
 export interface SynaraAiHistoryEvent {
   readonly id: string;
   readonly provenance: SynaraAiEventProvenance;
-  readonly outcome: "completed";
+  readonly outcome: SynaraAiEventOutcome;
   readonly batchId: string;
   readonly acceptedSyntheticWriteCount: number;
   readonly before: SynaraDocumentSnapshot;
