@@ -1,6 +1,6 @@
 # Ticket 05 Plan — restart, reconnect, Resume, projection truth, and crash diagnostics
 
-**Plan state:** accepted — Ticket 05 is the sole `ready-for-agent` frontier under this evidence-first plan
+**Plan state:** completed — accepted and executed in full; Ticket 05 closed evidence-only and Ticket 06 is the sole `ready-for-planning` frontier
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -319,3 +319,28 @@ Reopen this plan only for material evidence that the measured source differs
 from the grounded seams, an AC fails, controlled provenance changes, existing
 diagnostics cannot remain truthful and bounded, or an accepted later decision
 changes identity, restart, Resume, owner, cleanup, or no-replay authority.
+
+## 12. Completion record (2026-08-28)
+
+The plan executed in full and Ticket 05 closed from passing evidence only:
+
+- WP-01 committed `4090ccee8cf39b9164a9653fc41b239bc59b5173` — frozen
+  candidate `7521b92c7cb8a614346f994e963aa379175f540b`; 9/9 files, 118/118
+  deterministic tests, exit 0.
+- Runner correction `d12e1a2e071afcdc63f630fbff467b76779e7d42` — Node
+  producer authorized for the production real-Pi file per §7.
+- WP-02 committed `b5d0feefc26bf88d59d1759132c9a8b051c54865` — exact clean
+  Alfie `3fe340b401ca86bcbe8b55abd4de107e1d93482e`,
+  `@alfie/pi-subagents@0.15.0-alfie.6`, Pi SDK 0.83.0, 5/5 fixture hashes;
+  restart 1/1, Resume 1/1, fresh production boot 1 passed/9 skipped (Node
+  v24.14.1), all exit 0; Implementation Report complete across all 17 fields.
+- WP-03 closed Ticket 05 as `accepted` and routed Ticket 06 as the sole
+  `ready-for-planning` frontier. §10 closure conditions 1–8 all hold; the
+  owner-authorized final workspace gate passed (`bun fmt` exit 0, `bun lint`
+  exit 0 with 0 warnings/0 errors, `bun typecheck` exit 0 with 7/7 tasks,
+  0 cached); non-failing console advisories recorded in the issue closure
+  record; owner WIP hash `ab8f8f54…eaa8` identical pre/post gate.
+- Governance disposition unchanged: no ticket-level review or Supervisor
+  gate consumed; the integrated project review and exactly one Supervisor
+  final acceptance remain reserved for the complete Ticket 06/project
+  candidate.

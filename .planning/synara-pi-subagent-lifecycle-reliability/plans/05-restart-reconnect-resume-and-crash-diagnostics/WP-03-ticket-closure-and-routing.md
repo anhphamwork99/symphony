@@ -1,6 +1,30 @@
 # WP-03 — Ticket 05 closure and project routing
 
-**State:** blocked by WP-01 and WP-02
+**State:** completed (2026-08-28)
+
+**Result (WP-03 execution):** Ticket 05 closed `accepted` from passing
+evidence only — WP-01 `4090ccee8cf39b9164a9653fc41b239bc59b5173` (118/118
+deterministic tests), WP-02 `b5d0feefc26bf88d59d1759132c9a8b051c54865`
+(exact clean Alfie `3fe340b401ca86bcbe8b55abd4de107e1d93482e`,
+`@alfie/pi-subagents@0.15.0-alfie.6`, Pi SDK 0.83.0; restart 1/1, Resume
+1/1, fresh production boot 1 passed/9 skipped under Node v24.14.1; Bun
+`node:sqlite` pre-collection failure preserved as environment evidence),
+complete Implementation Report with T05-AC1–AC6 all PASS, zero
+source/test/contract/configuration/migration/manifest/lockfile/Alfie delta
+from candidate `7521b92c7` to HEAD, and the owner-authorized final gate
+passed (`bun fmt` exit 0; `bun lint` exit 0, 0 warnings/0 errors;
+`bun typecheck` exit 0, 7/7 tasks, 0 cached; non-failing console advisories
+recorded in the issue closure record; the gate run's out-of-scope
+planning-only rewrites were removed before closure and protected owner diff
+hash `ab8f8f54…eaa8` identical pre/post). All eight closure dependencies
+hold; no challenge, no Ticket 05 review or Supervisor artifact consumed.
+Ticket 06 is routed `ready-for-planning — sole frontier` in Project Home;
+no Ticket 06 implementation, review, or acceptance is claimed. Issue,
+PLAN, WP-01/WP-02 commit links, and Project Home updated within this
+write set only; owner WIP remained unstaged with identical pre/post diff hash
+and byte backups restored if the formatter touched those paths. The integrated project
+review and exactly one Supervisor final acceptance remain reserved for the
+complete Ticket 06/project candidate.
 
 **Owner role:** implementation worker
 
@@ -126,6 +150,11 @@ Verify:
 ```text
 docs(planning): accept Ticket 05 lifecycle recovery
 ```
+
+**Executed commit boundary (for the integrating main agent):** stage exactly
+the six allowed paths with explicit paths (never `git add .`/`git add -A`) and
+commit with the message above. Do not commit in this WP; integration and the
+closure transaction belong to the main agent.
 
 Stage the six allowed paths explicitly. Never use `git add .` or `git add -A`.
 

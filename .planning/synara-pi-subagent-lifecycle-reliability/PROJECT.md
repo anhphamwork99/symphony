@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–04 accepted; Ticket 05 is the sole frontier (`ready-for-agent` under its accepted evidence-first plan)
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 is the sole frontier (`ready-for-planning`)
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -150,8 +150,9 @@ Out of scope:
 
 ## Current frontier and statuses
 
-**Current frontier: Ticket 05 is the sole project frontier.** Ticket 01 is
-accepted as the read-only grounding report. Ticket 02 is accepted at Symphony
+**Current frontier: Ticket 06 is the sole project frontier
+(`ready-for-planning`).** Tickets 01–05 are accepted. Ticket 01 is accepted
+as the read-only grounding report. Ticket 02 is accepted at Symphony
 candidate `cb023e587` plus Implementation Report `d77a566e0`, against
 controlled Alfie
 `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
@@ -176,17 +177,33 @@ watchdog 2/2 PASS. No Ticket 04 source, test, contract, manifest, lockfile,
 or Alfie change exists; no destructive manual run was run or claimed. Its
 final gate passed `bun fmt`, `bun lint` with 0 warnings/0 errors, and
 `bun typecheck` 7/7 with non-failing console advisories recorded. Ticket-level
-review and Supervisor acceptance were intentionally unused. Ticket 05's
-accepted evidence-first plan at
-[`plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md`](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md)
-now routes it as the sole `ready-for-agent` frontier. Initial execution
-authorizes deterministic and controlled-provider evidence plus the issue
-Implementation Report only; it authorizes no source, test, contract,
-configuration, migration, manifest, lockfile, or Alfie change. Any criterion
-failure must stop at the plan's challenge/replan gate. Ticket 06 remains
-blocked. One integrated project review and exactly one Supervisor
-final-acceptance consultation remain reserved for the complete integrated
-candidate.
+review and Supervisor acceptance were intentionally unused. Ticket 05 is
+accepted from evidence-only execution under its accepted plan at
+[`plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md`](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md):
+WP-01 evidence `4090ccee8cf39b9164a9653fc41b239bc59b5173` passed 9/9 files
+and 118/118 deterministic tests at frozen candidate
+`7521b92c7cb8a614346f994e963aa379175f540b`; runner correction
+`d12e1a2e071afcdc63f630fbff467b76779e7d42` authorized the Node producer;
+WP-02 evidence and Implementation Report
+`b5d0feefc26bf88d59d1759132c9a8b051c54865` verified the exact clean Alfie
+pin and Pi SDK 0.83.0 (5/5 fixture hashes) and recorded non-destructive real-
+Pi restart 1/1, explicit Resume 1/1, and fresh production boot 1 passed/9
+skipped under the supported Node producer, with the Bun 1.3.12 `node:sqlite`
+pre-collection failure preserved as environment evidence only. Provider-
+inactive Resume fails closed at `ProviderService.resumePiSubagentExecution`
+with `allowRecovery: false` — a truthful denial without provider bootstrap.
+No Ticket 05 source, test, contract, configuration, migration, manifest,
+lockfile, or Alfie change exists (`7521b92c7..HEAD` apps/packages delta is
+empty); no Ticket 05 destructive manual run was claimed or executed. Its owner-
+authorized final gate passed `bun fmt` (exit 0), `bun lint` with 0 warnings/
+0 errors, and `bun typecheck` 7/7 (0 cached) with non-failing console
+advisories recorded. Ticket-level review and Supervisor acceptance were
+intentionally unused. Ticket 06 is now the sole project frontier,
+`ready-for-planning`, with Tickets 01–05 accepted and all
+provenance/evidence gates available; no Ticket 06 implementation, review, or
+acceptance has occurred. One integrated
+project review and exactly one Supervisor final-acceptance consultation
+remain reserved for the complete integrated candidate.
 
 | Ticket                                                                    | Status                                 | Dependency / unlock                                                                                           |
 | ------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -194,16 +211,21 @@ candidate.
 | [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                           | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted**                           | Decision 0006 implemented, evidenced, reviewed, and closed at frozen candidate `5a1ff1d42`                    |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | **accepted**                           | T04-AC1–AC5 deterministically evidenced and reported; no source change                                        |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | **ready-for-agent — sole frontier**    | accepted evidence-first plan; Tickets 02–04 accepted seams                                                     |
-| [06](issues/06-integrated-real-pi-acceptance.md)                          | blocked                                | Tickets 01–05 accepted; all provenance and evidence gates                                                     |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | **accepted**                           | T05-AC1–AC6 evidenced and reported; no source change                                                          |
+| [06](issues/06-integrated-real-pi-acceptance.md)                          | **ready-for-planning — sole frontier** | Tickets 01–05 accepted; all provenance/evidence gates available                                               |
 
 Ticket 04's evidence-first plan executed in full: WP-01 froze deterministic
 criterion evidence, WP-02 verified controlled provenance and completed the
 Implementation Report, and WP-03 closed the ticket from that evidence only.
-Under the Router rule, this Project Home remains the sole status and frontier
-authority. Ticket 05's accepted plan now advances execution authority to its
-serial evidence-only WPs. It does not authorize source remediation or claim
-Ticket 05, Ticket 06, or the integrated project accepted.
+Ticket 05's evidence-first plan likewise executed in full: WP-01
+(`4090ccee8`) froze deterministic criterion evidence at frozen candidate
+`7521b92c7`, WP-02 (`b5d0feefc`) verified controlled provenance and completed
+the Implementation Report, and WP-03 closed the ticket from that evidence
+only. Under the Router rule, this Project Home remains the sole status and
+frontier authority. Ticket 06 is the sole `ready-for-planning` frontier; its
+plan does not yet exist and no implementation, review, or acceptance is
+claimed. It does not authorize source remediation or claim Ticket 06 or the
+integrated project accepted.
 
 The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
 is discharged by Decision 0002. It remains a historical consultation link;
@@ -306,21 +328,23 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 review](reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md) — independent criterion-level PASS review of frozen candidate `5a1ff1d42`.
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
-- [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — accepted evidence-first plan with serial deterministic, controlled real-Pi/report, and closure/routing packages; initially authorizes no source change.
+- [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
-Tickets 01–04 are accepted. Ticket 03 implements Decision 0006's exact-tuple
+Tickets 01–05 are accepted. Ticket 03 implements Decision 0006's exact-tuple
 Alternative A proxy, preserves the inherited closed DG-4 owner boundary, and
 is closed at frozen candidate `5a1ff1d42` with PASS review `c3dbc328a`.
 Ticket 04 is accepted at frozen candidate `08b65ebb4` from evidence-only
 execution with no source or Alfie change; its cancellation/watchdog/owned
 teardown evidence preserves bands 70–78, proof-before-fence, and
-exact-owner-only authority. Ticket 05 is the sole `ready-for-agent` frontier
-under its accepted evidence-first plan: initial execution is limited to
-deterministic and controlled-provider evidence plus its Implementation Report,
-with no source/Alfie change. Ticket 06 remains blocked. The one integrated
-project review and exactly one Supervisor final-acceptance consultation remain
-reserved for the complete project candidate.
+exact-owner-only authority. Ticket 05 is accepted at frozen candidate
+`7521b92c7` from evidence-only execution with no source or Alfie change; its
+reconnect/restart/Resume/no-replay evidence preserves identity, restart,
+Resume, owner, cleanup, and no-replay authority, and provider-inactive
+Resume remains a truthful fail-closed denial. Ticket 06 is the sole
+`ready-for-planning` frontier. The one integrated project review and exactly
+one Supervisor final-acceptance consultation remain reserved for the
+complete project candidate.

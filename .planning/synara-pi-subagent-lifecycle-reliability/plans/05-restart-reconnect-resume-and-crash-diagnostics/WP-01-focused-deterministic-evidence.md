@@ -2,6 +2,8 @@
 
 **State:** completed
 
+**Commit:** `4090ccee8cf39b9164a9653fc41b239bc59b5173` — "test(pi): record Ticket 05 deterministic recovery evidence"
+
 **Owner role:** implementation worker
 
 **Dependencies:** persisted Ticket 05 plan; Project Home routes Ticket 05

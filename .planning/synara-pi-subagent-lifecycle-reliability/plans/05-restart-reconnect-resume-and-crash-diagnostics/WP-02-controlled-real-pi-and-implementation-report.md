@@ -2,6 +2,8 @@
 
 **State:** completed (2026-08-28)
 
+**Commit:** `b5d0feefc26bf88d59d1759132c9a8b051c54865` — "test(pi): record Ticket 05 controlled recovery evidence"; runner correction `d12e1a2e071afcdc63f630fbff467b76779e7d42` — "docs(planning): correct Ticket 05 node sqlite runner"
+
 **Result (WP-02 execution):** Exact controlled provenance PASS — Alfie HEAD
 `3fe340b401ca86bcbe8b55abd4de107e1d93482e`, origin
 `https://github.com/anhphamwork99/alfie.git`, clean controlled status, zero

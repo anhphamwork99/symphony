@@ -1,7 +1,8 @@
 # Ticket 05 — restart, reconnect, Resume, projection truth, and crash diagnostics
 
-**Status:** ready-for-agent
-**Dependencies:** Tickets 02–04 accepted; local Decisions 0002/0006, applicable inherited decisions, and this evidence-first plan remain binding
+**Status:** accepted
+**Implementation result:** evidence-only closure; no Ticket 05 source/test/contract/configuration/migration/Alfie change
+**Dependencies:** Tickets 02–04 accepted — discharged at closure; local Decisions 0002/0006, applicable inherited decisions, and this evidence-first plan remain binding
 **Plan:** [`../plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md`](../plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md)
 **Execution authorization:** serial evidence-only WPs; no source/test/contract/configuration/migration/manifest/lockfile/Alfie remediation without the PLAN §9 challenge/replan gate
 
@@ -122,6 +123,90 @@ No AC failed; no challenge was raised. Residual honest boundaries: (a) the produ
 ### 17. Proposed Ticket 06 planning frontier
 
 Deferred to WP-03 per the WP-02 contract: no Ticket 06 routing or frontier text is proposed by this report.
+
+## Closure record (WP-03, 2026-08-28)
+
+Ticket 05 is accepted from evidence-only execution. Report-time statements in
+fields 1, 13, 16, and 17 describe the state before WP-03 and are superseded
+by this record.
+
+- **Lineage/commits:** planning baseline `fa02c58ed100242dcaab1ce2aabf0ec8d6a9cef2`;
+  plan commit / frozen candidate `7521b92c7cb8a614346f994e963aa379175f540b`
+  ("docs(planning): plan Ticket 05 lifecycle recovery evidence"); WP-01
+  evidence `4090ccee8cf39b9164a9653fc41b239bc59b5173` ("test(pi): record
+  Ticket 05 deterministic recovery evidence" — 9/9 files, 118/118 tests,
+  exit 0); runner correction `d12e1a2e071afcdc63f630fbff467b76779e7d42`
+  ("docs(planning): correct Ticket 05 node sqlite runner"); WP-02 evidence
+  and completed Implementation Report `b5d0feefc26bf88d59d1759132c9a8b051c54865`
+  ("test(pi): record Ticket 05 controlled recovery evidence").
+  `git diff --name-only 7521b92c7..HEAD -- apps packages` is empty: zero
+  Ticket 05 source/test/contract/configuration/migration/manifest/lockfile/
+  Alfie delta from candidate through HEAD.
+- **Controlled provenance:** Alfie HEAD
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`, clean tree, zero diff on the
+  six contracted controlled surfaces; `@alfie/pi-subagents@0.15.0-alfie.6`;
+  Pi SDK `@earendil-works/pi-coding-agent@0.83.0`; 5/5 fixture hashes exact
+  (`evidence/WP-02-controlled-provider-provenance.txt`).
+- **AC verdicts:** T05-AC1–AC6 all PASS per the Implementation Report §6
+  matrix. Dynamic rows cite executed deterministic tests and/or controlled
+  real-Pi legs; the provider-inactive Resume row is explicitly structural,
+  proven from fail-closed source order and sole-caller reachability. No AC
+  rests on inherited totals, comments, or compile success.
+- **Reconnect/cursor:** bounded durable card hydration with no in-memory
+  Agent row; fresh subscriber over the same isolated durable state; card cap
+  64 with oldest-overflow omission; 512-char progress/diagnostic caps;
+  prompt/raw `progressJson`/full transcript/result/`agentId`/PID exclusions;
+  exact-gap cursor replay; excessive/ahead/deleted-subject/unbounded-attach-gap
+  resnapshot fallbacks; all work-creation counters zero
+  (`evidence/WP-01-ac-seam-diagnostic-matrix.md`, T05-AC1 row).
+- **Inactive-provider Resume denial:** ProviderService with
+  `allowRecovery: false` returns
+  `Cannot resume subagent execution '<executionId>' because the provider
+  runtime is not active.` before adapter/coordinator access, sequence-80
+  persistence, attempt creation, or child launch — zero effects, no
+  bootstrap; structurally proven in WP-01 and paired with the explicit
+  real-Pi Resume leg (`evidence/WP-02-resume-acceptance.log`).
+- **Crash/bounds evidence:** stage/evidence-gap diagnostic rows executed
+  (terminal ingest/persistence/outbox delivery, startup terminal recovery,
+  live-owner refresh/absence, late old-generation terminal, watchdog
+  timeout/cleanup uncertainty, teardown requested/survivors/owner-unproven/
+  proven, resume persistence/child-launch failures); metadata bounded and
+  redacted (512/512 caps; prohibited content excluded; no invented owner
+  receipt, terminal exception, or cleanup proof).
+- **No-replay proof:** six structural claims proven from callers/imports
+  (`evidence/WP-01-no-replay-structural-proof.md`); real-Pi counters show
+  zero new delegated work (delegated 1→1, fresh-server admissions 0,
+  resume-requested 0, parent effects 0, outbox 0→0).
+- **Real-Pi/manual disposition:** three authorized non-destructive controlled
+  legs pass with producer exit 0 — restart 1/1 (10.74s), explicit Resume 1/1
+  (4.26s), fresh production boot 1 passed/9 skipped (12.18s, Node v24.14.1);
+  the preserved Bun 1.3.12 `node:sqlite` pre-collection failure (0 tests,
+  exit 1) remains environment evidence, not a behavior result or test
+  failure. No destructive zero-owned-child run was claimed or executed; the
+  inherited isolated manual evidence was not rerun and not relabeled
+  (`evidence/WP-02-nondestructive-real-pi-disposition.md`).
+- **Final workspace gate (owner-authorized):** `bun fmt` exit 0 (3118 files,
+  2329ms); `bun lint` exit 0, 0 warnings/0 errors (2658 files, 149 rules);
+  `bun typecheck` exit 0, 7 successful/7 total, 0 cached (11.789s).
+  Non-failing console advisories: two Vite/Astro
+  `optimizeDeps.esbuildOptions` deprecation warnings, Astro diagnostics
+  0 errors/0 warnings/0 hints, and two Effect TS44 messages in
+  `packages/contracts/src/orchestration.test.ts` (lines 213, 251). The gate
+  run's transient out-of-scope planning-only rewrites were removed before
+  closure; the shared checkout returned to only the protected owner WIP.
+- **Owner-WIP exclusion:** `apps/web/package.json`, `apps/web/src/main.tsx`,
+  and `bun.lock` remained modified-unstaged; protected diff hash
+  `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`
+  was identical pre/post gate. The gate took byte backups and restored them
+  if the workspace formatter touched those paths; they were never staged;
+  no `git add .`/`git add -A`.
+- **Governance:** no Ticket 05 review and no Supervisor gate was consumed;
+  no decision/review/Supervisor artifact exists for this ticket. The
+  integrated project review and exactly one Supervisor final acceptance
+  remain reserved for the complete Ticket 06/project candidate.
+- **Next frontier:** Ticket 06 routed `ready-for-planning — sole frontier`
+  in Project Home; no Ticket 06 implementation, review, or acceptance is
+  claimed or authorized by this closure.
 
 ## Unlock gate
 
