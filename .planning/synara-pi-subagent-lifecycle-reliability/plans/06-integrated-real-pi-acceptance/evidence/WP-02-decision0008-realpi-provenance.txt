@@ -1,9 +1,9 @@
 WP-02 Decision 0008 candidate real-Pi provenance and zero-delta record
 =======================================================================
 Recorded: 2026-08-28 (local, UTC+7)
-Class: P/R supporting evidence only; candidate attempt challenged
-Purpose: preserve the owner-checkout raw logs and route the completed
-         diagnostic trace to Supervisor reassessment
+Class: P/R supporting evidence only; candidate2 attempt challenged
+Purpose: preserve the owner-checkout raw logs and route the failure to the
+         Decision 0009 correction/rebaseline path
 
 1. CANDIDATE AND AUTHORITIES
 ----------------------------
@@ -11,8 +11,10 @@ Historical producer candidate:
   SHA      : 2afef48b008527685658801d8f0d84c79e24827d
   parent   : ffd45bd867e94c9003415f5f2e937cc9c616e399
   identity : candidate2 producer identity; never the integration merge
-Decision 0008 remains binding for the canonical F5 post-await classification.
-This record does not authorize source, test, Alfie, or public-contract changes.
+Decision 0008 remains binding for post-await same-registration classification.
+Decision 0009 is aspect-scoped Authoritative for structured unavailable-value
+preservation, managed mapping, exact four-file correction, and rebaseline.
+This record does not authorize a retry, public-contract change, or acceptance.
 
 Pinned controlled Alfie composition remains:
   commit   : 3fe340b401ca86bcbe8b55abd4de107e1d93482e
@@ -28,14 +30,22 @@ Protected owner WIP (must remain modified, unstaged, and byte-identical):
 Aggregate WIP diff hash, before and after the producer attempt:
   ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
 
-Candidate/source acceptance surface remained zero-delta for the producer
-attempt. Candidate2 is recorded as historical only; no producer source path,
-application path, package path, or lockfile is committed by this transaction.
+Candidate2's producer surface was clean and zero-delta during the attempt.
+Its historical total delta from 12fd6686 was four paths. Decision 0009
+authorizes a future sole-parent correction child whose correction delta is
+exactly these four paths and whose final total distinct delta from 12fd6686 is
+exactly six paths:
+  - the two historical Decision 0007 fixture paths;
+  - piSubagentLiveLifecycleContainment.ts;
+  - piSubagentLiveLifecycleContainment.test.ts;
+  - piSubagentManagedRuntimeBinding.ts;
+  - piSubagentCanonicalRouting.test.ts.
+No fifth path, source/configuration/schema/lockfile/Alfie change is allowed.
 
 3. EXECUTED PRODUCERS AND CLEANUP
 ---------------------------------
-The two producers ran serially and preserve their true Vitest exits. The first
-nonzero producer stopped the attempt; there was no retry.
+The two candidate2 producers ran serially and preserve their true Vitest
+exits. The first nonzero producer stopped the attempt; there was no retry.
 
 Integrated producer:
   file      : apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
@@ -62,7 +72,7 @@ Later authorized files not run after fail-stop:
   apps/server/src/provider/piSubagentResumeAcceptance.test.ts
 
 No destructive action, PID enumeration/signalling, quality gate, review, or
-Supervisor consultation was run. The candidate attempt is not a five-leg PASS.
+Supervisor consultation was run. The candidate2 attempt is not a five-leg PASS.
 
 4. COMPLETED TRACE AND MATERIAL MISMATCH
 ----------------------------------------
@@ -73,33 +83,29 @@ Terminal-first at piSubagentCanonicalIdentityAcceptance.test.ts:913:
 The completed enqueue-first trace returned applied and recorded exactly:
   sessionSteerInvocations : 1
   sdkInsertions           : 1
-The raw trace also records one managed admission, one delegated model request,
-zero active exact tuples at settlement, bridge-index retirement, durable
-seq-40 commit, post-await generation validation, bookkeeping, and production
-settlement. No second provider action, replay, Resume, bootstrap,
-reconstruction, or new child was claimed.
+The terminal-first trace established zero session-steer invocations and zero
+SDK insertions. The containment seam discarded the structured provider
+classification before the managed binding could apply the established mapping.
+This is a diagnostic preservation defect, not permission to call the result
+applied or to claim provider acceptance.
 
-The source-grounded trace proves containment discarded the structured provider
-classification. This is a material design choice, not permission to call the
-terminal-first result applied: the control did not cross provider acceptance.
+5. DECISION 0009 AND FAIL-STOP ROUTING
+--------------------------------------
+Decision 0009 selects internal unavailableReason preservation. It is present
+only on an internal unavailable result. The managed binding maps an unaccepted
+control with provider_inactive to pi_subagent_read_live_record_unavailable;
+observation and generic unavailable results remain
+pi_subagent_live_lifecycle_unavailable. The reason is not public or durable,
+and provider text is never parsed. No applied/acceptance lie is permitted.
 
-5. FAIL-STOP AND ROUTING
-------------------------
-WP-02 is CHALLENGED and historical supporting evidence only. It has no current
-R PASS and no retry. Candidate2 remains challenged historical evidence; no
-source correction may start until Supervisor reassesses the diagnostic
-contract.
+The authorized correction child is a sole-parent child of candidate2 with
+exactly the four paths listed above. Its final total distinct delta from
+12fd6686 is exactly six paths. After its SHA is frozen, the required route is
+fresh WP-01 closed-19-file D evidence with actual count, exactly one complete
+five-file WP-02 R attempt, fresh authorized WP-03 M, fresh authorized WP-04 Q,
+WP-05 one integrated review, WP-06 one final Supervisor Decision 0010, and
+WP-07 closure. A failed fresh WP-02 has no retry authority.
 
-Required reassessment choices:
-  A. Same two files: extend PiSubagentLiveLifecycleDiagnosticCode union/array
-     and map unaccepted provider_inactive control to
-     pi_subagent_read_live_record_unavailable.
-  B. Authorize a third binding file/value-preservation seam to carry the
-     structured provider classification without loss.
-
-Applied-without-acceptance is rejected. WP-03, WP-04, WP-05, WP-06, and WP-07
-remain blocked until the reassessment, any authorized exact correction,
-renewed WP-01, and a renewed complete five-file WP-02 PASS.
-
-This record is planning/evidence only. It contains no source implementation,
-new test, retry, destructive run, formatter, lint, typecheck, or acceptance.
+This derivative provenance record does not change either raw log. It contains
+no source implementation, new test execution, retry, destructive run,
+formatter, lint, typecheck, review, or acceptance.

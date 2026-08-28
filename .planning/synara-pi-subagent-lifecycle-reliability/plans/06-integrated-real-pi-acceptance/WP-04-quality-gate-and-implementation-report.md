@@ -1,16 +1,19 @@
 # WP-04 — exactly-one fresh owner-authorized quality gate and report
 
-**State:** blocked. Requires the new WP-03 PASS and fresh explicit owner
-authorization. Historical authorization is non-transferable; Decision 0008
-does not authorize a quality run.
+**State:** blocked. Requires the new candidate's fresh WP-01 PASS, exactly one
+new full five-file WP-02 PASS, the exactly-one fresh owner-authorized WP-03
+PASS, and fresh explicit owner authorization. Historical authorization is
+non-transferable; Decision 0009 does not authorize a quality run.
 
 ## Objective
 
 Run exactly one `bun fmt`, `bun lint`, and `bun typecheck` gate in the isolated
 Symphony worktree and complete Ticket 06's Implementation Report with
-criterion-level AC1–AC8 evidence classes, all failure/diagnostic legs,
-provenance, authorization/no-retry, protected-WIP, and staging audits.
-Leave review and Decision 0009 fields explicitly pending for WP-05/WP-06.
+criterion-level AC1–AC8 evidence classes, all failure/diagnostic legs, exact
+six-path-from-`12fd6686` candidate lineage, provenance, authorization/no-retry,
+protected-WIP, and staging audits. Preserve Decision 0009's internal-only
+`unavailableReason` mapping and leave review and Decision 0010 fields explicitly
+pending for WP-05/WP-06.
 
 ## Stop gates
 

@@ -1,13 +1,13 @@
 # WP-03 — exactly-one fresh owner-authorized manual destructive run
 
-**State:** blocked. Historical ffd/WP-01 and the spent renewed WP-02 attempt
-are supporting only. Fresh explicit owner authorization is required after the
-new full five-file WP-02 PASS; old authorization is non-transferable and not
-executable.
+**State:** blocked. Candidate2 WP-01/WP-02 evidence is historical supporting
+only. Fresh explicit owner authorization is required after the new candidate's
+fresh WP-01 PASS and exactly one new full five-file WP-02 PASS; old authorization
+is non-transferable and not executable.
 
-**Authority:** Decision 0008 is aspect-scoped Authoritative only for its named
-classification correction; inherited destructive-boundary decisions remain
-binding and unchanged.
+**Authority:** Decision 0009 is aspect-scoped **Authoritative** for the exact
+four-file correction and rebaseline route; inherited destructive-boundary
+decisions remain binding and unchanged.
 
 ## Objective and boundary
 
@@ -19,10 +19,11 @@ kill authority, automation, or retry.
 
 ## Dependencies and stop rule
 
-Requires reset WP-01 PASS, exactly one new WP-02 five-leg exit-0 record, and a
-fresh current-session owner authorization. If the run fails, aborts, or is
-ambiguous, record truthfully and return challenge; no rerun without a new
-owner decision. Historical H evidence remains supporting only.
+Requires the new sole-parent correction candidate, fresh closed-19-file WP-01
+PASS, exactly one new WP-02 five-leg exit-0 record, and fresh current-session
+owner authorization. If the run fails, aborts, or is ambiguous, record
+truthfully and return challenge; no rerun without a new owner decision.
+Historical H evidence remains supporting only.
 
 ## Write set and commit
 

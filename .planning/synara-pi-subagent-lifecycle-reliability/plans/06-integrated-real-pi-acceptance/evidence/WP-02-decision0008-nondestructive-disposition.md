@@ -7,7 +7,7 @@
 
 ## 1. Executed scope and exact outcome
 
-This candidate attempt ran the first two authorized standalone producers
+This candidate2 attempt ran the first two authorized standalone producers
 serially. The integrated producer passed and the canonical-identity producer
 failed; the first nonzero exit stopped the attempt. The later three producers
 were not run.
@@ -18,34 +18,10 @@ were not run.
 | `piSubagentCanonicalIdentityAcceptance.test.ts` | fresh HOME `tmp.Td4`; cleanup PASS | 8 passed, 1 failed; exit 1 |
 
 The integrated skip was exactly the expected manual destructive test. No
-unexpected skip occurred. No destructive operation, PID enumeration/signalling,
-quality gate, review, or Supervisor consultation ran. The complete provenance
-and raw-log hashes are recorded in
-`WP-02-decision0008-realpi-provenance.txt`.
+unexpected skip, destructive operation, PID enumeration/signalling, quality
+gate, review, or Supervisor consultation ran.
 
-## 2. Completed trace: enqueue-first PASS
-
-The canonical enqueue-first strand completed with:
-
-```text
-result                  : applied
-sessionSteerInvocations  : 1
-sdkInsertions            : 1
-```
-
-Its causal trace reached the exact production tool call, manager invocation,
-exact live tuple/held child, live-guard pass, session-steer invocation, one
-synchronous SDK insertion, promise hold/release, bridge-index retirement,
-durable seq-40 commit, post-await generation pass, bookkeeping, and settlement.
-The raw log is the byte-identical record of this completed trace:
-
-`evidence/WP-02-decision0008-canonical-identity-acceptance.log`
-SHA-256: `bf1cd51eaa9e8b81833951e9f95e0d64934044393e98b760881da168731c59d1`
-
-This is a PASS for the enqueue-first trace only. It is not a five-file WP-02
-PASS and does not erase the terminal-first failure.
-
-## 3. Terminal-first failure and source-grounded challenge
+## 2. Completed trace and material mismatch
 
 At `piSubagentCanonicalIdentityAcceptance.test.ts:913`, terminal-first asserted:
 
@@ -54,57 +30,50 @@ expected: pi_subagent_read_live_record_unavailable
 received: pi_subagent_live_lifecycle_unavailable
 ```
 
-The trace proves that containment discarded the structured provider
-classification. The terminal-first control was unaccepted, so its result
-cannot be relabeled `applied`; doing so would claim a provider effect without
-the provider-owned acceptance boundary. **Applied-without-acceptance is
-rejected.**
+The containment seam discarded the structured provider classification. The
+terminal-first control was unaccepted, so it cannot be relabeled `applied`; no
+provider acceptance, SDK insertion, retry, second action, or duplicate action
+is established by this trace. The enqueue-first strand separately passed with
+`applied`, exactly one session steer, and one SDK insertion, but it does not
+repair terminal-first and is not a five-file WP-02 PASS.
 
-The exact material choice is whether the existing two-file containment
-boundary can preserve the structured value or whether the binding must widen.
-This is a Supervisor reassessment item, not an implementation decision for this
-transaction.
+## 3. Decision 0009 route
 
-## 4. Required Supervisor reassessment before source
+Decision 0009 is aspect-scoped **Authoritative** and selects internal
+`unavailableReason` preservation. The reason may exist only on an internal
+`status: "unavailable"` result. The managed binding maps an unaccepted control
+with `provider_inactive` to `pi_subagent_read_live_record_unavailable`.
+Observation and generic unavailable cases remain
+`pi_subagent_live_lifecycle_unavailable`. The reason is never public, durable,
+or parsed from provider text.
 
-Supervisor must reassess and authorize one of these designs before any source
-change:
+The exact correction boundary is four existing files:
 
-- **Option A — same two files:** extend the
-  `PiSubagentLiveLifecycleDiagnosticCode` union/array in
-  `piSubagentLiveLifecycleContainment.ts` and its focused test, and map the
-  unaccepted `provider_inactive` control to
-  `pi_subagent_read_live_record_unavailable`.
-- **Option B — third binding file/value preservation:** authorize a third
-  binding file or equivalent value-preservation seam if the structured
-  provider classification cannot be carried within the two-file boundary.
+```text
+apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+apps/server/src/provider/piSubagentManagedRuntimeBinding.ts
+apps/server/src/provider/piSubagentCanonicalRouting.test.ts
+```
 
-No source, test, contract, schema, configuration, lockfile, or Alfie change is
-authorized by this evidence record. The current candidate remains challenged
-historical evidence only until the reassessment resolves the boundary.
+The new candidate is one sole-parent child of candidate2. Its total distinct
+delta from `12fd6686` is exactly six paths: the two Decision 0007 fixture paths
+plus those four correction paths. No fifth behavioral file or public/schema,
+configuration, lockfile, manifest, or Alfie change is authorized.
 
-## 5. Downstream stop state
+## 4. Downstream stop state
 
-The candidate attempt did not complete all five legs. Therefore:
+The required route is: correction child and freeze → fresh WP-01 on the
+unchanged closed 19-file set with actual count → exactly one complete fresh
+five-file WP-02 → fresh owner WP-03 → fresh owner WP-04 → WP-05 one integrated
+review → WP-06 one final Supervisor Decision 0010 → WP-07 closure. Candidate2
+D/R records cannot satisfy the new route. WP-03 through WP-07 remain blocked,
+and no retry or missing-leg rerun is permitted.
 
-- WP-02 has no current R PASS and cannot authorize WP-03;
-- WP-03's manual destructive leg is blocked;
-- WP-04's quality/report gate is blocked;
-- WP-05's integrated review is blocked;
-- WP-06's final Supervisor acceptance is blocked; and
-- WP-07 closure/routing is blocked.
+## 5. Preservation boundary
 
-The required route is Supervisor reassessment → any explicitly authorized exact
-source correction/candidate → renewed WP-01 → one renewed complete five-file
-WP-02 → fresh downstream authorizations. No retry is permitted for this
-candidate attempt.
-
-## 6. Transaction and preservation boundary
-
-The two raw logs were copied byte-identically from the owning checkout
-`/Users/anhpham99/symphony/.planning/.../evidence/` and are force-added under
-the two Decision 0008 filenames. This planning/evidence-only transaction
-modifies exactly six paths: PLAN.md, this WP-02 contract, this disposition,
-the provenance record, and the two raw logs. Protected owner WIP remains
-unstaged with its exact aggregate hash; no apps/packages/source path is
-committed.
+The two raw owner-checkout logs remain byte-identical under their existing
+Decision 0008 filenames. This derivative disposition does not rewrite raw logs,
+source, tests, configuration, lockfiles, Alfie, protected owner WIP, or runtime
+artifacts. Protected WIP remains unstaged with aggregate hash
+`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.

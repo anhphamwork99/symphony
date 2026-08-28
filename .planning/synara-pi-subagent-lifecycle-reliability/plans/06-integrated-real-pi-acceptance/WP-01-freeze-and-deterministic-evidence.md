@@ -1,28 +1,22 @@
-# WP-01 — Decision 0008 deterministic evidence at frozen candidate2
+# WP-01 — freeze correction candidate and collect deterministic evidence
 
-**State:** **PASS** — deterministic evidence recorded at `303/303` with zero
-failures and zero skips.
-**Candidate:** `2afef48b008527685658801d8f0d84c79e24827d`, the exact detached,
-clean sole-parent child of `ffd45bd867e94c9003415f5f2e937cc9c616e399`.
-**Authority:** [Decision 0008](../../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
-is Authoritative for the post-await retirement/replacement classification;
-Decision 0007 remains authoritative for the fixture correction and historical
-rebaseline.
+**State:** ready only after the exact new candidate is frozen; candidate2's
+`303/303` result is historical supporting evidence only.
+**Candidate2:** `2afef48b008527685658801d8f0d84c79e24827d`, the sole-parent child
+of `ffd45bd867e94c9003415f5f2e937cc9c616e399`.
+**Authority:** [Decision 0009](../../decisions/0009-reassessment-structured-provider-unavailable-preservation.md)
+is aspect-scoped **Authoritative** for the exact four-file correction and
+rebaseline; Decisions 0007/0008 remain authoritative for their separate
+historical aspects.
 
 ## Objective and disposition
 
-The same closed 19-file deterministic set was collected once at frozen
-candidate2. The unit producer covered 18 files and 263 tests; the contracts
-producer covered one file and 40 tests. Aggregate result: **19/19 files,
-303/303 tests, 0 failed, 0 skipped**.
+The new candidate must run the same closed 19-file deterministic set exactly
+once. Record the actual producer-collected file and test count; do not reuse
+candidate2's historical `19/19`, `303/303`, zero-failure/zero-skip result and do
+not broaden the set.
 
-The planning estimate `296 + 6 = 302` is superseded by the authoritative
-producer result. The pre-change containment collection contributed **seven**
-new cases, so the actual total is `296 + 7 = 303`. There is no missing file and
-no extra file. All prior WP-01 logs and matrices remain historical and were not
-overwritten.
-
-Current evidence files:
+Historical candidate2 evidence files:
 
 - `evidence/WP-01-decision0008-deterministic.log` — exit 0; 18/18 files;
   263/263 tests; duration 16.31s;
@@ -40,9 +34,15 @@ Current evidence files:
   delta from `ffd45bd` is only:
   `apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
   `apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`.
-- Its total delta from `12fd6686` is exactly four authorized paths: those two
-  containment paths plus `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`
-  and `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts`.
+- Candidate2's total delta from `12fd6686` is the two Decision 0007 fixture
+  paths plus the two containment paths.
+- The new candidate is one exact recorded sole-parent child of candidate2. Its
+  correction delta is exactly these four existing paths:
+  `apps/server/src/provider/piSubagentLiveLifecycleContainment.ts`,
+  `apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`,
+  `apps/server/src/provider/piSubagentManagedRuntimeBinding.ts`, and
+  `apps/server/src/provider/piSubagentCanonicalRouting.test.ts`.
+- Its total distinct delta from `12fd6686` is exactly six paths.
 - Candidate2 is detached and clean; the producer collection introduced no
   source or candidate-surface delta.
 - Alfie is pinned to
@@ -51,9 +51,9 @@ Current evidence files:
   and build outputs.
 - Protected owner WIP remains untouched and unstaged with aggregate diff hash
   `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
-- Exact commands, outputs, hashes, and explicit staging paths are recorded in
-  the provenance file. The two current logs are force-added because `*.log`
-  is ignored.
+- Exact historical commands, outputs, hashes, and explicit staging paths are
+  recorded in the provenance file. The historical logs were force-added because
+  `*.log` is ignored.
 
 ## Closed 19-file set
 
@@ -64,32 +64,28 @@ file remains included exactly once in the unit producer.
 
 ## Acceptance and next route
 
-WP-01 is **PASS** only for D-class deterministic evidence. The matrix records
-positive and material failure/diagnostic evidence for T06-AC2, T06-AC3,
-T06-AC4, T06-AC5, and T06-AC7, including Decision 0008's new same-registration
-retirement and replacement/invalidation classifications. It does not claim
-R, M, Q, integrated review, or final Supervisor acceptance.
+A future WP-01 PASS is D-class deterministic evidence only. It does not claim
+R, M, Q, integrated review, or final Supervisor acceptance. The fresh collection
+must preserve Decision 0009's mapping: internal `unavailableReason` only on an
+unavailable result; control `provider_inactive` maps to
+`pi_subagent_read_live_record_unavailable`; observation and generic unavailable
+remain generic; no public reason or applied/acceptance lie.
 
-WP-02 is **READY** for exactly one complete five-file non-destructive real-Pi
-attempt, serially and without retry, after its required fresh authorization.
-No WP-02 leg, test rerun, destructive action, quality gate, review, or
-Supervisor consultation occurred in this transaction.
+After the fresh WP-01 PASS, WP-02 is authorized only as exactly one complete
+five-file non-destructive real-Pi attempt, serially and without retry. No
+producer or test rerun occurs in this planning transaction.
 
 ## Commit boundary
 
-This transaction modifies and stages exactly these six paths:
+Future WP-01 evidence is limited to its permitted D logs, matrix, provenance,
+and this WP file. This reassessment transaction modifies none of those outputs
+and stages exactly the twelve planning paths listed in PLAN §9.
+
+No WP-01 producer or evidence commit occurs in this reassessment. The
+transactional write set is exactly the twelve planning paths listed in PLAN §9.
+
+Commit message for this planning transaction:
 
 ```text
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/PLAN.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-worktree-provenance.txt
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-deterministic.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-contracts.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-ac-diagnostic-matrix.md
-```
-
-Commit message:
-
-```text
-test(pi): record Decision 0008 Ticket 06 deterministic evidence
+docs(planning): reassess Ticket 06 under Decision 0009
 ```
