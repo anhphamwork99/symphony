@@ -24,6 +24,11 @@ import {
   semanticFingerprint,
   type SynaraDocumentSnapshot,
 } from "./SynaraDocumentSnapshot";
+import {
+  SynaraWhiteboardOperationBridge,
+  type SynaraWhiteboardOperationOutcome,
+  type SynaraWhiteboardOperationTransport,
+} from "./SynaraWhiteboardOperationBridge";
 import type { SynaraSettlementResult } from "./SynaraHumanMutationSettlement";
 import type {
   SynaraAiCommandTrace,
@@ -37,11 +42,27 @@ const LazyAdapter = lazy(async () => {
   return { default: module.SynaraExcalidrawAdapter };
 });
 
+/** Session fields the test-only operation bridge composition attaches with. */
+export interface ExcalidrawTicket02OperationSessionProps {
+  readonly projectId: string;
+  readonly documentKind: "file-canvas" | "untitled-canvas";
+  readonly documentId: string;
+  readonly expectedDocumentRevision: number;
+}
+
 export interface ExcalidrawTicket02HarnessProps {
   readonly initialScene?: SynaraSceneInput;
   readonly scenario?: string;
   readonly settlementMaxWaitMs?: number;
   readonly onDiagnostic?: (diagnostic: SynaraHistoryDiagnostic) => void;
+  /**
+   * Test-only WP-B3 composition (Decision 0063 §9): a deterministic
+   * contract-level transport fixture driving the real dormant operation
+   * bridge. Never set in production UI.
+   */
+  readonly operationSession?: ExcalidrawTicket02OperationSessionProps & {
+    readonly transport: SynaraWhiteboardOperationTransport;
+  };
 }
 
 export interface ExcalidrawTicket02HarnessHandle {
@@ -69,6 +90,14 @@ export interface ExcalidrawTicket02HarnessHandle {
   readonly undoAiBatch: () => Promise<boolean>;
   readonly redoAiBatch: () => Promise<boolean>;
   readonly settleHumanMutation: () => Promise<SynaraSettlementResult>;
+  /** Test-only WP-B3: opens the real operation bridge session exactly once. */
+  readonly startOperationSession: () => Promise<void>;
+  /** Test-only WP-B3: the real bridge (state, identity, resume cursor), or null before start. */
+  readonly getOperationBridge: () => SynaraWhiteboardOperationBridge | null;
+  /** Test-only WP-B3: terminal outcomes the real bridge exposed. */
+  readonly getOperationOutcomes: () => readonly SynaraWhiteboardOperationOutcome[];
+  /** Test-only WP-B3: transport-level diagnostics emitted by the real bridge. */
+  readonly getOperationDiagnostics: () => readonly unknown[];
 }
 
 type OpenHumanFamily = "pointer" | "keyboard" | "text" | null;
@@ -110,6 +139,9 @@ export const ExcalidrawTicket02Harness = forwardRef<
   const settlementScheduledRef = useRef(false);
   const settlementPromiseRef = useRef<Promise<void>>(Promise.resolve());
   const pendingAdapterDiagnosticsRef = useRef<SynaraExcalidrawDiagnostic[]>([]);
+  const operationBridgeRef = useRef<SynaraWhiteboardOperationBridge | null>(null);
+  const operationOutcomesRef = useRef<SynaraWhiteboardOperationOutcome[]>([]);
+  const operationDiagnosticsRef = useRef<unknown[]>([]);
   const [, rerender] = useState(0);
 
   const getAdapter = useCallback(() => adapterRef.current ?? unavailable("adapter"), []);
@@ -343,6 +375,38 @@ export const ExcalidrawTicket02Harness = forwardRef<
     [ensureCoordinator, scheduleSettlement, snapshotNow],
   );
 
+  const startOperationSession = useCallback(async (): Promise<void> => {
+    const session = props.operationSession;
+    if (session === undefined) {
+      throw new Error("no operation session is composed for this harness");
+    }
+    if (operationBridgeRef.current !== null) {
+      throw new Error("operation bridge already started");
+    }
+    const bridge = new SynaraWhiteboardOperationBridge(session.transport, {
+      projectId: session.projectId,
+      documentKind: session.documentKind,
+      documentId: session.documentId,
+      canvasIdentity: "ticket-02-gate-canvas",
+      expectedDocumentRevision: session.expectedDocumentRevision,
+      host: getAdapter() as unknown as SynaraAiHistoryHost,
+      // The real harness coordinator stays the sole AI-history owner.
+      createCoordinator: () => ensureCoordinator(),
+      scenario: props.scenario ?? "ticket-02-fallback-gate",
+      onDiagnostic: (diagnostic) => {
+        operationDiagnosticsRef.current = [...operationDiagnosticsRef.current, diagnostic];
+        props.onDiagnostic?.(diagnostic as SynaraHistoryDiagnostic);
+      },
+      onOutcome: (outcome) => {
+        operationOutcomesRef.current = [...operationOutcomesRef.current, outcome];
+        rerender((value) => value + 1);
+      },
+    });
+    operationBridgeRef.current = bridge;
+    await bridge.startSession();
+    rerender((value) => value + 1);
+  }, [ensureCoordinator, getAdapter, props.operationSession, props.scenario, props.onDiagnostic]);
+
   useImperativeHandle(
     ref,
     (): ExcalidrawTicket02HarnessHandle => ({
@@ -392,8 +456,12 @@ export const ExcalidrawTicket02Harness = forwardRef<
         rerender((value) => value + 1);
         return settled;
       },
+      startOperationSession,
+      getOperationBridge: () => operationBridgeRef.current,
+      getOperationOutcomes: () => operationOutcomesRef.current,
+      getOperationDiagnostics: () => operationDiagnosticsRef.current,
     }),
-    [awaitRenderAndSettlementDrain, ensureCoordinator, getAdapter],
+    [awaitRenderAndSettlementDrain, ensureCoordinator, getAdapter, startOperationSession],
   );
 
   const state = coordinatorRef.current?.getState();
