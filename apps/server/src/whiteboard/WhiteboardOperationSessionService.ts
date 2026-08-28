@@ -231,6 +231,20 @@ export const makeWhiteboardOperationSessionService = (options: {
       bytes: number;
     }
 
+    interface AcknowledgementSummary {
+      acceptedSemanticCount: number;
+      acceptedNoOpCount: number;
+      rejectedCount: number;
+      lastAcceptedProducerSequence: number;
+    }
+
+    const emptyAcknowledgementSummary = (): AcknowledgementSummary => ({
+      acceptedSemanticCount: 0,
+      acceptedNoOpCount: 0,
+      rejectedCount: 0,
+      lastAcceptedProducerSequence: 0,
+    });
+
     interface OperationRecord {
       readonly batchId: string;
       readonly operationId: string;
@@ -247,6 +261,7 @@ export const makeWhiteboardOperationSessionService = (options: {
         number,
         { readonly canonical: string; readonly serverSequence: number }
       >;
+      readonly acknowledgementSummary: AcknowledgementSummary;
       terminal: WhiteboardOperationTerminalRecord | undefined;
     }
 
@@ -275,12 +290,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       documentRevision: number;
       rows: Array<RowEntry>;
       lastServerSequence: number;
-      readonly acknowledgementSummary: {
-        acceptedSemanticCount: number;
-        acceptedNoOpCount: number;
-        rejectedCount: number;
-        lastAcceptedProducerSequence: number;
-      };
+      readonly acknowledgementSummary: AcknowledgementSummary;
       readonly operations: Map<string, OperationRecord>;
       activeOperationKey: string | undefined;
       latestTerminal: WhiteboardOperationTerminalRecord | undefined;
@@ -547,7 +557,10 @@ export const makeWhiteboardOperationSessionService = (options: {
      * to the baseline row, the latest terminal row, and the immediate retry
      * predecessor row. Active or Take-Over-pending state is never compacted.
      */
-    const compactSession = (session: SessionRecord): void => {
+    const compactSession = (
+      state: ServiceState,
+      session: SessionRecord,
+    ): void => {
       if (!isSessionQuiescent(session)) return;
       const baseline = session.rows[0];
       if (baseline === undefined) return;
@@ -605,7 +618,9 @@ export const makeWhiteboardOperationSessionService = (options: {
       // Compaction drops duplicate payload accounting only; canonical input
       // strings of retained rows remain usable because retained rows are the
       // ones whose canonical inputs were kept in producerSequences maps.
-      session.retainedBytes -= session.retainedBytes - bytes;
+      const removedBytes = session.retainedBytes - bytes;
+      session.retainedBytes = bytes;
+      state.retainedBytesTotal -= removedBytes;
     };
 
     const terminateSubscriber = (
@@ -651,19 +666,18 @@ export const makeWhiteboardOperationSessionService = (options: {
     ): Effect.Effect<boolean> =>
       Effect.gen(function*() {
         const bytes = byteLengthOf(event);
-        const totalBytes = state.retainedBytesTotal - session.retainedBytes + bytes;
+        const totalBytes = state.retainedBytesTotal + bytes;
         const exceeds =
           session.rows.length + 1 > limits.maxReplayEventsPerSession ||
           bytes > limits.maxReplayBytesPerSession - session.retainedBytes + bytes ||
           session.retainedBytes + bytes > limits.maxReplayBytesPerSession ||
           totalBytes > limits.maxReplayBytesTotal;
         if (exceeds) {
-          compactSession(session);
+          compactSession(state, session);
           if (
             session.rows.length + 1 > limits.maxReplayEventsPerSession ||
             session.retainedBytes + bytes > limits.maxReplayBytesPerSession ||
-            state.retainedBytesTotal - session.retainedBytes + session.retainedBytes + bytes >
-              limits.maxReplayBytesTotal
+            state.retainedBytesTotal + bytes > limits.maxReplayBytesTotal
           ) {
             return false;
           }
@@ -765,13 +779,26 @@ export const makeWhiteboardOperationSessionService = (options: {
     /** D3/Decision-0063 §7 exactly-one terminal derivation from ack evidence. */
     const deriveTerminal = (
       operation: OperationRecord,
-      summary: SessionRecord["acknowledgementSummary"],
+      summary: AcknowledgementSummary,
       reason: "complete" | "producer-failed" | "dependency-failed",
     ): WhiteboardOperationTerminalRecord | undefined => {
       const semantic = summary.acceptedSemanticCount;
       const noOp = summary.acceptedNoOpCount;
       const rejected = summary.rejectedCount;
       if (reason === "complete") {
+        if (semantic >= 1 && rejected >= 1) {
+          return {
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            generation: operation.generation,
+            outcome: "failed-partial",
+            terminalReason: "browser-application-failed",
+            acceptedSemanticCount: semantic,
+            acceptedNoOpCount: noOp,
+            rejectedCount: rejected,
+            lastAcceptedProducerSequence: summary.lastAcceptedProducerSequence,
+          };
+        }
         if (semantic >= 1) {
           return {
             batchId: operation.batchId,
@@ -781,7 +808,7 @@ export const makeWhiteboardOperationSessionService = (options: {
             terminalReason: "completed",
             acceptedSemanticCount: semantic,
             acceptedNoOpCount: noOp,
-            rejectedCount: rejected,
+            rejectedCount: 0,
             lastAcceptedProducerSequence: summary.lastAcceptedProducerSequence,
           };
         }
@@ -968,7 +995,14 @@ export const makeWhiteboardOperationSessionService = (options: {
               Effect.as<WhiteboardContainmentResult>("ack-timeout"),
             ),
           );
-          yield* recordContainmentOutcome(state, session.identity.operationSessionId, takeOver.takeOverRequestId, outcome);
+          yield* withLock(
+            recordContainmentOutcome(
+              state,
+              session.identity.operationSessionId,
+              takeOver.takeOverRequestId,
+              outcome,
+            ),
+          );
         });
         // The fiber lives in the service scope: shutdown interrupts it.
         yield* Effect.forkIn(race, scope);
@@ -1023,22 +1057,34 @@ export const makeWhiteboardOperationSessionService = (options: {
         if (
           operation === undefined ||
           operation.terminal !== undefined ||
-          session.acknowledgementSummary.acceptedSemanticCount < 1
+          operation.acknowledgementSummary.acceptedSemanticCount < 1
         ) {
           // Interrupted requires at least one semantic acknowledgement; no
           // terminal truth is manufactured when evidence is absent.
           return;
         }
-        const record = deriveTerminal(operation, session.acknowledgementSummary, "complete");
+        const record = deriveTerminal(
+          operation,
+          operation.acknowledgementSummary,
+          "complete",
+        );
         if (record === undefined) {
           return;
         }
-        const terminal: WhiteboardOperationTerminalRecord = {
-          ...record,
-          outcome: "interrupted",
-          terminalReason: "take-over-acknowledged",
-          containmentResult: "acknowledged",
-        };
+        const terminal: WhiteboardOperationTerminalRecord =
+          record.rejectedCount > 0
+            ? {
+                ...record,
+                outcome: "failed-partial",
+                terminalReason: "browser-application-failed",
+                containmentResult: "acknowledged",
+              }
+            : {
+                ...record,
+                outcome: "interrupted",
+                terminalReason: "take-over-acknowledged",
+                containmentResult: "acknowledged",
+              };
         const interruptedEvent: WhiteboardOperationTerminalEvent = {
           kind: "operation-terminal",
           ...identityOf(session),
@@ -1121,12 +1167,7 @@ export const makeWhiteboardOperationSessionService = (options: {
             documentRevision: decoded.expectedDocumentRevision,
             rows: [],
             lastServerSequence: 0,
-            acknowledgementSummary: {
-              acceptedSemanticCount: 0,
-              acceptedNoOpCount: 0,
-              rejectedCount: 0,
-              lastAcceptedProducerSequence: 0,
-            },
+            acknowledgementSummary: emptyAcknowledgementSummary(),
             operations: new Map(),
             activeOperationKey: undefined,
             latestTerminal: undefined,
@@ -1202,8 +1243,16 @@ export const makeWhiteboardOperationSessionService = (options: {
               "requested sequence is ahead of the live session history",
             );
           }
-          const floor = session.rows[0]?.serverSequence ?? highWater + 1;
-          if (cursor + 1 < floor) {
+          const firstReplayIndex = session.rows.findIndex(
+            (row) => row.serverSequence > cursor,
+          );
+          const replayHasGap =
+            firstReplayIndex >= 0 &&
+            (session.rows[firstReplayIndex]!.serverSequence !== cursor + 1 ||
+              session.rows[session.rows.length - 1]!.serverSequence !==
+                session.rows[firstReplayIndex]!.serverSequence +
+                  (session.rows.length - 1 - firstReplayIndex));
+          if (replayHasGap) {
             if (isSessionQuiescent(session)) {
               return yield* fail(
                 WHITEBOARD_OPERATION_ERROR.resetRequired,
@@ -1350,21 +1399,29 @@ export const makeWhiteboardOperationSessionService = (options: {
               "acknowledgement evidence conflicts with the recorded acknowledgement",
             );
           }
-          const summary = session.acknowledgementSummary;
+          const sessionSummary = session.acknowledgementSummary;
+          const operationSummary = operation.acknowledgementSummary;
+          const summaries = [sessionSummary, operationSummary] as const;
           if (decoded.applicationResult === "applied-semantic") {
-            summary.acceptedSemanticCount += 1;
-            summary.lastAcceptedProducerSequence = Math.max(
-              summary.lastAcceptedProducerSequence,
-              decoded.producerSequence,
-            );
+            for (const summary of summaries) {
+              summary.acceptedSemanticCount += 1;
+              summary.lastAcceptedProducerSequence = Math.max(
+                summary.lastAcceptedProducerSequence,
+                decoded.producerSequence,
+              );
+            }
           } else if (decoded.applicationResult === "applied-no-op") {
-            summary.acceptedNoOpCount += 1;
-            summary.lastAcceptedProducerSequence = Math.max(
-              summary.lastAcceptedProducerSequence,
-              decoded.producerSequence,
-            );
+            for (const summary of summaries) {
+              summary.acceptedNoOpCount += 1;
+              summary.lastAcceptedProducerSequence = Math.max(
+                summary.lastAcceptedProducerSequence,
+                decoded.producerSequence,
+              );
+            }
           } else {
-            summary.rejectedCount += 1;
+            for (const summary of summaries) {
+              summary.rejectedCount += 1;
+            }
           }
           const result: WhiteboardAcknowledgeApplicationResult = {
             ...identityOf(session),
@@ -1373,9 +1430,9 @@ export const makeWhiteboardOperationSessionService = (options: {
             generation: decoded.generation,
             producerSequence: decoded.producerSequence,
             serverSequence: decoded.serverSequence,
-            acceptedSemanticCount: summary.acceptedSemanticCount,
-            acceptedNoOpCount: summary.acceptedNoOpCount,
-            rejectedCount: summary.rejectedCount,
+            acceptedSemanticCount: operationSummary.acceptedSemanticCount,
+            acceptedNoOpCount: operationSummary.acceptedNoOpCount,
+            rejectedCount: operationSummary.rejectedCount,
           };
           session.acks.set(key, { canonical: canonicalInput, result });
           session.order = ++state.orderCounter;
@@ -1573,6 +1630,7 @@ export const makeWhiteboardOperationSessionService = (options: {
             admittedServerSequence: session.lastServerSequence + 1,
             lastProducerSequence: 0,
             producerSequences: new Map(),
+            acknowledgementSummary: emptyAcknowledgementSummary(),
             terminal: undefined,
           };
           const event: WhiteboardOperationSessionEvent = {
@@ -1624,6 +1682,19 @@ export const makeWhiteboardOperationSessionService = (options: {
             WhiteboardOperationReleaseSessionInput,
             input,
           );
+          const tombstone = state.tombstones.find(
+            (entry) =>
+              entry.identity.serverInstanceId === decoded.serverInstanceId &&
+              entry.identity.operationSessionId === decoded.operationSessionId &&
+              entry.identity.sessionEpoch === decoded.sessionEpoch &&
+              entry.identity.projectId === decoded.projectId &&
+              entry.identity.documentKind === decoded.documentKind &&
+              entry.identity.documentId === decoded.documentId &&
+              entry.identity.canvasIdentity === decoded.canvasIdentity,
+          );
+          if (tombstone !== undefined) {
+            return tombstone.result;
+          }
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
@@ -1696,6 +1767,7 @@ export const makeWhiteboardOperationSessionService = (options: {
             admittedServerSequence: session.lastServerSequence + 1,
             lastProducerSequence: 0,
             producerSequences: new Map(),
+            acknowledgementSummary: emptyAcknowledgementSummary(),
             terminal: undefined,
           };
           const event: WhiteboardOperationSessionEvent = {
@@ -1786,7 +1858,11 @@ export const makeWhiteboardOperationSessionService = (options: {
           for (const dependency of decoded.dependsOnProducerSequences) {
             if (!operation.producerSequences.has(dependency)) {
               // Invalid dependent work is not delivered; dependent work stops.
-              const record = deriveTerminal(operation, session.acknowledgementSummary, "dependency-failed");
+              const record = deriveTerminal(
+                operation,
+                operation.acknowledgementSummary,
+                "dependency-failed",
+              );
               if (record !== undefined) {
                 yield* finalizeTerminal(state, session, operation, record);
               }
@@ -1871,7 +1947,7 @@ export const makeWhiteboardOperationSessionService = (options: {
           }
           const record = deriveTerminal(
             operation,
-            session.acknowledgementSummary,
+            operation.acknowledgementSummary,
             mode === "complete" ? "complete" : "producer-failed",
           );
           if (record === undefined) {
