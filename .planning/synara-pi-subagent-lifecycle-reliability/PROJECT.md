@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under aspect-scoped Authoritative Decision 0009; candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as candidate2's exact sole-parent correction child; WP-01 is ready on the unchanged closed-19-file set with `308` as an estimate only pending the actual producer count; WP-02 is blocked; G-M and G-Q remain pending and exactly one of each is reserved
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under aspect-scoped Authoritative Decision 0009; candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as candidate2's exact sole-parent correction child; WP-01 is **PASS** (`19/19` files, `306/306` tests); WP-02 is **PASS** (exactly one complete five-file non-destructive attempt: `22` passed, `1` expected skip, all exits `0`, no retry); WP-03 requires fresh owner authorization; G-M and G-Q remain pending and exactly one of each is reserved
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -213,10 +213,16 @@ Alfie remains pinned at
 `@alfie/pi-subagents@0.15.0-alfie.6`. Protected owner WIP remains outside
 this transaction with required aggregate diff hash
 `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`;
-protected paths remain untouched and unstaged. WP-01 is ready on the unchanged
-closed 19-file set: candidate2's actual `303` tests plus five focused tests make
-`308` an estimate only, subject to the fresh producer's actual count. WP-02 is
-blocked; there is no current D/R PASS.
+protected paths remain untouched and unstaged. WP-01 is **PASS** on the
+unchanged closed 19-file set with actual count `19/19` files, `306/306` tests.
+WP-02 is **PASS**: exactly one complete five-file non-destructive real-Pi
+attempt ran serially at the frozen candidate without retry — integrated `10`
+passed + `1` expected skip, canonical `9` passed with terminal-first steer
+`0`/SDK `0` and enqueue-first steer `1`/SDK `1` applied, containment `1`,
+restart `1`, resume `1`; aggregate `22` passed, `1` expected skip, all exits
+`0`; fresh per-leg HOME cleanup proven; raw logs, hashes, provenance, and
+disposition under `plans/06-integrated-real-pi-acceptance/evidence/` with the
+`WP-02-decision0009-*` prefix.
 
 A delegated worker also ran heavyweight typecheck/lint and targeted format
 validation without user authorization. Those commands are recorded as a
@@ -235,7 +241,7 @@ and exactly one of each remains reserved.
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
-| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | frozen candidate `9b556490`; WP-01 ready (`308` estimate only); WP-02 blocked; no current D/R/Q pass |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | frozen candidate `9b556490`; WP-01 PASS (`306/306`); WP-02 PASS (five legs, `22` passed + `1` expected skip, all exit 0); WP-03 needs fresh owner auth; no current M/Q pass |
 
 The prior evidence-only/zero-source-delta execution contract is superseded only
 for the Decision 0007 and Decision 0008 candidate aspects. This planning
@@ -326,7 +332,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0009 candidate `9b556490`, exact four-file child of candidate2, six-path total from `12fd6686`, WP-01 ready with `308` estimate only, WP-02 blocked, and final Decision 0010; no current D/R/Q PASS.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0009 candidate `9b556490`, exact four-file child of candidate2, six-path total from `12fd6686`, WP-01 PASS (`306/306`), WP-02 PASS (five serial legs, `22` passed + `1` expected skip, all exits `0`), and final Decision 0010; WP-03 needs fresh owner auth.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
@@ -340,11 +346,12 @@ and rebaseline only; it is not final acceptance. Candidate
 sole-parent child; preserve its focused logs, hashes, provenance, and all
 non-authoritative incident details.
 
-WP-01 is ready to run exactly once on the unchanged closed 19-file set; `308`
-is an estimate only and the producer must record the actual count. WP-02 is
-blocked until WP-01 PASS, then exactly one complete fresh five-file attempt is
-permitted. Fresh owner WP-03, fresh owner WP-04, WP-05, WP-06 Decision 0010,
-and WP-07 follow in order. No source implementation, tests, producer,
-destructive run, review, or quality gate is part of this planning transaction;
-the unauthorized heavyweight command incident is not evidence and was not
-rerun.
+WP-01 is **PASS** on the unchanged closed 19-file set with actual count
+`19/19` files, `306/306` tests. WP-02 is **PASS**: exactly one complete fresh
+five-file non-destructive attempt ran serially at the frozen candidate without
+retry (`22` passed, `1` expected skip, all exits `0`, per-leg HOME cleanup
+proven). Fresh owner WP-03, fresh owner WP-04, WP-05, WP-06 Decision 0010,
+and WP-07 follow in order; no WP-03 authorization exists yet. No source
+implementation, tests, producer, destructive run, review, or quality gate is
+part of this evidence transaction; the unauthorized heavyweight command
+incident is not evidence and was not rerun.

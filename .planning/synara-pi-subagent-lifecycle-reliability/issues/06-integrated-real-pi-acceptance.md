@@ -1,9 +1,10 @@
 # Ticket 06 — integrated real-Pi acceptance
 
 **Status:** ready-for-agent — sole project frontier; Decision 0009 candidate
-`9b55649050b76feffdc4279ceaec92ac74a78686` frozen; WP-01 ready with `308` as
-an estimate only pending the actual producer count; WP-02 blocked; no current
-D/R/Q PASS
+`9b55649050b76feffdc4279ceaec92ac74a78686` frozen; WP-01 **PASS** (`19/19`
+files, `306/306` tests); WP-02 **PASS** (exactly one complete five-file
+non-destructive attempt: `22` passed, `1` expected skip, all exits `0`, no
+retry); WP-03 requires fresh owner authorization; no current M/Q PASS
 **Dependencies:** Tickets 01–05 accepted. [Decision 0008](../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
 remains aspect-scoped **Authoritative** for post-await same-registration
 classification. [Decision 0007](../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
@@ -23,8 +24,10 @@ the old WP-01/WP-02 records, and merge `44249d81c49172e192dcf0f09ddfadc702a4b34c
 The current integration merge `cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7` has
 parents `0e828e0fe5daf273a6a0c04960494756ccdf204e` (planning) and the frozen
 candidate; it is integration provenance only.
-**Current evidence state:** no current D/R PASS. This planning transaction
-runs no producer, test, gate, review, or Supervisor consultation.
+**Current evidence state:** WP-01 D PASS (`306/306`) and WP-02 R PASS
+(`22` passed, `1` expected skip, five serial legs, all exits `0`). No current
+M/Q PASS. This evidence transaction runs no producer, test, gate, review, or
+Supervisor consultation.
 
 ## Candidate freeze and exact lineage
 
@@ -87,13 +90,15 @@ boundary for destructive process-tree claims.
 1. **Freeze:** candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is the
    exact four-file correction child of candidate2, with six total paths from
    `12fd6686`; its SHA and sole-parent proof are recorded.
-2. **WP-01:** run the unchanged closed 19-file deterministic set exactly once
-   and record the actual producer file/test count. Candidate2's actual `303`
-   tests plus five focused tests make `308` an estimate only; do not broaden the
-   set.
-3. **WP-02:** remains blocked until fresh WP-01 PASS; then run exactly one
-   complete fresh five-file non-destructive real-Pi attempt, serially, with no
-   retry.
+2. **WP-01 PASS:** the unchanged closed 19-file deterministic set ran exactly
+   once at the frozen candidate and recorded its actual count: `19/19` files,
+   `306/306` tests, zero failures and skips.
+3. **WP-02 PASS:** exactly one complete fresh five-file non-destructive
+   real-Pi attempt ran serially with no retry — integrated `10 passed, 1
+   expected skip`, canonical `9 passed` (terminal-first steer 0/SDK 0;
+   enqueue-first steer 1/SDK 1, applied), containment `1`, restart `1`, resume
+   `1`; aggregate `22` passed, `1` expected skip, all exits `0`; fresh per-leg
+   HOME cleanup proven; candidate surface zero-delta.
 4. Fresh owner authorization for WP-03 manual destructive evidence, then fresh
    owner authorization for WP-04 quality/report evidence after WP-03 PASS.
 5. WP-05 exactly one integrated review, then WP-06 exactly one final Supervisor

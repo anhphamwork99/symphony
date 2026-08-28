@@ -3,9 +3,11 @@
 **Plan state:** Candidate3 `9b55649050b76feffdc4279ceaec92ac74a78686` remains
 frozen; WP-01 is **PASS** with `19/19` files and `306/306` deterministic tests,
 zero failures, and zero skips. The `308` estimate is superseded by the actual
-producer count. WP-02 is **READY** for exactly one complete five-file
-non-destructive real-Pi attempt. No WP-02 leg, test rerun, quality gate,
-review, or Supervisor consultation was run in the WP-01 evidence transaction.
+producer count. WP-02 is **PASS** with exactly one complete five-file
+non-destructive real-Pi attempt: `22` passed and `1` expected skip across the
+five serial legs, all exits `0`, fresh per-leg HOME cleanup proven, and the
+frozen candidate surface zero-delta. WP-03 now requires fresh owner
+authorization; no WP-03 authorization exists yet.
 **Date:** 2026-08-28
 
 ## 1. Objective and governing authorities
@@ -122,7 +124,8 @@ acceptance; the final Supervisor record is Decision 0010.
 frozen candidate `9b55649050b76feffdc4279ceaec92ac74a78686`
   -> WP-01 PASS: exact closed 19-file D collection (actual count recorded;
      `306/306`; `308` estimate superseded)
-  -> WP-02 READY: exactly one new complete five-file R attempt
+  -> WP-02 PASS: exactly one complete five-file R attempt, serial,
+     no retry (`22` passed, `1` expected skip; all exits `0`)
   -> fresh owner authorization, WP-03 (M)
   -> fresh owner authorization after WP-03 PASS, WP-04 (Q/report)
   -> WP-05 exactly one integrated review (G-M)
@@ -155,14 +158,22 @@ historical.
 
 ### WP-02 — one new full non-destructive real-Pi run (R)
 
-**READY after WP-01 PASS.** Candidate2's challenged attempt remains historical
-supporting evidence only; it has no current R PASS and no retry. The next
-attempt is exactly one complete five-file non-destructive real-Pi run,
-serially and without retry, from a fresh candidate worktree with pinned Alfie
-and isolated roots/HOME/state/ports. A nonzero leg, unexpected skip,
-cleanup/provenance drift, candidate drift, protected-WIP drift, or
-contradiction stops the attempt with no retry. No quality command or other
-gate substitutes for that route. WP-02 has not run in this transaction.
+**PASS.** At candidate `9b55649050b76feffdc4279ceaec92ac74a78686`, exactly one
+complete five-file non-destructive real-Pi attempt ran serially from the
+detached clean candidate worktree with pinned Alfie and isolated roots, and
+without retry: `piSubagentRealPiAcceptance.test.ts` (10 passed, 1 expected
+skip), `piSubagentCanonicalIdentityAcceptance.test.ts` (9 passed),
+`piSubagentLifecycleContainmentRealPiAcceptance.test.ts` (1 passed),
+`piSubagentRestartAcceptance.test.ts` (1 passed), and
+`piSubagentResumeAcceptance.test.ts` (1 passed) — `22` passed, `1` expected
+skip, all exits `0`. Each leg used a fresh temporary outer HOME removed by an
+EXIT trap and verified absent; no unexpected skip, cleanup/provenance drift,
+candidate drift, protected-WIP drift, or contradiction occurred. The
+candidate surface stayed zero-delta. Raw five logs, hashes, cleanup proofs,
+and the zero-delta record live in
+`evidence/WP-02-decision0009-realpi-provenance.txt`; the classification and
+routing record is
+`evidence/WP-02-decision0009-nondestructive-disposition.md`.
 
 The trace showed containment discarding the structured provider classification.
 The frozen candidate records the Decision 0009 correction: preserve internal
@@ -172,14 +183,18 @@ maps an unaccepted control with `provider_inactive` to
 route-inactive remain `pi_subagent_live_lifecycle_unavailable`. The reason is
 not public or durable, provider text is never parsed, and the attempted
 `applied`-without-acceptance interpretation is rejected. The pre-freeze review
-also fixed route-inactive conflation. WP-02 has not run at candidate3.
+also fixed route-inactive conflation. WP-02 ran once at candidate3 and is
+**PASS**; the canonical terminal-first strand now records zero steer/SDK
+actions and the enqueue-first strand exactly one steer and one SDK insertion
+with result `applied`.
 
 ### WP-03 and WP-04
 
-WP-03 requires fresh owner authorization after the new five-leg WP-02 PASS and
-is the exactly-one manual destructive M leg. WP-04 requires fresh owner
-authorization after WP-03 PASS and is the exactly-one Q/report gate. Neither is
-authorized or run by this package.
+WP-03 requires fresh owner authorization after the new five-leg WP-02 PASS
+(now recorded) and is the exactly-one manual destructive M leg. No WP-03
+authorization exists yet. WP-04 requires fresh owner authorization after WP-03
+PASS and is the exactly-one Q/report gate. Neither is authorized or run by
+this package.
 
 ### WP-05 / WP-06 / WP-07
 

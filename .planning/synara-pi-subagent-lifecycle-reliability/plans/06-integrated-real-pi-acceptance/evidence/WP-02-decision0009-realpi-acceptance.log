@@ -1,0 +1,17 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:30341) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T17-AC2 detach envelope: attachment=300ms budget=300ms envelope=800ms
+T17-AC2 reconnect running card: {"executionId":"exec_aa8e32df-90ec-46ec-ac78-ca6dda6ffab8","attemptId":"att_3082b61f-878d-4734-9567-33bdee579dff","generation":1,"projectId":"t17-proj-1","parentThreadId":"t17-thread-2","parentTurnId":"f4a04d83-dc8e-4bff-990c-b3f132cb826e","parentToolCallId":"call_synara_local_agent_2","agentType":"researcher","mode":"foreground","cancellationScope":"parent_turn","desiredState":"running","observedState":"running","leaseExpiresAt":null,"droppedProgressCount":0,"currentAttachment":"detached","currentTeardownEvidence":"none","turnCount":null,"maxTurns":null,"createdAt":"2026-08-28T15:41:19.414Z","updatedAt":"2026-08-28T15:41:19.723Z"}
+T17-AC4 stage 4 fixture barrier: accepted=2 pending=2
+T17 slice 4 stage 5 pre-restart counters: executionId=exec_883e7e95-1b85-4faa-bb81-77c11a932f90 attemptId=att_86d685b2-9063-4ed0-bdb5-11ac7151c70f generation=1 modelRequests=2 delegations=1 admissions=1 outbox=0 followUps=3
+T17 slice 4 stage 5 post-restart counters: executionId=exec_883e7e95-1b85-4faa-bb81-77c11a932f90 attemptId=att_86d685b2-9063-4ed0-bdb5-11ac7151c70f generation=2 modelRequests=3 delegations=1 admissions=0 outbox=0 followUps=3
+T17 slice 4 stage 5 seam note: no late old-generation terminal can be induced here through public WS + durable-read seams after disposing the original live process; a real old-generation child dies with that process and this suite has no durable write seam to fabricate stale terminal evidence.
+
+ Test Files  1 passed (1)
+      Tests  10 passed | 1 skipped (11)
+   Start at  22:41:10
+   Duration  42.00s (transform 1.78s, setup 0ms, import 2.43s, tests 39.49s, environment 0ms)
+
