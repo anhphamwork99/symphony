@@ -368,3 +368,76 @@ Interpretation: §10 attempt-01 canonical/lifecycle logs remain historical
 environment/runner evidence and are NOT current; the §11 attempt-02 log
 remains a non-PASS environment record. This record authorizes execution
 only and contains no behavioral result.
+
+13. ATTEMPT-3 INTEGRATED LEG (R class — EXECUTED 2026-08-28 15:01 local)
+------------------------------------------------------------------------
+Scope: the integrated leg ONLY (WP-02 §"Attempt 3" executable pattern, PLAN
+§7c item 1), exactly once. The canonical-identity and lifecycle-containment
+attempt-3 legs were NOT run; this producer's nonzero exit stopped the attempt.
+Worktrees at run start, re-verified: Symphony /tmp/symphony-t06 detached at
+12fd6686 (zero tracked delta; 7-path Pi acceptance-surface diff EMPTY); Alfie
+/tmp/alfie-t06 detached at 3fe340b4, clean except gitignored ext-local
+node_modules; protected owner WIP hash still
+ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8 EXACT;
+nothing staged in the main checkout.
+
+Command discipline (exact): cwd /tmp/symphony-t06/apps/server; set -o pipefail;
+fresh `mktemp -d` outer HOME per producer (`T06_HOME`, this producer's own);
+`trap 'rm -rf "$T06_HOME"' EXIT`; then
+`env -u SYNARA_T17_MANUAL_TEARDOWN HOME="$T06_HOME" ALFIE_REPO_DIR=/tmp/alfie-t06
+node ../../node_modules/vitest/vitest.mjs run --project wallclock
+--maxWorkers=1 --no-file-parallelism src/provider/piSubagentRealPiAcceptance.test.ts
+2>&1 | tee <evidence>/WP-02-realpi-acceptance.log`; exit = PIPESTATUS[0].
+HOME was bound ONLY to that Node/Vitest process; no profile/rc/worktree/file
+modified; manual env unset; no-concurrent-tool producer window observed.
+
+Temp-HOME cleanup proof: this producer's outer HOME
+/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/tmp.dfn6E3LpgR is ABSENT
+after producer exit (ls: No such file or directory; no live process holds it)
+— the EXIT trap fired exactly once. Outer-HOME cleanup stop gate NOT
+triggered.
+
+Start 15:01:40 local; vitest Duration 39.45s (transform 1.70s, import 2.29s,
+tests 37.09s).
+PRODUCER_EXIT (PIPESTATUS[0]): 1 — LEG FAILED (BEHAVIORAL).
+Result line: `Tests  1 failed | 8 passed | 1 skipped (10)`.
+Skips: exactly the one MANUAL T17-AC6 destructive test — the expected skip
+set. The attempt-2 failure surface (teardown user-Pi-home digest,
+piSubagentRealPiAcceptance.test.ts:1877) PASSED under the temporary outer
+HOME — the HOME-isolation correction is effective for its class.
+
+Sole failing row — T17-AC4 stage 4 (REAL BEHAVIORAL failure; NOT an
+environment/runner/isolation artifact):
+  piSubagentRealPiAcceptance.test.ts:1125
+    expect(followUps).toHaveLength(1)
+  AssertionError: expected 2 to be 1 // Object.is equality
+  — expected EXACTLY 1 accepted batched parent follow-up
+    ("background subagents finished:" message event); RECEIVED 2.
+  Wrapped/rethrown with stage label + full modelRequests dump at :1193
+  ("T17-AC4 stage 4 failed: expected 2 to be 1 … modelRequests=[…]", 20
+  requests including both real agent-driver-background delegations,
+  delegated:true). The two real background children completed into the
+  bounded batch; the once-only parent follow-up path emitted the follow-up
+  TWICE. Source diagnosis: PENDING — no root-cause claim is made in this
+  record.
+
+Evidence preservation: attempt-3 raw log preserved byte-identical as
+  WP-02-attempt-03-realpi-acceptance.log
+  SHA-256 798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99
+(canonical WP-02-realpi-acceptance.log holds the same bytes and must NOT be
+read as a PASS record; attempt-01/attempt-02 logs untouched and preserved).
+
+Gate state (STOP, no retry): the attempt-3 authorization is SPENT by this
+exactly-once nonzero-exit integrated run (nonzero producer exit is an
+attempt-3 stop gate). WP-02 is CHALLENGED — NO RETRY; no five-legs-exit-0
+WP-02 record exists. WP-03 (manual destructive, M) and WP-04 (quality gate,
+Q) conditions did NOT activate; their exactly-once conditional authorizations
+REMAIN UNSPENT. Canonical-identity and lifecycle-containment attempt-3 legs
+remain pending. Any further attempt requires a fresh owner decision after
+source diagnosis of the stage-4 duplicate follow-up.
+
+Post-run host gates (re-verified): Symphony main HEAD 669316934, status
+exactly the three protected files modified-unstaged, staged 0; WIP hash
+EXACT; zero-delta gate on the named Pi acceptance surface EMPTY; pins
+12fd6686 / 3fe340b4 unchanged (Alfie clean except gitignored node_modules,
+which the provenance verifier excludes).

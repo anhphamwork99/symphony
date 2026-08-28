@@ -22,7 +22,17 @@ in the current session and verbatim (`Cho phép tất cả các cổng`), the fr
 authorization for attempt 3 — §"Attempt 3" below is the executable contract
 (authorized, NOT yet executed; exactly once, no retry).** Per WP-02
 §Escalation and PLAN §11 no completion was claimed and Ticket 06 did not
-advance.
+advance. **Attempt-3 status (2026-08-28, post-run): the integrated leg ran
+exactly once under the §"Attempt 3" process-HOME-isolated pattern, exited 1
+(8 passed, 1 failed, 1 manual skipped, 39.45s) on a REAL BEHAVIORAL failure —
+T17-AC4 stage 4 expected exactly 1 accepted batched parent follow-up,
+received 2 (piSubagentRealPiAcceptance.test.ts:1125, wrapped :1193). The
+canonical-identity and lifecycle-containment attempt-3 legs were NOT run.
+WP-02 is CHALLENGED — NO RETRY; source diagnosis PENDING; the attempt-3
+authorization is SPENT; WP-03/WP-04 conditional authorizations REMAIN
+UNSPENT. Evidence: `evidence/WP-02-attempt-03-realpi-acceptance.log`
+(SHA-256 `798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99`,
+byte-identical to the canonical log), disposition §8, provenance §13.**
 
 Attempt 1 (2026-08-28 12:23–12:54 local): all five authorized standalone
 producers ran exactly once each against the retained pinned worktrees

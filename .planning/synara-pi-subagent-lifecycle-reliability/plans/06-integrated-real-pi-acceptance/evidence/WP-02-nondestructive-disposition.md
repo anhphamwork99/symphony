@@ -3,9 +3,12 @@
 **State of this record:** executed (attempt 1, 2026-08-28) and stopped at
 challenge; the authorized corrected attempt (attempt 2) then ran exactly once
 and ALSO stopped at challenge (integrated leg exit 1, sole failure = teardown
-user-Pi-home digest, exact FFF root cause recorded in §4c). WP-02 is NOT
-completed. No behavioral PASS is claimed for any corrected leg; no further
-run is authorized without a fresh owner decision (§4c/§6).
+user-Pi-home digest, exact FFF root cause recorded in §4c). The owner-authorized
+attempt 3 (integrated leg, 2026-08-28, exactly once) then FAILED on a REAL
+BEHAVIORAL assertion (§8): WP-02 is NOT completed and is marked CHALLENGED with
+NO RETRY; source diagnosis is pending a fresh owner decision. No behavioral
+PASS is claimed for the integrated leg in any attempt. No further run is
+authorized without a fresh owner decision (§4c/§7/§8).
 
 **Attempt-1 evidence classification: environment/runner evidence, NOT a
 behavioral PASS.** Nothing in attempt 1 proves the pinned-composition
@@ -356,3 +359,81 @@ evidence, and claims no completion.
   historical environment/runner evidence and are NOT current results;
   attempt-2 integrated remains a non-PASS environment record; no WP-02
   completion exists until the attempt-3 five-legs-exit-0 record.
+
+## 8. Attempt-3 integrated leg outcome — behavioral challenge record (2026-08-28)
+
+Classification: R (controlled real-Pi, non-destructive), executed exactly once.
+Scope executed: the INTEGRATED leg only, per WP-02 §"Attempt 3" and PLAN §7c
+item 1. **The canonical-identity and lifecycle-containment attempt-3 legs were
+NOT run** — the integrated leg's nonzero exit consumed the exactly-once
+attempt-3 authorization for this record's boundary and stopped into this
+challenge package; those two legs therefore remain pending, and the
+five-legs-exit-0 WP-02 record does not exist.
+
+1. **Exact attempt-3 command discipline (as executed).** Per producer, per
+   WP-02 §"Attempt 3" executable pattern: cwd `/tmp/symphony-t06/apps/server`;
+   `set -o pipefail`; fresh temporary outer HOME via `mktemp -d` created for
+   THIS producer alone (`T06_HOME`, never shared across legs; producer-exit
+   code would have been 125 on `mktemp -d` failure without running anything);
+   `trap 'rm -rf "$T06_HOME"' EXIT`; then
+   `env -u SYNARA_T17_MANUAL_TEARDOWN HOME="$T06_HOME" ALFIE_REPO_DIR=/tmp/alfie-t06 node ../../node_modules/vitest/vitest.mjs run --project wallclock --maxWorkers=1 --no-file-parallelism src/provider/piSubagentRealPiAcceptance.test.ts 2>&1 | tee <evidence>/WP-02-realpi-acceptance.log`;
+   exit status taken from `PIPESTATUS[0]`. `HOME` was set ONLY for that
+   Node/Vitest process — no profile, rc file, shell state, worktree, or any
+   other file was modified; the manual env stayed unset; the no-concurrent-tool
+   producer window was observed (the worker only waited between launch and
+   exit). Start 15:01:40 local; vitest Duration **39.45s** (transform 1.70s,
+   import 2.29s, tests 37.09s).
+2. **Temporary-HOME cleanup proof.** The outer HOME for this producer was
+   `/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/tmp.dfn6E3LpgR`; after the
+   producer process exited, `tmp.dfn6E3LpgR` is ABSENT on the host
+   (`ls` → "No such file or directory"; no live process references it), i.e.
+   the `EXIT` trap fired and removed it exactly once. Outer-HOME cleanup
+   stop gate: NOT triggered.
+3. **Producer outcome — FAILED, exit 1 (behavioral).**
+   `Tests  1 failed | 8 passed | 1 skipped (10)`; PRODUCER_EXIT
+   (PIPESTATUS[0]) = **1**. The one skip is exactly the MANUAL T17-AC6
+   destructive test (`it.skipIf(SYNARA_T17_MANUAL_TEARDOWN !== "1")`) — the
+   expected skip set; no unexpected skip. ALL of attempt 2's previously
+   passing stages kept passing, INCLUDING the attempt-2 failure surface:
+   the teardown user-Pi-home digest (piSubagentRealPiAcceptance.test.ts:1877)
+   PASSED — the process-HOME isolation correction is confirmed effective for
+   its target class.
+4. **Sole failing row — T17-AC4 stage 4 (REAL BEHAVIORAL failure, unlike
+   attempt 2's FFF-isolation failure).** Test: "T17-AC4 stage 4: two real
+   background slow children under one parent thread complete into one
+   accepted bounded batch, produce exactly one parent follow-up, and each
+   result is retrievable individually through the public read RPC with stable
+   denial on unknown identity" (8700ms). Assertion
+   `expect(followUps).toHaveLength(1)` at
+   `piSubagentRealPiAcceptance.test.ts:1125` — **expected exactly 1 accepted
+   batched parent follow-up (`background subagents finished:` message event),
+   received 2** (`AssertionError: expected 2 to be 1 // Object.is equality`),
+   wrapped and rethrown with stage label + full modelRequests dump by the
+   stage wrapper at `:1193` (`T17-AC4 stage 4 failed: expected 2 to be 1 …
+   modelRequests=[…20 requests…, including the two real
+   `agent-driver-background` delegations, both `delegated:true`]"). The two
+   real background children ran; the bounded batch dispatched; the parent
+   thread emitted the batched completion follow-up TWICE instead of exactly
+   once. This is a behavior-under-test discrepancy in the duplicate/once-only
+   follow-up path, NOT an environment/runner/isolation artifact: stage 0
+   provenance+isolation, managed negotiation, detach/reconnect, cancellation,
+   slice-4 stages 4/5 (generation bump), and watchdog handoff all passed in
+   the same run under the isolated temporary HOME.
+5. **Evidence preservation.** The attempt-3 raw log is durably preserved
+   byte-identical as `evidence/WP-02-attempt-03-realpi-acceptance.log` —
+   SHA-256
+   `798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99`.
+   The canonical `WP-02-realpi-acceptance.log` currently holds those same
+   bytes and must not be read as a PASS record. Attempt-01 and attempt-02
+   logs remain untouched and preserved byte-identical.
+6. **No-retry and gate state (STOP).** The §7 attempt-3 authorization is
+   SPENT by this exactly-once integrated run (nonzero producer exit is itself
+   an attempt-3 stop gate). **WP-02 is CHALLENGED: NO RETRY.** The source
+   diagnosis of the duplicate follow-up (why the once-only parent follow-up
+   path emitted 2 events for one acknowledged bounded batch) is PENDING and is
+   explicitly NOT attempted here — this record makes no root-cause claim
+   beyond the observed expected-vs-received counts. WP-03's destructive and
+   WP-04's quality conditional authorizations DID NOT activate (their
+   condition — five-legs-exit-0 WP-02 PASS — was not met) and REMAIN UNSPENT
+   and available exactly once each to a future owner-gated sequence. A further
+   attempt of any leg requires a fresh owner decision after source diagnosis.

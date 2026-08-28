@@ -1,0 +1,43 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:90830) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T17-AC2 detach envelope: attachment=300ms budget=300ms envelope=800ms
+T17-AC2 reconnect running card: {"executionId":"exec_20a6d8cc-2586-442a-b29d-179c8a312660","attemptId":"att_76b23946-1ba2-4a79-8203-81365bd350a4","generation":1,"projectId":"t17-proj-1","parentThreadId":"t17-thread-2","parentTurnId":"37e500da-7d86-47ed-9d0a-76681a40d6ff","parentToolCallId":"call_synara_local_agent_2","agentType":"researcher","mode":"foreground","cancellationScope":"parent_turn","desiredState":"running","observedState":"running","leaseExpiresAt":null,"droppedProgressCount":0,"currentAttachment":"detached","currentTeardownEvidence":"none","turnCount":null,"maxTurns":null,"createdAt":"2026-08-28T08:01:48.819Z","updatedAt":"2026-08-28T08:01:49.132Z"}
+T17 slice 4 stage 5 pre-restart counters: executionId=exec_da293c1f-cb39-4090-83fa-2038275125c0 attemptId=att_e2bfb7c4-6323-4eec-9da4-859ac3b00937 generation=1 modelRequests=2 delegations=1 admissions=1 outbox=0 followUps=3
+T17 slice 4 stage 5 post-restart counters: executionId=exec_da293c1f-cb39-4090-83fa-2038275125c0 attemptId=att_e2bfb7c4-6323-4eec-9da4-859ac3b00937 generation=2 modelRequests=3 delegations=1 admissions=0 outbox=0 followUps=3
+T17 slice 4 stage 5 seam note: no late old-generation terminal can be induced here through public WS + durable-read seams after disposing the original live process; a real old-generation child dies with that process and this suite has no durable write seam to fabricate stale terminal evidence.
+ ❯ |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts (10 tests | 1 failed | 1 skipped) 37087ms
+     × T17-AC4 stage 4: two real background slow children under one parent thread complete into one accepted bounded batch, produce exactly one parent follow-up, and each result is retrievable individually through the public read RPC with stable denial on unknown identity 8700ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC4 stage 4: two real background slow children under one parent thread complete into one accepted bounded batch, produce exactly one parent follow-up, and each result is retrievable individually through the public read RPC with stable denial on unknown identity
+Error: T17-AC4 stage 4 failed: expected 2 to be 1 // Object.is equality; modelRequests=[{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":true},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":true},{"model":"echo-slow","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":true},{"model":"echo-slow","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":true},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"echo-slow","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":true,"delegated":true},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":true,"delegated":false},{"model":"echo-slow","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":true},{"model":"agent-driver-background","hasAgentTool":true,"hasBashTool":true,"hasUserTurnAfterTool":false,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"echo-slow","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false}]
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1193:13
+    1191|       });
+    1192|     } catch (error) {
+    1193|       throw new Error(
+       |             ^
+    1194|         `${stage} failed: ${error instanceof Error ? error.message : S…
+    1195|           `modelRequests=${JSON.stringify(harness.modelServer.requests…
+
+Caused by: AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1125:46
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed | 1 skipped (10)
+   Start at  15:01:40
+   Duration  39.45s (transform 1.70s, setup 0ms, import 2.29s, tests 37.09s, environment 0ms)
+

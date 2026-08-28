@@ -1,15 +1,19 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
 **Plan state:** persisted and executing — WP-01 evidence committed
-(9208e1728); WP-02 executed twice (attempt 1 and the authorized corrected
-attempt 2, both 2026-08-28), stopped at challenge after each (see WP-02,
-disposition §4c, provenance §11, and §7b below). The attempt-2 authorization
-is SPENT. On 2026-08-28 the owner granted, in the current session and
-verbatim (`Cho phép tất cả các cổng`), a fresh decision authorizing the
-three remaining gates in a fixed conditional sequence — WP-02 attempt 3
-(authorized, NOT yet executed), then conditionally WP-03, then
-conditionally WP-04 (§7c). No Ticket 06 completion, review, or acceptance
-exists.
+(9208e1728); WP-02 executed three times (attempt 1, corrected attempt 2, and
+the owner-authorized attempt 3 integrated leg — all 2026-08-28), stopped at
+challenge after each (see WP-02, disposition §4c/§8, provenance §11/§13, and
+§7b/§7c below). Attempt-2 AND attempt-3 authorizations are SPENT. Attempt 3
+ran exactly once (integrated leg only, process-HOME-isolated, temp-HOME
+cleanup proven, Node, 39.45s): exit 1 — 8 passed, 1 failed, 1 manual skipped —
+sole failure REAL BEHAVIORAL: T17-AC4 stage 4 expected exactly 1 accepted
+batched parent follow-up, received 2
+(piSubagentRealPiAcceptance.test.ts:1125, wrapped :1193); canonical-identity
+and lifecycle-containment attempt-3 legs were NOT run. WP-02 is CHALLENGED —
+NO RETRY; source diagnosis PENDING. WP-03 and WP-04 conditional authorizations
+did NOT activate and REMAIN UNSPENT. No Ticket 06 completion, review, or
+acceptance exists.
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -368,6 +372,54 @@ No gate above authorizes a source, test, harness, fixture, config,
 migration, manifest, lockfile, or Alfie change. WP-05–WP-07 keep their
 existing gates (main-agent convening with the owner's go-ahead; exactly one
 each).
+
+## 7d. Attempt-3 execution record (2026-08-28, post-run; classification R + P)
+
+Executed under §7c item 1 and WP-02 §"Attempt 3", exactly once. **Integrated
+leg only** — after its nonzero exit (itself an attempt-3 stop gate), the
+attempt stopped into the challenge package; the canonical-identity and
+lifecycle-containment attempt-3 legs were NOT run.
+
+- **Command discipline (exact, per WP-02 §"Attempt 3"):** cwd
+  `/tmp/symphony-t06/apps/server`; `set -o pipefail`; fresh `mktemp -d` outer
+  HOME for this producer alone; `trap 'rm -rf "$T06_HOME"' EXIT`; then
+  `env -u SYNARA_T17_MANUAL_TEARDOWN HOME="$T06_HOME"
+  ALFIE_REPO_DIR=/tmp/alfie-t06 node ../../node_modules/vitest/vitest.mjs run
+  --project wallclock --maxWorkers=1 --no-file-parallelism
+  src/provider/piSubagentRealPiAcceptance.test.ts 2>&1 | tee
+  <evidence>/WP-02-realpi-acceptance.log`; exit from `PIPESTATUS[0]`. HOME
+  bound only to that Node/Vitest process; manual env unset; no-concurrent-tool
+  producer window observed.
+- **Temp-HOME cleanup proof:** the producer's outer HOME
+  `/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/tmp.dfn6E3LpgR` is ABSENT
+  after producer exit — the EXIT trap fired exactly once. Outer-HOME cleanup
+  stop gate NOT triggered.
+- **Outcome (exit 1, 39.45s, start 15:01:40 local):** `Tests  1 failed |
+  8 passed | 1 skipped (10)`; PRODUCER_EXIT (PIPESTATUS[0]) = 1. Skip set
+  exactly the one MANUAL T17-AC6 destructive test. The attempt-2 failure
+  class (teardown user-Pi-home digest, :1877) PASSED — the HOME-isolation
+  correction is effective.
+- **Sole failure — REAL BEHAVIORAL:** T17-AC4 stage 4, two real background
+  slow children under one parent thread completed into one accepted bounded
+  batch, but the parent thread emitted **2** accepted batched parent
+  follow-ups where exactly **1** is required
+  (`expect(followUps).toHaveLength(1)`,
+  `piSubagentRealPiAcceptance.test.ts:1125`; AssertionError `expected 2 to be
+  1 // Object.is equality`; wrapped with stage label + modelRequests dump at
+  `:1193`). Unlike attempt 2 (external FFF-isolation artifact), this is a
+  discrepancy in the behavior under test. Source diagnosis: PENDING; no
+  root-cause claim is recorded here.
+- **Evidence:** raw log preserved byte-identical as
+  `evidence/WP-02-attempt-03-realpi-acceptance.log`, SHA-256
+  `798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99`
+  (canonical `WP-02-realpi-acceptance.log` holds the same bytes and is NOT a
+  PASS record). Full record: disposition §8, provenance §13.
+- **Gate state after attempt 3:** the §7c attempt-3 authorization is SPENT.
+  WP-02 is CHALLENGED — NO RETRY — with source diagnosis pending; no
+  five-legs-exit-0 WP-02 record exists. WP-03 (conditional on attempt-3 PASS)
+  and WP-04 (conditional on WP-03 PASS) DID NOT ACTIVATE; their exactly-once
+  conditional authorizations REMAIN UNSPENT. Any further attempt requires a
+  fresh owner decision.
 
 ## 8. Authorization gates and no-retry rule
 
