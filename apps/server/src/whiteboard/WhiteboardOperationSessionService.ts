@@ -36,6 +36,7 @@
  */
 
 import {
+  Cause,
   Data,
   Duration,
   Effect,
@@ -63,7 +64,6 @@ import {
 import type {
   WhiteboardAcknowledgeApplicationResult,
   WhiteboardContainmentResult,
-  WhiteboardOperationAcknowledgeApplicationInput,
   WhiteboardOperationAdmittedEvent,
   WhiteboardOperationAttachSessionResult,
   WhiteboardOperationErrorCode,
@@ -72,7 +72,6 @@ import type {
   WhiteboardOperationRetryResult,
   WhiteboardOperationSessionEvent,
   WhiteboardOperationSessionIdentity,
-  WhiteboardOperationSubscribeInput,
   WhiteboardOperationTakeOverResult,
   WhiteboardOperationTerminalEvent,
   WhiteboardOperationTerminalRecord,
@@ -200,18 +199,18 @@ export const makeWhiteboardOperationSessionService = (options: {
   /** Optional dispatcher; default fails closed as dispatch unavailable (D2). */
   readonly containmentDispatcher?: WhiteboardContainmentDispatcher | undefined;
   /** Optional Effect-native deadline; default is exactly 2_000 ms (D2). */
-  readonly containmentDeadline?: Duration.DurationInput | undefined;
+  readonly containmentDeadline?: Duration.Input | undefined;
 }): Effect.Effect<
   WhiteboardOperationSessionService,
   never,
-  Scope
+  Scope.Scope
 > =>
   Effect.gen(function*() {
     const serverInstanceId = options.serverInstanceId;
     const dispatcher: WhiteboardContainmentDispatcher =
       options.containmentDispatcher ??
       (() => Promise.resolve<WhiteboardContainmentResult>("dispatch-failed"));
-    const deadline: Duration.DurationInput =
+    const deadline: Duration.Input =
       options.containmentDeadline ?? Duration.millis(WHITEBOARD_CONTAINMENT_DEADLINE_MS);
 
     const limits = WHITEBOARD_OPERATION_SESSION_LIMITS;
@@ -229,7 +228,7 @@ export const makeWhiteboardOperationSessionService = (options: {
     interface RowEntry {
       readonly serverSequence: number;
       readonly event: WhiteboardOperationSessionEvent;
-      readonly bytes: number;
+      bytes: number;
     }
 
     interface OperationRecord {
@@ -264,14 +263,17 @@ export const makeWhiteboardOperationSessionService = (options: {
 
     interface SubscriberEntry {
       readonly id: number;
-      readonly queue: Queue.Queue<WhiteboardOperationSessionEvent, never>;
+      readonly queue: Queue.Queue<
+        WhiteboardOperationSessionEvent,
+        Cause.Done<void>
+      >;
     }
 
     interface SessionRecord {
       readonly identity: WhiteboardOperationSessionIdentity;
       order: number;
       documentRevision: number;
-      readonly rows: Array<RowEntry>;
+      rows: Array<RowEntry>;
       lastServerSequence: number;
       readonly acknowledgementSummary: {
         acceptedSemanticCount: number;
@@ -449,7 +451,9 @@ export const makeWhiteboardOperationSessionService = (options: {
     };
 
     /** Strict decoding of every entry point; unknown keys fail decoding (D8). */
-    const decode = <S extends Schema.Top>(
+    const decode = <
+      S extends Schema.Top & { readonly DecodingServices: never },
+    >(
       schema: S,
       input: unknown,
     ): Effect.Effect<S["Type"], WhiteboardOperationSessionError> =>
@@ -883,8 +887,8 @@ export const makeWhiteboardOperationSessionService = (options: {
         operationId: operation.operationId,
         generation: operation.generation,
         outcome: "zero-valid",
-        terminalReason: "producer-failed",
-        zeroValidReason: "producer-failed",
+        terminalReason: "zero-mutation",
+        zeroValidReason: "zero-mutation",
         acceptedSemanticCount: 0,
         acceptedNoOpCount: 0,
         rejectedCount: 0,
@@ -975,10 +979,10 @@ export const makeWhiteboardOperationSessionService = (options: {
       operationSessionId: string,
       takeOverRequestId: string,
       outcome: WhiteboardContainmentResult,
-    ): Effect.Effect<void> =>
+    ): Effect.Effect<void, WhiteboardOperationSessionError> =>
       Effect.gen(function*() {
         const session = state.sessions.get(operationSessionId);
-        if (session === undefined || session.closedByShutdown === true) {
+        if (session === undefined || state.closed) {
           return;
         }
         const takeOver = session.takeOver;
@@ -1211,9 +1215,10 @@ export const makeWhiteboardOperationSessionService = (options: {
               "requested replay range is no longer retained for a protected session",
             );
           }
-          const queue = yield* Queue.bounded<WhiteboardOperationSessionEvent>(
-            limits.liveSubscriberQueueCapacity,
-          );
+          const queue = yield* Queue.bounded<
+            WhiteboardOperationSessionEvent,
+            Cause.Done<void>
+          >(limits.liveSubscriberQueueCapacity);
           const subscriber: SubscriberEntry = {
             id: ++session.nextSubscriberId,
             queue,
@@ -1252,7 +1257,7 @@ export const makeWhiteboardOperationSessionService = (options: {
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
           const decoded = yield* decode(
-            WhiteboardAcknowledgeApplicationInput as Schema.Top,
+            WhiteboardAcknowledgeApplicationInput,
             input,
           );
           const session = yield* classifySession(state, decoded);
@@ -1387,7 +1392,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       withLock(
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
-          const decoded = yield* decode(WhiteboardOperationTakeOverInput as Schema.Top, input);
+          const decoded = yield* decode(WhiteboardOperationTakeOverInput, input);
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
@@ -1408,9 +1413,11 @@ export const makeWhiteboardOperationSessionService = (options: {
               "take over request id conflicts with the recorded request",
             );
           }
-          const operation = session.operations.get(
-            operationKeyOf(decoded.operationId, decoded.generation),
+          const originalOperationKey = operationKeyOf(
+            decoded.operationId,
+            decoded.expectedGeneration,
           );
+          const operation = session.operations.get(originalOperationKey);
           if (operation === undefined) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationUnknown,
@@ -1432,6 +1439,15 @@ export const makeWhiteboardOperationSessionService = (options: {
           // 1. Atomically validated. 2. Recorded (below). 3. Generation
           // advances before dispatch. 4. Lineage becomes non-retryable.
           operation.generation = decoded.expectedGeneration + 1;
+          const advancedOperationKey = operationKeyOf(
+            operation.operationId,
+            operation.generation,
+          );
+          session.operations.delete(originalOperationKey);
+          session.operations.set(advancedOperationKey, operation);
+          if (session.activeOperationKey === originalOperationKey) {
+            session.activeOperationKey = advancedOperationKey;
+          }
           session.lineageNonRetryable = true;
           const record: TakeOverRecord = {
             canonicalRequest,
@@ -1477,7 +1493,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       withLock(
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
-          const decoded = yield* decode(WhiteboardOperationRetryInput as Schema.Top, input);
+          const decoded = yield* decode(WhiteboardOperationRetryInput, input);
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
@@ -1605,7 +1621,7 @@ export const makeWhiteboardOperationSessionService = (options: {
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
           const decoded = yield* decode(
-            WhiteboardOperationReleaseSessionInput as Schema.Top,
+            WhiteboardOperationReleaseSessionInput,
             input,
           );
           const session = yield* classifySession(state, decoded);
@@ -1652,7 +1668,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       withLock(
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
-          const decoded = yield* decode(WhiteboardAdmitOperationInput as Schema.Top, input);
+          const decoded = yield* decode(WhiteboardAdmitOperationInput, input);
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
@@ -1712,7 +1728,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       withLock(
         Effect.gen(function*() {
           const state = yield* Ref.get(stateRef);
-          const decoded = yield* decode(WhiteboardPublishProgressInput as Schema.Top, input);
+          const decoded = yield* decode(WhiteboardPublishProgressInput, input);
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
@@ -1807,7 +1823,9 @@ export const makeWhiteboardOperationSessionService = (options: {
       );
 
     const completeOrFail = (
-      schema: Schema.Top,
+      schema:
+        | typeof WhiteboardCompleteOperationInput
+        | typeof WhiteboardFailOperationInput,
       mode: "complete" | "fail",
       input: unknown,
     ): Effect.Effect<
@@ -1871,12 +1889,12 @@ export const makeWhiteboardOperationSessionService = (options: {
     const completeOperation = (input: unknown): Effect.Effect<
       WhiteboardOperationTerminalEvent,
       WhiteboardOperationSessionError
-    > => completeOrFail(WhiteboardCompleteOperationInput as Schema.Top, "complete", input);
+    > => completeOrFail(WhiteboardCompleteOperationInput, "complete", input);
 
     const failOperation = (input: unknown): Effect.Effect<
       WhiteboardOperationTerminalEvent,
       WhiteboardOperationSessionError
-    > => completeOrFail(WhiteboardFailOperationInput as Schema.Top, "fail", input);
+    > => completeOrFail(WhiteboardFailOperationInput, "fail", input);
 
     return {
       attachSession,
