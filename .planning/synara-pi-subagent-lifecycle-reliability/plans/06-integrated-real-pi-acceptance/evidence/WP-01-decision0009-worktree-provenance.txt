@@ -1,0 +1,190 @@
+Ticket 06 WP-01 Decision 0009 candidate3 provenance and deterministic evidence
+===============================================================================
+Recorded: 2026-08-28 (UTC+7)
+Evidence classes: P (provenance) and D (deterministic producer records)
+
+1. FROZEN CANDIDATE AND LINEAGE
+--------------------------------
+Frozen producer candidate3:
+  9b55649050b76feffdc4279ceaec92ac74a78686
+  sole parent: 2afef48b008527685658801d8f0d84c79e24827d (candidate2)
+  checkout: /private/tmp/symphony-t06
+  identity: exact detached producer checkout; not the integration merge
+
+Historical base:
+  12fd6686edc26a3fa0382e8bdeb83a1be8045539
+
+Integration merge (provenance only):
+  cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7
+  parents:
+    0e828e0fe5daf273a6a0c04960494756ccdf204e  (planning)
+    9b55649050b76feffdc4279ceaec92ac74a78686  (candidate3)
+
+Exact candidate checks:
+  git -C /private/tmp/symphony-t06 rev-parse HEAD
+    9b55649050b76feffdc4279ceaec92ac74a78686
+  git -C /private/tmp/symphony-t06 show -s --format='%P' HEAD
+    2afef48b008527685658801d8f0d84c79e24827d
+  git -C /private/tmp/symphony-t06 status -b --short --untracked-files=no
+    ## HEAD (no branch)
+
+Candidate3 correction delta from candidate2 (exactly four paths):
+  git -C /private/tmp/symphony-t06 diff --name-status \
+    2afef48b008527685658801d8f0d84c79e24827d..9b55649050b76feffdc4279ceaec92ac74a78686
+    M apps/server/src/provider/piSubagentCanonicalRouting.test.ts
+    M apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+    M apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+    M apps/server/src/provider/piSubagentManagedRuntimeBinding.ts
+
+Candidate3 relative to 12fd6686 (exactly six authorized paths):
+  git -C /private/tmp/symphony-t06 diff --name-status \
+    12fd6686edc26a3fa0382e8bdeb83a1be8045539..9b55649050b76feffdc4279ceaec92ac74a78686
+    M apps/server/src/provider/piSubagentCanonicalRouting.test.ts
+    M apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+    M apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+    M apps/server/src/provider/piSubagentManagedRuntimeBinding.ts
+    M apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+    M apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
+
+The candidate is detached and clean. The producer run introduced no source,
+configuration, lockfile, manifest, or other candidate delta. Prior WP-01 logs
+and matrices (renewed, decision0008) remain historical and are not overwritten
+by this record.
+
+2. CONTROLLED ALFIE PIN
+-----------------------
+Controlled checkout: /private/tmp/alfie-t06
+  git -C /private/tmp/alfie-t06 rev-parse HEAD
+    3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  git -C /private/tmp/alfie-t06 status -b --short --untracked-files=no
+    ## HEAD (no branch)
+  package: @alfie/pi-subagents@0.15.0-alfie.6
+
+Alfie is clean at the required pin when tracked files are considered. The
+extension-local node_modules/build outputs are ignored runtime dependencies only;
+they are not a tracked change and do not alter the pin.
+
+Pinned fixture hashes (standing controlled-boundary verification):
+  agent/extensions/pi-subagents/package.json
+    954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f
+  agent/extensions/pi-subagents/src/index.ts
+    c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9
+  agent/extensions/pi-subagents/src/agent-manager.ts
+    1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783
+  agent/extensions/pi-subagents/src/agent-runner.ts
+    98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2
+  agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+    ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0
+
+3. PROTECTED OWNER WIP
+----------------------
+Canonical owner checkout: /Users/anhpham99/symphony
+Protected paths:
+  apps/web/package.json
+  apps/web/src/main.tsx
+  bun.lock
+
+Command:
+  git -C /Users/anhpham99/symphony diff -- \
+    apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+Observed aggregate hash:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+
+Owner WIP status:
+  M apps/web/package.json
+  M apps/web/src/main.tsx
+  M bun.lock
+
+The protected WIP is unchanged, modified-unstaged, outside this transaction,
+and not staged. Owner index check:
+  git -C /Users/anhpham99/symphony diff --cached --name-only
+    (empty)
+
+4. CURRENT PRODUCER RECORDS (NO RERUN)
+--------------------------------------
+The producers ran once before this recording, from the detached candidate3
+checkout. No test, producer, WP-02, manual, quality, review, or Supervisor
+rerun was performed while recording. The two current logs are the only current
+D evidence:
+  evidence/WP-01-decision0009-deterministic.log
+  evidence/WP-01-decision0009-contracts.log
+
+4a. Unit producer — 18 files
+  cwd: /private/tmp/symphony-t06/apps/server
+  exact command:
+    set -o pipefail
+    bun run ../../node_modules/vitest/vitest.mjs run \
+      --project unit --maxWorkers=1 --no-file-parallelism \
+      src/provider/piSubagentCancellationCoordinator.test.ts \
+      src/provider/piSubagentWatchdogEscalation.test.ts \
+      src/provider/piSubagentProcessTeardown.test.ts \
+      src/provider/piSubagentWatchdogSweep.test.ts \
+      src/provider/piSubagentProcessTeardownSweep.test.ts \
+      src/provider/piSubagentBridge.test.ts \
+      src/provider/piSubagentLiveLifecycleContainment.test.ts \
+      src/provider/piSubagentChildOwnerTeardownWiring.test.ts \
+      src/provider/piSubagentTeardownWiring.test.ts \
+      src/provider/piSubagentCanonicalRouting.test.ts \
+      src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts \
+      src/provider/piSubagentRestartReconciliation.test.ts \
+      src/provider/piSubagentStartupRecoveryOrder.test.ts \
+      src/provider/piSubagentResumeCoordinator.test.ts \
+      src/provider/piSubagentTerminalLifecycle.test.ts \
+      src/provider/piSubagentCompletionOutbox.test.ts \
+      src/wsSnapshotLiveStream.test.ts \
+      src/provider/piSubagentExecutionReadBoundary.test.ts \
+      2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-deterministic.log
+    status=${PIPESTATUS[0]}
+    exit "$status"
+
+  producer exit: 0
+  Test Files: 18 passed (18)
+  Tests: 266 passed (266)
+  failed: 0
+  skipped: 0
+  duration: 16.34s
+  bytes: 230
+  log SHA-256: cb074d3abd09ddbb8cddda32a137318eb69982b1d554e342ddd94cefb6a04f59
+
+4b. Contracts producer — 1 file
+  cwd: /private/tmp/symphony-t06/packages/contracts
+  exact command:
+    set -o pipefail
+    bun run test src/piSubagents.test.ts \
+      2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-contracts.log
+    status=${PIPESTATUS[0]}
+    exit "$status"
+
+  producer exit: 0
+  Test Files: 1 passed (1)
+  Tests: 40 passed (40)
+  failed: 0
+  skipped: 0
+  duration: 223ms
+  bytes: 266
+  log SHA-256: 69234e5371cf0973a95826d633eb5a56816a8d56cbc5b5785f9983bde244f02a
+
+Aggregate producer result: 19/19 files, 306/306 tests, zero failed, zero
+skipped. The frozen closed set is unchanged: 18 unit files plus one contracts
+file. The planning estimate `303 + 5 = 308` is superseded by the authoritative
+producer count: candidate3 added three focused net cases, not five, for
+`303 + 3 = 306`. There is no missing file and no extra file.
+
+The two raw logs were copied byte-identically from the owner-checkout evidence
+directory into the isolated checkout for this transaction; hashes above are
+taken over the copied bytes and are identical to the source bytes.
+
+5. TRANSACTION SCOPE AND NEXT ROUTE
+------------------------------------
+This evidence transaction modifies exactly six paths:
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/PLAN.md
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-worktree-provenance.txt
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-deterministic.log
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-contracts.log
+  .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0009-ac-diagnostic-matrix.md
+
+The two `.log` paths are ignored by repository policy and must be force-added.
+No source path is staged. WP-01 is PASS at 306/306. WP-02 is ready for exactly
+one complete five-file non-destructive real-Pi attempt, serially and without
+retry, subject to its own gates. No WP-02 or later gate was run here.
