@@ -1,9 +1,12 @@
 # WP-02 — non-destructive real-Pi evidence, five standalone files
 
-**State:** historical attempts preserved; no current WP-02 PASS exists. Package
-C froze candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; the renewed full
-five-file run remains blocked until renewed WP-01 passes 296/296. No WP-02
-producer ran in Package C.
+**State:** renewed WP-02 attempt started exactly once and is **CHALLENGED**;
+no current WP-02 PASS exists. Package C froze candidate
+`ffd45bd867e94c9003415f5f2e937cc9c616e399`; renewed WP-01 passed 296/296.
+The renewed integrated leg passed, the canonical-identity leg failed, and the
+atomic attempt stopped before lifecycle-containment, restart, or resume. No
+retry is authorized; source diagnosis is pending. WP-03 and WP-04 remain
+blocked. This evidence transaction runs no producer.
 
 Decision 0007 is aspect-scoped Authoritative for this rebaseline. Attempts 1–3
 are supporting only. Attempt 3 ran its integrated leg exactly once and exited
@@ -346,24 +349,36 @@ renewed contract.
 
 ## Verification contract
 
-- Provenance exact; five legs exit 0 standalone. Attempt-1 status: 2/5 exit 0
-  (restart, resume); the corrected attempt (§"Attempt 2") must bring the
-  three failed legs to exit 0 under the canonical names, with attempt-1
-  failed-leg logs retained as `WP-02-attempt-01-*` environment/runner
-  evidence. Attempt-1 as a whole is environment/runner evidence, NOT a
+- Historical attempt-1/attempt-2/attempt-3 artifacts remain immutable and
+  supporting only. The renewed attempt is recorded by the two renewed logs,
+  with integrated exit 0 and canonical-identity exit 1; it is NOT a five-leg
   behavioral PASS.
-- Isolation asserted (roots/home/state/workspace/ports); no user
-  live-instance mutation.
-- Evidence-class separation preserved; no destructive claim anywhere.
-- Zero-delta and WIP-hash gates pass.
+- Candidate and Alfie provenance remain exact; runner is Node v24.14.1 for
+  both renewed legs; each leg used a fresh process-level temporary HOME and
+  its cleanup was verified by post-run absence.
+- No-concurrent-tool producer-window discipline was observed for the renewed
+  legs. The manual env was unset; no destructive claim is made.
+- Evidence-class separation is preserved; lifecycle-containment, restart, and
+  resume were not run after the canonical failure, and no conclusion is
+  inferred for them.
+- Zero-delta and protected-WIP hash gates pass; protected WIP remains unstaged.
 
 ## Commit boundary
 
 ```text
-test(pi): record Ticket 06 non-destructive real-Pi evidence
+test(pi): record renewed Ticket 06 canonical-identity challenge
 ```
 
-Stage only the eight allowed WP-02 paths that actually exist.
+Stage only these six paths, explicitly:
+
+```text
+PLAN.md
+WP-02-non-destructive-real-pi-evidence.md
+evidence/WP-02-renewed-realpi-provenance.txt
+evidence/WP-02-renewed-realpi-acceptance.log
+evidence/WP-02-renewed-canonical-identity-acceptance.log
+evidence/WP-02-renewed-nondestructive-disposition.md
+```
 
 ## Escalation
 
