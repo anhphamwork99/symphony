@@ -1,0 +1,159 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+ ❯ |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts (24 tests | 6 failed) 10ms
+     × classifies ordinary retirement before control acceptance as unavailable, not stale 3ms
+     × applies a successful accepted control after ordinary retirement and never reconstructs it 0ms
+     × classifies an accepted control throw after ordinary retirement as outcome-unknown 0ms
+     × classifies an accepted response loss after ordinary retirement as outcome-unknown 0ms
+     × classifies an accepted timeout after ordinary retirement as outcome-unknown 0ms
+     × classifies an unaccepted throw after ordinary retirement as unavailable 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies ordinary retirement before control acceptance as unavailable, not stale
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "diagnosticCode": "pi_subagent_live_lifecycle_unavailable",
+-   "status": "unavailable",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:355:28
+    353|     expect(containment.retire(registration)).toBe(true);
+    354|     pending.resolve();
+    355|     expect(await inFlight).toEqual({
+       |                            ^
+    356|       status: "unavailable",
+    357|       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > applies a successful accepted control after ordinary retirement and never reconstructs it
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'applied', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "status": "applied",
+-   "value": "accepted result",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:382:28
+    380|     expect(containment.retire(registration)).toBe(true);
+    381|     pending.resolve();
+    382|     expect(await inFlight).toEqual({ status: "applied", value: "accept…
+       |                            ^
+    383|     expect(await containment.control({ tuple, session, registration })…
+    384|       status: "unavailable",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies an accepted control throw after ordinary retirement as outcome-unknown
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'outcome_unknown', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "diagnosticCode": "pi_subagent_live_lifecycle_outcome_unknown",
+-   "status": "outcome_unknown",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:409:28
+    407|     expect(containment.retire(registration)).toBe(true);
+    408|     pending.resolve();
+    409|     expect(await inFlight).toEqual({
+       |                            ^
+    410|       status: "outcome_unknown",
+    411|       diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies an accepted response loss after ordinary retirement as outcome-unknown
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'outcome_unknown', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "diagnosticCode": "pi_subagent_live_lifecycle_outcome_unknown",
+-   "status": "outcome_unknown",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:433:28
+    431|     expect(containment.retire(registration)).toBe(true);
+    432|     pending.resolve();
+    433|     expect(await inFlight).toEqual({
+       |                            ^
+    434|       status: "outcome_unknown",
+    435|       diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies an accepted timeout after ordinary retirement as outcome-unknown
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'outcome_unknown', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "diagnosticCode": "pi_subagent_live_lifecycle_outcome_unknown",
+-   "status": "outcome_unknown",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:457:28
+    455|     expect(containment.retire(registration)).toBe(true);
+    456|     pending.resolve();
+    457|     expect(await inFlight).toEqual({
+       |                            ^
+    458|       status: "outcome_unknown",
+    459|       diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  |unit| src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies an unaccepted throw after ordinary retirement as unavailable
+AssertionError: expected { status: 'stale', …(1) } to deeply equal { status: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "diagnosticCode": "pi_subagent_live_lifecycle_unavailable",
+-   "status": "unavailable",
++   "diagnosticCode": "pi_subagent_live_lifecycle_stale_ignored",
++   "status": "stale",
+  }
+
+ ❯ src/provider/piSubagentLiveLifecycleContainment.test.ts:556:28
+    554|     expect(containment.retire(registration)).toBe(true);
+    555|     pending.resolve();
+    556|     expect(await inFlight).toEqual({
+       |                            ^
+    557|       status: "unavailable",
+    558|       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 18 passed (24)
+   Start at  18:49:41
+   Duration  129ms (transform 28ms, setup 0ms, import 36ms, tests 10ms, environment 0ms)
+
+
+RED_EXIT=1

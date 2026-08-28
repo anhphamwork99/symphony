@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under the Decision 0007 two-file correction rebaseline; G-M and G-Q remain pending and exactly one of each is reserved
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) with frozen Decision 0008 containment candidate `2afef48b008527685658801d8f0d84c79e24827d`; WP-01 is ready for producer collection; G-M and G-Q remain pending and exactly one of each is reserved
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -159,38 +159,52 @@ remains aspect-scoped Authoritative for the batching-fixture correction,
 historical candidate rebaseline, attempt-3 erratum, and its downstream gate
 state. Neither decision accepts Ticket 06 or consumes G-M/G-Q.
 
-Historical candidate `12fd6686edc26a3fa0382e8bdeb83a1be8045539` and candidate
-`ffd45bd867e94c9003415f5f2e937cc9c616e399` are supporting only. The `ffd45bd`
-candidate is the historical sole-parent child of `12fd6686` containing exactly
-the two Decision 0007 fixture files; merge `064b49f1d` is integration
-provenance only. Its WP-01 PASS and the renewed WP-02 attempt are historical
-supporting evidence, not the current candidate or current D/R proof.
+Historical base `12fd6686edc26a3fa0382e8bdeb83a1be8045539`, historical
+candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, and the old WP-01/WP-02
+records are supporting only. `ffd45bd` is the sole-parent child of `12fd6686`
+and contains exactly the two Decision 0007 fixture files. The integrated merge
+is `44249d81c49172e192dcf0f09ddfadc702a4b34c`, with parents
+`50853a3b9774e7aa5462916056195ffa536dc491` (planning) and
+`2afef48b008527685658801d8f0d84c79e24827d` (candidate); the merge is
+integration provenance only and is never a producer identity.
 
-Decision 0008 binds a new exact two-file containment correction candidate child
-of `ffd45bd`: only
-`apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
-`apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`. The new
-candidate SHA is intentionally unknown until that implementation is completed
-and frozen. From `ffd45bd` the delta must be exactly those two files; from
-`12fd6686` the total delta must be exactly four files (the two Decision 0007
-fixture files plus the two containment files). Production/configuration,
-canonical expectations, Alfie source/pin, and every third file remain unchanged.
+Decision 0008's exact containment candidate is now frozen:
+`2afef48b008527685658801d8f0d84c79e24827d`, the sole-parent child of
+`ffd45bd867e94c9003415f5f2e937cc9c616e399`. Its delta from `ffd45bd` is
+exactly `apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
+`apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`. Its
+total delta from `12fd6686` is exactly those two containment files plus
+`apps/server/src/provider/piSubagentRealPiAcceptance.test.ts` and
+`apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts`, the two
+Decision 0007 fixture files. Production/configuration, canonical expectations,
+Alfie source/pin, and every third path remain unchanged.
 
-The current renewed WP-02 attempt is a preserved historical challenge: the
-integrated leg passed, the canonical-identity leg failed with the recorded
-stale-versus-unavailable/applied classification mismatch, and lifecycle,
-restart, and resume were not run after the atomic stop. Its no-retry state is
-spent; its raw logs and hashes are immutable and supporting only.
+Focused containment evidence is preserved at
+[red](plans/06-integrated-real-pi-acceptance/evidence/candidate2-containment-red.log)
+(exit 1, 24 tests: 6 failed / 18 passed, SHA-256
+`665e0bbaf0a9a25d1908c9767d2bd7ff2947d4e1844a6df80d84622300b16e3b`) and
+[green](plans/06-integrated-real-pi-acceptance/evidence/candidate2-containment-green.log)
+(exit 0, 24/24, SHA-256
+`84feb4814b891ce69472c74dd5596f04c9bf753fa65de18c7d31b352dd95f43b`).
+These are focused implementation evidence, not current D or R acceptance.
+WP-01's closed 19-file collection retains its 296-test baseline and expects
+`296 + 6 = 302`, subject to confirmation of the actual producer-collected
+count. No producer ran in this planning transaction.
 
-The required serial route is: exact containment two-file candidate child of
-`ffd45bd` → freeze → rerun the same closed WP-01 baseline (296 tests, plus any
-exact focused cases added by the two-file implementation; record the expected
-aggregate only after implementation) → exactly one new full five-file WP-02 →
-fresh owner authorization WP-03 → fresh owner authorization WP-04 after the
-new WP-03 PASS → WP-05 one integrated review → WP-06 final Supervisor Decision
-0009 → WP-07 closure. Old WP-03/WP-04 authorizations are non-transferable and
-not executable. G-M and G-Q remain pending and exactly one of each remains
-reserved.
+Alfie remains pinned at
+`3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+`@alfie/pi-subagents@0.15.0-alfie.6`. Protected owner WIP remains outside
+this transaction with required aggregate diff hash
+`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`;
+protected paths are untouched and unstaged. There is no current D/R PASS.
+
+The required serial route is: frozen candidate2 → WP-01 ready for the same
+closed 19-file collection (expected 302, producer count to be confirmed) →
+exactly one new full five-file WP-02 → fresh owner authorization WP-03 →
+fresh owner authorization WP-04 after the new WP-03 PASS → WP-05 one
+integrated review → WP-06 final Supervisor Decision 0009 → WP-07 closure.
+Old WP-03/WP-04 authorizations are non-transferable and not executable. G-M
+and G-Q remain pending and exactly one of each remains reserved.
 
 | Ticket | Status | Current meaning |
 |---|---|---|
@@ -199,11 +213,12 @@ reserved.
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
-| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Decision 0008 reassessment; containment candidate pending; historical ffd/WP-01/WP-02 only |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Decision 0008 candidate2 frozen; WP-01 ready for producer collection; no current D/R PASS |
 
 The prior evidence-only/zero-source-delta execution contract is superseded only
-for the Decision 0007 aspects. No source implementation or renewed producer is
-claimed by this planning package.
+for the Decision 0007 and Decision 0008 candidate aspects. This planning
+package records the frozen candidate and focused red/green evidence but claims
+no current D/R PASS and runs no producer.
 
 ## Settled invariants and open design points
 
@@ -289,7 +304,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — Decision 0008 reassessment router: historical ffd/WP-01/WP-02 are supporting only; the exact containment two-file child, WP-01 reset, and one new five-file WP-02 remain ahead.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0008 candidate2 router: focused red/green evidence is supporting only; WP-01 is ready for its closed 19-file producer collection (expected 302, actual count to be confirmed), with no current D/R PASS.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
@@ -303,15 +318,18 @@ remains authoritative only for its historical fixture/rebaseline/erratum
 aspects.
 
 Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, its WP-01 PASS, and the
-renewed WP-02 integrated-pass/canonical-failure attempt are historical
-supporting evidence. Preserve the attempt's failure details, raw bytes, hashes,
-and spent no-retry state; do not treat it as current proof or retry it.
+renewed WP-02 integrated-pass/canonical-failure attempt remain historical
+supporting evidence. Frozen candidate2 is
+`2afef48b008527685658801d8f0d84c79e24827d`, the sole-parent child of ffd and
+the producer identity; merge `44249d81c49172e192dcf0f09ddfadc702a4b34c` is
+integration provenance only. Preserve historical failure details, raw bytes,
+hashes, and spent no-retry state; do not treat them as current proof or retry.
 
-The next candidate is an exact two-file child of `ffd45bd`: the containment
-production file and its focused test only. Freeze that candidate, rerun WP-01
-with the 296-test baseline plus any exact added focused cases (expected count
-recorded after implementation), then run exactly one fresh full five-file
-WP-02. Only a fresh WP-02 PASS can permit fresh owner WP-03; only a new WP-03
-PASS can permit fresh owner WP-04; then WP-05, WP-06 Decision 0009, and closure.
-No canonical expectation, Alfie, third-file, or unrelated source change is
-permitted. G-M/G-Q remain pending and reserved exactly once each.
+WP-01 is now ready at candidate2 with the same closed 19-file set: 296 historical
+baseline + 6 new focused tests = expected 302, subject to actual producer
+collection confirmation. The copied focused red/green logs are supporting
+implementation evidence only. After WP-01 PASS, run exactly one fresh full
+five-file WP-02. Only a fresh WP-02 PASS can permit fresh owner WP-03; only a
+new WP-03 PASS can permit fresh owner WP-04; then WP-05, WP-06 Decision 0009,
+and closure. No canonical expectation, Alfie, third-file, or unrelated source
+change is permitted. G-M/G-Q remain pending and reserved exactly once each.

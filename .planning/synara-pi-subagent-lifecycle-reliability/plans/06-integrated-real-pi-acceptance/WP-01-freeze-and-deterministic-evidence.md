@@ -1,38 +1,48 @@
-# WP-01 — reset deterministic evidence at the new containment candidate
+# WP-01 — deterministic evidence at frozen Decision 0008 candidate2
 
-**State:** historical ffd WP-01 PASS only; current WP-01 is pending. The
-historical 19-file/296-test result at `ffd45bd867e94c9003415f5f2e937cc9c616e399`
-is supporting and cannot satisfy the reset gate.
-
+**State:** **READY** for producer collection; no current D PASS.
+**Candidate:** `2afef48b008527685658801d8f0d84c79e24827d`, the sole-parent child
+of `ffd45bd867e94c9003415f5f2e937cc9c616e399`.
 **Authority:** [Decision 0008](../../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
-is aspect-scoped Authoritative for the exact two-file containment correction;
-[Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
-remains authoritative only for the historical fixture correction/rebaseline.
+is Authoritative for the exact containment correction; Decision 0007 remains
+authoritative for the historical fixture correction/rebaseline.
 
 ## Objective
 
-After the exact two-file implementation child of `ffd45bd` is frozen, rerun
-the same closed 19-file deterministic set. Preserve the 296-test baseline and
-record the exact number of implementation-added focused cases and resulting
-aggregate only after implementation; do not guess a new expected total now.
-The containment test may contain the focused additions, but no third file is
-allowed.
+Rerun the same closed 19-file deterministic set at frozen candidate2. Retain
+the historical 296-test baseline and collect the six new focused cases for an
+expected aggregate of `296 + 6 = 302`. The actual producer-collected count must
+be confirmed and recorded before this WP can become D PASS.
 
-## Required candidate/provenance
+The focused containment logs are preserved implementation evidence only:
 
-- New candidate SHA is recorded before this WP starts; it is the sole-parent
-  child of `ffd45bd` with exactly these two additional paths:
+- red: 24 tests, 6 failed / 18 passed, exit 1, SHA-256
+  `665e0bbaf0a9a25d1908c9767d2bd7ff2947d4e1844a6df80d84622300b16e3b`;
+- green: 24/24, exit 0, SHA-256
+  `84feb4814b891ce69472c74dd5596f04c9bf753fa65de18c7d31b352dd95f43b`.
+
+These focused logs do not substitute for the closed-set producer collection.
+No producer ran in this planning transaction.
+
+## Required candidate and provenance
+
+- Candidate2 is the sole-parent child of `ffd45bd`; its exact delta from ffd is
+  only:
   `apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
   `apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`.
-- Total delta from `12fd6686` is exactly four paths, including the two Decision
-  0007 fixture files. Coordinator/configuration/canonical expectations and
-  Alfie remain unchanged/pinned.
-- Producers use a fresh detached candidate worktree; no main-checkout producer.
+- Its total delta from `12fd6686` is exactly four paths: the two containment
+  paths plus `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts` and
+  `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts`, the two
+  Decision 0007 fixture paths.
+- The main merge `44249d81c49172e192dcf0f09ddfadc702a4b34c` is integration
+  provenance only. The producer identity is candidate2, never the merge.
+- Alfie remains pinned at
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+  `@alfie/pi-subagents@0.15.0-alfie.6`.
+- Protected owner WIP remains untouched and unstaged with required aggregate
+  hash `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
 
-## Closed test set and evidence
-
-The existing 19-file set from the historical WP-01 remains closed and must be
-rerun unchanged, including `piSubagentLiveLifecycleContainment.test.ts`:
+## Closed 19-file set
 
 ```text
 apps/server/src/provider/piSubagentCancellationCoordinator.test.ts
@@ -56,24 +66,16 @@ apps/server/src/provider/piSubagentExecutionReadBoundary.test.ts
 packages/contracts/src/piSubagents.test.ts
 ```
 
-Prove all eight Decision 0008 rows with causal barriers, exact registration /
-epoch/session identity, acceptance markers, no-value/no-retry/second-action
-negative assertions, and the existing failure/diagnostic matrix. Record D
-logs, exact count, candidate SHA, zero source delta after freeze, protected-WIP
-hash, and explicit staging paths.
+## Required evidence and gates
 
-## Gates and prohibited work
-
-A failure, unexpected skip, provenance drift, candidate-surface delta, or
-protected-WIP/staging drift stops the route. The historical ffd result is not a
-retry or current PASS. Do not run real-Pi, manual destructive, quality, review,
-or Supervisor work in WP-01. Do not modify any source/test file here.
+Record the actual producer count, all positive and material failure rows,
+exact candidate SHA, zero source delta after freeze, Alfie pin, protected-WIP
+hash, and explicit staging paths. Any failure, unexpected skip, provenance
+drift, candidate-surface delta, or protected-WIP/staging drift stops the route.
+Do not run WP-02, WP-03, WP-04, quality, review, or Supervisor work in WP-01.
+The historical ffd WP-01 PASS and focused red/green logs are supporting only.
 
 ## Commit boundary
 
-```text
-test(pi): record Ticket 06 deterministic evidence reset
-```
-
-This future WP stages only its explicitly named evidence/report paths. It is
-not part of the current 12-path planning commit.
+Future WP-01 evidence has its own producer transaction. It is not part of this
+planning freeze commit.
