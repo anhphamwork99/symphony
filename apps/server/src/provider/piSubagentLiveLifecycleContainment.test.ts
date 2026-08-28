@@ -109,7 +109,11 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(calls).toBe(0);
 
     const inactive = await containment.control({ tuple, session, registration });
-    expect(inactive.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
+    expect(inactive).toEqual({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "provider_route_inactive",
+    });
     expect(calls).toBe(0);
 
     containment.activate(registration);
@@ -127,7 +131,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(disposed.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
     expect(calls).toBe(0);
     expect(traces.some((entry) => entry.reason === "callback_missing")).toBe(true);
-    expect(traces.some((entry) => entry.reason === "provider_inactive")).toBe(true);
+    expect(traces.some((entry) => entry.reason === "provider_route_inactive")).toBe(true);
     expect(traces.some((entry) => entry.reason === "callback_mismatched")).toBe(true);
     expect(traces.some((entry) => entry.reason === "callback_disposed")).toBe(true);
   });
@@ -219,6 +223,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(await containment.observe({ tuple, session, registration: observation })).toEqual({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "callback_timeout_before_acceptance",
     });
 
     const control = containment.capture({
@@ -279,6 +284,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(unavailable).toEqual({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "callback_failed_before_acceptance",
     });
 
     const after = containment.capture({
@@ -355,6 +361,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(await inFlight).toEqual({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "provider_inactive",
     });
     expect(calls).toBe(1);
     expect(traces).not.toContain("return_stale");
@@ -556,6 +563,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(await inFlight).toEqual({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "callback_failed_before_acceptance",
     });
   });
 
@@ -614,6 +622,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(result).toEqual({
       status: "unavailable",
       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "callback_failed_before_acceptance",
     });
     // The value must never be exposed, and the trace must carry the explicit
     // non-timeout reason for an unmarked return.
@@ -821,7 +830,7 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     });
   });
 
-  it("never exposes internal reasons or provider text on the public result surface", async () => {
+  it("preserves only the closed unavailable reason and never provider text", async () => {
     const session = {};
     const containment = makePiSubagentLiveLifecycleContainment();
     const registration = containment.capture({
@@ -833,8 +842,176 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     })!;
     containment.activate(registration);
     const result = await containment.control({ tuple, session, registration });
-    expect(Object.keys(result).toSorted()).toEqual(["diagnosticCode", "status"]);
+    expect(result).toEqual({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+      unavailableReason: "callback_failed_before_acceptance",
+    });
+    expect("value" in result).toBe(false);
     expect(JSON.stringify(result)).not.toContain("sk-provider-secret");
-    expect(JSON.stringify(result)).not.toContain("callback_");
+    expect(result.unavailableReason).toBe("callback_failed_before_acceptance");
+  });
+
+  it("carries a closed reason on every unavailable path and omits it on applied, unknown, and stale", async () => {
+    const reasons = new Set([
+      "provider_inactive",
+      "provider_route_inactive",
+      "callback_missing",
+      "callback_disposed",
+      "callback_mismatched",
+      "callback_failed_before_acceptance",
+      "callback_timeout_before_acceptance",
+    ]);
+    const expectUnavailable = async (
+      resultPromise: Promise<{
+        readonly status: string;
+        readonly unavailableReason?: string;
+        readonly value?: unknown;
+      }>,
+    ) => {
+      const result = await resultPromise;
+      expect(result.status).toBe("unavailable");
+      expect(reasons.has(result.unavailableReason ?? "")).toBe(true);
+      expect("value" in result).toBe(false);
+    };
+
+    const missing = makePiSubagentLiveLifecycleContainment();
+    await expectUnavailable(missing.control({ tuple, session: {}, registration: undefined }));
+
+    const inactive = makePiSubagentLiveLifecycleContainment();
+    const inactiveSession = {};
+    const inactiveRegistration = inactive.capture({ tuple, session: inactiveSession })!;
+    await expectUnavailable(
+      inactive.control({ tuple, session: inactiveSession, registration: inactiveRegistration }),
+    );
+
+    const mismatched = makePiSubagentLiveLifecycleContainment();
+    const mismatchedSession = {};
+    const mismatchedRegistration = mismatched.capture({ tuple, session: mismatchedSession })!;
+    mismatched.activate(mismatchedRegistration);
+    await expectUnavailable(
+      mismatched.control({
+        tuple,
+        session: mismatchedSession,
+        registration: { tuple: { ...tuple }, session: mismatchedSession },
+      }),
+    );
+
+    const disposed = makePiSubagentLiveLifecycleContainment();
+    const disposedSession = {};
+    const disposedRegistration = disposed.capture({ tuple, session: disposedSession })!;
+    disposed.activate(disposedRegistration);
+    disposed.retire(disposedRegistration);
+    await expectUnavailable(
+      disposed.control({ tuple, session: disposedSession, registration: disposedRegistration }),
+    );
+
+    const callbackMissing = makePiSubagentLiveLifecycleContainment();
+    const callbackMissingSession = {};
+    const callbackMissingRegistration = callbackMissing.capture({
+      tuple,
+      session: callbackMissingSession,
+    })!;
+    callbackMissing.activate(callbackMissingRegistration);
+    await expectUnavailable(
+      callbackMissing.control({
+        tuple,
+        session: callbackMissingSession,
+        registration: callbackMissingRegistration,
+      }),
+    );
+
+    const failed = makePiSubagentLiveLifecycleContainment();
+    const failedSession = {};
+    const failedRegistration = failed.capture({
+      tuple,
+      session: failedSession,
+      control: () => {
+        throw new Error("provider failure");
+      },
+    })!;
+    failed.activate(failedRegistration);
+    await expectUnavailable(
+      failed.control({ tuple, session: failedSession, registration: failedRegistration }),
+    );
+
+    const timedOut = makePiSubagentLiveLifecycleContainment();
+    const timedOutSession = {};
+    const timedOutRegistration = timedOut.capture({
+      tuple,
+      session: timedOutSession,
+      control: ({ markTimedOut }) => {
+        markTimedOut();
+        throw new Error("deadline");
+      },
+    })!;
+    timedOut.activate(timedOutRegistration);
+    await expectUnavailable(
+      timedOut.control({ tuple, session: timedOutSession, registration: timedOutRegistration }),
+    );
+
+    const applied = makePiSubagentLiveLifecycleContainment();
+    const appliedSession = {};
+    const appliedRegistration = applied.capture({
+      tuple,
+      session: appliedSession,
+      control: ({ markAccepted }) => {
+        markAccepted();
+        return "accepted";
+      },
+    })!;
+    applied.activate(appliedRegistration);
+    const appliedResult = await applied.control({
+      tuple,
+      session: appliedSession,
+      registration: appliedRegistration,
+    });
+    expect(appliedResult).toEqual({ status: "applied", value: "accepted" });
+    expect("unavailableReason" in appliedResult).toBe(false);
+
+    const unknown = makePiSubagentLiveLifecycleContainment();
+    const unknownSession = {};
+    const unknownRegistration = unknown.capture({
+      tuple,
+      session: unknownSession,
+      control: ({ markAccepted }) => {
+        markAccepted();
+        throw new Error("lost");
+      },
+    })!;
+    unknown.activate(unknownRegistration);
+    const unknownResult = await unknown.control({
+      tuple,
+      session: unknownSession,
+      registration: unknownRegistration,
+    });
+    expect(unknownResult).toEqual({
+      status: "outcome_unknown",
+      diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+    });
+    expect("unavailableReason" in unknownResult).toBe(false);
+
+    const stale = makePiSubagentLiveLifecycleContainment();
+    const staleSession = {};
+    const pending = deferred<string>();
+    const staleRegistration = stale.capture({
+      tuple,
+      session: staleSession,
+      observe: () => pending.promise,
+    })!;
+    stale.activate(staleRegistration);
+    const staleResultPromise = stale.observe({
+      tuple,
+      session: staleSession,
+      registration: staleRegistration,
+    });
+    stale.retire(staleRegistration);
+    pending.resolve("late");
+    const staleResult = await staleResultPromise;
+    expect(staleResult).toEqual({
+      status: "stale",
+      diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored",
+    });
+    expect("unavailableReason" in staleResult).toBe(false);
   });
 });

@@ -506,6 +506,7 @@ describe("Pi managed canonical routing", () => {
   const liveManagedTool = (
     toolName: "get_subagent_result" | "steer_subagent",
     providerExecute: () => Promise<any>,
+    activate = true,
   ) => {
     const state = { providerCalls: 0, traces: [] as Array<{ event: string; reason?: string }> };
     const session = {};
@@ -516,7 +517,7 @@ describe("Pi managed canonical routing", () => {
       tuple: { executionId: "exec-live", attemptId: "attempt-live", generation: 1 },
       session,
     })!;
-    containment.activate(registration);
+    if (activate) containment.activate(registration);
     const tool = {
       execute: async () => {
         state.providerCalls += 1;
@@ -543,6 +544,27 @@ describe("Pi managed canonical routing", () => {
     return { state, invoke: () => invoke(tool, { execution_id: "exec-live", task: "steer" }) };
   };
 
+  it("keeps a captured but inactive route on the generic unavailable path", async () => {
+    const harness = liveManagedTool(
+      "steer_subagent",
+      async () => toolResult("must not run"),
+      false,
+    );
+    const result = await harness.invoke();
+    expect(harness.state.providerCalls).toBe(0);
+    expect(result.isError).toBe(true);
+    expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
+    expect(result.diagnosticCode).not.toBe("pi_subagent_read_live_record_unavailable");
+    expect(
+      harness.state.traces.some(
+        (entry) =>
+          entry.event === "return_unavailable" && entry.reason === "provider_route_inactive",
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("unavailableReason");
+    assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
+  });
+
   it("maps the exact structured unavailable marker to bounded live-lifecycle unavailable", async () => {
     const harness = liveManagedTool("steer_subagent", async () => ({
       isError: true,
@@ -552,12 +574,16 @@ describe("Pi managed canonical routing", () => {
     const result = await harness.invoke();
     expect(harness.state.providerCalls).toBe(1);
     expect(result.isError).toBe(true);
-    expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
+    expect(result.diagnosticCode).toBe("pi_subagent_read_live_record_unavailable");
+    expect(result.content[0].text).not.toContain("Agent not found");
+    expect(JSON.stringify(result)).not.toContain("unavailableReason");
     expect(
       harness.state.traces.some(
         (entry) => entry.event === "return_unavailable" && entry.reason === "provider_inactive",
       ),
     ).toBe(true);
+    expect(harness.state.traces.some((entry) => entry.event === "provider_acceptance")).toBe(false);
+    expect(harness.state.traces.some((entry) => entry.event === "return_applied")).toBe(false);
     assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
 
@@ -660,6 +686,22 @@ describe("Pi managed canonical routing", () => {
     expect(observationResult.diagnosticCode).toBe("pi_subagent_live_lifecycle_unavailable");
     expect(observationResult.isError).toBeUndefined();
     expect(observationResult.content[0].text).toContain("Execution ID: exec-live");
+    expect(JSON.stringify(observationResult)).not.toContain("unavailableReason");
+  });
+
+  it("keeps a malformed unavailable marker on the generic conservative path", async () => {
+    const harness = liveManagedTool("steer_subagent", async () => ({
+      isError: true,
+      diagnosticCode: "pi_subagent_managed_execution_unavailable_live ",
+      content: [{ type: "text", text: "Agent not found" }],
+    }));
+    const result = await harness.invoke();
+    expect(result.isError).toBe(true);
+    expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_outcome_unknown");
+    expect(result.content[0].text).toContain("outcome unknown");
+    expect(JSON.stringify(result)).not.toContain("unavailableReason");
+    expect(harness.state.traces.some((entry) => entry.event === "provider_acceptance")).toBe(true);
+    assertNoProviderIdentity(JSON.parse(JSON.stringify(result)));
   });
 
   it("keeps the observation structured provider error unavailable without acceptance", async () => {
