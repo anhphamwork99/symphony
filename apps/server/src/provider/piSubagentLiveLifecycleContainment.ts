@@ -11,13 +11,16 @@
  *
  * - Live CONTROL is only ever returned as `applied` after the provider-owned
  *   callback explicitly marked the acceptance boundary (`markAccepted`) AND
- *   the registration still revalidates as current after the response.  A
- *   control callback that returns without ever marking acceptance is NOT an
- *   applied control; it classifies as bounded unavailable, because no
- *   provider-owned acceptance point was reached.
+ *   the same tuple/session/registration/epoch still exists after the response.
+ *   Ordinary retirement removes live availability but preserves that in-flight
+ *   continuity, so an accepted success may still apply while failures remain
+ *   outcome-unknown. A control callback that returns without ever marking
+ *   acceptance is NOT an applied control; it classifies as bounded unavailable,
+ *   because no provider-owned acceptance point was reached.
  * - Live OBSERVATION never emits a provider acceptance boundary, never
  *   classifies as outcome-unknown, and is only returned as `applied` when the
- *   current registration revalidates after the bounded snapshot resolves.
+ *   current, still-live registration revalidates after the bounded snapshot
+ *   resolves.
  * - Internal reasons are a closed, bounded vocabulary.  They reach only the
  *   injected trace seam; the public result surface stays the fixed diagnostic
  *   code.  Timeout reasons are reachable only through `markTimedOut`.
@@ -357,17 +360,26 @@ export function makePiSubagentLiveLifecycleContainment(
     };
     emit("callback_revalidated", input.tuple);
 
-    const isCurrent = (): boolean => {
+    // Continuity is identity-only: ordinary retirement changes availability,
+    // but must not turn an already-entered control into a stale response.
+    // Replacement, session clear, or any other invalidation removes the
+    // exact tuple/registration/epoch from the live registry and is stale.
+    const isContinuous = (): boolean => {
       const current = bySession.get(input.session)?.get(tupleKey(input.tuple));
       return (
         current !== undefined &&
         current === state &&
         current.epoch === state.epoch &&
-        !current.retired &&
-        !current.cleared &&
-        current.active
+        current.registration === input.registration &&
+        current.registration.session === input.session
       );
     };
+
+    // Observation retains the existing availability-sensitive semantics:
+    // retirement during a snapshot makes the response stale.
+    const isCurrent = (): boolean =>
+      isContinuous() && !state.retired && !state.cleared && state.active;
+    const isResponseValid = kind === "control" ? isContinuous : isCurrent;
 
     const returnFailure = (failure: ClassifiedFailure): PiSubagentLiveLifecycleResult<T> => {
       if (failure.kind === "outcome_unknown") {
@@ -395,7 +407,7 @@ export function makePiSubagentLiveLifecycleContainment(
         markUnavailable,
       });
     } catch {
-      if (!isCurrent()) {
+      if (!isResponseValid()) {
         emit("response_revalidated", input.tuple);
         emit("return_stale", input.tuple, "stale");
         return { status: "stale", diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored" };
@@ -405,7 +417,7 @@ export function makePiSubagentLiveLifecycleContainment(
       );
     }
 
-    if (!isCurrent()) {
+    if (!isResponseValid()) {
       emit("response_revalidated", input.tuple);
       emit("return_stale", input.tuple, "stale");
       return { status: "stale", diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored" };

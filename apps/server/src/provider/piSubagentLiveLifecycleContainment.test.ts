@@ -330,11 +330,141 @@ describe("PiSubagentLiveLifecycleContainment", () => {
     expect(traces).toContain("return_stale");
   });
 
-  it("does not expose an outcome-unknown failure after retirement wins the race", async () => {
+  it("classifies ordinary retirement before control acceptance as unavailable, not stale", async () => {
     const session = {};
-    const pending = deferred<never>();
+    const pending = deferred<void>();
+    const traces: string[] = [];
+    const containment = makePiSubagentLiveLifecycleContainment({
+      trace: ({ event }) => traces.push(event),
+    });
+    let calls = 0;
+    const registration = containment.capture({
+      tuple,
+      session,
+      control: async ({ markUnavailable }) => {
+        calls += 1;
+        await pending.promise;
+        markUnavailable("provider_inactive");
+        return "late value";
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+    });
+    expect(calls).toBe(1);
+    expect(traces).not.toContain("return_stale");
+  });
+
+  it("applies a successful accepted control after ordinary retirement and never reconstructs it", async () => {
+    const session = {};
+    const pending = deferred<void>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    let calls = 0;
+    const registration = containment.capture({
+      tuple,
+      session,
+      control: async ({ markAccepted }) => {
+        calls += 1;
+        markAccepted();
+        await pending.promise;
+        return "accepted result";
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({ status: "applied", value: "accepted result" });
+    expect(await containment.control({ tuple, session, registration })).toMatchObject({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+    });
+    expect(calls).toBe(1);
+    expect(containment.capture({ tuple, session, control: () => "reconstructed" })).toBeUndefined();
+    expect(containment.activate(registration)).toBe(false);
+  });
+
+  it("classifies an accepted control throw after ordinary retirement as outcome-unknown", async () => {
+    const session = {};
+    const pending = deferred<void>();
     const containment = makePiSubagentLiveLifecycleContainment();
     const registration = containment.capture({
+      tuple,
+      session,
+      control: async ({ markAccepted }) => {
+        markAccepted();
+        await pending.promise;
+        throw new Error("late failure");
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({
+      status: "outcome_unknown",
+      diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+    });
+  });
+
+  it("classifies an accepted response loss after ordinary retirement as outcome-unknown", async () => {
+    const session = {};
+    const pending = deferred<void>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    const registration = containment.capture({
+      tuple,
+      session,
+      control: async ({ markAccepted, markResponseLost }) => {
+        markAccepted();
+        await pending.promise;
+        markResponseLost();
+        return "untrusted result";
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({
+      status: "outcome_unknown",
+      diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+    });
+  });
+
+  it("classifies an accepted timeout after ordinary retirement as outcome-unknown", async () => {
+    const session = {};
+    const pending = deferred<void>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    const registration = containment.capture({
+      tuple,
+      session,
+      control: async ({ markAccepted, markTimedOut }) => {
+        markAccepted();
+        await pending.promise;
+        markTimedOut();
+        return "late result";
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({
+      status: "outcome_unknown",
+      diagnosticCode: "pi_subagent_live_lifecycle_outcome_unknown",
+    });
+  });
+
+  it("ignores a success-shaped response when the tuple registration is replaced during await", async () => {
+    const session = {};
+    const pending = deferred<string>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    const original = containment.capture({
       tuple,
       session,
       control: async ({ markAccepted }) => {
@@ -342,13 +472,90 @@ describe("PiSubagentLiveLifecycleContainment", () => {
         return pending.promise;
       },
     })!;
-    containment.activate(registration);
-    const inFlight = containment.control({ tuple, session, registration });
-    expect(containment.retire(registration)).toBe(true);
-    pending.reject(new Error("late failure"));
+    containment.activate(original);
+    const inFlight = containment.control({ tuple, session, registration: original });
+
+    const replacement = containment.capture({
+      tuple,
+      session,
+      control: ({ markAccepted }) => {
+        markAccepted();
+        return "replacement";
+      },
+    })!;
+    containment.activate(replacement);
+    pending.resolve("original");
+
     expect(await inFlight).toEqual({
       status: "stale",
       diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored",
+    });
+    expect(await containment.control({ tuple, session, registration: replacement })).toEqual({
+      status: "applied",
+      value: "replacement",
+    });
+  });
+
+  it("ignores an in-flight response after session clear while the replacement session remains live", async () => {
+    const oldSession = {};
+    const replacementSession = {};
+    const pending = deferred<string>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    const original = containment.capture({
+      tuple,
+      session: oldSession,
+      control: async ({ markAccepted }) => {
+        markAccepted();
+        return pending.promise;
+      },
+    })!;
+    containment.activate(original);
+    const inFlight = containment.control({ tuple, session: oldSession, registration: original });
+
+    const replacement = containment.capture({
+      tuple,
+      session: replacementSession,
+      control: ({ markAccepted }) => {
+        markAccepted();
+        return "replacement session";
+      },
+    })!;
+    containment.activate(replacement);
+    containment.clearSession(oldSession);
+    expect(
+      await containment.control({
+        tuple,
+        session: replacementSession,
+        registration: replacement,
+      }),
+    ).toEqual({ status: "applied", value: "replacement session" });
+
+    pending.resolve("cleared original");
+    expect(await inFlight).toEqual({
+      status: "stale",
+      diagnosticCode: "pi_subagent_live_lifecycle_stale_ignored",
+    });
+  });
+
+  it("classifies an unaccepted throw after ordinary retirement as unavailable", async () => {
+    const session = {};
+    const pending = deferred<void>();
+    const containment = makePiSubagentLiveLifecycleContainment();
+    const registration = containment.capture({
+      tuple,
+      session,
+      control: async () => {
+        await pending.promise;
+        throw new Error("late failure");
+      },
+    })!;
+    containment.activate(registration);
+    const inFlight = containment.control({ tuple, session, registration });
+    expect(containment.retire(registration)).toBe(true);
+    pending.resolve();
+    expect(await inFlight).toEqual({
+      status: "unavailable",
+      diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
     });
   });
 
