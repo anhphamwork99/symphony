@@ -1,10 +1,27 @@
 # WP-02 — non-destructive real-Pi evidence, five standalone files
 
-**State:** pending — RUN EXECUTED (attempt 1, 2026-08-28), STOPPED AT
-CHALLENGE; attempt-1 logs preserved as environment/runner evidence (not
-behavioral PASS). A corrected attempt (attempt 2, §"Attempt 2 — corrected
-runner/environment authorization", exactly one) is authorized but NOT yet
-executed; this correction package was committed before any rerun.
+**State:** pending — RUN EXECUTED TWICE (attempt 1 and the corrected
+attempt 2, both 2026-08-28), STOPPED AT CHALLENGE after each; no behavioral
+PASS claimed for any corrected leg. Attempt 1: legs 4–5 (restart, resume)
+PASSED exit 0; legs 1–3 FAILED exit 1 (environment/runner: missing gitignored
+ext-local `node_modules`, Bun-only `SocketCloseError`, external Pi-FFF
+frecency digest interference); attempt-1 logs preserved under explicit
+`WP-02-attempt-01-*` names (never overwritten/deleted). The authorized
+corrected attempt (§"Attempt 2", exactly one) then ran: `npm ci` environment
+preparation PASSED (zero tracked delta), and the integrated leg rerun under
+Node moved from 8 failed / 1 passed to **8 passed / 1 failed / 1 skipped,
+exit 1** — every managed/non-manual behavioral stage now functions; the sole
+failure is the teardown user-Pi-home digest, caused by user Pi settings
+enabling `npm:@ff-labs/pi-fff` writing `~/.pi/agent/fff/frecency/data.mdb`
+outside the harness (root cause and owner-decision gate in the disposition
+§4c and provenance §11). Corrected-attempt log preserved byte-identical as
+`evidence/WP-02-attempt-02-realpi-acceptance.log` (SHA-256
+`cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0`).
+**The §"Attempt 2" authorization is SPENT; any further attempt (identified
+next correction: process-level HOME isolation for the Vitest process,
+covering integrated + canonical + lifecycle under Node) requires a fresh
+owner decision.** Per WP-02 §Escalation and PLAN §11 no completion was
+claimed and Ticket 06 did not advance.
 
 Attempt 1 (2026-08-28 12:23–12:54 local): all five authorized standalone
 producers ran exactly once each against the retained pinned worktrees

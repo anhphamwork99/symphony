@@ -1,10 +1,11 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
 **Plan state:** persisted and executing — WP-01 evidence committed
-(9208e1728); WP-02 executed once (attempt 1, 2026-08-28), stopped at
-challenge; a single corrected attempt is authorized (see WP-02 §"Attempt 2"
-and §7a below) but NOT yet executed. No Ticket 06 completion, review, or
-acceptance exists.
+(9208e1728); WP-02 executed twice (attempt 1 and the authorized corrected
+attempt 2, both 2026-08-28), stopped at challenge after each (see WP-02,
+disposition §4c, provenance §11, and §7b below). The attempt-2 authorization
+is SPENT; any further attempt requires a fresh owner decision. No Ticket 06
+completion, review, or acceptance exists.
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -282,6 +283,45 @@ bound to WP-02 §"Attempt 2" exactly:
   `npm ci`; any listed stop-gate trigger (WP-02 §"Attempt 2" item 6) stops
   immediately into a fresh challenge package. WP-03–WP-07 remain gated
   behind a five-legs-exit-0 WP-02 record.
+
+## 7b. Corrected-attempt (attempt 2) outcome and fresh owner-decision gate (2026-08-28)
+
+The §7a authorization was consumed exactly once, in full conformance with its
+stop gates. Outcome (details: disposition §4c, provenance §11):
+
+- **Environment preparation PASS:** the exactly-one `npm ci` at
+  `/tmp/alfie-t06/agent/extensions/pi-subagents` succeeded with zero tracked
+  delta (gitignored `node_modules` only; HEAD still `3fe340b4`; invariants
+  preserved).
+- **Integrated corrected leg (Node):** `Tests  1 failed | 8 passed | 1
+  skipped (10)`, exit 1, Duration 62.26s. ALL managed/non-manual behavioral
+  stages now pass — the attempt-1 extension-load and Bun-runner failure
+  classes are resolved by the npm ci + Node correction. The manual destructive
+  test skipped exactly by design.
+- **Sole failure — teardown user-Pi-home digest**
+  (piSubagentRealPiAcceptance.test.ts:1877). Exact root cause: user
+  `~/.pi/agent/settings.json` enables `npm:@ff-labs/pi-fff`; the harness
+  snapshots `os.homedir()` before setting only `PI_CODING_AGENT_DIR` and
+  `PI_HOME` (piSubagentRealPiAcceptanceHelpers.ts:1541–1553), and the digest
+  walk is `os.homedir()/.pi`-anchored (helpers :488–549), so the outer Vitest
+  process still discovered user Pi settings and Pi FFF wrote
+  `~/.pi/agent/fff/frecency/data.mdb` (mtime = producer start) outside every
+  harness-owned dir. External tool state — NOT a harness write-path
+  violation; no destructive claim; `envWasRestored()` true.
+- **Evidence:** corrected-attempt log preserved byte-identical as
+  `evidence/WP-02-attempt-02-realpi-acceptance.log` (SHA-256
+  `cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0`),
+  classified environment/isolation evidence — NOT a behavioral PASS.
+- **Scope not covered:** the canonical-identity and lifecycle-containment
+  corrected legs did NOT run in attempt 2 and remain pending.
+- **GATE:** per WP-02 §"Attempt 2" item 5 and §11, a further attempt requires
+  a fresh owner decision. The identified next correction is process-level
+  HOME isolation for the Vitest process (a fresh temporary outer HOME,
+  removing user Pi settings from discovery while `ALFIE_REPO_DIR` and
+  harness-owned dirs remain explicit), covering the integrated leg plus the
+  two pending corrected legs under Node. WP-03–WP-07 remain gated behind a
+  five-legs-exit-0 WP-02 record. This section records the outcome only; it
+  grants no authorization.
 
 ## 8. Authorization gates and no-retry rule
 

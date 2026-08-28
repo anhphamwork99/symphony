@@ -1,12 +1,11 @@
 # WP-02 non-destructive real-Pi disposition — Ticket 06
 
 **State of this record:** executed (attempt 1, 2026-08-28) and stopped at
-challenge. WP-02 is NOT completed. Three of the five authorized standalone
-legs failed (exit 1); per WP-02 §Escalation ("any leg fails" → challenge) and
-PLAN §11 this WP stopped before any completion claim. This disposition now
-also records the source-grounded classification of attempt 1 (§4a) and the
-authorized corrected attempt (§4b, WP-02 §"Attempt 2"), which had NOT been
-executed at the time of this commit.
+challenge; the authorized corrected attempt (attempt 2) then ran exactly once
+and ALSO stopped at challenge (integrated leg exit 1, sole failure = teardown
+user-Pi-home digest, exact FFF root cause recorded in §4c). WP-02 is NOT
+completed. No behavioral PASS is claimed for any corrected leg; no further
+run is authorized without a fresh owner decision (§4c/§6).
 
 **Attempt-1 evidence classification: environment/runner evidence, NOT a
 behavioral PASS.** Nothing in attempt 1 proves the pinned-composition
@@ -130,7 +129,7 @@ clean; main checkout staged 0, protected WIP aggregate hash exact
 - Attempt 1 does NOT count as a behavioral PASS for any of the three failed
   legs, and no completion of WP-02 is claimed from attempt 1.
 
-## 4b. Source-grounded correction and authorized corrected attempt (exactly one)
+## 4b. Source-grounded correction and authorized corrected attempt (exactly one — SPENT, see §4c)
 
 Owner-resolved correction (full contract: WP-02 §"Attempt 2"; PLAN §7a):
 
@@ -173,6 +172,58 @@ Owner-resolved correction (full contract: WP-02 §"Attempt 2"; PLAN §7a):
    below (the original challenge question) was answered with option (a) in
    this bounded form, with `npm ci` (lockfile-pinned, provenance-excluded)
    chosen over `bun install`, and options (b)/(c) rejected.
+
+## 4c. Corrected-attempt (attempt 2) outcome — integrated leg, challenge record
+
+The exactly-one authorized corrected attempt (WP-02 §"Attempt 2", PLAN §7a)
+ran 2026-08-28. Scope executed: environment preparation + the integrated leg
+only. No canonical-identity or lifecycle-containment corrected leg ran in
+attempt 2; the restart/resume PASS logs remain unchanged.
+
+1. **Environment preparation — PASS.** `cd /tmp/alfie-t06/agent/extensions/pi-subagents
+   && npm ci` succeeded (exactly once; no second install). Post-install proof:
+   only gitignored `node_modules` in `git -C /tmp/alfie-t06 status
+   --porcelain`; zero tracked delta; HEAD still `3fe340b4` detached; fixture
+   hashes and clean-status invariants preserved.
+2. **Integrated leg rerun (Node v24.14.1, exactly once) — FAILED, exit 1.**
+   Command per WP-02 §"Attempt 2" item 2 (cwd /tmp/symphony-t06/apps/server,
+   ALFIE_REPO_DIR=/tmp/alfie-t06, `env -u SYNARA_T17_MANUAL_TEARDOWN`,
+   pipefail + PIPESTATUS[0], tee to `WP-02-realpi-acceptance.log`).
+   No-concurrent-tool producer window observed. Start 13:33:00 local,
+   Duration 62.26s. Result: **8 passed, 1 failed (teardown user-Pi-home
+   digest), 1 skipped (only the MANUAL T17-AC6 destructive test, by design)**,
+   exit 1. The managed behavioral pipeline is now FUNCTIONING: managed
+   capability negotiation, detach/reconnect, cancellation, batch completion,
+   restart generation bump, and watchdog handoff stages all passed — the
+   attempt-1 extension-load and Bun `SocketCloseError` failures are gone.
+3. **Root cause of the sole failure (exact, source-grounded).** The only host
+   path changed in-window was `~/.pi/agent/fff/frecency/data.mdb` (mtime at
+   producer start). User `~/.pi/agent/settings.json` enables
+   `npm:@ff-labs/pi-fff`; the harness snapshots `os.homedir()` before setting
+   ONLY `PI_CODING_AGENT_DIR` and `PI_HOME`
+   (piSubagentRealPiAcceptanceHelpers.ts:1541–1553) and anchors the digest
+   walk at `os.homedir()/.pi` (helpers :488–549), so the outer Vitest process
+   still discovered user Pi settings and the harness-launched Pi loaded Pi
+   FFF, whose frecency write landed in the user `~/.pi` tree outside every
+   harness-owned dir (test assertions: piSubagentRealPiAcceptance.test.ts:157–185
+   snapshot before harness, :1864–1878 teardown digest equality).
+   `harness.envWasRestored()` was true; dispose was idempotent; the owned temp
+   root was removed. This is external-tool state, NOT a Symphony harness
+   write-path violation; NO destructive or user-content-mutation claim is made.
+4. **Evidence preservation.** Corrected-attempt raw log preserved byte-identical
+   as `evidence/WP-02-attempt-02-realpi-acceptance.log` — SHA-256
+   `cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0`. The
+   canonical `WP-02-realpi-acceptance.log` currently holds those same bytes
+   and must not be read as a PASS record.
+5. **Owner-decision gate (STOP).** The §4b authorization is SPENT. Per WP-02
+   §"Attempt 2" item 5, a further attempt requires a fresh owner decision.
+   The identified next correction: process-level HOME isolation for the
+   Vitest process (fresh temporary outer HOME; removes user Pi settings from
+   discovery while `ALFIE_REPO_DIR` and all harness-owned dirs stay
+   explicit), covering the integrated leg plus the pending canonical-identity
+   and lifecycle-containment corrected legs under Node. Authorization, scope,
+   and gating are the owner's decision; this record neither requests-executes
+   nor presumes it.
 
 ## 4. Failing-row detail and differential root-cause evidence (challenge package)
 
@@ -263,8 +314,11 @@ in the bounded §4b form above.
 
 ## 6. Remaining gate
 
-WP-02 (five legs exit 0 — restart/resume already PASS from attempt 1; the
-three corrected legs pending the exactly-one §4b corrected attempt) → then
-WP-03 (owner-authorized exactly-one manual destructive run) → WP-04 quality
-gate + Implementation Report → WP-05 integrated review → WP-06 Supervisor
-acceptance → WP-07 closure.
+WP-02 (five legs exit 0 — restart/resume PASS from attempt 1; integrated leg
+FAILED in attempt 2 on the external FFF digest interference with all managed
+stages passing; canonical-identity and lifecycle-containment corrected legs
+NOT yet rerun) → a FRESH owner decision is required before any attempt 3
+(process-HOME-isolated run covering the three corrected legs under Node) →
+then WP-03 (owner-authorized exactly-one manual destructive run) → WP-04
+quality gate + Implementation Report → WP-05 integrated review → WP-06
+Supervisor acceptance → WP-07 closure.

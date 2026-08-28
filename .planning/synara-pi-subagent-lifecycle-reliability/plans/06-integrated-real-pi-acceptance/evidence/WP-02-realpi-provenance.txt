@@ -263,3 +263,78 @@ re-verified ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
 (12fd6686..HEAD named surface): EMPTY. Symphony worktree /tmp/symphony-t06:
 12fd6686, tracked delta 0. Alfie worktree /tmp/alfie-t06: 3fe340b4, status
 clean, ext-local node_modules still ABSENT (no npm ci run yet).
+
+11. ATTEMPT-2 (CORRECTED) INTEGRATED LEG — CHALLENGE RECORD
+-----------------------------------------------------------
+Recorded 2026-08-28 after the exactly-one authorized corrected attempt. This
+§11 amends the state after §10; §1–§10 stand unchanged. NO behavioral PASS is
+claimed; the corrected integrated leg FAILED and WP-02 remains open at the
+challenge gate.
+
+11a. Environment preparation (authorized `npm ci`, exactly once) — PASS.
+  `cd /tmp/alfie-t06/agent/extensions/pi-subagents && npm ci` succeeded.
+  Post-install proof: `git -C /tmp/alfie-t06 status --porcelain` showed only
+  gitignored `node_modules` lines; zero tracked delta; HEAD unchanged at
+  3fe340b401ca86bcbe8b55abd4de107e1d93482e (detached); fixture 5/5 hash
+  basis untouched (gitignored outputs only). This unblocked the pinned
+  extension's runtime deps (@sinclair/typebox, croner, nanoid, yaml).
+
+11b. Corrected integrated producer (leg 1 rerun under Node, exactly once).
+  Command shape: per WP-02 §"Attempt 2" item 2 — cwd
+  /tmp/symphony-t06/apps/server, ALFIE_REPO_DIR=/tmp/alfie-t06,
+  `env -u SYNARA_T17_MANUAL_TEARDOWN`, `set -o pipefail` + PIPESTATUS[0],
+  `node ../../node_modules/vitest/vitest.mjs run --project wallclock
+  --maxWorkers=1 --no-file-parallelism
+  src/provider/piSubagentRealPiAcceptance.test.ts 2>&1 | tee
+  <evidence>/WP-02-realpi-acceptance.log`.
+  Producer-window discipline observed: no concurrent FFF/semantic/search or
+  other agent-tool activity by the executing worker between launch and exit.
+  Start 13:33:00 local; vitest Duration 62.26s (tests 59.91s).
+  PRODUCER_EXIT (PIPESTATUS[0]): 1 — LEG FAILED (again; different cause).
+  Result line: `Tests  1 failed | 8 passed | 1 skipped (10)`.
+  Skips: exactly the one MANUAL T17-AC6 destructive test — the expected skip
+  set. ALL managed/non-manual behavioral stages now PASSED (8/8): stage 0
+  provenance+isolation, stage 1 managed capability negotiation, stage 2
+  detach+reconnect, stage 3 cancellation, slice-4 stage 4/5, stage 6
+  watchdog handoff — the attempt-1 extension-load and Bun-runner failures
+  are gone. The npm ci + Node correction is confirmed effective.
+
+  Sole failing row — T17-AC8/AC9 teardown user-Pi-home digest
+  (piSubagentRealPiAcceptance.test.ts:1877):
+    expected 1e964fa96a4f15c10995cbdf240db5d6c5e821db4708a9b9ebfb8e33a2baebb5
+    observed 472d918aaea03aff903cb5a109bb9fcd1e1af45168bc37fbd4f9d2bd53c9ebf1
+  harness.envWasRestored() was true; dispose idempotent; owned temp root
+  removed.
+
+11c. Root cause (source-grounded, exact). The only host path changed during
+  the producer window was ~/.pi/agent/fff/frecency/data.mdb (mtime 13:34:02
+  — exactly the producer-start window; Pi FFF frecency index). Cause chain:
+  the harness snapshots os.homedir()/.pi BEFORE setting only PI_CODING_AGENT_DIR
+  and PI_HOME (piSubagentRealPiAcceptanceHelpers.ts:1541–1553), and the
+  digest walker is os.homedir()-anchored (helpers :488–549); the outer Vitest
+  process therefore still resolved user Pi settings (~/.pi/agent/settings.json
+  enables `npm:@ff-labs/pi-fff`), so the Pi instance launched by the harness
+  loaded the user's Pi FFF plugin, which wrote its frecency state in the user
+  ~/.pi tree — outside every harness-owned directory. The digest-only failure
+  is external tool state, NOT a Symphony harness write-path violation: no
+  user live-instance content was mutated by the harness; envWasRestored held.
+
+11d. Evidence preservation and classification.
+  The corrected-attempt raw log is durably preserved byte-identical as
+    WP-02-attempt-02-realpi-acceptance.log
+    SHA-256 cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0
+  (canonical WP-02-realpi-acceptance.log currently holds the same bytes and
+  must not be treated as a PASS record). This is environment/isolation
+  evidence of a managed-stage-functional run, NOT a behavioral PASS and NOT
+  a WP-02 completion.
+
+11e. Owner-decision gate (STOP). Per WP-02 §"Attempt 2" item 5, the corrected
+  attempt is spent; no further run is authorized by this record. The next
+  safe correction — process-level HOME isolation for the Vitest process
+  (a fresh temporary outer HOME, removing user Pi settings from discovery
+  while ALFIE_REPO_DIR and all harness-owned dirs remain explicit) — requires
+  a FRESH owner decision. If authorized, the owner-decided scope is one
+  attempt covering the integrated leg plus the canonical-identity and
+  lifecycle-containment corrected legs under Node. Canonical/lifecycle
+  corrected legs were NOT run in attempt 2 and remain pending. WP-03–WP-07
+  stay gated behind a five-legs-exit-0 WP-02 record.

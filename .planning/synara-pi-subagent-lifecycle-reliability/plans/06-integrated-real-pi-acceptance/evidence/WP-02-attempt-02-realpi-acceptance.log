@@ -1,0 +1,45 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:11097) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T17-AC2 detach envelope: attachment=301ms budget=300ms envelope=800ms
+T17-AC2 reconnect running card: {"executionId":"exec_5615ef7e-f84f-42f7-bda5-d6b19dbc61b6","attemptId":"att_d8cd8585-264e-4ca5-afe1-67a19b9ee5a9","generation":1,"projectId":"t17-proj-1","parentThreadId":"t17-thread-2","parentTurnId":"f3c715ae-0c32-4f32-8427-75836adbc2e0","parentToolCallId":"call_synara_local_agent_2","agentType":"researcher","mode":"foreground","cancellationScope":"parent_turn","desiredState":"running","observedState":"running","leaseExpiresAt":null,"droppedProgressCount":0,"currentAttachment":"detached","currentTeardownEvidence":"none","turnCount":null,"maxTurns":null,"createdAt":"2026-08-28T06:33:18.649Z","updatedAt":"2026-08-28T06:33:18.955Z"}
+T17 slice 4 stage 5 pre-restart counters: executionId=exec_69ae51e5-6902-4e19-b621-a9216e820eed attemptId=att_6a0f89cb-4aa1-43c5-a017-cdd387fa93b1 generation=1 modelRequests=2 delegations=1 admissions=1 outbox=0 followUps=3
+T17 slice 4 stage 5 post-restart counters: executionId=exec_69ae51e5-6902-4e19-b621-a9216e820eed attemptId=att_6a0f89cb-4aa1-43c5-a017-cdd387fa93b1 generation=2 modelRequests=3 delegations=1 admissions=0 outbox=0 followUps=3
+T17 slice 4 stage 5 seam note: no late old-generation terminal can be induced here through public WS + durable-read seams after disposing the original live process; a real old-generation child dies with that process and this suite has no durable write seam to fabricate stale terminal evidence.
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC8/AC9 teardown: dispose is idempotent, removes the owned temp root, restores the environment, and leaves the user Pi home unchanged
+[13:33:52.975] WARN (#739): checkpoint reactor failed to process input {
+  source: 'domain',
+  eventType: 'thread.turn-start-requested',
+  cause: 'Error: Checkpoint invariant violation in CheckpointStore.captureCheckpoint: Checkpoint capture was interrupted before completion.\n' +
+    '    at Array.<anonymous> (/private/tmp/symphony-t06/apps/server/src/checkpointing/Layers/CheckpointStore.ts:307:19)'
+}
+
+ ❯ |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts (10 tests | 1 failed | 1 skipped) 59909ms
+     × T17-AC8/AC9 teardown: dispose is idempotent, removes the owned temp root, restores the environment, and leaves the user Pi home unchanged 9544ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC8/AC9 teardown: dispose is idempotent, removes the owned temp root, restores the environment, and leaves the user Pi home unchanged
+AssertionError: expected '472d918aaea03aff903cb5a109bb9fcd1e1af…' to deeply equal '1e964fa96a4f15c10995cbdf240db5d6c5e82…'
+
+Expected: "1e964fa96a4f15c10995cbdf240db5d6c5e821db4708a9b9ebfb8e33a2baebb5"
+Received: "472d918aaea03aff903cb5a109bb9fcd1e1af45168bc37fbd4f9d2bd53c9ebf1"
+
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1877:26
+    1875|     expect(harness.envWasRestored()).toBe(true);
+    1876|     const after = verifyRealPiExtensionProvenance().snapshotUserPiHome…
+    1877|     expect(after.digest).toEqual(userPiHomeDigest);
+       |                          ^
+    1878|   }, 120_000);
+    1879|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed | 1 skipped (10)
+   Start at  13:33:00
+   Duration  62.26s (transform 1.68s, setup 0ms, import 2.26s, tests 59.91s, environment 0ms)
+
