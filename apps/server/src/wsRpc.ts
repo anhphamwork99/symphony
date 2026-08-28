@@ -11,6 +11,9 @@ import {
   WS_BOOTSTRAP_PATH,
   WS_FEATURE_PATH,
   WS_NEGOTIATE_HTTP_PATH,
+  WS_PROTOCOL_EPOCH,
+  WS_PROTOCOL_MAX_REVISION,
+  WS_PROTOCOL_MIN_REVISION,
   WS_METHODS,
   WsBootstrapRpcGroup,
   WsCompatibilityError,
@@ -44,6 +47,7 @@ import {
   Queue,
   Schema,
   Scope,
+  ServiceMap,
   Stream,
 } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -178,6 +182,11 @@ import {
   parseWsNegotiateSearchParams,
   validateWsFeatureCompatibility,
 } from "./wsCompatibility";
+import {
+  makeWhiteboardOperationSessionService,
+  WhiteboardOperationSessionError,
+  type WhiteboardOperationSessionService,
+} from "./whiteboard/WhiteboardOperationSessionService";
 import {
   isTrustedAppOrigin,
   normalizeCorsOrigin,
@@ -420,8 +429,56 @@ function isShellRelevantEvent(event: OrchestrationEvent): boolean {
   );
 }
 
-const makeWsRpcHandlersLayer = () =>
-  AdmittedWsFeatureRpcGroup.toLayer(
+export interface WsRpcConstructionOptions {
+  /**
+   * An application-owned operation-session service. Production callers omit
+   * this and the RPC layer constructs one scoped to the negotiated server
+   * authority; route tests and future provider composition may share a service
+   * with their producer calls through this normal construction seam.
+   */
+  readonly whiteboardOperationSessionService?: WhiteboardOperationSessionService;
+}
+
+class WhiteboardOperationSession extends ServiceMap.Service<
+  WhiteboardOperationSession,
+  WhiteboardOperationSessionService
+>()("synara/WhiteboardOperationSession") {}
+
+function toWhiteboardOperationRpcError(cause: unknown, fallbackMessage: string) {
+  if (cause instanceof WhiteboardOperationSessionError) {
+    const retryable = cause.code === "WHITEBOARD_OPERATION_SESSION_ACTIVE";
+    return new WsRpcError({
+      message: cause.message,
+      code: cause.code,
+      retryable,
+      ...(retryable ? { retryAfterMs: 250 } : {}),
+      cause,
+    });
+  }
+  return toWsRpcError(cause, fallbackMessage);
+}
+
+const makeWhiteboardOperationSessionLayer = (options: WsRpcConstructionOptions) =>
+  options.whiteboardOperationSessionService
+    ? Layer.succeed(WhiteboardOperationSession, options.whiteboardOperationSessionService)
+    : Layer.effect(
+        WhiteboardOperationSession,
+        Effect.gen(function* () {
+          const negotiated = yield* negotiateWsCompatibility({
+            protocolEpoch: WS_PROTOCOL_EPOCH,
+            minRevision: WS_PROTOCOL_MIN_REVISION,
+            maxRevision: WS_PROTOCOL_MAX_REVISION,
+            clientBuild: "synara-server",
+            requiredCapabilities: [],
+          });
+          return yield* makeWhiteboardOperationSessionService({
+            serverInstanceId: negotiated.serverInstanceId,
+          });
+        }),
+      );
+
+const makeWsRpcHandlersLayer = (options: WsRpcConstructionOptions = {}) => {
+  const handlers = AdmittedWsFeatureRpcGroup.toLayer(
     Effect.gen(function* () {
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const automationService = yield* AutomationService;
@@ -526,6 +583,7 @@ const makeWsRpcHandlersLayer = () =>
               ),
             ),
       });
+      const whiteboardOperationSessionService = yield* WhiteboardOperationSession;
       const recordThreadStreamDrop = (threadId: string, report: LiveUiStreamDropReport) =>
         threadDiagnostics
           .recordOperationalDiagnostic({
@@ -1501,6 +1559,73 @@ const makeWsRpcHandlersLayer = () =>
             bufferLiveUiStream(orchestrationEngine.streamDomainEvents, {
               label: "orchestration.domain-events",
             }),
+          ),
+
+        [WS_METHODS.whiteboardOperationAttachSession]: (input) =>
+          rpcEffect(
+            whiteboardOperationSessionService.attachSession(input).pipe(
+              Effect.mapError((cause) =>
+                toWhiteboardOperationRpcError(cause, "Failed to attach Whiteboard operation session"),
+              ),
+            ),
+            "Failed to attach Whiteboard operation session",
+          ),
+        [WS_METHODS.whiteboardOperationSubscribe]: (input, { clientId }) =>
+          streamAdmission.guard(
+            clientId,
+            { key: `whiteboard.operation.session:${input.operationSessionId}` },
+            Stream.unwrap(
+              whiteboardOperationSessionService.subscribe(input).pipe(
+                Effect.mapError((cause) =>
+                  toWhiteboardOperationRpcError(
+                    cause,
+                    "Failed to subscribe to Whiteboard operation session",
+                  ),
+                ),
+              ),
+            ),
+          ),
+        [WS_METHODS.whiteboardOperationAcknowledgeApplication]: (input) =>
+          rpcEffect(
+            whiteboardOperationSessionService.acknowledgeApplication(input).pipe(
+              Effect.mapError((cause) =>
+                toWhiteboardOperationRpcError(
+                  cause,
+                  "Failed to acknowledge Whiteboard operation application",
+                ),
+              ),
+            ),
+            "Failed to acknowledge Whiteboard operation application",
+          ),
+        [WS_METHODS.whiteboardOperationTakeOver]: (input) =>
+          rpcEffect(
+            whiteboardOperationSessionService.takeOver(input).pipe(
+              Effect.mapError((cause) =>
+                toWhiteboardOperationRpcError(cause, "Failed to take over Whiteboard operation"),
+              ),
+            ),
+            "Failed to take over Whiteboard operation",
+          ),
+        [WS_METHODS.whiteboardOperationRetry]: (input) =>
+          rpcEffect(
+            whiteboardOperationSessionService.retry(input).pipe(
+              Effect.mapError((cause) =>
+                toWhiteboardOperationRpcError(cause, "Failed to retry Whiteboard operation"),
+              ),
+            ),
+            "Failed to retry Whiteboard operation",
+          ),
+        [WS_METHODS.whiteboardOperationReleaseSession]: (input) =>
+          rpcEffect(
+            whiteboardOperationSessionService.releaseSession(input).pipe(
+              Effect.mapError((cause) =>
+                toWhiteboardOperationRpcError(
+                  cause,
+                  "Failed to release Whiteboard operation session",
+                ),
+              ),
+            ),
+            "Failed to release Whiteboard operation session",
           ),
 
         [WS_METHODS.projectsListDirectories]: (input) =>
@@ -2516,20 +2641,29 @@ const makeWsRpcHandlersLayer = () =>
       });
     }),
   );
+  return options.whiteboardOperationSessionService
+    ? handlers.pipe(
+        Layer.provide(Layer.succeed(WhiteboardOperationSession, options.whiteboardOperationSessionService)),
+      )
+    : handlers;
+};
 
-export const makeWsRpcLayer = () =>
-  Layer.merge(makeWsRpcHandlersLayer(), wsRequestAdmissionMiddlewareLayer);
+export const makeWsRpcLayer = (options: WsRpcConstructionOptions = {}) =>
+  Layer.merge(makeWsRpcHandlersLayer(options), wsRequestAdmissionMiddlewareLayer);
 
-const makeRpcWebSocketHttpEffect = RpcServer.toHttpEffectWebsocket(AdmittedWsFeatureRpcGroup, {
-  spanPrefix: "ws.rpc",
-  spanAttributes: {
-    "rpc.transport": "websocket",
-    "rpc.system": "effect-rpc",
-  },
-  // JSON keeps the wire format symmetric with any web build. A serialization
-  // mismatch on this single multiplexed socket is a hard connect failure, and the
-  // desktop/dev setup routinely runs server and web on independently-built copies.
-}).pipe(Effect.provide(makeWsRpcLayer().pipe(Layer.provideMerge(RpcSerialization.layerJson))));
+export const makeRpcWebSocketHttpEffect = (options: WsRpcConstructionOptions = {}) =>
+  RpcServer.toHttpEffectWebsocket(AdmittedWsFeatureRpcGroup, {
+    spanPrefix: "ws.rpc",
+    spanAttributes: {
+      "rpc.transport": "websocket",
+      "rpc.system": "effect-rpc",
+    },
+    // JSON keeps the wire format symmetric with any web build. A serialization
+    // mismatch on this single multiplexed socket is a hard connect failure, and the
+    // desktop/dev setup routinely runs server and web on independently-built copies.
+  }).pipe(
+    Effect.provide(makeWsRpcLayer(options).pipe(Layer.provideMerge(RpcSerialization.layerJson))),
+  );
 
 const makeBootstrapWebSocketHttpEffect = RpcServer.toHttpEffectWebsocket(WsBootstrapRpcGroup, {
   spanPrefix: "ws.bootstrap",
@@ -2833,7 +2967,7 @@ export const websocketRpcRouteLayer = Layer.mergeAll(
   makeWebsocketNegotiationRouteLayer(),
   // The registry must be provided here so the upgrade route and the RPC
   // middleware (built from the same source effect) share one instance.
-  makeWebsocketRpcRouteLayer(makeRpcWebSocketHttpEffect).pipe(
+  makeWebsocketRpcRouteLayer(makeRpcWebSocketHttpEffect()).pipe(
     Layer.provide(WsConnectionSessionsLive),
   ),
-);
+).pipe(Layer.provide(makeWhiteboardOperationSessionLayer({})));
