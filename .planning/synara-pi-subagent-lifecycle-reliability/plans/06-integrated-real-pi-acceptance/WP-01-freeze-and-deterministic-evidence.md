@@ -1,15 +1,28 @@
-# WP-01 — freeze at 12fd6686 and 19-file deterministic integrated evidence
+# WP-01 — renewed 19-file deterministic evidence at frozen candidate
 
-**State:** blocked pending implementation and freeze of the exact two-file Decision 0007 candidate.
+**State:** ready — Package C froze the exact two-file Decision 0007 candidate;
+renewed WP-01 has not run.
 
 The detailed result and command record below describe historical WP-01 at
-`12fd6686` and remain supporting only. Renewed WP-01 must substitute the
-frozen exact two-file child candidate, while retaining the same closed 19-file
-set and 296/296 requirement.
+`12fd6686` and remain supporting only. Renewed WP-01 must run at frozen
+candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, retaining the same closed
+19-file set and 296/296 requirement.
 
-## Result
+## Candidate freeze and result
 
-Historical execution completed exactly per the prior packet; this result is supporting-only for old candidate `12fd6686`. Renewed WP-01 has not run and is the sole current D evidence when produced.
+Package C records candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` as the
+sole-parent child of base `12fd6686`, with exactly the two correction files.
+Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` is provenance only;
+all WP-01 behavioral producers must use `ffd45bd867e`, never that merge.
+Production coordinator/configuration remain byte-identical to base, and Alfie
+remains pinned at `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+`@alfie/pi-subagents@0.15.0-alfie.6`. The completion coordinator SHA-256 is
+`baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8` at both
+base and candidate; `apps/server/vitest.config.ts` is
+`8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0` at both.
+
+Renewed WP-01 has not run, so no current D PASS exists. The focused red/green
+candidate-correction logs are diagnostics only, not WP-01 evidence.
 
 - **Worktrees (retained for WP-02):** `/tmp/symphony-t06` detached at
   `12fd6686edc26a3fa0382e8bdeb83a1be8045539`; `/tmp/alfie-t06` detached at
@@ -41,16 +54,17 @@ Historical execution completed exactly per the prior packet; this result is supp
 
 **Owner role:** implementation worker
 
-**Dependencies:** plan persisted; Ticket 06 routed `ready-for-agent`; no
-unresolved challenge; protected WIP unstaged.
+**Dependencies:** Package C candidate freeze persisted; Ticket 06 routed
+`ready-for-agent`; no unresolved challenge; protected WIP unstaged with
+aggregate hash `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
 
 ## Objective and observable outcome
 
-Freeze the exact two-file child of historical Symphony base
-`12fd6686edc26a3fa0382e8bdeb83a1be8045539` and prove the unchanged integrated
-deterministic seam with one serialized 18-file unit run plus the contracts
-suite — 19 files and **296/296** cases. This is renewed D evidence, not reuse
-of historical WP-01 `9208e1728`.
+At frozen candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, prove the
+unchanged integrated deterministic seam with one serialized 18-file unit run
+plus the contracts suite — 19 files and **296/296** cases. The producer must
+run from the candidate worktree, not integration merge `064b49f1d`; this is
+renewed D evidence, not reuse of historical WP-01 `9208e1728`.
 
 ## The 19 files and their derivation
 

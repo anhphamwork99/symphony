@@ -1,0 +1,30 @@
+$ ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 --no-file-parallelism src/provider/piSubagentRealPiAcceptance.test.ts -t "activates the runtime hold immediately before future slow requests"
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:63515) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts (11 tests | 1 failed | 10 skipped) 5ms
+     × activates the runtime hold immediately before future slow requests 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Decision 0007 causal slow-response fixture contract > activates the runtime hold immediately before future slow requests
+TypeError: modelServer.holdSlowResponses is not a function
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:163:19
+    161|     try {
+    162|       expect(modelServer.pendingSlowResponseCount()).toBe(0);
+    163|       modelServer.holdSlowResponses();
+       |                   ^
+    164|       throw new Error("runtime holdSlowResponses() did not exist on th…
+    165|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  16:45:44
+   Duration  2.25s (transform 1.59s, setup 0ms, import 2.18s, tests 5ms, environment 0ms)
+
+EXIT_CODE=1

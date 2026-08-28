@@ -1,8 +1,9 @@
 # WP-02 — non-destructive real-Pi evidence, five standalone files
 
-**State:** historical attempts preserved; no current WP-02 PASS exists. The
-renewed full five-file run is blocked until the exact two-file Decision 0007
-candidate is frozen and renewed WP-01 passes 296/296.
+**State:** historical attempts preserved; no current WP-02 PASS exists. Package
+C froze candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; the renewed full
+five-file run remains blocked until renewed WP-01 passes 296/296. No WP-02
+producer ran in Package C.
 
 Decision 0007 is aspect-scoped Authoritative for this rebaseline. Attempts 1–3
 are supporting only. Attempt 3 ran its integrated leg exactly once and exited
@@ -20,6 +21,16 @@ historical command or log is a current execution authorization.
 durable batch IDs. The test stopped before the later public follow-up
 replay/count assertion. No duplicate follow-up count was observed. Preserve
 exit 1 and the raw logs byte-for-byte.
+
+**Package C candidate record:** base `12fd6686edc26a3fa0382e8bdeb83a1be8045539`
+→ candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` (sole parent, exact
+two-file delta); integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2`
+(parents `8c9b8bcbb` and `ffd45bd867e`) is not a producer identity. Alfie is
+pinned at `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+`@alfie/pi-subagents@0.15.0-alfie.6`, with existing ext-local `node_modules`
+ignored. Production coordinator/configuration are byte-identical to base;
+protected WIP hash remains `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`
+and unstaged. No current D/R PASS is claimed.
 
 Attempt 1 (2026-08-28 12:23–12:54 local): all five authorized standalone
 producers ran exactly once each against the retained pinned worktrees
@@ -52,18 +63,21 @@ the source-grounded correction).
 
 **Owner role:** implementation worker
 
-**Dependencies:** WP-01 committed and PASS; same worktrees intact at
-`12fd6686` / `3fe340b4`; no unresolved challenge. This WP is
-**non-destructive only**: it runs exactly the five standalone files below and
-makes no destructive process claim of any kind.
+**Dependencies:** renewed WP-01 committed and PASS at candidate
+`ffd45bd867e94c9003415f5f2e937cc9c616e399`; candidate worktree and Alfie pin
+`3fe340b4` intact; no unresolved challenge. This WP is **non-destructive only**:
+it runs exactly the five standalone files below and makes no destructive process
+claim of any kind. Any behavioral producer must use `ffd45bd867e`, never merge
+`064b49f1d954b64343006da9240cdadf58bc0ff2`.
 
 ## Objective and observable outcome
 
-Execute the five authorized standalone wallclock files against real Pi plus
-the controlled Alfie worktree (R evidence), proving T06-AC1–AC5 and AC7 at
-the integrated boundary with full isolation and truthful diagnostics — and
-explicitly NOT covering the destructive zero-owned-child leg, which belongs
-to WP-03 alone.
+Execute the five authorized standalone wallclock files from the frozen
+candidate worktree against real Pi plus the controlled Alfie worktree (R
+evidence), proving T06-AC1–AC5 and AC7 at the integrated boundary with full
+isolation and truthful diagnostics — and explicitly NOT covering the destructive
+zero-owned-child leg, which belongs to WP-03 alone. The producer identity is
+`ffd45bd867e94c9003415f5f2e937cc9c616e399`, never merge `064b49f1d`.
 
 ## The five standalone files (complete and closed set)
 
@@ -184,7 +198,13 @@ The owner-resolved, source-grounded correction for the three failed legs is
    the named Pi acceptance surface non-empty; provenance verifier failure at
    any stage; an unexpected skip in any leg.
 
-## Attempt 3 — process-HOME-isolated rerun authorization (exactly one; authorized 2026-08-28, current session)
+## Attempt 3 — process-HOME-isolated rerun authorization (historical; not Package C)
+
+The commands and outcomes below are historical attempt-3 records at the old
+candidate and are preserved only as supporting evidence. Package C ran no
+producer and grants no retry. Any renewed five-file run must first use a fresh
+worktree at candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; it must never
+use merge `064b49f1d954b64343006da9240cdadf58bc0ff2` as its producer identity.
 
 Owner authorization (current session, verbatim): **`Cho phép tất cả các
 cổng`** (PLAN §7c item 1). Exactly one run of the three pending legs —

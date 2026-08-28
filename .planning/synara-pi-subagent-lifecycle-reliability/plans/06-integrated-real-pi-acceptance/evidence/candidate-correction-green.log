@@ -1,0 +1,13 @@
+$ ./node_modules/.bin/vitest run --project wallclock --maxWorkers=1 --no-file-parallelism src/provider/piSubagentRealPiAcceptance.test.ts -t "Decision 0007 causal slow-response fixture contract"
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:67292) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 10 skipped (11)
+   Start at  16:48:22
+   Duration  2.34s (transform 1.68s, setup 0ms, import 2.24s, tests 31ms, environment 0ms)
+
+EXIT_CODE=0

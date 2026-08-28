@@ -1,8 +1,8 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** reassessed under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md), aspect-scoped Authoritative for fixture correction, candidate rebaseline, attempt-3 evidence erratum, and downstream gate status. Historical evidence is preserved; renewed evidence has not started.
+**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is ready but no current D/R PASS exists. Historical evidence is supporting only and no producer ran in Package C.
 
-**Historical base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`. Historical WP-01 `9208e1728` and attempts 1–3 are supporting only. The future candidate is an exact two-file child of that base, with its SHA frozen before renewed evidence.
+**Historical base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`. Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is its sole-parent exact two-file child. Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` has parents Package A `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; it is integration provenance only.
 
 **Exact candidate correction scope:**
 
@@ -20,6 +20,41 @@ After candidate freeze, all renewed evidence commits have zero source delta.
 `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`, unstaged.
 
 **Date:** 2026-08-28
+
+## Candidate freeze record — Package C
+
+- **Base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
+- **Candidate:** `ffd45bd867e94c9003415f5f2e937cc9c616e399`; sole parent exactly
+  `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
+- **Candidate delta:** exactly two files, and no others:
+  `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` and
+  `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`.
+- **Integration identity:** no-ff merge
+  `064b49f1d954b64343006da9240cdadf58bc0ff2`, parents Package A
+  `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate
+  `ffd45bd867e94c9003415f5f2e937cc9c616e399`; candidate remains reachable.
+- **Byte identity:** production coordinator
+  `apps/server/src/provider/piSubagentCompletionCoordinator.ts` is
+  `baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8` at
+  both base and candidate; server configuration `apps/server/vitest.config.ts`
+  is `8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0` at
+  both; extension provenance fixture is
+  `05ba0b7cf2d80afba3185c6469a81c832275ebc989b453985bb03c9da2d3a478` at
+  both.
+- **Composition:** Alfie remains pinned at
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+  `@alfie/pi-subagents@0.15.0-alfie.6`; existing ext-local `node_modules`
+  remains ignored and is not a tracked change.
+- **Producer identity:** every future behavioral producer must run from a
+  worktree at candidate `ffd45bd867e`, never from merge `064b49f1d`.
+- **Protected WIP:** `apps/web/package.json`, `apps/web/src/main.tsx`, and
+  `bun.lock` remain outside this transaction, unstaged, with aggregate hash
+  `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
+- **Focused correction logs:** red exit 1, `1 failed / 10 skipped`, SHA-256
+  `bd78416cf860427fb222e8a5c7a33c54559c930d96a10289ec81743866d624a8`;
+  green exit 0, `1 passed / 10 skipped`, SHA-256
+  `07f42c2c266a39d11945c71d06c1e294060f492042c6e6e6d6e7813e32108d09`.
+  These are focused candidate-correction diagnostics, not WP-01/WP-02 PASS.
 
 ## 1. Objective and planning conclusion
 
@@ -136,8 +171,8 @@ No source implementation is authorized in the plan-persistence transaction.
 
 ```text
 12fd6686 historical base
-  └──> exact two-file child candidate + freeze
-       └──> renewed WP-01: same 19 files, 296/296 (D)
+  └──> ffd45bd exact two-file child candidate + freeze (Package C)
+       └──> renewed WP-01 at ffd45bd: same 19 files, 296/296 (D)
             └──> one renewed full five-file WP-02 (R)
                  └──> fresh owner authorization, WP-03 (M)
                       └──> fresh owner authorization after new WP-03 PASS, WP-04 (Q)
@@ -159,10 +194,11 @@ Behavioral producers never run in the user's main Symphony checkout or the
 user Alfie checkout.
 
 1. **Create** a fresh detached Symphony worktree outside the repository:
-   `git worktree add --detach <tmp>/symphony-t06 12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
+   `git worktree add --detach <tmp>/symphony-t06 ffd45bd867e94c9003415f5f2e937cc9c616e399`.
 2. **Install** dependencies inside it (`bun install` at the worktree root).
    Record lockfile-pinned resolution; the worktree must stay at exactly
-   `12fd6686` (detached HEAD) for the whole lifecycle.
+   `ffd45bd867e94c9003415f5f2e937cc9c616e399` (detached HEAD) for the whole
+   lifecycle. The integration merge `064b49f1d` is never a producer identity.
 3. **Create** a fresh detached Alfie worktree:
    `git -C /Users/anhpham99/alfie worktree add --detach <tmp>/alfie-t06 3fe340b401ca86bcbe8b55abd4de107e1d93482e`.
    Verify clean status and provenance hashes against
@@ -170,8 +206,8 @@ user Alfie checkout.
 4. **Run** all D and R producers from the Symphony worktree with
    `ALFIE_REPO_DIR=<tmp>/alfie-t06`.
 5. **Verify after every producer** that the Symphony worktree's Pi acceptance
-   surface is still exactly at `12fd6686` (zero working-tree delta on the
-   named surface) and the Alfie worktree is clean.
+   surface is still exactly at frozen candidate `ffd45bd867e` (zero
+   working-tree delta on the named surface) and the Alfie worktree is clean.
 6. **Freeze evidence** into this plan's `evidence/` directory in the main
    checkout (the only place commits happen).
 7. **Remove** both worktrees with `git worktree remove` only after WP-03 (or
@@ -179,7 +215,9 @@ user Alfie checkout.
    over uncommitted evidence.
 
 The main checkout keeps only planning/evidence writes; the three protected
-owner WIP files stay modified-unstaged with hash `ab8f8f54…` at every record.
+owner WIP files stay modified-unstaged with hash
+`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8` at every
+record.
 
 ## 7. Runner and verification policy
 
@@ -205,7 +243,12 @@ owner WIP files stay modified-unstaged with hash `ab8f8f54…` at every record.
   No AC may pass from inherited totals (H), source comments, compile success,
   or an unexecuted command.
 
-## 7a. Historical attempts and Decision 0007 reassessment (2026-08-28)
+## 7a. Candidate freeze and historical attempts (2026-08-28)
+
+Package C freezes candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` before
+renewed behavioral evidence. No WP-01 or WP-02 producer ran in this package.
+Any renewed producer must use the candidate SHA, not integration merge
+`064b49f1d954b64343006da9240cdadf58bc0ff2`.
 
 Attempts 1–3 are historical supporting evidence only and their raw logs remain
 immutable. Decision 0007 classifies attempt 3 as an acceptance-fixture causal-
@@ -217,7 +260,8 @@ gate changes.
 
 Attempt 2 remains an environment/isolation challenge and attempt 3 remains a
 failed historical run. Neither supplies current D/R evidence. No renewed run
-has started in this reassessment.
+has started; the focused red/green correction logs are diagnostics only and do
+not constitute a D or R PASS.
 
 ## 7c. Current downstream gate status
 
@@ -246,7 +290,8 @@ defect from this failure.
 
 | Gate | Current status |
 |---|---|
-| Renewed WP-02 | blocked until exact candidate freeze and renewed WP-01 296/296; one full five-file run only |
+| Renewed WP-01 | ready at frozen candidate `ffd45bd`; same 19 files, 296/296; not yet run |
+| Renewed WP-02 | blocked until renewed WP-01 passes 296/296; one full five-file run only |
 | WP-03 | blocked; fresh owner authorization required after renewed WP-02 PASS; old authorization unspent/non-transferable/not executable |
 | WP-04 | blocked; fresh owner authorization required after the newly authorized WP-03 PASS; old authorization unspent/non-transferable/not executable |
 | WP-05 | one integrated review reservation unused; after complete current package |
@@ -267,15 +312,17 @@ Before and after each package record:
 ```bash
 git rev-parse HEAD
 git status --short
-git diff --name-status <CANDIDATE_SHA>..HEAD -- apps/server/src/provider apps/server/src/persistence apps/server/src/orchestration apps/server/scripts/wallclock-tests.ts apps/server/vitest.config.ts packages/contracts/src/piSubagents.ts
+git diff --name-status ffd45bd867e94c9003415f5f2e937cc9c616e399..HEAD -- apps/server/src/provider apps/server/src/persistence apps/server/src/orchestration apps/server/scripts/wallclock-tests.ts apps/server/vitest.config.ts packages/contracts/src/piSubagents.ts
 git diff --name-only
 git diff --cached --name-only
 git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
 ```
 
 The candidate gate allows exactly the two Decision 0007 files in
-`12fd6686..CANDIDATE_SHA`; from the candidate through the evidence package the
-source-surface diff must be **empty** at every record. Explicit staging only — never `git add .` or
+`12fd6686..ffd45bd867e94c9003415f5f2e937cc9c616e399`; from frozen candidate
+`ffd45bd867e` through the evidence package the source-surface diff must be
+**empty** at every record. Behavioral producers identify `ffd45bd867e`, never
+merge `064b49f1d`. Explicit staging only — never `git add .` or
 `git add -A`. No reset, clean, checkout of protected paths, push, release,
 deploy, default dev instance, or destructive process operation is authorized.
 PID discovery is bounded to the operator recipe's own isolated child tree in

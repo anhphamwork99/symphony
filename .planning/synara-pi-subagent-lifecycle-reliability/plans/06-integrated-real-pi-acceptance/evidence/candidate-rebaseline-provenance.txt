@@ -1,0 +1,65 @@
+Ticket 06 Package C — candidate rebaseline provenance
+Date: 2026-08-28
+
+Candidate lineage
+-----------------
+Historical base:       12fd6686edc26a3fa0382e8bdeb83a1be8045539
+Frozen candidate:      ffd45bd867e94c9003415f5f2e937cc9c616e399
+Candidate parent:      12fd6686edc26a3fa0382e8bdeb83a1be8045539 (sole parent)
+Integration merge:     064b49f1d954b64343006da9240cdadf58bc0ff2
+Merge first parent:    8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e (Package A)
+Merge second parent:   ffd45bd867e94c9003415f5f2e937cc9c616e399 (candidate)
+Candidate reachable:   yes; candidate remains an ancestor of the integration merge
+
+Exact candidate delta
+---------------------
+The base→candidate delta is exactly two files (and no others):
+  apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
+  apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+
+Production/configuration byte identity
+--------------------------------------
+Completion coordinator:
+  apps/server/src/provider/piSubagentCompletionCoordinator.ts
+  base SHA-256:      baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8
+  candidate SHA-256: baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8
+Server configuration:
+  apps/server/vitest.config.ts
+  base SHA-256:      8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0
+  candidate SHA-256: 8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0
+Extension provenance fixture:
+  apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json
+  base SHA-256:      05ba0b7cf2d80afba3185c6469a81c832275ebc989b453985bb03c9da2d3a478
+  candidate SHA-256: 05ba0b7cf2d80afba3185c6469a81c832275ebc989b453985bb03c9da2d3a478
+
+Pinned composition and workspace safety
+---------------------------------------
+Alfie commit:        3fe340b401ca86bcbe8b55abd4de107e1d93482e
+Alfie package:       @alfie/pi-subagents@0.15.0-alfie.6
+Alfie dependency:    existing ext-local node_modules is gitignored; no tracked Alfie change
+Protected WIP:       apps/web/package.json, apps/web/src/main.tsx, bun.lock
+Protected WIP hash:  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+Protected WIP state: modified-unstaged and absent from this transaction's index/commit
+
+Producer and evidence identity
+------------------------------
+No WP-01/WP-02 producer ran in Package C. Renewed behavioral producers must
+run from a worktree checked out at candidate ffd45bd867e94c9003415f5f2e937cc9c616e399;
+they must never use integration merge 064b49f1d954b64343006da9240cdadf58bc0ff2
+as their producer identity. Renewed WP-01 is ready with the same 19-file set
+and 296/296 requirement. No current D or R PASS is claimed.
+
+Focused candidate-correction logs (copied byte-identically from /tmp)
+---------------------------------------------------------------------
+Red diagnostic:   exit 1; 1 failed / 10 skipped
+  source: /tmp/t06-candidate-correction-red.log
+  SHA-256: bd78416cf860427fb222e8a5c7a33c54559c930d96a10289ec81743866d624a8
+  canonical: evidence/candidate-correction-red.log
+Green diagnostic: exit 0; 1 passed / 10 skipped
+  source: /tmp/t06-candidate-correction-green.log
+  SHA-256: 07f42c2c266a39d11945c71d06c1e294060f492042c6e6e6d6e7813e32108d09
+  canonical: evidence/candidate-correction-green.log
+
+These focused logs are candidate-correction diagnostics only. They are not
+renewed WP-01 deterministic evidence, renewed WP-02 real-Pi evidence, or a
+current D/R PASS. Historical raw logs remain immutable and are not rewritten.
