@@ -487,6 +487,146 @@ describe("WhiteboardOperationSessionService", () => {
     );
   });
 
+  it("terminalizes acknowledged zero-valid Take Over and preserves no-op evidence", async () => {
+    await runScoped(
+      (service) =>
+        Effect.gen(function*() {
+          const attached = yield* service.attachSession(attachInput("zero-takeover"));
+          const identity = identityOf(attached);
+          const operation = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-zero-takeover",
+          });
+          const progress = yield* service.publishProgress(
+            progressInput(identity, operation, 1),
+          );
+          yield* service.acknowledgeApplication(
+            acknowledgementInput(identity, progress, "applied-no-op"),
+          );
+          const input = {
+            ...identity,
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            expectedGeneration: operation.generation,
+            takeOverRequestId: "take-over-zero",
+          };
+          yield* awaitResolvedTakeOver(service, input);
+
+          const snapshotStream = yield* service.subscribe({
+            ...identity,
+            lastServerSequence: 0,
+          });
+          const snapshotEvents = Array.from(
+            yield* Stream.runCollect(Stream.take(snapshotStream, 1)),
+          );
+          expect(snapshotEvents[0]).toMatchObject({
+            kind: "session-snapshot",
+            terminal: {
+              outcome: "zero-valid",
+              terminalReason: "semantic-no-op",
+              acceptedNoOpCount: 1,
+              lastAcceptedProducerSequence: 1,
+              containmentResult: "acknowledged",
+            },
+          });
+
+          const next = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-after-zero-takeover",
+          });
+          expect(next.operationId).not.toBe(operation.operationId);
+        }),
+      {
+        serverInstanceId: SERVER_ID,
+        containmentDispatcher: async () => "acknowledged",
+      },
+    );
+  });
+
+  it("classifies stale Take Over generation and released identity mismatch precisely", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("classification"));
+        const identity = identityOf(attached);
+        const operation = yield* service.admitOperation({
+          ...identity,
+          batchId: "batch-classification",
+        });
+        const stale = Effect.runPromise(
+          service.takeOver({
+            ...identity,
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            expectedGeneration: operation.generation + 1,
+            takeOverRequestId: "take-over-stale",
+          }),
+        );
+        yield* Effect.promise(() =>
+          expectCode(stale, WHITEBOARD_OPERATION_ERROR.takeOverGenerationStale),
+        );
+
+        yield* service.failOperation({
+          ...identity,
+          batchId: operation.batchId,
+          operationId: operation.operationId,
+          generation: operation.generation,
+        });
+        yield* service.releaseSession(identity);
+        const mismatch = Effect.runPromise(
+          service.subscribe({
+            ...identity,
+            projectId: "different-project",
+            lastServerSequence: 0,
+          }),
+        );
+        yield* Effect.promise(() =>
+          expectCode(mismatch, WHITEBOARD_OPERATION_ERROR.identityMismatch),
+        );
+      }),
+    );
+  });
+
+  it("advances retry document revision from truthful browser acknowledgement", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("retry-revision"));
+        const identity = identityOf(attached);
+        const operation = yield* service.admitOperation({
+          ...identity,
+          batchId: "batch-retry-revision",
+        });
+        const progress = yield* service.publishProgress(
+          progressInput(identity, operation, 1),
+        );
+        yield* service.acknowledgeApplication(
+          acknowledgementInput(identity, progress, "applied-semantic"),
+        );
+        yield* service.failOperation({
+          ...identity,
+          batchId: operation.batchId,
+          operationId: operation.operationId,
+          generation: operation.generation,
+        });
+        const retry = yield* service.retry({
+          ...identity,
+          batchId: operation.batchId,
+          failedOperationId: operation.operationId,
+          failedGeneration: operation.generation,
+          failedRetryAttempt: 0,
+        });
+        expect(retry.expectedDocumentRevision).toBe(1);
+        const repeated = yield* service.retry({
+          ...identity,
+          batchId: operation.batchId,
+          failedOperationId: operation.operationId,
+          failedGeneration: operation.generation,
+          failedRetryAttempt: 0,
+        });
+        expect(repeated).toEqual(retry);
+      }),
+    );
+  });
+
   it("records an Effect-clock acknowledgement timeout without synthesizing terminal truth", async () => {
     await runScoped(
       (service) =>
