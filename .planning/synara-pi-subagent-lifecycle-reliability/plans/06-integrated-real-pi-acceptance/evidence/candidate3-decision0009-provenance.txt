@@ -1,0 +1,133 @@
+Ticket 06 — Decision 0009 candidate3 freeze provenance
+=========================================================
+Recorded: 2026-08-28
+Evidence class: P (planning/provenance) with focused implementation evidence only
+
+1. CANDIDATE LINEAGE
+--------------------
+Historical base:
+  12fd6686edc26a3fa0382e8bdeb83a1be8045539
+Historical fixture candidate:
+  ffd45bd867e94c9003415f5f2e937cc9c616e399
+Candidate2:
+  2afef48b008527685658801d8f0d84c79e24827d
+Frozen candidate3:
+  9b55649050b76feffdc4279ceaec92ac74a78686
+
+Candidate3 is the exact sole-parent child of candidate2:
+  git rev-list --parents -n 1 9b55649050b76feffdc4279ceaec92ac74a78686
+  9b55649050b76feffdc4279ceaec92ac74a78686 2afef48b008527685658801d8f0d84c79e24827d
+
+The integration merge is provenance only:
+  cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7
+  parents: 0e828e0fe5daf273a6a0c04960494756ccdf204e (planning),
+           9b55649050b76feffdc4279ceaec92ac74a78686 (candidate3)
+No producer may use the integration merge as its identity.
+
+2. EXACT DELTAS
+---------------
+Candidate3 delta from candidate2 is exactly four paths:
+  apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+  apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+  apps/server/src/provider/piSubagentManagedRuntimeBinding.ts
+  apps/server/src/provider/piSubagentCanonicalRouting.test.ts
+
+Candidate3's total distinct delta from historical base 12fd6686 is exactly six
+paths: the four paths above plus the two Decision 0007 fixture paths:
+  apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+  apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
+
+No fifth behavioral path, canonical expectation, coordinator, configuration,
+contract/schema, lockfile, manifest, unrelated test, or Alfie source change is
+part of this frozen acceptance surface.
+
+3. DECISION 0009 REASON CONTRACT
+--------------------------------
+The mapping is exact-marker-only. Only the exact structured provider marker
+`pi_subagent_managed_execution_unavailable_live` may produce the internal
+`unavailableReason: provider_inactive`, and only on an internal
+`status: "unavailable"` result. An unaccepted control maps that reason at the
+managed boundary to `pi_subagent_read_live_record_unavailable`.
+
+Observation remains `pi_subagent_live_lifecycle_unavailable`. A captured but
+inactive route is generic and carries the bounded internal reason
+`provider_route_inactive`; it must not be conflated with provider-inactive
+structured-marker routing. Generic unavailable paths remain
+`pi_subagent_live_lifecycle_unavailable`. Provider text is never parsed. No
+public reason, accepted effect, SDK insertion, retry, or acceptance lie is
+claimed.
+
+The pre-freeze review found and fixed the route-inactive conflation and amended
+the candidate before this freeze.
+
+4. FOCUSED LOGS — COPIED BYTE-IDENTICALLY FROM /tmp
+----------------------------------------------------
+Initial red:
+  source: /tmp/t06-decision0009-red.log
+  canonical: evidence/candidate3-decision0009-red.log
+  bytes: 4611
+  result: exit 1; 2 files; 49 tests; 45 passed / 4 failed
+  SHA-256: 4285cbdd33f6e4f76cc126133a6589396b8e133aca0522c6fdb1ef087115fbb9
+
+Initial green:
+  source: /tmp/t06-decision0009-green.log
+  canonical: evidence/candidate3-decision0009-green.log
+  bytes: 211
+  result: exit 0; 2 files; 49/49 tests passed
+  SHA-256: 2e22b5879ea1bc16d199e277e8aaa52b334cf81e9fb540841842cc1d4cef5a47
+
+Review-conflation red:
+  source: /tmp/t06-decision0009-conflation-red.log
+  canonical: evidence/candidate3-decision0009-conflation-red.log
+  bytes: 1347
+  result: exit 1; 2 files; 49 tests; 1 failed
+  SHA-256: 363e2f7c3297f27a69425a13021cea0ea889cd8ac8161fc42e59a41268f4ffff
+
+Final green:
+  source: /tmp/t06-decision0009-conflation-green.log
+  canonical: evidence/candidate3-decision0009-conflation-green.log
+  bytes: 223
+  result: exit 0; 2 files; 50/50 tests passed
+  SHA-256: d9d1f4f351b0e4598b5699c1e5ca5e73919c49a82e39083c8ff964e8f8c106be
+
+These are focused implementation diagnostics only. They are not current WP-01
+D evidence, WP-02 R evidence, or WP-04 Q evidence.
+
+5. WP ROUTING AND COUNTS
+------------------------
+WP-01 is READY at the frozen candidate. The unchanged closed set is 19 files.
+Candidate2's actual WP-01 result was 19/19 files and 303/303 tests. Five focused
+implementation tests make 308 an estimate only; the fresh WP-01 producer must
+record the actual count and must not broaden the closed set. This transaction
+does not run WP-01.
+
+WP-02 is BLOCKED until a fresh WP-01 PASS. No current D/R PASS exists. After
+that boundary, exactly one complete five-file non-destructive real-Pi attempt
+may run, serially and without retry. WP-03/WP-04/WP-05/WP-06/WP-07 remain
+blocked in order.
+
+6. ALFIE AND PROTECTED WIP
+--------------------------
+Alfie pin:
+  commit 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  package @alfie/pi-subagents@0.15.0-alfie.6
+Alfie is unchanged by this transaction.
+
+Protected owner WIP aggregate hash:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+Protected WIP remains outside this transaction, untouched and unstaged.
+
+7. UNAUTHORIZED QUALITY-COMMAND INCIDENT
+-----------------------------------------
+A delegated worker mistakenly ran heavyweight typecheck/lint and targeted
+format validation without user authorization. Those commands are recorded as a
+factual incident only: they are non-authoritative, are not WP-04/Q evidence or
+gates, and do not establish a current quality pass. They were not rerun.
+
+8. TRANSACTION BOUNDARY
+-----------------------
+This freeze transaction modifies exactly ten planning/evidence paths: PROJECT.md,
+the Ticket 06 issue, PLAN.md, WP-01, WP-02, these four focused logs, and this
+provenance file. No source commit, producer, test run, formatter, lint,
+typecheck, destructive action, review, Supervisor consultation, or retry is part
+of this transaction.

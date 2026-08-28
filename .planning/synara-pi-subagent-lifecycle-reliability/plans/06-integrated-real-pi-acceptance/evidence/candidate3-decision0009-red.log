@@ -1,0 +1,98 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06
+
+ ❯ apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts (25 tests | 3 failed) 9ms
+     × classifies ordinary retirement before control acceptance as unavailable, not stale 3ms
+     × preserves only the closed unavailable reason and never provider text 0ms
+     × carries a closed reason on every unavailable path and omits it on applied, unknown, and stale 0ms
+ ❯ apps/server/src/provider/piSubagentCanonicalRouting.test.ts (24 tests | 1 failed) 10ms
+     × maps the exact structured unavailable marker to bounded live-lifecycle unavailable 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/server/src/provider/piSubagentCanonicalRouting.test.ts > Pi managed canonical routing > maps the exact structured unavailable marker to bounded live-lifecycle unavailable
+AssertionError: expected 'pi_subagent_live_lifecycle_unavailable' to be 'pi_subagent_read_live_record_unavaila…' // Object.is equality
+
+Expected: "pi_subagent_read_live_record_unavailable"
+Received: "pi_subagent_live_lifecycle_unavailable"
+
+ ❯ apps/server/src/provider/piSubagentCanonicalRouting.test.ts:555:35
+    553|     expect(harness.state.providerCalls).toBe(1);
+    554|     expect(result.isError).toBe(true);
+    555|     expect(result.diagnosticCode).toBe("pi_subagent_read_live_record_u…
+       |                                   ^
+    556|     expect(result.content[0].text).not.toContain("Agent not found");
+    557|     expect(JSON.stringify(result)).not.toContain("unavailableReason");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > classifies ordinary retirement before control acceptance as unavailable, not stale
+AssertionError: expected { status: 'unavailable', …(1) } to deeply equal { status: 'unavailable', …(2) }
+
+- Expected
++ Received
+
+  {
+    "diagnosticCode": "pi_subagent_live_lifecycle_unavailable",
+    "status": "unavailable",
+-   "unavailableReason": "provider_inactive",
+  }
+
+ ❯ apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts:355:28
+    353|     expect(containment.retire(registration)).toBe(true);
+    354|     pending.resolve();
+    355|     expect(await inFlight).toEqual({
+       |                            ^
+    356|       status: "unavailable",
+    357|       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > preserves only the closed unavailable reason and never provider text
+AssertionError: expected { status: 'unavailable', …(1) } to deeply equal { status: 'unavailable', …(2) }
+
+- Expected
++ Received
+
+  {
+    "diagnosticCode": "pi_subagent_live_lifecycle_unavailable",
+    "status": "unavailable",
+-   "unavailableReason": "callback_failed_before_acceptance",
+  }
+
+ ❯ apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts:837:20
+    835|     containment.activate(registration);
+    836|     const result = await containment.control({ tuple, session, registr…
+    837|     expect(result).toEqual({
+       |                    ^
+    838|       status: "unavailable",
+    839|       diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts > PiSubagentLiveLifecycleContainment > carries a closed reason on every unavailable path and omits it on applied, unknown, and stale
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ expectUnavailable apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts:865:59
+    863|       const result = await resultPromise;
+    864|       expect(result.status).toBe("unavailable");
+    865|       expect(reasons.has(result.unavailableReason ?? "")).toBe(true);
+       |                                                           ^
+    866|       expect("value" in result).toBe(false);
+    867|     };
+ ❯ apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts:870:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 45 passed (49)
+   Start at  20:36:28
+   Duration  555ms (transform 197ms, setup 0ms, import 410ms, tests 18ms, environment 0ms)
+

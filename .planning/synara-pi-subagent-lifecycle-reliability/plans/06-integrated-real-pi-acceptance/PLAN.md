@@ -1,12 +1,12 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
 **Plan state:** Decision 0009 reassessment is persisted and aspect-scoped
-**Authoritative**. Candidate2 `2afef48b008527685658801d8f0d84c79e24827d` and
-its `303/303` WP-01 plus challenged WP-02 are historical supporting evidence
-only. No new candidate, D/R PASS, producer, or acceptance exists. The next
-candidate is an exact four-file correction child of candidate2; its total
-distinct delta from `12fd6686` must be exactly six paths. Final acceptance is
-renumbered Decision 0010.
+**Authoritative**. Candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is
+frozen as candidate2's exact sole-parent four-file correction child, with six
+distinct paths from `12fd6686`. WP-01 is ready on the unchanged closed 19-file
+set; `308` is an estimate only pending the actual producer count. WP-02 is
+blocked, no current D/R/Q PASS exists, and final acceptance remains Decision
+0010.
 **Date:** 2026-08-28
 
 ## 1. Objective and governing authorities
@@ -34,9 +34,10 @@ acceptance, terminal truth, and the other lifecycle invariants.
 - Historical ffd candidate: `ffd45bd867e94c9003415f5f2e937cc9c616e399`, the
   sole-parent child of `12fd6686`, with exactly the two Decision 0007 fixture
   paths. Its WP-01/WP-02 evidence is historical supporting only.
-- Frozen candidate2: `2afef48b008527685658801d8f0d84c79e24827d`, the sole-parent
-  child of `ffd45bd`. This is the producer identity; its exact candidate SHA is
-  recorded before any new behavioral evidence.
+- Historical candidate2: `2afef48b008527685658801d8f0d84c79e24827d`, the
+  sole-parent child of `ffd45bd`.
+- Frozen candidate: `9b55649050b76feffdc4279ceaec92ac74a78686`, the exact
+  sole-parent child of candidate2 and the producer identity for the next route.
 - Candidate2 delta from `ffd45bd`: exactly:
 
   ```text
@@ -59,9 +60,10 @@ acceptance, terminal truth, and the other lifecycle invariants.
 - The new candidate's total distinct delta from `12fd6686` is exactly six
   paths: the two fixture paths plus those four correction paths.
 
-- Main integration merge: `44249d81c49172e192dcf0f09ddfadc702a4b34c`, with
-  parents `50853a3b9774e7aa5462916056195ffa536dc491` (planning) and candidate2.
-  The merge is integration provenance only and is never the producer identity.
+- Main integration merge: `cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7`, with
+  parents `0e828e0fe5daf273a6a0c04960494756ccdf204e` (planning) and the frozen
+  candidate. The merge is integration provenance only and is never the producer
+  identity.
 - Production coordinator/configuration, canonical expectations, lockfiles, all
   other source/test paths, and Alfie remain unchanged.
 - Alfie pin: `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
@@ -72,18 +74,34 @@ acceptance, terminal truth, and the other lifecycle invariants.
 
 ## 3. Focused implementation evidence
 
-The candidate's focused containment evidence is copied byte-identically into
-this plan's evidence directory:
+The frozen candidate's focused Decision 0009 evidence is copied byte-identically
+into this plan's evidence directory. These logs are implementation evidence,
+not current WP-01 D, WP-02 R, or WP-04 Q acceptance:
 
-- `candidate2-containment-red.log`: exit 1; 24 tests; 6 failed / 18 passed;
-  SHA-256 `665e0bbaf0a9a25d1908c9767d2bd7ff2947d4e1844a6df80d84622300b16e3b`.
-- `candidate2-containment-green.log`: exit 0; 24/24 tests passed; SHA-256
-  `84feb4814b891ce69472c74dd5596f04c9bf753fa65de18c7d31b352dd95f43b`.
+- `candidate3-decision0009-red.log`: exit 1; 2 files; 49 tests, 45 passed / 4
+  failed; SHA-256 `4285cbdd33f6e4f76cc126133a6589396b8e133aca0522c6fdb1ef087115fbb9`.
+- `candidate3-decision0009-green.log`: exit 0; 2 files; 49/49; SHA-256
+  `2e22b5879ea1bc16d199e277e8aaa52b334cf81e9fb540841842cc1d4cef5a47`.
+- `candidate3-decision0009-conflation-red.log`: exit 1; 2 files; 49 tests,
+  1 failed; SHA-256 `363e2f7c3297f27a69425a13021cea0ea889cd8ac8161fc42e59a41268f4ffff`.
+- `candidate3-decision0009-conflation-green.log`: exit 0; 2 files; 50/50;
+  SHA-256 `d9d1f4f351b0e4598b5699c1e5ca5e73919c49a82e39083c8ff964e8f8c106be`.
 
-These logs are focused implementation red/green evidence, not new-candidate
-WP-01 D acceptance and not WP-02 R acceptance. Candidate2's WP-01 producer
-records are historical supporting evidence only. The new candidate requires a
-fresh WP-01 collection and actual count.
+The pre-freeze review fixed route-inactive conflation and amended the candidate.
+Decision 0009's reason mapping is exact-marker-only: the exact structured
+`pi_subagent_managed_execution_unavailable_live` marker may yield internal
+`unavailableReason: provider_inactive` only on an unavailable result; an
+unaccepted control maps to `pi_subagent_read_live_record_unavailable`, while
+observation and generic route-inactive (`provider_route_inactive`) remain
+`pi_subagent_live_lifecycle_unavailable`. Provider text is never parsed, and
+no accepted effect or public reason is claimed.
+
+A delegated worker also ran heavyweight typecheck/lint and targeted format
+validation without user authorization. This factual incident is
+non-authoritative, not WP-04/Q evidence or a gate, no current quality pass is
+claimed, and it was not rerun. Candidate2's WP-01 producer records remain
+historical supporting evidence only; the frozen candidate requires a fresh
+WP-01 collection and actual count.
 
 ## 4. Evidence classes and acceptance
 
@@ -100,9 +118,9 @@ acceptance; the final Supervisor record is Decision 0010.
 ## 5. Serial route and gates
 
 ```text
-candidate2 `2afef48b`
-  -> exact four-file correction child; freeze SHA
-  -> WP-01 fresh closed 19-file D collection (actual count recorded)
+frozen candidate `9b55649050b76feffdc4279ceaec92ac74a78686`
+  -> WP-01 ready: exact closed 19-file D collection (actual count recorded;
+     `308` is estimate only)
   -> exactly one new complete five-file WP-02 R attempt
   -> fresh owner authorization, WP-03 (M)
   -> fresh owner authorization after WP-03 PASS, WP-04 (Q/report)
@@ -124,39 +142,33 @@ WP-06/WP-07 remain blocked and no retry is authorized.
 
 ### WP-01 — reset deterministic evidence (D)
 
-**READY after candidate freeze.** Run the same closed 19-file deterministic
-set exactly once at the new sole-parent correction child. Record the actual
-producer file/test count, exact commands, exits, skips, candidate SHA,
-detached-clean truth, six-path total from `12fd6686`, Alfie pin,
-protected-WIP hash, and explicit staging paths. Candidate2's `19/19`, `303/303`
-result is historical supporting evidence only; do not broaden the set merely
-because the correction includes binding/routing paths. A failure or unexpected
-skip stops the route.
+**READY.** Candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as
+candidate2's exact sole-parent correction child. Run the same closed 19-file
+set exactly once and record the actual producer file/test count, exact commands,
+exits, skips, candidate SHA, detached-clean truth, six-path total from
+`12fd6686`, Alfie pin, protected-WIP hash, and explicit staging paths.
+Candidate2's actual `303` tests plus five focused tests make `308` an estimate
+only, not a result; do not broaden the set. A failure or unexpected skip stops
+the route.
 
 ### WP-02 — one new full non-destructive real-Pi run (R)
 
-**CHALLENGED — historical supporting evidence only.** At candidate2, the
-integrated producer completed `10 passed, 1 skipped` (the one expected manual
-skip) with exit 0 under fresh HOME `tmp.k0HG` and cleanup PASS. The serial
-canonical-identity producer then completed `8 passed, 1 failed` with exit 1
-under fresh HOME `tmp.Td4` and cleanup PASS. Its terminal-first assertion at
-`piSubagentCanonicalIdentityAcceptance.test.ts:913` expected
-`pi_subagent_read_live_record_unavailable` but received the generic
-`pi_subagent_live_lifecycle_unavailable`. Its enqueue-first trace separately
-passed with `applied`, exactly one session steer and one SDK insertion. The
-remaining lifecycle-containment, restart, and resume legs were not run after
-fail-stop. The raw logs are preserved byte-identically in the two
-`WP-02-decision0008-*` files. WP-02 has no current R PASS and no retry.
+**BLOCKED until fresh WP-01 PASS.** Candidate2's challenged attempt remains
+historical supporting evidence only; it has no current R PASS and no retry.
+The frozen candidate's focused logs do not unlock WP-02. The next attempt, when
+unblocked, is exactly one complete five-file non-destructive real-Pi run,
+serially and without retry. No quality command or other gate substitutes for
+that route.
 
-The trace shows containment discarding the structured provider classification.
-Decision 0009 resolves the material choice: preserve internal
-`unavailableReason` only on `status: "unavailable"`; the managed binding maps
-unaccepted control `provider_inactive` to `read_live_record_unavailable`, while
-observation and generic unavailable remain generic. The reason is not public or
-durable, provider text is never parsed, and the attempted
-`applied`-without-acceptance interpretation is rejected. The exact four-file
-correction and six-path total from `12fd6686` must be implemented and frozen
-before the renewed route.
+The trace showed containment discarding the structured provider classification.
+The frozen candidate records the Decision 0009 correction: preserve internal
+`unavailableReason` only on `status: "unavailable"`; the exact structured marker
+maps an unaccepted control with `provider_inactive` to
+`pi_subagent_read_live_record_unavailable`, while observation and generic
+route-inactive remain `pi_subagent_live_lifecycle_unavailable`. The reason is
+not public or durable, provider text is never parsed, and the attempted
+`applied`-without-acceptance interpretation is rejected. The pre-freeze review
+also fixed route-inactive conflation. WP-02 remains blocked until WP-01 PASS.
 
 ### WP-03 and WP-04
 
@@ -179,21 +191,23 @@ in §3. No PiAdapter, coordinator, contracts/schema, persistence, orchestration,
 watchdog, teardown, canonical expectation, configuration, manifest, lockfile,
 fifth source/test path, or Alfie change is allowed.
 
-This planning transaction modifies only the twelve planning paths named in §9
-and does not modify raw logs. It runs no producer,
-test, formatter, lint, typecheck, destructive action, review, or Supervisor
-consultation.
+This planning transaction modifies exactly the ten paths named in §9,
+including four byte-identical focused evidence logs and their provenance record.
+It runs no producer, test, formatter, lint, typecheck, destructive action,
+review, or Supervisor consultation.
 
 ## 8. Verification and stop gates
 
-Verify before and after commit exactly the twelve staged planning paths,
-`git diff --check`, clean index after commit, no raw-log/source/index changes,
+Verify before and after commit exactly the ten staged planning paths,
+`git diff --check`, clean index after commit, no source or unrelated-log changes,
 candidate reachability, sole-parent lineage, exact four-file delta and six-path
-total from `12fd6686`, byte-identical raw-log hashes, HOME cleanup records,
-Alfie pin, and the protected-WIP hash record. Stop before advancing on any
-candidate, provenance, protected-WIP, source, count, or evidence contradiction.
-Candidate2 D/R remains historical only; the new route has no current D/R PASS or
-retry authority. All downstream gates remain blocked until the serial route.
+total from `12fd6686`, byte-identical copied-log hashes, Alfie pin, and the
+protected-WIP hash record. Stop before advancing on any candidate, provenance,
+protected-WIP, source, count, or evidence contradiction. Candidate2 D/R and the
+focused candidate3 logs remain supporting only; WP-01 is ready with `308` as an
+estimate only, WP-02 is blocked, and all downstream gates remain blocked until
+the serial route. The unauthorized heavyweight command incident is not a
+quality pass or gate and is not rerun.
 
 The inherited manual destructive boundary remains unchanged: no automation,
 PID guessing, external signalling, or retry. G-M and G-Q remain pending with
@@ -201,7 +215,7 @@ one reservation each.
 
 ## 9. Planning transaction and commit
 
-Modify and stage exactly these twelve planning paths:
+Modify and stage exactly these ten planning paths:
 
 ```text
 .planning/synara-pi-subagent-lifecycle-reliability/PROJECT.md
@@ -214,17 +228,22 @@ Modify and stage exactly these twelve planning paths:
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-05-integrated-review.md
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-06-supervisor-final-acceptance.md
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-07-closure-and-routing.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-nondestructive-disposition.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-realpi-provenance.txt
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-red.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-green.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-conflation-red.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-conflation-green.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-provenance.txt
 ```
 
 Commit message:
 
 ```text
-docs(planning): reassess Ticket 06 under Decision 0009
+docs(planning): freeze Decision 0009 Ticket 06 candidate
 ```
 
 No source implementation, test execution, retry, destructive run, quality gate,
 integrated review, or final-acceptance consultation is part of this planning
-transaction. No raw log or source change is made; all historical failure details
-remain preserved and all downstream gates are blocked pending the fresh route.
+transaction. The four focused logs are copied byte-identically; no source change
+is made. The unauthorized heavyweight typecheck/lint/targeted-format incident
+is recorded as non-authoritative and non-Q, with no current quality pass and no
+rerun. All downstream gates remain blocked pending the fresh route.

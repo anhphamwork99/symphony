@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+ ❯ |unit| src/provider/piSubagentCanonicalRouting.test.ts (25 tests | 1 failed) 9ms
+     × keeps a captured but inactive route on the generic unavailable path 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/provider/piSubagentCanonicalRouting.test.ts > Pi managed canonical routing > keeps a captured but inactive route on the generic unavailable path
+AssertionError: expected 'pi_subagent_read_live_record_unavaila…' to be 'pi_subagent_live_lifecycle_unavailable' // Object.is equality
+
+Expected: "pi_subagent_live_lifecycle_unavailable"
+Received: "pi_subagent_read_live_record_unavailable"
+
+ ❯ src/provider/piSubagentCanonicalRouting.test.ts:552:35
+    550|     expect(harness.state.providerCalls).toBe(0);
+    551|     expect(result.isError).toBe(true);
+    552|     expect(result.diagnosticCode).toBe("pi_subagent_live_lifecycle_una…
+       |                                   ^
+    553|     expect(result.diagnosticCode).not.toBe("pi_subagent_read_live_reco…
+    554|     expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 24 passed (25)
+   Start at  20:51:12
+   Duration  439ms (transform 184ms, setup 0ms, import 367ms, tests 9ms, environment 0ms)
+

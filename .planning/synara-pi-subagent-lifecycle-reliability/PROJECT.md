@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under aspect-scoped Authoritative Decision 0009; candidate2 `2afef48b` is historical and the next candidate is an exact four-file correction child of it; WP-01 is ready for a fresh closed-19-file collection; G-M and G-Q remain pending and exactly one of each is reserved
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under aspect-scoped Authoritative Decision 0009; candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as candidate2's exact sole-parent correction child; WP-01 is ready on the unchanged closed-19-file set with `308` as an estimate only pending the actual producer count; WP-02 is blocked; G-M and G-Q remain pending and exactly one of each is reserved
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -172,18 +172,17 @@ fresh downstream route. None of these decisions accepts Ticket 06 or consumes
 G-M/G-Q.
 
 Historical base `12fd6686edc26a3fa0382e8bdeb83a1be8045539`, historical
-candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, and the old WP-01/WP-02
-records are supporting only. `ffd45bd` is the sole-parent child of `12fd6686`
-and contains exactly the two Decision 0007 fixture files. The integrated merge
-is `44249d81c49172e192dcf0f09ddfadc702a4b34c`, with parents
-`50853a3b9774e7aa5462916056195ffa536dc491` (planning) and
-`2afef48b008527685658801d8f0d84c79e24827d` (candidate); the merge is
-integration provenance only and is never a producer identity.
+`ffd45bd867e94c9003415f5f2e937cc9c616e399`, and candidate2
+`2afef48b008527685658801d8f0d84c79e24827d` remain supporting only. Candidate2
+is the sole-parent child of `ffd45bd`; the frozen candidate
+`9b55649050b76feffdc4279ceaec92ac74a78686` is its exact sole-parent child.
+The integration merge is `cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7`, with
+parents `0e828e0fe5daf273a6a0c04960494756ccdf204e` (planning) and the frozen
+candidate; the merge is integration provenance only and is never a producer
+identity.
 
-Candidate2 `2afef48b008527685658801d8f0d84c79e24827d` is the sole-parent child
-of `ffd45bd` and is historical-only for the new route. Decision 0009 authorizes
-one new producer candidate as the exact sole-parent child of candidate2. Its
-correction delta from candidate2 is exactly these four existing paths:
+The frozen candidate's correction delta from candidate2 is exactly these four
+paths:
 
 ```text
 apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
@@ -192,38 +191,42 @@ apps/server/src/provider/piSubagentManagedRuntimeBinding.ts
 apps/server/src/provider/piSubagentCanonicalRouting.test.ts
 ```
 
-The final candidate's total distinct acceptance-surface delta from `12fd6686`
-is exactly six paths: the two Decision 0007 fixture paths plus the four paths
-above. No fifth path, canonical expectation, coordinator, configuration,
+Its total distinct acceptance-surface delta from `12fd6686` is exactly six
+paths: the two Decision 0007 fixture paths plus the four correction paths above.
+No fifth path, canonical expectation, coordinator, configuration,
 contract/schema, lockfile, manifest, Alfie source, or unrelated test change is
-allowed. The new candidate SHA must be recorded before fresh D or R evidence.
+allowed.
 
-Focused containment evidence is preserved at
-[red](plans/06-integrated-real-pi-acceptance/evidence/candidate2-containment-red.log)
-(exit 1, 24 tests: 6 failed / 18 passed, SHA-256
-`665e0bbaf0a9a25d1908c9767d2bd7ff2947d4e1844a6df80d84622300b16e3b`) and
-[green](plans/06-integrated-real-pi-acceptance/evidence/candidate2-containment-green.log)
-(exit 0, 24/24, SHA-256
-`84feb4814b891ce69472c74dd5596f04c9bf753fa65de18c7d31b352dd95f43b`).
-These are focused implementation evidence, not current D or R acceptance.
-WP-01's historical candidate2 collection was `19/19`, `303/303`, but that
-result is supporting-only. The new candidate requires a fresh actual count over
-the same closed 19-file set; the set must not be broadened.
+Focused implementation evidence is preserved in the four candidate3 logs:
+initial red [log](plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-red.log), exit 1, 2 files, 49 tests (`45` passed / `4` failed), SHA-256 `4285cbdd33f6e4f76cc126133a6589396b8e133aca0522c6fdb1ef087115fbb9`; initial green [log](plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-green.log), exit 0, 2 files, `49/49`, SHA-256 `2e22b5879ea1bc16d199e277e8aaa52b334cf81e9fb540841842cc1d4cef5a47`; review-conflation red [log](plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-conflation-red.log), exit 1, 2 files, 49 tests with 1 failure, SHA-256 `363e2f7c3297f27a69425a13021cea0ea889cd8ac8161fc42e59a41268f4ffff`; final green [log](plans/06-integrated-real-pi-acceptance/evidence/candidate3-decision0009-conflation-green.log), exit 0, 2 files, `50/50`, SHA-256 `d9d1f4f351b0e4598b5699c1e5ca5e73919c49a82e39083c8ff964e8f8c106be`. The review fixed the route-inactive conflation and amended the candidate before this freeze. These remain focused implementation evidence, not current D, R, or Q acceptance.
+
+Decision 0009's reason mapping is exact-marker-only: the exact structured
+`pi_subagent_managed_execution_unavailable_live` marker yields internal
+`unavailableReason: provider_inactive` only on an unavailable result; an
+unaccepted control maps to `pi_subagent_read_live_record_unavailable`, while
+observation and generic route-inactive (`provider_route_inactive`) remain
+`pi_subagent_live_lifecycle_unavailable`. Provider text is never parsed; no
+accepted effect, public reason, or acceptance lie is permitted.
 
 Alfie remains pinned at
 `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
 `@alfie/pi-subagents@0.15.0-alfie.6`. Protected owner WIP remains outside
 this transaction with required aggregate diff hash
 `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`;
-protected paths are untouched and unstaged. There is no current D/R PASS.
+protected paths remain untouched and unstaged. WP-01 is ready on the unchanged
+closed 19-file set: candidate2's actual `303` tests plus five focused tests make
+`308` an estimate only, subject to the fresh producer's actual count. WP-02 is
+blocked; there is no current D/R PASS.
 
-The required serial route is: candidate2 `2afef48b` → exact four-file
-correction child and freeze → WP-01 fresh same closed 19-file collection
-(actual count to be recorded) → exactly one new full five-file WP-02 → fresh
-owner authorization WP-03 → fresh owner authorization WP-04 after the new WP-03
-PASS → WP-05 one integrated review → WP-06 one final Supervisor Decision 0010
-→ WP-07 closure. Old WP-03/WP-04 authorizations are non-transferable and not
-executable. G-M and G-Q remain pending and exactly one of each remains reserved.
+A delegated worker also ran heavyweight typecheck/lint and targeted format
+validation without user authorization. Those commands are recorded as a
+non-authoritative incident only, are not WP-04/Q evidence or gates, and were not
+rerun. No current quality pass is claimed. The required serial route is: frozen
+candidate → WP-01 exact closed-19-file collection (actual count) → exactly one
+new full five-file WP-02 → fresh owner WP-03 → fresh owner WP-04 → WP-05 one
+integrated review → WP-06 one final Supervisor Decision 0010 → WP-07 closure.
+Old WP-03/WP-04 authorizations are non-transferable. G-M and G-Q remain pending
+and exactly one of each remains reserved.
 
 | Ticket | Status | Current meaning |
 |---|---|---|
@@ -232,7 +235,7 @@ executable. G-M and G-Q remain pending and exactly one of each remains reserved.
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
-| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Decision 0009 correction route; fresh WP-01 required; no current D/R PASS |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | frozen candidate `9b556490`; WP-01 ready (`308` estimate only); WP-02 blocked; no current D/R/Q pass |
 
 The prior evidence-only/zero-source-delta execution contract is superseded only
 for the Decision 0007 and Decision 0008 candidate aspects. This planning
@@ -323,7 +326,7 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — Decision 0009 correction router: exact four-file child of candidate2, six-path total from `12fd6686`, fresh closed-19-file WP-01, one full five-file WP-02, and final Decision 0010; no current D/R PASS.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0009 candidate `9b556490`, exact four-file child of candidate2, six-path total from `12fd6686`, WP-01 ready with `308` estimate only, WP-02 blocked, and final Decision 0010; no current D/R/Q PASS.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
@@ -332,15 +335,16 @@ and [research/002](research/002-candidate-solution-contract.md).
 Tickets 01–05 are accepted. Ticket 06 remains the sole `ready-for-agent`
 frontier. Decision 0009 is the aspect-scoped Authority for structured
 unavailable-value preservation, managed mapping, exact four-file correction,
-and rebaseline only; it is not final acceptance. Preserve candidate2's failure
-details, raw bytes, hashes, provenance, and spent no-retry state. Do not treat
-historical D/R records as new-candidate proof or retry them.
+and rebaseline only; it is not final acceptance. Candidate
+`9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as candidate2's exact
+sole-parent child; preserve its focused logs, hashes, provenance, and all
+non-authoritative incident details.
 
-The next producer must create and freeze one sole-parent child of candidate2
-with exactly the four listed correction paths and exactly six distinct paths
-from `12fd6686`. Then WP-01 reruns the unchanged closed 19-file set and records
-its actual count. Only a fresh WP-01 PASS permits exactly one complete fresh
-five-file WP-02. Only that PASS permits fresh owner WP-03; only a new WP-03 PASS
-permits fresh owner WP-04. WP-05, WP-06 Decision 0010, and WP-07 follow in
-order. No source implementation, tests, producer, destructive run, review, or
-acceptance is part of this planning transaction.
+WP-01 is ready to run exactly once on the unchanged closed 19-file set; `308`
+is an estimate only and the producer must record the actual count. WP-02 is
+blocked until WP-01 PASS, then exactly one complete fresh five-file attempt is
+permitted. Fresh owner WP-03, fresh owner WP-04, WP-05, WP-06 Decision 0010,
+and WP-07 follow in order. No source implementation, tests, producer,
+destructive run, review, or quality gate is part of this planning transaction;
+the unauthorized heavyweight command incident is not evidence and was not
+rerun.
