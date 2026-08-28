@@ -372,6 +372,22 @@ const FailedContainmentResults = new Set<WhiteboardContainmentResult>([
   "containment-failed",
 ]);
 
+/**
+ * Shared wire invariant across every terminal outcome: the last accepted
+ * producer sequence is zero exactly when nothing was accepted (semantic or
+ * no-op). Rejected attempts never occupy accepted sequence space, so they
+ * carry no last-accepted-sequence constraint.
+ */
+const HasZeroLastAcceptedSequenceIffZeroAcceptedTotals = Schema.makeFilter(
+  (terminal: {
+    readonly acceptedSemanticCount: number;
+    readonly acceptedNoOpCount: number;
+    readonly lastAcceptedProducerSequence: number;
+  }) =>
+    terminal.lastAcceptedProducerSequence === 0 ===
+    (terminal.acceptedSemanticCount + terminal.acceptedNoOpCount === 0),
+);
+
 const WhiteboardTerminalRecordFields = {
   batchId: BoundedId(128),
   operationId: BoundedId(128),
@@ -392,13 +408,24 @@ const HasValidTerminalRecord = Schema.makeFilter(
     readonly terminalReason: WhiteboardTerminalReason;
     readonly zeroValidReason?: WhiteboardZeroValidReason;
     readonly acceptedSemanticCount: number;
+    readonly acceptedNoOpCount: number;
+    readonly rejectedCount: number;
+    readonly lastAcceptedProducerSequence: number;
     readonly containmentResult?: WhiteboardContainmentResult;
   }) => {
+    if (
+      HasZeroLastAcceptedSequenceIffZeroAcceptedTotals.run(terminal) !== undefined
+    ) {
+      return false;
+    }
     switch (terminal.outcome) {
       case "completed":
         return (
           terminal.terminalReason === "completed" &&
           terminal.acceptedSemanticCount >= 1 &&
+          terminal.acceptedNoOpCount >= 0 &&
+          terminal.rejectedCount === 0 &&
+          terminal.lastAcceptedProducerSequence >= 1 &&
           terminal.zeroValidReason === undefined &&
           terminal.containmentResult === undefined
         );
@@ -406,24 +433,37 @@ const HasValidTerminalRecord = Schema.makeFilter(
         return (
           terminal.terminalReason === "take-over-acknowledged" &&
           terminal.acceptedSemanticCount >= 1 &&
+          terminal.acceptedNoOpCount >= 0 &&
+          terminal.rejectedCount === 0 &&
+          terminal.lastAcceptedProducerSequence >= 1 &&
           terminal.zeroValidReason === undefined &&
           terminal.containmentResult === "acknowledged"
         );
       case "failed-partial":
+        // Decision 0063 §7: failed-partial requires acknowledged containment
+        // where work could still be active. The schema cannot observe whether
+        // work is still active, so it permits acknowledged, absent, and the
+        // failure results; whether containment is mandatory for a given
+        // failure is a stateful server decision (WP2), not a wire shape.
         return (
           WhiteboardFailedPartialTerminalReason.literals.includes(
             terminal.terminalReason as WhiteboardFailedPartialTerminalReason,
           ) &&
           terminal.acceptedSemanticCount >= 1 &&
+          terminal.acceptedNoOpCount >= 0 &&
+          terminal.lastAcceptedProducerSequence >= 1 &&
           terminal.zeroValidReason === undefined &&
           (terminal.containmentResult === undefined ||
+            terminal.containmentResult === "acknowledged" ||
             FailedContainmentResults.has(terminal.containmentResult))
         );
       case "zero-valid":
         return (
           terminal.zeroValidReason !== undefined &&
           terminal.terminalReason === terminal.zeroValidReason &&
-          terminal.acceptedSemanticCount === 0
+          terminal.acceptedSemanticCount === 0 &&
+          terminal.acceptedNoOpCount >= 0 &&
+          terminal.rejectedCount >= 0
         );
     }
   },

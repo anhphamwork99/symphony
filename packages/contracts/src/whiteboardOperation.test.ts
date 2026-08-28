@@ -532,7 +532,7 @@ describe("Whiteboard operation-session contracts", () => {
         acceptedSemanticCount: 1,
         acceptedNoOpCount: 0,
         rejectedCount: 0,
-        lastAcceptedProducerSequence: 0,
+        lastAcceptedProducerSequence: 3,
       };
       const snapshotBase = {
         kind: "session-snapshot" as const,
@@ -562,6 +562,14 @@ describe("Whiteboard operation-session contracts", () => {
           containmentResult: "ack-timeout",
         },
         {
+          // Decision 0063 §7: failed-partial permits acknowledged containment
+          // where work could still be active.
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "dependency-failed",
+          containmentResult: "acknowledged",
+        },
+        {
           ...terminalBase,
           outcome: "zero-valid",
           terminalReason: "semantic-no-op",
@@ -576,6 +584,7 @@ describe("Whiteboard operation-session contracts", () => {
           terminalReason: "zero-mutation",
           zeroValidReason: "zero-mutation",
           acceptedSemanticCount: 0,
+          lastAcceptedProducerSequence: 0,
           containmentResult: "acknowledged",
         },
         {
@@ -584,6 +593,8 @@ describe("Whiteboard operation-session contracts", () => {
           terminalReason: "all-operations-rejected",
           zeroValidReason: "all-operations-rejected",
           acceptedSemanticCount: 0,
+          rejectedCount: 2,
+          lastAcceptedProducerSequence: 0,
           containmentResult: "containment-failed",
         },
       ] as const;
@@ -609,6 +620,15 @@ describe("Whiteboard operation-session contracts", () => {
           containmentResult: "containment-failed",
         },
         {
+          // Shared invariant: positive accepted semantic count requires a
+          // positive last accepted producer sequence.
+          ...terminalBase,
+          outcome: "completed",
+          terminalReason: "completed",
+          acceptedSemanticCount: 1,
+          lastAcceptedProducerSequence: 0,
+        },
+        {
           ...terminalBase,
           outcome: "completed",
           terminalReason: "completed",
@@ -621,16 +641,49 @@ describe("Whiteboard operation-session contracts", () => {
           acceptedSemanticCount: 0,
         },
         {
+          // Shared invariant: zero accepted totals require a zero last
+          // accepted producer sequence.
+          ...terminalBase,
+          outcome: "completed",
+          terminalReason: "completed",
+          acceptedSemanticCount: 0,
+          lastAcceptedProducerSequence: 2,
+        },
+        {
+          ...terminalBase,
+          outcome: "completed",
+          terminalReason: "completed",
+          rejectedCount: 1,
+        },
+        {
+          ...terminalBase,
+          outcome: "interrupted",
+          terminalReason: "take-over-acknowledged",
+          containmentResult: "acknowledged",
+          rejectedCount: 1,
+        },
+        {
+          ...terminalBase,
+          outcome: "failed-partial",
+          terminalReason: "producer-failed",
+          lastAcceptedProducerSequence: 0,
+        },
+        {
           ...terminalBase,
           outcome: "completed",
           terminalReason: "completed",
           containmentResult: "acknowledged",
         },
         {
+          // Shared invariant: a positive no-op count is an accepted total and
+          // therefore requires a positive last accepted producer sequence.
           ...terminalBase,
-          outcome: "failed-partial",
-          terminalReason: "dependency-failed",
-          containmentResult: "acknowledged",
+          outcome: "zero-valid",
+          terminalReason: "semantic-no-op",
+          zeroValidReason: "semantic-no-op",
+          acceptedSemanticCount: 0,
+          acceptedNoOpCount: 1,
+          lastAcceptedProducerSequence: 0,
         },
         {
           ...terminalBase,
@@ -669,6 +722,38 @@ describe("Whiteboard operation-session contracts", () => {
         );
         assert.strictEqual(snapshotExit._tag, "Failure");
       }
+    }),
+  );
+
+  it.effect("keeps the terminal event usable through the RPC JSON codec", () =>
+    Effect.gen(function* () {
+      // The wire codec is derived from the same schema: a valid terminal event
+      // survives encode/decode unchanged, and the codec still rejects unknown
+      // terminal fields at the JSON boundary.
+      const codec = Schema.toCodecJson(WhiteboardOperationTerminalEvent);
+      const completedEvent = {
+        kind: "operation-terminal" as const,
+        ...sessionIdentity,
+        serverSequence: 9,
+        batchId: "batch-1",
+        operationId: "op-1",
+        generation: 1,
+        outcome: "completed" as const,
+        terminalReason: "completed" as const,
+        acceptedSemanticCount: 1,
+        acceptedNoOpCount: 0,
+        rejectedCount: 0,
+        lastAcceptedProducerSequence: 3,
+      };
+
+      const encoded = yield* Schema.encodeEffect(codec)(completedEvent);
+      const decoded = yield* Schema.decodeUnknownEffect(codec)(encoded);
+      assert.deepStrictEqual(decoded, completedEvent);
+
+      const exitUnknownField = yield* Effect.exit(
+        Schema.decodeUnknownEffect(codec)({ ...encoded, unknownTerminalField: true }),
+      );
+      assert.strictEqual(exitUnknownField._tag, "Failure");
     }),
   );
 
