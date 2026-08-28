@@ -1,0 +1,105 @@
+WP-02 Decision 0008 candidate real-Pi provenance and zero-delta record
+=======================================================================
+Recorded: 2026-08-28 (local, UTC+7)
+Class: P/R supporting evidence only; candidate attempt challenged
+Purpose: preserve the owner-checkout raw logs and route the completed
+         diagnostic trace to Supervisor reassessment
+
+1. CANDIDATE AND AUTHORITIES
+----------------------------
+Historical producer candidate:
+  SHA      : 2afef48b008527685658801d8f0d84c79e24827d
+  parent   : ffd45bd867e94c9003415f5f2e937cc9c616e399
+  identity : candidate2 producer identity; never the integration merge
+Decision 0008 remains binding for the canonical F5 post-await classification.
+This record does not authorize source, test, Alfie, or public-contract changes.
+
+Pinned controlled Alfie composition remains:
+  commit   : 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  package  : @alfie/pi-subagents@0.15.0-alfie.6
+No Alfie byte, pin, lockfile, or configuration change is part of this record.
+
+2. PROTECTED OWNER WIP AND SURFACE GATES
+----------------------------------------
+Protected owner WIP (must remain modified, unstaged, and byte-identical):
+  apps/web/package.json
+  apps/web/src/main.tsx
+  bun.lock
+Aggregate WIP diff hash, before and after the producer attempt:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+
+Candidate/source acceptance surface remained zero-delta for the producer
+attempt. Candidate2 is recorded as historical only; no producer source path,
+application path, package path, or lockfile is committed by this transaction.
+
+3. EXECUTED PRODUCERS AND CLEANUP
+---------------------------------
+The two producers ran serially and preserve their true Vitest exits. The first
+nonzero producer stopped the attempt; there was no retry.
+
+Integrated producer:
+  file      : apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+  HOME      : fresh temporary HOME tmp.k0HG
+  result    : 10 passed, 1 expected skip
+  exit      : 0
+  skip      : exactly the expected manual destructive test; no unexpected skip
+  cleanup   : PASS; temporary HOME removed
+  raw hash  : a9e530e5ac6a849a8303207bbc1be42ca38cf34924932f196a86cd91f1beb149
+  raw file  : evidence/WP-02-decision0008-realpi-acceptance.log
+
+Canonical-identity producer:
+  file      : apps/server/src/provider/piSubagentCanonicalIdentityAcceptance.test.ts
+  HOME      : fresh temporary HOME tmp.Td4
+  result    : 8 passed, 1 failed
+  exit      : 1
+  cleanup   : PASS; temporary HOME removed
+  raw hash  : bf1cd51eaa9e8b81833951e9f95e0d64934044393e98b760881da168731c59d1
+  raw file  : evidence/WP-02-decision0008-canonical-identity-acceptance.log
+
+Later authorized files not run after fail-stop:
+  apps/server/src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts
+  apps/server/src/provider/piSubagentRestartAcceptance.test.ts
+  apps/server/src/provider/piSubagentResumeAcceptance.test.ts
+
+No destructive action, PID enumeration/signalling, quality gate, review, or
+Supervisor consultation was run. The candidate attempt is not a five-leg PASS.
+
+4. COMPLETED TRACE AND MATERIAL MISMATCH
+----------------------------------------
+Terminal-first at piSubagentCanonicalIdentityAcceptance.test.ts:913:
+  expected: pi_subagent_read_live_record_unavailable
+  received: pi_subagent_live_lifecycle_unavailable
+
+The completed enqueue-first trace returned applied and recorded exactly:
+  sessionSteerInvocations : 1
+  sdkInsertions           : 1
+The raw trace also records one managed admission, one delegated model request,
+zero active exact tuples at settlement, bridge-index retirement, durable
+seq-40 commit, post-await generation validation, bookkeeping, and production
+settlement. No second provider action, replay, Resume, bootstrap,
+reconstruction, or new child was claimed.
+
+The source-grounded trace proves containment discarded the structured provider
+classification. This is a material design choice, not permission to call the
+terminal-first result applied: the control did not cross provider acceptance.
+
+5. FAIL-STOP AND ROUTING
+------------------------
+WP-02 is CHALLENGED and historical supporting evidence only. It has no current
+R PASS and no retry. Candidate2 remains challenged historical evidence; no
+source correction may start until Supervisor reassesses the diagnostic
+contract.
+
+Required reassessment choices:
+  A. Same two files: extend PiSubagentLiveLifecycleDiagnosticCode union/array
+     and map unaccepted provider_inactive control to
+     pi_subagent_read_live_record_unavailable.
+  B. Authorize a third binding file/value-preservation seam to carry the
+     structured provider classification without loss.
+
+Applied-without-acceptance is rejected. WP-03, WP-04, WP-05, WP-06, and WP-07
+remain blocked until the reassessment, any authorized exact correction,
+renewed WP-01, and a renewed complete five-file WP-02 PASS.
+
+This record is planning/evidence only. It contains no source implementation,
+new test, retry, destructive run, formatter, lint, typecheck, or acceptance.

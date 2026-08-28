@@ -3,9 +3,13 @@
 **Plan state:** Decision 0008 containment candidate remains frozen; WP-01 is
 **PASS** with `19/19` files and `303/303` deterministic tests, zero failures,
 and zero skips. Candidate2 is `2afef48b008527685658801d8f0d84c79e24827d`.
-WP-02 is **READY** for exactly one complete five-file non-destructive real-Pi
-attempt. No WP-02 leg, test rerun, quality gate, review, or Supervisor
-consultation was run in the WP-01 evidence transaction.
+WP-02's candidate attempt is **CHALLENGED — historical supporting evidence
+only**: the integrated leg passed (`10 passed, 1 expected skip`, exit 0), the
+canonical-identity leg failed (`8 passed, 1 failed`, exit 1), and the later
+three legs were not run because the first nonzero exit stopped the attempt.
+There is no current WP-02 R PASS and no retry. The completed trace exposes a
+material diagnostic-contract choice that must route to Supervisor reassessment
+before any source change.
 **Date:** 2026-08-28
 
 ## 1. Objective and governing authorities
@@ -93,7 +97,12 @@ acceptance; the final decision filename and number are Decision 0009.
 frozen candidate2
   -> WP-01 PASS: same closed 19-file deterministic collection (303/303)
      (296 baseline + actual 7 focused additions; estimate 302 superseded)
-  -> WP-02 READY: exactly one complete five-file attempt, no retry
+  -> WP-02 candidate attempt: CHALLENGED historical evidence only
+     (integrated 10 passed + 1 expected skip, exit 0; canonical 8 passed /
+      1 failed, exit 1; later three legs not run; no retry)
+  -> Supervisor reassessment of the diagnostic-contract choice
+  -> only after reassessment: authorized exact source correction/candidate
+  -> renewed WP-01 -> one renewed full five-file WP-02
   -> fresh owner authorization, WP-03 (M)
   -> fresh owner authorization after WP-03 PASS, WP-04 (Q)
   -> WP-05 exactly one integrated review (G-M)
@@ -104,9 +113,13 @@ frozen candidate2
 WP-01's planning estimate `296 + 6 = 302` is superseded by the authoritative
 producer result `296 + 7 = 303`: the pre-change containment collection
 contributed seven new cases. The closed set remains the same 19 files, with no
-missing or extra file and no broadening. WP-02 is now READY and must run its
-five files exactly once, completely and serially, with no retry. Old WP-03/WP-04
-authorizations are non-transferable and not executable.
+missing or extra file and no broadening. The candidate WP-02 attempt is
+stopped/challenged after the canonical-identity nonzero exit; its two raw
+Decision 0008 logs and provenance are historical supporting evidence only. The
+completed enqueue-first trace is a PASS for that trace, but the terminal-first
+classification mismatch means there is no current R PASS. A Supervisor
+reassessment is required before source work; WP-03/WP-04/WP-05/WP-06/WP-07
+remain blocked and no retry is authorized.
 
 ## 6. WP contracts
 
@@ -124,12 +137,26 @@ six-path evidence transaction. Prior WP-01 logs/matrices remain historical.
 
 ### WP-02 — one new full non-destructive real-Pi run (R)
 
-**READY after WP-01 PASS.** Run exactly the five existing standalone wallclock
-files, serially, once, from a fresh candidate worktree with pinned Alfie and
-isolated roots/HOME/state/ports. Preserve all historical logs. A nonzero leg,
-unexpected skip, cleanup/provenance drift, candidate drift, protected-WIP drift,
-or contradiction stops the attempt with no retry. WP-02 has not run in this
-transaction.
+**CHALLENGED — historical supporting evidence only.** At candidate2, the
+integrated producer completed `10 passed, 1 skipped` (the one expected manual
+skip) with exit 0 under fresh HOME `tmp.k0HG` and cleanup PASS. The serial
+canonical-identity producer then completed `8 passed, 1 failed` with exit 1
+under fresh HOME `tmp.Td4` and cleanup PASS. Its terminal-first assertion at
+`piSubagentCanonicalIdentityAcceptance.test.ts:913` expected
+`pi_subagent_read_live_record_unavailable` but received the generic
+`pi_subagent_live_lifecycle_unavailable`. Its enqueue-first trace separately
+passed with `applied`, exactly one session steer and one SDK insertion. The
+remaining lifecycle-containment, restart, and resume legs were not run after
+fail-stop. The raw logs are preserved byte-identically in the two
+`WP-02-decision0008-*` files. WP-02 has no current R PASS and no retry.
+
+The trace shows containment discarding the structured provider classification.
+Before any source change, this material choice is routed to Supervisor
+reassessment: either option A extends the containment diagnostic union/array in
+the same two files and maps unaccepted `provider_inactive` to
+`read_live_record_unavailable`, or option B authorizes a third binding
+file/value-preservation change. The attempted `applied`-without-acceptance
+interpretation is rejected.
 
 ### WP-03 and WP-04
 
@@ -152,20 +179,23 @@ paths named in §2. No PiAdapter, coordinator, contracts, persistence,
 orchestration, watchdog, teardown, canonical expectation, configuration,
 manifest, lockfile, third source/test path, or Alfie change is allowed.
 
-This WP-01 evidence transaction modifies only the six paths named in §9,
-force-adds the two ignored current logs, and records producer outputs that ran
-once before this transaction. It runs no producer, test, formatter, lint,
-typecheck, destructive action, review, or Supervisor consultation.
+This planning/evidence transaction modifies only the six paths named in §9,
+force-adds the two owner-checkout Decision 0008 logs byte-identically, and
+records producer outputs that ran before this transaction. It runs no producer,
+test, formatter, lint, typecheck, destructive action, review, or Supervisor
+consultation.
 
 ## 8. Verification and stop gates
 
 Before and after commit verify exactly the six staged paths, `git diff --check`,
 clean index after commit, source-path absence from the evidence commit,
-candidate reachability, exact lineage/deltas, current-log hashes, detached and
-clean candidate truth, Alfie pin, and the protected-WIP hash record. Stop before
-advancing on any candidate delta, provenance, protected-WIP, source, count, or
-evidence contradiction. WP-01 D is PASS at `303/303`; WP-02 is only READY and
-has not run.
+candidate reachability, exact lineage/deltas, byte-identical owner log copies
+and hashes, HOME cleanup records, detached and clean candidate truth, Alfie pin,
+and the protected-WIP hash record. Stop before advancing on any candidate delta,
+provenance, protected-WIP, source, count, or evidence contradiction. WP-01 D
+remains PASS at `303/303`; WP-02 is challenged historical evidence only, with
+no current R PASS and no retry. All downstream gates remain blocked pending
+Supervisor reassessment and the required renewed route.
 
 The inherited manual destructive boundary remains unchanged: no automation,
 PID guessing, external signalling, or retry. G-M and G-Q remain pending with
@@ -177,18 +207,20 @@ Modify and stage exactly these six paths:
 
 ```text
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/PLAN.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-worktree-provenance.txt
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-deterministic.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-contracts.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-decision0008-ac-diagnostic-matrix.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-02-non-destructive-real-pi-evidence.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-realpi-provenance.txt
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-realpi-acceptance.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-canonical-identity-acceptance.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-decision0008-nondestructive-disposition.md
 ```
 
 Commit message:
 
 ```text
-test(pi): record Decision 0008 Ticket 06 deterministic evidence
+test(pi): record Decision 0008 canonical diagnostic challenge
 ```
 
-No source implementation, test execution, WP-02 leg, gate, review, or
-Supervisor consultation is part of this evidence transaction.
+No source implementation, test execution, retry, destructive run, quality
+gate, integrated review, or final-acceptance consultation is part of this
+planning/evidence transaction. The candidate attempt remains historical only;
+all downstream gates are blocked pending Supervisor reassessment.
