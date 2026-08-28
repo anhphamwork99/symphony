@@ -1,8 +1,18 @@
 # Ticket 06 — integrated real-Pi acceptance
 
-**Status:** blocked
-**Blocked by:** Tickets 01–05 accepted; all provenance and evidence gates
-**Implementation:** forbidden while blocked
+**Status:** ready-for-agent — sole project frontier
+**Dependencies:** discharged — Tickets 01–05 accepted; local Decisions
+0001/0002/0006, applicable inherited decisions (especially durable-subagents
+0031–0034), and this evidence-only plan remain binding
+**Plan:** [`../plans/06-integrated-real-pi-acceptance/PLAN.md`](../plans/06-integrated-real-pi-acceptance/PLAN.md)
+**Execution authorization:** serial evidence-only WPs (WP-01–WP-07) in the
+accepted plan; no source/test/harness/fixture/config/migration/manifest/
+lockfile/Alfie change anywhere; no manual destructive run and no quality gate
+until explicit current-session owner authorization; behavioral producers run
+in an isolated Symphony worktree at `12fd6686` with controlled Alfie worktree
+`3fe340b4` via `ALFIE_REPO_DIR`
+**Evidence status:** none yet — no Ticket 06 evidence, review, or acceptance
+exists
 
 ## Objective
 
@@ -53,3 +63,7 @@ mutation. Inherited Decisions 0031–0034 govern the destructive boundary.
 
 No integrated acceptance may be claimed from deterministic fixtures alone, and
 no automated destructive real-Pi claim may replace the approved manual leg.
+Ticket 06 cannot close without WP-03's exactly-one authorized manual
+destructive run (M evidence) and WP-06's persisted Supervisor acceptance; the
+historical 2026-08-20 operator run is supporting-only (H) and cannot close
+AC6 by itself.
