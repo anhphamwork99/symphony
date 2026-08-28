@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, ManagedRuntime, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime, Scope, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 import { describe, expect, it } from "vitest";
@@ -20,6 +20,8 @@ import {
 import { Schema } from "effect";
 
 import { makeWsOrchestrationHarness } from "../integration/WsOrchestrationHarness.integration";
+import { makeWhiteboardOperationSessionService } from "./whiteboard/WhiteboardOperationSessionService";
+import { makeWsRequestAdmission } from "./wsRequestAdmission";
 
 const makeRpcClient = RpcClient.make(WsFeatureRpcGroup);
 
@@ -34,7 +36,9 @@ interface WhiteboardRpcClient {
   readonly runtime: ManagedRuntime.ManagedRuntime<never, never>;
 }
 
-async function connectWhiteboardClient(port: number): Promise<WhiteboardRpcClient> {
+async function connectWhiteboardClient(
+  port: number,
+): Promise<WhiteboardRpcClient & { readonly serverInstanceId: string }> {
   const clientBuild = "synara-whiteboard-operation-route-test/1";
   const negotiateUrl = new URL(`http://127.0.0.1:${port}${WS_NEGOTIATE_HTTP_PATH}`);
   negotiateUrl.searchParams.set(WS_NEGOTIATE_QUERY.clientBuild, clientBuild);
@@ -93,6 +97,7 @@ async function connectWhiteboardClient(port: number): Promise<WhiteboardRpcClien
       await runtime.runPromise(Scope.close(scope, Exit.void)).catch(() => undefined);
     },
     runtime,
+    serverInstanceId: negotiated.value.serverInstanceId,
   };
 }
 
@@ -116,90 +121,258 @@ function identityOf(result: Record<string, unknown>) {
   };
 }
 
-async function expectRpcCode(effect: Effect.Effect<unknown>, code: string, runtime: ManagedRuntime.ManagedRuntime<never, never>) {
-  await expect(runtime.runPromise(effect)).rejects.toMatchObject({ code });
+async function expectRpcError(
+  effect: Effect.Effect<unknown>,
+  runtime: ManagedRuntime.ManagedRuntime<never, never>,
+  expected: Record<string, unknown>,
+) {
+  let error: unknown;
+  try {
+    await runtime.runPromise(effect);
+  } catch (cause) {
+    error = cause;
+  }
+  expect(error).toMatchObject(expected);
+  return error as Record<string, unknown>;
 }
 
 describe("canonical Whiteboard operation WebSocket route", () => {
-  it("serves all six methods with negotiated authority, stream replacement, exact errors, and no producer RPCs", async () => {
+  it("keeps the first same-key subscription live until replacement, then terminates it cleanly", async () => {
     const harness = await makeWsOrchestrationHarness();
     const client = await connectWhiteboardClient(harness.port);
     try {
-      const attached = (await client.runtime.runPromise(client.attach(sessionInput))) as Record<
-        string,
-        unknown
-      >;
-      expect(attached.serverInstanceId).toBe(harness.authority.authorityId === undefined ? attached.serverInstanceId : attached.serverInstanceId);
+      const attached = (await client.runtime.runPromise(client.attach(sessionInput))) as Record<string, unknown>;
+      expect(attached.serverInstanceId).toBe(client.serverInstanceId);
       expect(String(attached.serverInstanceId)).toHaveLength(36);
       const identity = identityOf(attached);
-
-      const firstStream = client.subscribe({ ...identity, lastServerSequence: 0 });
-      const first = await client.runtime.runPromise(
-        Stream.runCollect(Stream.take(firstStream, 1)),
-      );
-      expect(Array.from(first)[0]).toMatchObject({
-        kind: "session-snapshot",
-        serverSequence: 1,
-      });
-
-      const secondStream = client.subscribe({ ...identity, lastServerSequence: 0 });
-      const second = await client.runtime.runPromise(
-        Stream.runCollect(Stream.take(secondStream, 1)),
-      );
-      expect(Array.from(second)[0]).toMatchObject({ kind: "session-snapshot" });
-
-      const unknownOperation = {
-        ...identity,
-        batchId: "route-unknown-batch",
-        operationId: "route-unknown-operation",
-        generation: 1,
-        producerSequence: 1,
-        serverSequence: 2,
-        adapterCorrelationId: "route-correlation",
-        applicationResult: "applied-semantic",
-        resultingMutationRevision: 0,
-        verifiedSemanticFingerprint: "route-fingerprint",
-      };
-      await expectRpcCode(client.acknowledge(unknownOperation), WHITEBOARD_OPERATION_ERROR.ackUnknown, client.runtime);
-      await expectRpcCode(
-        client.takeOver({
-          ...identity,
-          batchId: "route-unknown-batch",
-          operationId: "route-unknown-operation",
-          expectedGeneration: 1,
-          takeOverRequestId: "route-take-over",
-        }),
-        WHITEBOARD_OPERATION_ERROR.operationUnknown,
-        client.runtime,
-      );
-      await expectRpcCode(
-        client.retry({
-          ...identity,
-          batchId: "route-unknown-batch",
-          failedOperationId: "route-unknown-operation",
-          failedGeneration: 1,
-          failedRetryAttempt: 0,
-        }),
-        WHITEBOARD_OPERATION_ERROR.operationUnknown,
-        client.runtime,
-      );
-
-      const released = await client.runtime.runPromise(client.release(identity)) as Record<string, unknown>;
-      expect(released).toMatchObject({ ...identity, released: true });
-      await expectRpcCode(
+      const firstSnapshotSeen = Deferred.makeUnsafe<void>();
+      const firstCompletion = client.runtime.runPromise(
         Stream.runCollect(
-          Stream.take(client.subscribe({ ...identity, lastServerSequence: 0 }), 1),
+          Stream.tap(client.subscribe({ ...identity, lastServerSequence: 0 }), () =>
+            Deferred.succeed(firstSnapshotSeen, undefined)),
         ),
-        WHITEBOARD_OPERATION_ERROR.sessionReleased,
-        client.runtime,
       );
+      await client.runtime.runPromise(Deferred.await(firstSnapshotSeen));
 
-      const producerNames = ["admitOperation", "publishProgress", "completeOperation", "failOperation"];
-      for (const producerName of producerNames) {
+      const second = Array.from(
+        await client.runtime.runPromise(
+          Stream.runCollect(Stream.take(client.subscribe({ ...identity, lastServerSequence: 0 }), 1)),
+        ),
+      );
+      expect(second[0]).toMatchObject({ kind: "session-snapshot", ...identity });
+      const firstEvents = Array.from(await firstCompletion);
+      expect(firstEvents.length).toBeGreaterThanOrEqual(1);
+      expect(firstEvents.every((event) => event.kind === "session-snapshot")).toBe(true);
+      expect(firstEvents[0]).toMatchObject({ kind: "session-snapshot", ...identity });
+      for (const producerName of ["admitOperation", "publishProgress", "completeOperation", "failOperation"]) {
         expect((client as unknown as Record<string, unknown>)[producerName]).toBeUndefined();
       }
     } finally {
       await client.close();
+      await harness.dispose();
+    }
+  });
+
+  it("proves the exact producer snapshot/replay/live sequence through the service seam", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const service = yield* makeWhiteboardOperationSessionService({
+            serverInstanceId: "whiteboard-route-seam-server",
+          });
+          const attached = yield* service.attachSession(sessionInput);
+          const identity = identityOf(attached);
+          const stream = yield* service.subscribe({ ...identity, lastServerSequence: 0 });
+          const eventsPromise = Effect.runPromise(Stream.runCollect(Stream.take(stream, 4)));
+          const admitted = yield* service.admitOperation({ ...identity, batchId: "route-seam-batch" });
+          const progress = yield* service.publishProgress({
+            ...identity,
+            batchId: admitted.batchId,
+            operationId: admitted.operationId,
+            generation: admitted.generation,
+            producerSequence: 1,
+            dependsOnProducerSequences: [],
+            expectedBeforeRevision: 0,
+            expectedAfterRevision: 1,
+            expectedSemanticFingerprint: "route-seam-fingerprint",
+            mutation: {
+              format: "synara.whiteboard.progress/v1",
+              elements: [{ id: "route-seam-element", type: "rectangle", x: 1, y: 2 }],
+            },
+          });
+          const events = Array.from(yield* Effect.promise(() => eventsPromise));
+          expect(events.map((event) => event.kind)).toEqual([
+            "session-snapshot",
+            "session-snapshot",
+            "operation-admitted",
+            "operation-progress",
+          ]);
+          expect(events[0]).toMatchObject(identity);
+          expect(events[1]).toMatchObject(identity);
+          expect(events[2]).toMatchObject({
+            ...identity,
+            kind: "operation-admitted",
+            batchId: admitted.batchId,
+            operationId: admitted.operationId,
+            generation: admitted.generation,
+            retryAttempt: 0,
+          });
+          expect(events[3]).toMatchObject({
+            ...identity,
+            kind: "operation-progress",
+            batchId: progress.batchId,
+            operationId: progress.operationId,
+            generation: progress.generation,
+            producerSequence: 1,
+            dependsOnProducerSequences: [],
+            expectedBeforeRevision: 0,
+            expectedAfterRevision: 1,
+            expectedSemanticFingerprint: "route-seam-fingerprint",
+            mutation: {
+              format: "synara.whiteboard.progress/v1",
+              elements: [{ id: "route-seam-element", type: "rectangle", x: 1, y: 2 }],
+            },
+          });
+          expect(new Set(events.slice(2).map((event) => event.serverSequence)).size).toBe(2);
+        }),
+      ),
+    );
+  });
+
+  it("enforces 20 stream leases and 12 standard unary leases with exact retry metadata", async () => {
+    const harness = await makeWsOrchestrationHarness();
+    const client = await connectWhiteboardClient(harness.port);
+    const heldFibers: Array<ReturnType<typeof client.runtime.runFork>> = [];
+    try {
+      const identities: Record<string, unknown>[] = [];
+      for (let index = 0; index < 21; index += 1) {
+        const attached = (await client.runtime.runPromise(
+          client.attach({
+            ...sessionInput,
+            documentId: `whiteboard-route-capacity-document-${index}`,
+            canvasIdentity: `whiteboard-route-capacity-canvas-${index}`,
+          }),
+        )) as Record<string, unknown>;
+        identities.push(identityOf(attached));
+      }
+      for (const identity of identities.slice(0, 20)) {
+        heldFibers.push(
+          client.runtime.runFork(Stream.runDrain(client.subscribe({ ...identity, lastServerSequence: 0 }))),
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await expectRpcError(
+        Stream.runDrain(client.subscribe({ ...identities[20], lastServerSequence: 0 })),
+        client.runtime,
+        { code: "STREAM_CAPACITY_EXCEEDED", retryable: true, retryAfterMs: 1_000 },
+      );
+
+      const requestAdmission = await Effect.runPromise(makeWsRequestAdmission);
+      const requestGate = Deferred.makeUnsafe<void>();
+      const gatedHandler = () => Deferred.await(requestGate);
+      const admittedRequests = Array.from({ length: 12 }, () =>
+        Effect.runPromise(requestAdmission.guard(1, "whiteboard.gated.standard", gatedHandler())),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await expect(
+        Effect.runPromise(requestAdmission.guard(1, "whiteboard.gated.standard", gatedHandler())),
+      ).rejects.toMatchObject({
+        code: "RPC_REQUEST_CAPACITY_EXCEEDED",
+        retryable: true,
+        retryAfterMs: 250,
+      });
+      await Effect.runPromise(Deferred.succeed(requestGate, undefined));
+      await Promise.all(admittedRequests);
+    } finally {
+      await Promise.all(heldFibers.map((fiber) => client.runtime.runPromise(Fiber.interrupt(fiber))));
+      await client.close();
+      await harness.dispose();
+    }
+  });
+
+  it("reports complete retry metadata for competing attach and terminal identity errors", async () => {
+    const harness = await makeWsOrchestrationHarness();
+    const client = await connectWhiteboardClient(harness.port);
+    const secondClient = await connectWhiteboardClient(harness.port);
+    try {
+      const attached = (await client.runtime.runPromise(client.attach(sessionInput))) as Record<string, unknown>;
+      const identity = identityOf(attached);
+      await expectRpcError(secondClient.attach(sessionInput), secondClient.runtime, {
+        code: WHITEBOARD_OPERATION_ERROR.sessionActive,
+        retryable: true,
+        retryAfterMs: 250,
+      });
+      const unknown = {
+        ...identity,
+        batchId: "route-metadata-batch",
+        operationId: "route-metadata-operation",
+        generation: 1,
+        producerSequence: 1,
+        serverSequence: 2,
+        adapterCorrelationId: "route-metadata-correlation",
+        applicationResult: "applied-semantic",
+        resultingMutationRevision: 0,
+        verifiedSemanticFingerprint: "route-metadata-fingerprint",
+      };
+      const errors = [
+        [client.acknowledge(unknown), WHITEBOARD_OPERATION_ERROR.ackUnknown],
+        [client.takeOver({ ...identity, batchId: unknown.batchId, operationId: unknown.operationId, expectedGeneration: 1, takeOverRequestId: "route-metadata-take-over" }), WHITEBOARD_OPERATION_ERROR.operationUnknown],
+        [client.retry({ ...identity, batchId: unknown.batchId, failedOperationId: unknown.operationId, failedGeneration: 1, failedRetryAttempt: 0 }), WHITEBOARD_OPERATION_ERROR.operationUnknown],
+      ] as const;
+      for (const [effect, code] of errors) {
+        const error = await expectRpcError(effect, client.runtime, { code, retryable: false });
+        expect(error).not.toHaveProperty("retryAfterMs");
+      }
+      await client.runtime.runPromise(client.release(identity));
+      const releasedError = await expectRpcError(
+        Stream.runDrain(client.subscribe({ ...identity, lastServerSequence: 0 })),
+        client.runtime,
+        { code: WHITEBOARD_OPERATION_ERROR.sessionReleased, retryable: false },
+      );
+      expect(releasedError).not.toHaveProperty("retryAfterMs");
+    } finally {
+      await client.close();
+      await secondClient.close();
+      await harness.dispose();
+    }
+  });
+
+  it("returns one negotiated authority for attach/events and rejects a forged valid identity", async () => {
+    const harness = await makeWsOrchestrationHarness();
+    const client = await connectWhiteboardClient(harness.port);
+    const secondClient = await connectWhiteboardClient(harness.port);
+    try {
+      const attached = (await client.runtime.runPromise(client.attach(sessionInput))) as Record<string, unknown>;
+      const identity = identityOf(attached);
+      expect(client.serverInstanceId).toBe(attached.serverInstanceId);
+      expect(secondClient.serverInstanceId).toBe(attached.serverInstanceId);
+      const event = Array.from(
+        await client.runtime.runPromise(
+          Stream.runCollect(Stream.take(client.subscribe({ ...identity, lastServerSequence: 0 }), 1)),
+        ),
+      )[0] as Record<string, unknown>;
+      expect(event.serverInstanceId).toBe(attached.serverInstanceId);
+      const forgedError = await expectRpcError(
+        client.acknowledge({
+          ...identity,
+          serverInstanceId: "forged-whiteboard-authority",
+          batchId: "forged-batch",
+          operationId: "forged-operation",
+          generation: 1,
+          producerSequence: 1,
+          serverSequence: 1,
+          adapterCorrelationId: "forged-correlation",
+          applicationResult: "applied-semantic",
+          resultingMutationRevision: 0,
+          verifiedSemanticFingerprint: "forged-fingerprint",
+        }),
+        client.runtime,
+        { code: WHITEBOARD_OPERATION_ERROR.authorityChanged, retryable: false },
+      );
+      expect(forgedError).not.toHaveProperty("retryAfterMs");
+    } finally {
+      await client.close();
+      await secondClient.close();
       await harness.dispose();
     }
   });
