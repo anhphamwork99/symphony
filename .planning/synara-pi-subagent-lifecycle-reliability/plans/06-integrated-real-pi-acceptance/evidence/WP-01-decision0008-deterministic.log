@@ -1,0 +1,11 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+
+ Test Files  18 passed (18)
+      Tests  263 passed (263)
+   Duration  16.31s
+
+Producer exit: 0
+Failed: 0
+Skipped: 0

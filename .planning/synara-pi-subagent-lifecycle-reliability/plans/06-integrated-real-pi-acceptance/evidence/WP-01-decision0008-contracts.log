@@ -1,0 +1,12 @@
+$ vitest run src/piSubagents.test.ts
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/packages/contracts
+
+
+ Test Files  1 passed (1)
+      Tests  40 passed (40)
+   Duration  257ms
+
+Producer exit: 0
+Failed: 0
+Skipped: 0
