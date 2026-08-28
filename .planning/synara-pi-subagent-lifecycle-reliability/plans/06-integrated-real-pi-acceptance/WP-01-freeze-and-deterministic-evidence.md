@@ -1,75 +1,63 @@
 # WP-01 — renewed 19-file deterministic evidence at frozen candidate
 
-**State:** ready — Package C froze the exact two-file Decision 0007 candidate;
-renewed WP-01 has not run.
+**State:** PASS — renewed WP-01 completed at the exact frozen candidate with
+19/19 files and 296/296 tests, zero failures, and zero skips. WP-02 is ready
+for exactly one full renewed five-file attempt, subject to its own authorization
+and gates.
 
-The detailed result and command record below describe historical WP-01 at
-`12fd6686` and remain supporting only. Renewed WP-01 must run at frozen
-candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, retaining the same closed
-19-file set and 296/296 requirement.
+## Renewed result
 
-## Candidate freeze and result
+- **Candidate:** `ffd45bd867e94c9003415f5f2e937cc9c616e399`.
+- **Parent:** sole parent `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
+- **Base→candidate delta:** exactly two files, and no others:
+  `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` and
+  `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`.
+- **Producer worktree:** `/tmp/symphony-t06` at the exact candidate HEAD. It is
+  branch-attached, not detached: `git status -b --short` reported
+  `## t06-candidate-correction-20260828-1642`. Its tracked worktree is clean.
+  This branch-attached state is recorded truthfully and is not relabeled as
+  detached.
+- **Unit producer:** exit `0`; 18/18 files, 256/256 tests, 0 failed, 0
+  skipped; Vitest duration `16.59s`. Log:
+  `evidence/WP-01-renewed-deterministic.log` (SHA-256
+  `cc2bd34c59bf1826230f5862c3ae3b6979f2d331f0587135ef203dda228d52ba`).
+- **Contracts producer:** exit `0`; 1/1 file, 40/40 tests, 0 failed, 0
+  skipped; Vitest duration `198ms`. Log:
+  `evidence/WP-01-renewed-contracts.log` (SHA-256
+  `9d174a4257a89db2d7929db2f12688e9cf4ff08a494d331c4d34f858996a3686`).
+- **Aggregate:** 19/19 files, 296/296 tests, 0 failed, 0 skipped.
+- **No tests were rerun while recording this evidence transaction.** The
+  renewed logs are the completed producer outputs copied byte-for-byte from
+  the canonical evidence location.
 
-Package C records candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` as the
-sole-parent child of base `12fd6686`, with exactly the two correction files.
-Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` is provenance only;
-all WP-01 behavioral producers must use `ffd45bd867e`, never that merge.
-Production coordinator/configuration remain byte-identical to base, and Alfie
-remains pinned at `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
-`@alfie/pi-subagents@0.15.0-alfie.6`. The completion coordinator SHA-256 is
-`baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8` at both
-base and candidate; `apps/server/vitest.config.ts` is
-`8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0` at both.
+## Provenance and zero-delta result
 
-Renewed WP-01 has not run, so no current D PASS exists. The focused red/green
-candidate-correction logs are diagnostics only, not WP-01 evidence.
+- Production coordinator and server configuration are unchanged from the
+  historical base through the candidate and this evidence record. The
+  recorded SHA-256 values remain:
+  - `apps/server/src/provider/piSubagentCompletionCoordinator.ts`:
+    `baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8`;
+  - `apps/server/vitest.config.ts`:
+    `8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0`.
+- From the frozen candidate through this evidence transaction, the
+  Ticket-06 acceptance source surface has zero delta. No production,
+  configuration, manifest, lockfile, test, or Alfie path was changed by
+  WP-01.
+- Controlled Alfie remains pinned at exact HEAD
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`, package
+  `@alfie/pi-subagents@0.15.0-alfie.6`; `/tmp/alfie-t06` is detached and
+  clean. Its ignored extension-local `node_modules` is retained and is not a
+  tracked change.
+- The protected owner WIP remains unstaged in the canonical main checkout:
+  `apps/web/package.json`, `apps/web/src/main.tsx`, and `bun.lock`. Its exact
+  aggregate diff hash is
+  `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
+  These paths are absent from this transaction's index and commit.
 
-- **Worktrees (retained for WP-02):** `/tmp/symphony-t06` detached at
-  `12fd6686edc26a3fa0382e8bdeb83a1be8045539`; `/tmp/alfie-t06` detached at
-  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`. Both verified detached
-  (`HEAD (no branch)`), clean at every record, and unchanged through WP-01.
-  Alfie remote URL matches the provenance fixture; all 5 pinned Alfie file
-  hashes recomputed and byte-exact; user Alfie checkout untouched at
-  `c6a27714`. Provenance: `evidence/WP-01-worktree-provenance.txt`.
-- **Install:** `bun install --frozen-lockfile` exit 0 (2887 packages,
-  10.32s); post-install tracked delta in the worktree: zero.
-- **Unit producer (18 files, serialized, `--project unit
-  --maxWorkers=1 --no-file-parallelism`):** exit 0 — 18/18 files, 256/256
-  tests, 0 failed, 0 skipped, 16.79s. Log: `evidence/WP-01-deterministic.log`.
-- **Contracts producer (`bun run test src/piSubagents.test.ts`):** exit 0 —
-  1/1 file, 40/40 tests, 181ms. Log: `evidence/WP-01-contracts.log`.
-- **Matrix:** `evidence/WP-01-ac-diagnostic-matrix.md` — T06-AC2/3/4/5/7
-  criterion rows (D class), positive rows paired with material
-  failure/diagnostic rows, stable diagnostic codes, per-file executed-case
-  inventory (256+40 = 296 cases), R legs explicitly pending for WP-02.
-- **Gates at every record:** protected WIP aggregate hash exactly
-  `ab8f8f54…aa8` (pre and post); staging 0; Pi-acceptance-surface diff from
-  `12fd6686` empty pre/post (main checkout and worktree); worktrees zero
-  tracked delta post-run.
-- **Commit:** `test(pi): record Ticket 06 deterministic integrated
-  evidence` — exactly the five allowed WP-01 paths, explicit-path staging.
-- One clean full re-execution of the unit producer was performed after an
-  aborted first launch (evidence directory absent at tee time; no tests ran;
-  disclosed in the provenance record).
+## Objective and the closed 19-file set
 
-**Owner role:** implementation worker
-
-**Dependencies:** Package C candidate freeze persisted; Ticket 06 routed
-`ready-for-agent`; no unresolved challenge; protected WIP unstaged with
-aggregate hash `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
-
-## Objective and observable outcome
-
-At frozen candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, prove the
-unchanged integrated deterministic seam with one serialized 18-file unit run
-plus the contracts suite — 19 files and **296/296** cases. The producer must
-run from the candidate worktree, not integration merge `064b49f1d`; this is
-renewed D evidence, not reuse of historical WP-01 `9208e1728`.
-
-## The 19 files and their derivation
-
-Union of the Ticket 04 (11-file) and Ticket 05 (9-file) focused deterministic
-sets, plus the Ticket 02 read-boundary suite and the contracts suite:
+The renewed D-class proof is one serialized 18-file unit invocation plus the
+contracts suite at the candidate worktree. The exact closed set is:
 
 ```text
 apps/server/src/provider/piSubagentCancellationCoordinator.test.ts
@@ -93,49 +81,11 @@ apps/server/src/provider/piSubagentExecutionReadBoundary.test.ts
 packages/contracts/src/piSubagents.test.ts
 ```
 
-(Files appearing in both prior sets — WatchdogEscalation, ProcessTeardown,
-ExecutionCardSurface — are counted once.)
+## Exact producer commands and outcomes
 
-## Bounded read set
-
-- PLAN §2, §3, §6, §7, §9; governing decisions 0002/0006 and inherited
-  0031–0034.
-- The 19 test files and their direct production seams.
-- `apps/server/vitest.config.ts`, `apps/server/scripts/wallclock-tests.ts`.
-- Git state of the main checkout and both worktrees.
-
-## Exact allowed write set
-
-```text
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-worktree-provenance.txt
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-deterministic.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-contracts.log
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-ac-diagnostic-matrix.md
-.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
-```
-
-## Prohibited changes
-
-Everything else — especially any path under `apps/` or `packages/` in the
-main checkout or the worktree, both worktrees' checked-out files, Alfie, the
-three protected owner WIP paths, decisions/reviews/issue/PROJECT.md (issue
-and PROJECT.md are WP-07's), and any other plan directory.
-
-## Exact commands (cwd and env explicit)
-
-Worktree setup (once):
+Unit producer, cwd `/tmp/symphony-t06/apps/server`:
 
 ```bash
-cd /Users/anhpham99/symphony
-git worktree add --detach /tmp/symphony-t06 12fd6686edc26a3fa0382e8bdeb83a1be8045539
-git -C /Users/anhpham99/alfie worktree add --detach /tmp/alfie-t06 3fe340b401ca86bcbe8b55abd4de107e1d93482e
-cd /tmp/symphony-t06 && bun install
-```
-
-Unit producer (18 files, serialized) — cwd `/tmp/symphony-t06/apps/server`:
-
-```bash
-cd /tmp/symphony-t06/apps/server
 set -o pipefail
 bun run ../../node_modules/vitest/vitest.mjs run \
   --project unit \
@@ -159,50 +109,74 @@ bun run ../../node_modules/vitest/vitest.mjs run \
   src/provider/piSubagentCompletionOutbox.test.ts \
   src/wsSnapshotLiveStream.test.ts \
   src/provider/piSubagentExecutionReadBoundary.test.ts \
-  2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-deterministic.log
+  2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-deterministic.log
 status=${PIPESTATUS[0]}
 exit "$status"
 ```
 
-Contracts producer — cwd `/tmp/symphony-t06/packages/contracts`:
+Observed producer exit: `0`. The renewed log records Vitest `v4.1.10`,
+18/18 files, 256/256 tests, and duration `16.59s`.
+
+Contracts producer, cwd `/tmp/symphony-t06/packages/contracts`:
 
 ```bash
-cd /tmp/symphony-t06/packages/contracts
 set -o pipefail
 bun run test src/piSubagents.test.ts \
-  2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-contracts.log
+  2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-contracts.log
 status=${PIPESTATUS[0]}
 exit "$status"
 ```
 
-## Evidence artifact fields
+Observed producer exit: `0`. The renewed log records Vitest `v4.1.10`, 1/1
+file, 40/40 tests, and duration `198ms`.
 
-- `WP-01-worktree-provenance.txt`: both worktree SHAs (Symphony `12fd6686…`
-  detached; Alfie `3fe340b4…` detached), `git status --short` of both, Alfie
-  provenance fixture hash comparison, toolchain versions, protected WIP diff
-  hash `ab8f8f54…`, zero-delta gate output, producer exits.
-- `WP-01-ac-diagnostic-matrix.md`: per-criterion rows for T06-AC2, AC3, AC4,
-  AC5, AC7 (D class) with named test cases and file:line locators; every
-  positive row paired with its material failure/diagnostic row; explicit note
-  of which AC legs remain for R evidence (WP-02).
+## AC / diagnostic matrix
 
-## Verification contract
+`evidence/WP-01-renewed-ac-diagnostic-matrix.md` records the D-class rows for
+T06-AC2, T06-AC3, T06-AC4, T06-AC5, and T06-AC7. Each criterion has executed
+positive cases paired with material failure/diagnostic cases and a per-file
+inventory totaling 256 + 40 = 296. The matrix cites only the renewed logs and
+candidate SHA for this current run. R-class real-Pi legs remain explicitly
+pending WP-02; no R or M claim is made here.
 
-- Both producers exit 0; no skipped-but-required rows.
-- Zero-delta gate on the Pi acceptance surface passes before and after runs.
-- Protected WIP hash unchanged; nothing staged at any point.
-- Matrix cites only executed cases from the two logs.
+## Gate result and routing
+
+- Candidate identity: PASS — exact SHA and sole parent recorded.
+- Candidate correction scope: PASS — exact two-file base→candidate delta.
+- Candidate worktree: PASS — exact HEAD, branch-attached truth recorded, clean
+  tracked tree before/after the already-completed producers.
+- Alfie: PASS — exact pin, package identity, detached clean tree, ignored local
+  dependency only.
+- Protected WIP: PASS — exact aggregate hash unchanged and unstaged.
+- Source delta: PASS — empty Ticket-06 acceptance source surface after the
+  candidate; production coordinator/configuration unchanged.
+- Producers: PASS — 19/19 files, 296/296 tests, zero failed, zero skipped.
+- Index and scope: PASS — no protected WIP staged; this transaction stages
+  exactly the six paths listed below.
+
+WP-01 is **PASS**. WP-02 is **ready** for exactly one full renewed five-file
+non-destructive real-Pi attempt after its required authorization. This record
+does not authorize or execute WP-02, WP-03, WP-04, manual, quality, or review
+work.
 
 ## Commit boundary
 
+Commit message:
+
 ```text
-test(pi): record Ticket 06 deterministic integrated evidence
+test(pi): record renewed Ticket 06 deterministic evidence
 ```
 
-Stage only the five allowed WP-01 paths with explicit paths.
+The commit contains exactly these six paths:
 
-## Escalation
+```text
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/PLAN.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-worktree-provenance.txt
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-deterministic.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-contracts.log
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-ac-diagnostic-matrix.md
+```
 
-- `blocked`: worktree creation/install failure; provenance mismatch.
-- `challenge`: any failing test or missing failure-leg; any apparent need for
-  a source/test change; zero-delta or WIP-hash violation.
+No source implementation, test, configuration, Alfie, protected-WIP, WP-02,
+manual, quality, or review path is part of this transaction.

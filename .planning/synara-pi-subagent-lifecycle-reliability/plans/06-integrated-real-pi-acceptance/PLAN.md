@@ -1,6 +1,6 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is ready but no current D/R PASS exists. Historical evidence is supporting only and no producer ran in Package C.
+**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is **PASS** at 19/19 files and 296/296 tests with zero skips, and renewed WP-02 is ready for exactly one full five-file attempt. Historical evidence remains supporting only; no WP-02, WP-03, WP-04, manual, quality, or review work was run here.
 
 **Historical base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`. Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is its sole-parent exact two-file child. Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` has parents Package A `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; it is integration provenance only.
 
@@ -172,8 +172,8 @@ No source implementation is authorized in the plan-persistence transaction.
 ```text
 12fd6686 historical base
   └──> ffd45bd exact two-file child candidate + freeze (Package C)
-       └──> renewed WP-01 at ffd45bd: same 19 files, 296/296 (D)
-            └──> one renewed full five-file WP-02 (R)
+       └──> renewed WP-01 at ffd45bd: PASS, same 19 files, 296/296 (D)
+            └──> WP-02 ready for exactly one renewed full five-file attempt (R)
                  └──> fresh owner authorization, WP-03 (M)
                       └──> fresh owner authorization after new WP-03 PASS, WP-04 (Q)
                            └──> WP-05 one integrated review (A)
@@ -290,8 +290,8 @@ defect from this failure.
 
 | Gate | Current status |
 |---|---|
-| Renewed WP-01 | ready at frozen candidate `ffd45bd`; same 19 files, 296/296; not yet run |
-| Renewed WP-02 | blocked until renewed WP-01 passes 296/296; one full five-file run only |
+| Renewed WP-01 | **PASS** at frozen candidate `ffd45bd`; same 19 files, 296/296; zero failed/skipped |
+| Renewed WP-02 | **ready** after renewed WP-01 PASS; exactly one full five-file run only |
 | WP-03 | blocked; fresh owner authorization required after renewed WP-02 PASS; old authorization unspent/non-transferable/not executable |
 | WP-04 | blocked; fresh owner authorization required after the newly authorized WP-03 PASS; old authorization unspent/non-transferable/not executable |
 | WP-05 | one integrated review reservation unused; after complete current package |

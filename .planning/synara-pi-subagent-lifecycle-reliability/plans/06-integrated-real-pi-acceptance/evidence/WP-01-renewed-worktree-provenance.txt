@@ -1,0 +1,194 @@
+Ticket 06 WP-01 renewed worktree provenance and deterministic evidence
+====================================================================
+Recorded: 2026-08-28 · renewed producer outputs already completed
+Evidence class: P (planning/provenance) with D producer records
+
+1. CANDIDATE LINEAGE
+--------------------
+Frozen candidate:
+  ffd45bd867e94c9003415f5f2e937cc9c616e399
+Candidate parent (sole parent):
+  12fd6686edc26a3fa0382e8bdeb83a1be8045539
+Integration merge (provenance only):
+  064b49f1d954b64343006da9240cdadf58bc0ff2
+
+Command:
+  git show -s --format='%H%n%P%n%s' ffd45bd867e94c9003415f5f2e937cc9c616e399
+Observed:
+  ffd45bd867e94c9003415f5f2e937cc9c616e399
+  12fd6686edc26a3fa0382e8bdeb83a1be8045539
+  test(pi): make T17 batching fixture causally hold exact-two responses
+
+Base-to-candidate command:
+  git diff --name-status 12fd6686edc26a3fa0382e8bdeb83a1be8045539 \
+    ffd45bd867e94c9003415f5f2e937cc9c616e399
+Observed exact two-file delta and no others:
+  M apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+  M apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
+
+2. SYMPHONY CANDIDATE WORKTREE
+------------------------------
+Path: /tmp/symphony-t06
+HEAD command:
+  git -C /tmp/symphony-t06 rev-parse HEAD
+Observed:
+  ffd45bd867e94c9003415f5f2e937cc9c616e399
+
+Branch/state command:
+  git -C /tmp/symphony-t06 status -b --short --untracked-files=no
+Observed:
+  ## t06-candidate-correction-20260828-1642
+
+The candidate worktree is branch-attached, not detached. This is the exact
+observed state and is intentionally not relabeled. Clean tracked worktree
+command:
+  git -C /tmp/symphony-t06 status --short --untracked-files=no
+Observed: empty.
+
+Acceptance-surface zero-delta command after the candidate:
+  git diff --name-only ffd45bd867e94c9003415f5f2e937cc9c616e399..HEAD -- \
+    apps/server/src/provider apps/server/src/persistence \
+    apps/server/src/orchestration apps/server/scripts/wallclock-tests.ts \
+    apps/server/vitest.config.ts packages/contracts/src/piSubagents.ts
+Observed: empty.
+
+No source delta was introduced by WP-01. The candidate's exact two-file
+correction is the only base-to-candidate delta; no production, configuration,
+manifest, lockfile, test, or Alfie path changed in this evidence transaction.
+
+3. CONTROLLED ALFIE WORKTREE
+----------------------------
+Path: /tmp/alfie-t06
+HEAD:
+  3fe340b401ca86bcbe8b55abd4de107e1d93482e
+Package:
+  @alfie/pi-subagents@0.15.0-alfie.6
+Remote:
+  https://github.com/anhphamwork99/alfie.git
+
+Commands:
+  git -C /tmp/alfie-t06 status -b --short --untracked-files=no
+  git -C /tmp/alfie-t06 rev-parse HEAD
+Observed:
+  ## HEAD (no branch)
+  3fe340b401ca86bcbe8b55abd4de107e1d93482e
+
+Alfie is detached and clean. The extension-local
+agent/extensions/pi-subagents/node_modules directory is ignored-only and
+not a tracked change. The controlled Alfie package and pin are unchanged.
+
+The five pinned fixture hashes remain byte-exact at this pin:
+  agent/extensions/pi-subagents/package.json
+    954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f
+  agent/extensions/pi-subagents/src/index.ts
+    c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9
+  agent/extensions/pi-subagents/src/agent-manager.ts
+    1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783
+  agent/extensions/pi-subagents/src/agent-runner.ts
+    98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2
+  agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+    ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0
+
+4. PRODUCTION/CONFIGURATION IDENTITY
+------------------------------------
+Completion coordinator:
+  apps/server/src/provider/piSubagentCompletionCoordinator.ts
+  SHA-256: baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8
+  base and candidate: identical
+Server configuration:
+  apps/server/vitest.config.ts
+  SHA-256: 8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0
+  base and candidate: identical
+
+5. PROTECTED OWNER WIP
+----------------------
+Canonical main checkout: /Users/anhpham99/symphony
+Protected paths:
+  apps/web/package.json
+  apps/web/src/main.tsx
+  bun.lock
+
+Command:
+  git -C /Users/anhpham99/symphony diff -- \
+    apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+Observed exact aggregate hash:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+
+Command:
+  git -C /Users/anhpham99/symphony status --short --branch
+Observed protected WIP state:
+  M apps/web/package.json
+  M apps/web/src/main.tsx
+  M bun.lock
+
+The protected WIP is modified-unstaged, unchanged, and outside this
+transaction's index and commit. Index command:
+  git -C /Users/anhpham99/symphony diff --cached --name-only
+Observed: empty.
+
+6. RENEWED PRODUCER RECORDS
+---------------------------
+No tests were rerun while recording this transaction. The completed producer
+outputs were copied byte-for-byte from the canonical evidence location.
+
+Unit producer cwd: /tmp/symphony-t06/apps/server
+Exact command:
+  set -o pipefail
+  bun run ../../node_modules/vitest/vitest.mjs run \
+    --project unit --maxWorkers=1 --no-file-parallelism \
+    src/provider/piSubagentCancellationCoordinator.test.ts \
+    src/provider/piSubagentWatchdogEscalation.test.ts \
+    src/provider/piSubagentProcessTeardown.test.ts \
+    src/provider/piSubagentWatchdogSweep.test.ts \
+    src/provider/piSubagentProcessTeardownSweep.test.ts \
+    src/provider/piSubagentBridge.test.ts \
+    src/provider/piSubagentLiveLifecycleContainment.test.ts \
+    src/provider/piSubagentChildOwnerTeardownWiring.test.ts \
+    src/provider/piSubagentTeardownWiring.test.ts \
+    src/provider/piSubagentCanonicalRouting.test.ts \
+    src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts \
+    src/provider/piSubagentRestartReconciliation.test.ts \
+    src/provider/piSubagentStartupRecoveryOrder.test.ts \
+    src/provider/piSubagentResumeCoordinator.test.ts \
+    src/provider/piSubagentTerminalLifecycle.test.ts \
+    src/provider/piSubagentCompletionOutbox.test.ts \
+    src/wsSnapshotLiveStream.test.ts \
+    src/provider/piSubagentExecutionReadBoundary.test.ts \
+    2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-deterministic.log
+  status=${PIPESTATUS[0]}
+  exit "$status"
+
+Observed producer exit: 0
+  Test Files 18 passed (18)
+  Tests 256 passed (256)
+  failed: 0
+  skipped: 0
+  duration: 16.59s
+Log SHA-256:
+  cc2bd34c59bf1826230f5862c3ae3b6979f2d331f0587135ef203dda228d52ba
+
+Contracts producer cwd: /tmp/symphony-t06/packages/contracts
+Exact command:
+  set -o pipefail
+  bun run test src/piSubagents.test.ts \
+    2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-01-renewed-contracts.log
+  status=${PIPESTATUS[0]}
+  exit "$status"
+
+Observed producer exit: 0
+  Test Files 1 passed (1)
+  Tests 40 passed (40)
+  failed: 0
+  skipped: 0
+  duration: 198ms
+Log SHA-256:
+  9d174a4257a89db2d7929db2f12688e9cf4ff08a494d331c4d34f858996a3686
+
+Aggregate: 19/19 files, 296/296 tests, zero failed, zero skipped.
+
+7. EVIDENCE COMMIT SCOPE
+------------------------
+The renewed WP-01 transaction is restricted to exactly six paths: PLAN.md,
+WP-01-freeze-and-deterministic-evidence.md, this provenance file, the two
+renewed producer logs, and the renewed AC/diagnostic matrix. Logs are ignored
+by the repository's *.log rule and must be force-added explicitly.
