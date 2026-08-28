@@ -1,0 +1,338 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[12:41:31.956] INFO (#85): Running all migrations...
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[12:41:32.011] INFO (#85): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+[12:41:32.062] INFO (#138): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:41:32.063] INFO (#138): orchestration engine started { sequence: 0 }
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[12:44:31.405] INFO (#2099): Running all migrations...
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[12:44:31.454] INFO (#2099): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+[12:44:31.464] INFO (#2152): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:44:31.465] INFO (#2152): orchestration engine started { sequence: 0 }
+
+ ❯ |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts (9 tests | 2 failed) 360015ms
+     × proves terminal-first through the registered production steer_subagent tool and exact record session 180003ms
+     × proves enqueue-first through the registered production steer_subagent tool and exact record session 180005ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves terminal-first through the registered production steer_subagent tool and exact record session
+Error: Test timed out in 180000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ <anonymous> src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:878:30
+    876|       captureHookEvents();
+    877|       expect(hook.snapshot().counters["session-steer-invocation"]).toB…
+    878|       expect(hook.snapshot().counters["sdk-insertion"]).toBe(1);
+       |                              ^
+    879|       harness.modelServer.releaseSlowResponses();
+    880|       causalTrace.push("slow-child-response-released");
+ ❯ processTicksAndRejections unknown:7:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentCanonicalIdentityAcceptance.test.ts > Ticket 02 synchronized controlled real-Pi F5 acceptance > proves enqueue-first through the registered production steer_subagent tool and exact record session
+Error: Test timed out in 180000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ <anonymous> src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:881:30
+    880|       causalTrace.push("slow-child-response-released");
+    881|       await waitFor(
+    882|         () => harness!.bridgeActiveExecutions(thread),
+       |         ^
+    883|         (active) => active.every((candidate) => candidate.executionId …
+    884|         "enqueue-first natural live retirement and bridge removal",
+ ❯ processTicksAndRejections unknown:7:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: Expected number, got undefined
+  at ["code"]
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:1058:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/SchemaParser.js:70:33
+ ❯ new <anonymous> ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/Schema.js:4858:33
+ ❯ new SocketCloseError [source:2]:1:22
+ ❯ onClose ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/unstable/socket/Socket.js:293:16
+ ❯ emit node:events:98:21
+ ❯ #close ws:601:47
+ ❯ close node:_http_server:290:23
+ ❯ close ws:673:37
+ ❯ ~effect/Effect/evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:615:23
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ interruptUnsafe ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:392:11
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:588:7
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2031:8
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2080:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2091:30
+ ❯ src/provider/piSubagentRealPiAcceptanceHelpers.ts:2151:8
+ ❯ runRealPiSteerRace src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:1077:23
+
+This error originated in "src/provider/piSubagentCanonicalIdentityAcceptance.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "proves terminal-first through the registered production steer_subagent tool and exact record session". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: Expected number, got undefined
+  at ["code"]
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:1058:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/SchemaParser.js:70:33
+ ❯ new <anonymous> ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/Schema.js:4858:33
+ ❯ new SocketCloseError [source:2]:1:22
+ ❯ onClose ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/unstable/socket/Socket.js:293:16
+ ❯ emit node:events:98:21
+ ❯ #close ws:601:47
+ ❯ close node:_http_server:290:23
+ ❯ close ws:673:37
+ ❯ ~effect/Effect/evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:615:23
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ interruptUnsafe ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:392:11
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:588:7
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2031:8
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2080:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2091:30
+ ❯ src/provider/piSubagentRealPiAcceptanceHelpers.ts:2151:8
+ ❯ runRealPiSteerRace src/provider/piSubagentCanonicalIdentityAcceptance.test.ts:1077:23
+
+This error originated in "src/provider/piSubagentCanonicalIdentityAcceptance.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "proves enqueue-first through the registered production steer_subagent tool and exact record session". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 passed (9)
+     Errors  2 errors
+   Start at  12:41:12
+   Duration  362.36s (transform 1.64s, setup 0ms, import 2.26s, tests 360.01s, environment 0ms)
+

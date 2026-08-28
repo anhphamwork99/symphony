@@ -1,0 +1,182 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+stdout | src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts > Ticket 03 isolated real-Pi lifecycle containment acceptance > causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal
+[12:47:38.224] INFO (#75): Running all migrations...
+
+stdout | src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts > Ticket 03 isolated real-Pi lifecycle containment acceptance > causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal
+[12:47:38.285] INFO (#75): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts > Ticket 03 isolated real-Pi lifecycle containment acceptance > causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal
+[12:47:38.337] INFO (#128): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:47:38.338] INFO (#128): orchestration engine started { sequence: 0 }
+
+stdout | src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts > Ticket 03 isolated real-Pi lifecycle containment acceptance > causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal
+T03_REAL_PI_EVIDENCE {"rootDir":"/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/synara-realpi-t17-EUSisA","executionId":"exec_af436331-6721-4f77-b205-d1297e0e36b6","attemptId":"att_09c91ca3-5285-45a5-92c0-77a19fb987f0","generation":1,"trace":["sequence2-gated-live-lifecycle-unavailable","zero-extension-steer-before-sequence2","sequence2-committed","real-child-held","one-extension-steer-emitted","sibling-refused-without-extension-emission","route-retired-before-failed-commit","precommit-notification-and-outbox-absent","first-terminal-repository-write-failed","durable-state-remained-nonterminal","postfailure-route-still-unavailable","postfailure-notification-and-outbox-absent","repository-retry-band40-committed","notification-after-commit","repository-bands-74-75-77-78-unfenced","repository-band76-fenced-old-terminal-stale"],"journalSequences":[1,2,3,40],"observedCounts":{"admissions":1,"delegatedModelRequests":1,"supervisorSpawns":0,"extensionSteerEmissions":1,"providerTerminalCommitAttempts":1,"terminalLifecycleNotifications":1},"repositoryRetryOutcome":"recorded","bandOrdering":{"before76":[{"band":74,"observedState":"cancelling","generation":1,"durableBands":[74]},{"band":75,"observedState":"cancelling","generation":1,"durableBands":[74,75]},{"band":77,"observedState":"cancelling","generation":1,"durableBands":[74,75,77]},{"band":78,"observedState":"cancelling","generation":1,"durableBands":[74,75,77,78]}],"terminalBefore76":"recorded","proven76":{"kind":"recorded","observedState":"cancelled","generation":2},"terminalAfter76":"ignored_stale"},"deterministicOnlyClassifications":["response_loss_after_acceptance","late_response_from_replaced_or_stale_callback"]}
+
+ ❯ |wallclock| src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts (1 test | 1 failed) 240021ms
+     × causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal 240018ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts > Ticket 03 isolated real-Pi lifecycle containment acceptance > causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal
+Error: Test timed out in 240000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ <anonymous> src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts:218:30
+    217|             attemptId,
+    218|             generation: 1,
+    219|             outcome: "survivors",
+       |   ^
+    220|             occurredAt,
+    221|             survivorPids: [],
+ ❯ processTicksAndRejections unknown:7:39
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+Error: Expected number, got undefined
+  at ["code"]
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:1058:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/SchemaParser.js:70:33
+ ❯ new <anonymous> ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/Schema.js:4858:33
+ ❯ new SocketCloseError [source:2]:1:22
+ ❯ onClose ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/unstable/socket/Socket.js:293:16
+ ❯ emit node:events:98:21
+ ❯ #close ws:601:47
+ ❯ close node:_http_server:290:23
+ ❯ close ws:673:37
+ ❯ ~effect/Effect/evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:615:23
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ interruptUnsafe ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:392:11
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:588:7
+ ❯ runLoop ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:439:97
+ ❯ evaluate ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:407:22
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2031:8
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2080:18
+ ❯ ../../node_modules/.bun/effect@https+++pkg.pr.new+Effect-TS+effect-smol+effect@8881a9b/node_modules/effect/dist/internal/effect.js:2091:30
+ ❯ src/provider/piSubagentRealPiAcceptanceHelpers.ts:2151:8
+ ❯ src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts:689:23
+
+This error originated in "src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "causally proves inactive-before-sequence-2, one real steer, retired terminal failure, repository retry, band ordering, and disposal". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+     Errors  1 error
+   Start at  12:47:27
+   Duration  242.12s (transform 1.54s, setup 0ms, import 2.03s, tests 240.02s, environment 0ms)
+

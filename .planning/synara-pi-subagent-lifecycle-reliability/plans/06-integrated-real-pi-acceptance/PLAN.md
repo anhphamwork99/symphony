@@ -1,6 +1,10 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** persisted, not executed — no evidence, review, or acceptance exists yet
+**Plan state:** persisted and executing — WP-01 evidence committed
+(9208e1728); WP-02 executed once (attempt 1, 2026-08-28), stopped at
+challenge; a single corrected attempt is authorized (see WP-02 §"Attempt 2"
+and §7a below) but NOT yet executed. No Ticket 06 completion, review, or
+acceptance exists.
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -229,6 +233,55 @@ owner WIP files stay modified-unstaged with hash `ab8f8f54…` at every record.
 - Every criterion needs positive plus material failure/diagnostic evidence.
   No AC may pass from inherited totals (H), source comments, compile success,
   or an unexecuted command.
+
+## 7a. Attempt-1 challenge and corrected-attempt authorization (2026-08-28)
+
+WP-02 attempt 1 stopped at the §11 challenge gate: legs 4–5 (restart,
+resume) PASSED exit 0; legs 1–3 (realpi integrated, canonical-identity F5,
+lifecycle-containment) FAILED exit 1. Failure evidence is durably preserved
+as `WP-02-attempt-01-*` logs in the plan's `evidence/` directory and is
+classified as **environment/runner evidence, not behavioral PASS**. The
+challenge package (disposition §4, provenance §6) records failing rows,
+observed-vs-required, and the minimum gap. Source-grounded root cause: the
+pristine detached Alfie worktree `/tmp/alfie-t06` at the exact pin
+`3fe340b4` lacks the gitignored extension-local `node_modules` required by
+the extension entry (`"pi": {"extensions": ["./src/index.ts"]}`), so the
+pinned extension never loads in real sessions. Attempt 1's canonical and
+lifecycle legs additionally failed on Bun-only Effect `SocketCloseError`
+schema exceptions (`code` undefined) from the harness dispose path, and the
+integrated leg's user-Pi-home digest was perturbed by concurrent Pi-FFF
+frecency state (`~/.pi/agent/fff/frecency/data.mdb`) outside the harness.
+
+Per the challenge decision, ONE corrected attempt of WP-02 is authorized,
+bound to WP-02 §"Attempt 2" exactly:
+
+- **Environment preparation (not an Alfie source/pin change):** exactly one
+  `cd /tmp/alfie-t06/agent/extensions/pi-subagents && npm ci` before any
+  rerun. This writes only the gitignored ext-local `node_modules` from the
+  extension's own shipped `package-lock.json`; the provenance verifier
+  (`piSubagentRealPiAcceptanceHelpers.ts:561–580`) explicitly ignores
+  `node_modules` in `git status`, so pins, fixture hashes, and
+  clean-status invariants are preserved. Zero-tracked-delta proof required
+  after the install (WP-02 §"Attempt 2" item 1). This does not amend the
+  §1/§11 no-Alfie-change constraint: no tracked Alfie byte changes.
+- **Runner correction:** all three rerun legs use the supported Node
+  v24.14.1 (`node ../../node_modules/vitest/vitest.mjs`), consistent with
+  the root `engines.node ^24.13.1`, `apps/server` `>=24.10`, and the §7
+  Node-for-`node:sqlite` policy; Bun's WebSocket close path is implicated in
+  attempt-1's `SocketCloseError` dispose failures.
+- **Producer-window rule:** the three rerun commands run with no concurrent
+  FFF/semantic/search or other agent-tool activity by the executing worker —
+  after launching each command, only wait for it; no other tool call until
+  it exits (bounds the attempt-1 frecency-digest interference class).
+- **Scope and naming:** only the three failed legs rerun; the passing
+  restart/resume attempt-1 logs remain unchanged and reusable as final
+  evidence; corrected-attempt logs take the original canonical WP-02 log
+  names; attempt-1 failed-leg logs stay under their `WP-02-attempt-01-*`
+  names, never overwritten.
+- **Exactly once, with stop gates:** no retry of a corrected leg, no second
+  `npm ci`; any listed stop-gate trigger (WP-02 §"Attempt 2" item 6) stops
+  immediately into a fresh challenge package. WP-03–WP-07 remain gated
+  behind a five-legs-exit-0 WP-02 record.
 
 ## 8. Authorization gates and no-retry rule
 

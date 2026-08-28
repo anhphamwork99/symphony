@@ -1,0 +1,499 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:30515) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC7 stage 7: real capability-mismatch and bridge-absent Pi sessions retain legacy semantics and never project managed or recoverable executions
+[12:25:23.385] INFO (#1875): Running all migrations...
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC7 stage 7: real capability-mismatch and bridge-absent Pi sessions retain legacy semantics and never project managed or recoverable executions
+[12:25:23.420] INFO (#1875): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC7 stage 7: real capability-mismatch and bridge-absent Pi sessions retain legacy semantics and never project managed or recoverable executions
+[12:25:23.433] INFO (#1928): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:25:23.433] INFO (#1928): orchestration engine started { sequence: 0 }
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17 slice 4 stage 5: a fresh production WS boot on the same durable root reconciles one real nonterminal child honestly and does not auto-replay or resume it
+[12:28:24.133] INFO (#5959): Running all migrations...
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17 slice 4 stage 5: a fresh production WS boot on the same durable root reconciles one real nonterminal child honestly and does not auto-replay or resume it
+[12:28:24.166] INFO (#5959): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17 slice 4 stage 5: a fresh production WS boot on the same durable root reconciles one real nonterminal child honestly and does not auto-replay or resume it
+[12:28:24.175] INFO (#6012): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:28:24.175] INFO (#6012): orchestration engine started { sequence: 0 }
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC6 stage 6: a deliberately wedged real child reaches watchdog bands 70-74, invokes real session abort and real provider-session stop, and hands off teardown durably without claiming destructive proof
+[12:29:54.396] INFO (#7790): Running all migrations...
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC6 stage 6: a deliberately wedged real child reaches watchdog bands 70-74, invokes real session abort and real provider-session stop, and hands off teardown durably without claiming destructive proof
+[12:29:54.428] INFO (#7790): Migrations ran successfully {
+  migrations: [
+    '1_OrchestrationEvents',
+    '2_OrchestrationCommandReceipts',
+    '3_CheckpointDiffBlobs',
+    '4_ProviderSessionRuntime',
+    '5_Projections',
+    '6_ProjectionThreadSessionRuntimeModeColumns',
+    '7_ProjectionThreadMessageAttachments',
+    '8_ProjectionThreadActivitySequence',
+    '9_ProviderSessionRuntimeMode',
+    '10_ProjectionThreadsRuntimeMode',
+    '11_OrchestrationThreadCreatedRuntimeMode',
+    '12_ProjectionThreadsInteractionMode',
+    '13_ProjectionThreadProposedPlans',
+    '14_ProjectionThreadProposedPlanImplementation',
+    '15_ProjectionTurnsSourceProposedPlan',
+    '16_CanonicalizeModelSelections',
+    '17_ThreadHandoffMetadata',
+    '18_ProjectionThreadMessageMentions',
+    '19_ProjectionThreadsEnvMode',
+    '20_ProjectionThreadsForkSource',
+    '21_ProjectionThreadsAssociatedWorktree',
+    '22_ProjectionThreadsAssociatedWorktreeBranch',
+    '23_ProjectionThreadsAssociatedWorktreeRef',
+    '24_ProjectionThreadsArchivedAt',
+    '25_ProjectionThreadsSubagents',
+    '26_ProjectionThreadShellSummary',
+    '27_BackfillProjectionThreadShellSummary',
+    '28_ProjectionProjectsKind',
+    '29_ProjectionThreadsLastKnownPr',
+    '30_ProjectionThreadMessagesDispatchMode',
+    '31_ProjectionThreadsCreateBranchFlowCompleted',
+    '32_ReconcileImportedSchemaLineage',
+    '33_ProjectionThreadsSidechatSource',
+    '34_AuthAccessManagement',
+    '35_NormalizeLegacyModelSelectionOptions',
+    '36_ProjectionThreadsPinned',
+    '37_ProjectionSnapshotCapIndexes',
+    '38_ReconcileLegacySidechatSource',
+    '39_ReconcileLegacyPinnedThreads',
+    '40_ProjectionThreadsPinnedMessagesNotes',
+    '41_ProjectionProjectsPinned',
+    '42_ProjectionThreadsMarkers',
+    '43_ProfileStatsIndexes',
+    '44_Automations',
+    '45_AutomationPolicies',
+    '46_AutomationCompletionPolicy',
+    '47_AutomationCompletionPolicyVersion',
+    '48_AutomationCompletionEvaluationBacklog',
+    '49_ProjectionThreadMessagesDispatchOrigin',
+    '50_ProfileStatsArchive',
+    '51_ProfileStatsDeletedTokensModel',
+    '52_ProjectionThreadUserMessageSummaryIndex',
+    '53_BackfillThreadActivitySequence',
+    '54_DurableProviderCommandDelivery',
+    '55_ManagedAttachments',
+    '56_CommandReceiptFingerprints',
+    '57_ThreadScopedProjectionMessageIdentity',
+    '58_ThreadScopedPendingApprovalIdentity',
+    '59_ProviderSessionLifecycleGeneration',
+    '60_PendingApprovalLifecycleGeneration',
+    '61_PendingApprovalSettlementState',
+    '62_PendingInteractionSettlementParity',
+    '63_ProjectionMessageCausalSequence',
+    '64_DurableProviderCommandDeliveryCutover',
+    '65_DurableQueuedTurnPromotions',
+    '66_DurableProviderRuntimeEvents',
+    '67_ProviderDeliveryReconciliation',
+    '68_GitHandoffOperations',
+    '69_ProjectPullRequestPins',
+    '70_AgentGatewayOperations',
+    '71_ProjectionThreadsGatewayProvenance',
+    '72_AgentGatewayOperationRetention',
+    '73_OperationalDiagnostics',
+    '74_ExternalMcpIntegrations',
+    '75_ExternalMcpActiveCapacity',
+    '76_ExternalMcpHardening',
+    '77_ExternalMcpCompensatingCapacity',
+    '78_ExternalMcpLiveTurnCapacity',
+    '79_Spaces',
+    '80_ExternalMcpProjectScope',
+    '81_AutomationProposals',
+    '82_AutomationMemory',
+    '83_AutomationHeartbeatEligibility',
+    '84_AutomationNotificationPolicy',
+    '85_AutomationSettings',
+    '86_NormalizeStudioThreadWorkspaces',
+    '87_DropUnusedOrchestrationEventIndexes',
+    '88_ProjectionThreadsSettledAt',
+    '89_RecoverRetentionHiddenThreads',
+    '90_ProjectionThreadMessageTextSegments',
+    '91_AutomationFailureTolerance',
+    '92_BackfillAutomationRunThreadSource',
+    '93_BackfillMaxIterationsDisabledReason',
+    '94_ProjectionThreadsGoal',
+    '95_ProjectionThreadsGoalTiming',
+    '96_ProjectionThreadsGoalAchievements',
+    '97_ProjectMcpActivation',
+    '98_PiSubagentExecutions',
+    '99_PiSubagentLeasesAndProgress',
+    '100_PiSubagentAdmissionIdentity',
+    ... 5 more items
+  ]
+}
+
+stdout | src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC6 stage 6: a deliberately wedged real child reaches watchdog bands 70-74, invokes real session abort and real provider-session stop, and hands off teardown durably without claiming destructive proof
+[12:29:54.437] INFO (#7843): orchestration projection pipeline bootstrapped { projectors: 10 }
+[12:29:54.437] INFO (#7843): orchestration engine started { sequence: 0 }
+
+ ❯ |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts (10 tests | 8 failed | 1 skipped) 471666ms
+     × T17-AC1 stage 1: a real Pi session started by the public WS turn command negotiates managed capability and starts one identity-stamped long-running execution whose identity is continuous from the durable row to the WS card 751ms
+     × T17-AC2 stage 2: a slow real child detaches within wait + 500 ms with bounded/latest progress, and a genuinely new WS client restores the execution card from fresh thread detail 90024ms
+     × T17-AC7 stage 7: real capability-mismatch and bridge-absent Pi sessions retain legacy semantics and never project managed or recoverable executions 613ms
+     × T17-AC9 stage 3: a detached real slow child is cancelled durably through the public WS card-cancel command, shows a cancelling intent before terminal acknowledgement, settles cancelled on child_ack evidence for the current attempt/generation, and leaves no live child in the bridge registry 90064ms
+     × T17-AC4 stage 4: two real background slow children under one parent thread complete into one accepted bounded batch, produce exactly one parent follow-up, and each result is retrievable individually through the public read RPC with stable denial on unknown identity 90073ms
+     × T17 slice 4 stage 5: a fresh production WS boot on the same durable root reconciles one real nonterminal child honestly and does not auto-replay or resume it 90262ms
+     × T17-AC6 stage 6: a deliberately wedged real child reaches watchdog bands 70-74, invokes real session abort and real provider-session stop, and hands off teardown durably without claiming destructive proof 90274ms
+     × T17-AC8/AC9 teardown: dispose is idempotent, removes the owned temp root, restores the environment, and leaves the user Pi home unchanged 9517ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC1 stage 1: a real Pi session started by the public WS turn command negotiates managed capability and starts one identity-stamped long-running execution whose identity is continuous from the durable row to the WS card
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:278:34
+    276|       "managed capability negotiation",
+    277|     );
+    278|     expect(capability.isManaged).toBe(true);
+       |                                  ^
+    279|     expect(capability.status).toBe("managed_enabled");
+    280|     expect(capability.capabilities).toContain("managed-spawn");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC2 stage 2: a slow real child detaches within wait + 500 ms with bounded/latest progress, and a genuinely new WS client restores the execution card from fresh thread detail
+Error: Timed out after 90000ms waiting for slow managed admission.
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+    2143|     }
+    2144|     if (Date.now() >= deadline) {
+    2145|       throw new Error(`Timed out after ${timeoutMs}ms waiting for ${de…
+       |             ^
+    2146|     }
+    2147|     await new Promise((resolve) => setTimeout(resolve, 50));
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:388:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC7 stage 7: real capability-mismatch and bridge-absent Pi sessions retain legacy semantics and never project managed or recoverable executions
+Error: T17-AC7 stage 7 failed: expected 'bridge_absent' to be 'capability_mismatch' // Object.is equality; diagnostics=[]; modelRequests=[]
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:669:13
+    667|       ).toBe(false);
+    668|     } catch (error) {
+    669|       throw new Error(
+       |             ^
+    670|         `${stage} failed: ${error instanceof Error ? error.message : S…
+    671|           `diagnostics=${JSON.stringify(harness.lastOperationDiagnosti…
+
+Caused by: AssertionError: expected 'bridge_absent' to be 'capability_mismatch' // Object.is equality
+
+Expected: "capability_mismatch"
+Received: "bridge_absent"
+
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:592:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC9 stage 3: a detached real slow child is cancelled durably through the public WS card-cancel command, shows a cancelling intent before terminal acknowledgement, settles cancelled on child_ack evidence for the current attempt/generation, and leaves no live child in the bridge registry
+Error: Timed out after 90000ms waiting for T17-AC9 stage 3 managed admission.
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+    2143|     }
+    2144|     if (Date.now() >= deadline) {
+    2145|       throw new Error(`Timed out after ${timeoutMs}ms waiting for ${de…
+       |             ^
+    2146|     }
+    2147|     await new Promise((resolve) => setTimeout(resolve, 50));
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:731:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC4 stage 4: two real background slow children under one parent thread complete into one accepted bounded batch, produce exactly one parent follow-up, and each result is retrievable individually through the public read RPC with stable denial on unknown identity
+Error: T17-AC4 stage 4 failed: Timed out after 90000ms waiting for T17-AC4 stage 4 first managed admission.; modelRequests=[{"model":"agent-driver","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false},{"model":"agent-driver-background","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false}]
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1193:13
+    1191|       });
+    1192|     } catch (error) {
+    1193|       throw new Error(
+       |             ^
+    1194|         `${stage} failed: ${error instanceof Error ? error.message : S…
+    1195|           `modelRequests=${JSON.stringify(harness.modelServer.requests…
+
+Caused by: Error: Timed out after 90000ms waiting for T17-AC4 stage 4 first managed admission.
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1037:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17 slice 4 stage 5: a fresh production WS boot on the same durable root reconciles one real nonterminal child honestly and does not auto-replay or resume it
+Error: T17 slice 4 stage 5 failed: Timed out after 90000ms waiting for T17 slice 4 stage 5 managed admission.; diagnostics=[]; modelRequests=[{"model":"agent-driver-restart","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false}]
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1526:13
+    1524|       }
+    1525|     } catch (error) {
+    1526|       throw new Error(
+       |             ^
+    1527|         `${stage} failed: ${error instanceof Error ? error.message : S…
+    1528|           `diagnostics=${JSON.stringify(harness.lastOperationDiagnosti…
+
+Caused by: Error: Timed out after 90000ms waiting for T17 slice 4 stage 5 managed admission.
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1259:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC6 stage 6: a deliberately wedged real child reaches watchdog bands 70-74, invokes real session abort and real provider-session stop, and hands off teardown durably without claiming destructive proof
+Error: T17-AC6 stage 6 failed (pi_subagent_watchdog_t17_stage6_guard): Timed out after 90000ms waiting for T17-AC6 stage 6 managed admission.
+Error: Timed out after 90000ms waiting for T17-AC6 stage 6 managed admission.
+    at waitFor (/private/tmp/symphony-t06/apps/server/src/provider/piSubagentRealPiAcceptance.test.ts:2145:13)
+    at /private/tmp/symphony-t06/apps/server/src/provider/piSubagentRealPiAcceptance.test.ts:1595:25
+    at file:///private/tmp/symphony-t06/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20; diagnostics=[]; modelRequests=[{"model":"agent-driver-background","hasAgentTool":false,"hasBashTool":true,"hasUserTurnAfterTool":true,"latestUserStartsWithDelegate":false,"delegated":false}]
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+    2143|     }
+    2144|     if (Date.now() >= deadline) {
+    2145|       throw new Error(`Timed out after ${timeoutMs}ms waiting for ${de…
+       |             ^
+    2146|     }
+    2147|     await new Promise((resolve) => setTimeout(resolve, 50));
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1595:25
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1852:13
+
+Caused by: Error: Timed out after 90000ms waiting for T17-AC6 stage 6 managed admission.
+ ❯ waitFor src/provider/piSubagentRealPiAcceptance.test.ts:2145:13
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1595:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  |wallclock| src/provider/piSubagentRealPiAcceptance.test.ts > Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4) > T17-AC8/AC9 teardown: dispose is idempotent, removes the owned temp root, restores the environment, and leaves the user Pi home unchanged
+AssertionError: expected '31c1b30fc01a96de975f6066bc7747aa7549f…' to deeply equal 'deecd34d35981f8932a2da3816cb59c286829…'
+
+Expected: "deecd34d35981f8932a2da3816cb59c286829a8a76ddc03b32156f1a16a955e3"
+Received: "31c1b30fc01a96de975f6066bc7747aa7549fe3d01c6ac4f379b7e3d89a68b2d"
+
+ ❯ src/provider/piSubagentRealPiAcceptance.test.ts:1877:26
+    1875|     expect(harness.envWasRestored()).toBe(true);
+    1876|     const after = verifyRealPiExtensionProvenance().snapshotUserPiHome…
+    1877|     expect(after.digest).toEqual(userPiHomeDigest);
+       |                          ^
+    1878|   }, 120_000);
+    1879|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 1 passed | 1 skipped (10)
+   Start at  12:23:40
+   Duration  473.97s (transform 1.64s, setup 0ms, import 2.22s, tests 471.67s, environment 0ms)
+

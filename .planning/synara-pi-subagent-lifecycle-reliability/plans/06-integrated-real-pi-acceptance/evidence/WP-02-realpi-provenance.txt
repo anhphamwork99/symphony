@@ -1,0 +1,265 @@
+WP-02 non-destructive real-Pi provenance and zero-delta gate record — Ticket 06
+===============================================================================
+Recorded: 2026-08-28 (local, UTC+7) · host: Darwin arm64 (macOS)
+Executor: WP-02 implementation worker, evidence-only packet
+Class of this record: P (planning/provenance). The five producers below are R
+class (controlled real-Pi, non-destructive).
+Consumes: WP-01 evidence (commit 9208e1728) and the WP-01-retained worktrees.
+This record makes NO destructive process claim of any kind. The manual
+destructive leg (SYNARA_T17_MANUAL_TEARDOWN=1) is excluded from every producer
+by explicit env removal (`env -u SYNARA_T17_MANUAL_TEARDOWN`).
+
+1. FROZEN COMPOSITION (re-verified at WP-02 start)
+--------------------------------------------------
+Symphony behavioral candidate (detached):
+  path    : /tmp/symphony-t06
+  HEAD    : 12fd6686edc26a3fa0382e8bdeb83a1be8045539
+            == WP-01 pin, exact
+  branch  : `git status -b --short` → "## HEAD (no branch)" (detached)
+  tracked delta (status --short --untracked-files=no): 0 lines
+  Pi acceptance-surface working-tree diff (7 named paths): EMPTY
+
+Alfie controlled provider worktree (detached):
+  path    : /tmp/alfie-t06
+  HEAD    : 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+            == WP-01 pin and fixture pinnedCommit, exact
+  branch  : "## HEAD (no branch)" (detached)
+  status  : 0 lines (clean)
+  origin  : https://github.com/anhphamwork99/alfie.git
+            == fixture expectedRepositoryUrl (exact match)
+
+User Alfie checkout: /Users/anhpham99/alfie (UNTOUCHED — not referenced by any
+producer; ALFIE_REPO_DIR points exclusively at /tmp/alfie-t06).
+
+2. PROVENANCE FIXTURE (5/5 hashes re-verified at WP-02 start)
+-------------------------------------------------------------
+Fixture: apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json
+  expectedRepositoryUrl : https://github.com/anhphamwork99/alfie.git   MATCH
+  pinnedCommit          : 3fe340b401ca86bcbe8b55abd4de107e1d93482e     MATCH
+  packageName           : @alfie/pi-subagents      (package.json: MATCH)
+  packageVersion        : 0.15.0-alfie.6           (package.json: MATCH)
+shasum -a 256 recomputed from /tmp/alfie-t06 at WP-02 start — ALL MATCH:
+  954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f
+    agent/extensions/pi-subagents/package.json
+  c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9
+    agent/extensions/pi-subagents/src/index.ts
+  1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783
+    agent/extensions/pi-subagents/src/agent-manager.ts
+  98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2
+    agent/extensions/pi-subagents/src/agent-runner.ts
+  ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0
+    agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+
+3. TOOLCHAIN AND PI SDK
+-----------------------
+node  v24.14.1   (>= 24.10 required by piSubagentRealPiAcceptance.test.ts's
+                  node:sqlite import; producer 1 runs under Node)
+bun   1.3.12     (producers 2–5 run under the repository-pinned Bun runtime)
+vitest 4.1.10    (repository-pinned; `RUN v4.1.10` banner in each log)
+Pi SDK (installed under /tmp/symphony-t06/node_modules/.bun, resolved by
+bun install --frozen-lockfile at WP-01, manifests read at WP-02):
+  @earendil-works/pi-agent-core     0.83.0
+  @earendil-works/pi-ai             0.83.0
+  @earendil-works/pi-coding-agent   0.83.0
+  @earendil-works/pi-tui            0.83.0
+  (all four == ^0.83.0 declared in apps/server/package.json)
+
+4. PROTECTED OWNER WIP GATE (main checkout /Users/anhpham99/symphony)
+---------------------------------------------------------------------
+Main HEAD at WP-02 start: 9208e17288a4dd0862c8078f4ecdd332fff02652
+  (WP-01 evidence commit).
+Pre-run aggregate WIP diff hash:
+  git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+  → ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8  EXACT
+Staged files at WP-02 start: 0 (`git diff --cached --name-only` empty).
+Pi-acceptance-surface zero-delta gate, pre-run:
+  git diff --name-status 12fd6686edc26a3fa0382e8bdeb83a1be8045539..HEAD -- \
+    apps/server/src/provider apps/server/src/persistence \
+    apps/server/src/orchestration apps/server/scripts/wallclock-tests.ts \
+    apps/server/vitest.config.ts packages/contracts/src/piSubagents.ts
+  → EMPTY.
+Main status --short: exactly the three protected files modified-unstaged.
+
+5. PRODUCER AUTHORIZATION AND DESTRUCTIVE-LEG EXCLUSION
+-------------------------------------------------------
+Exactly five standalone wallclock files are authorized (WP-02 §"The five
+standalone files"); each runs in its OWN `vitest run --project wallclock
+--maxWorkers=1 --no-file-parallelism` process, serially, from
+/tmp/symphony-t06/apps/server, with ALFIE_REPO_DIR=/tmp/alfie-t06 and
+`env -u SYNARA_T17_MANUAL_TEARDOWN` so the manual destructive test
+("MANUAL T17-AC6: … band 76 fences the generation") can only ever skip.
+Every producer preserves its true exit via `set -o pipefail` +
+`status=${PIPESTATUS[0]}` (the vitest leg's exit, not tee's).
+No other wallclock file was run; no behavioral failure was retried.
+The expected skip set for producer 1 is exactly the one manual test
+(it.skipIf(SYNARA_T17_MANUAL_TEARDOWN !== "1")); any other skip is challenge.
+
+6. PRODUCER RUNS (R class — EXECUTED 2026-08-28 12:23–12:54 local)
+------------------------------------------------------------------
+All five authorized files ran, serially, one standalone vitest process each,
+from /tmp/symphony-t06/apps/server, ALFIE_REPO_DIR=/tmp/alfie-t06,
+`env -u SYNARA_T17_MANUAL_TEARDOWN`, `set -o pipefail` + PIPESTATUS[0].
+No other wallclock file was run; no behavioral failure was retried.
+
+6a. piSubagentRealPiAcceptance.test.ts — Node v24.14.1 producer
+  Command shape: per WP-02 §"Exact commands" (node ../../node_modules/vitest.mjs …).
+  Start 12:23:39 local; end 12:31:34 local; vitest Duration 473.97s.
+  PRODUCER_EXIT (PIPESTATUS[0]): 1 — LEG FAILED.
+  Result line: `Tests  8 failed | 1 passed | 1 skipped (10)`.
+  Skips: exactly the one MANUAL T17-AC6 destructive test
+  (it.skipIf SYNARA_T17_MANUAL_TEARDOWN !== "1") — the expected skip set; no
+  unexpected skip. All mandatory non-manual stages were collected and executed.
+  Stage 0 (provenance + owned isolation) PASSED (1 passed).
+  Failing rows (observed vs required):
+    - T17-AC1 stage 1 (piSubagentRealPiAcceptance.test.ts:278): managed
+      capability negotiation returned isManaged=false; required true
+      ("managed_enabled" + "managed-spawn").
+    - T17-AC2 stage 2 (:388 via waitFor :2145): "Timed out after 90000ms
+      waiting for slow managed admission."
+    - T17-AC7 stage 7 (:669, caused by :592): observed session kind
+      'bridge_absent', required 'capability_mismatch'; diagnostics=[];
+      modelRequests=[] — the extension-free negative control was NOT
+      distinguishable from the stripped-capability control.
+    - T17-AC9 stage 3 (:731): timed out waiting for managed admission.
+    - T17-AC4 stage 4 (:1193, caused by :1037): timed out; modelRequests
+      show hasAgentTool:false, delegated:false on every real request —
+      the Agent tool was never registered in any real Pi session.
+    - T17 slice 4 stage 5 (:1526, caused by :1259): timed out waiting for
+      managed admission; hasAgentTool:false.
+    - T17-AC6 stage 6 (:1852, caused by :1595): timed out waiting for
+      managed admission; hasAgentTool:false. (This leg reaches only watchdog
+      handoff bands 70–74 by design; it made no destructive claim; band 76
+      was never reached and was not claimed.)
+    - T17-AC8/AC9 teardown (:1877): user Pi home digest changed during the
+      run: expected deecd34d35981f8932a2da3816cb59c286829a8a76ddc03b32156f1a16a955e3,
+      observed 31c1b30fc01a96de975f6066bc7747aa7549fe3d01c6ac4f379b7e3d89a68b2d.
+      harness.envWasRestored() was true. Post-run host inspection (12:19–12:32
+      window, sessions excluded by the snapshot's own method): the only
+      ~/.pi path modified in-window outside agent/sessions is
+      ~/.pi/agent/fff/frecency/data.mdb (mtime 12:31:34 — the producer's own
+      teardown minute). The snapshot digest walks all ~/.pi except
+      agent/sessions and models-store.json, so this external-tool (Pi FFF
+      frecency index) write is the observed digest delta. It was NOT caused
+      by a Symphony harness write path under this record's evidence; root
+      attribution beyond this observation is left to the challenge owner.
+      No user live-instance content is claimed mutated by the harness.
+
+6b. piSubagentCanonicalIdentityAcceptance.test.ts — Bun producer
+  Start 12:41:12; end 12:47:15 local; vitest Duration 362.36s.
+  PRODUCER_EXIT (PIPESTATUS[0]): 1 — LEG FAILED.
+  Result line: `Tests  2 failed | 7 passed (9)`.
+  The 7 unit-simulation tests passed; BOTH real-Pi F5 steer-race tests timed
+  out at their 180s test timeouts:
+    - terminal-first (:878): waiting on sdk-insertion counter after slow
+      child hold — steer_subagent tool never registered (extension absent
+      in the real child session).
+    - enqueue-first (:881): waiting for natural live retirement/bridge
+      removal after release.
+  Plus 2 vitest-unhandled SocketCloseError uncaught exceptions bubbling from
+  the harness dispose path (helpers :2151) after the timeouts.
+
+6c. piSubagentLifecycleContainmentRealPiAcceptance.test.ts — Bun producer
+  Start 12:47:26; end 12:51:29 local; vitest Duration 242.12s.
+  PRODUCER_EXIT (PIPESTATUS[0]): 1 — LEG FAILED.
+  Result line: `Tests  1 failed (1)` — test timed out at its 240s limit at
+  the band-74/attemptId step (:218 region, survivors record write).
+  Its emitted T03_REAL_PI_EVIDENCE shows the real composition progressed
+  further here: admissions=1, delegatedModelRequests=1,
+  extensionSteerEmissions=1 (one REAL steer through the extension), journal
+  sequences [1,2,3,40], full band ordering 74/75/77/78 + proven-76 fence +
+  stale-terminal ignored. The failure occurred after those proofs, at the
+  post-terminal survivors-recording step. 1 unhandled SocketCloseError
+  uncaught exception from the harness dispose path (helpers :2151).
+
+6d. piSubagentRestartAcceptance.test.ts — Bun producer
+  Start 12:53:12; end 12:53:22 local; vitest Duration 9.76s.
+  PRODUCER_EXIT (PIPESTATUS[0]): 0 — LEG PASSED.
+  Result: `Test Files  1 passed (1)` · `Tests  1 passed (1)` · 0 skipped.
+  Executed: "T10-AC3/AC1/AC5: a real live bridge record under the same
+  identity refreshes observation; the no-owner view orphans; a late fenced
+  terminal is ignored and counted" (:360).
+
+6e. piSubagentResumeAcceptance.test.ts — Bun producer
+  Start 12:53:35; end 12:53:39 local; vitest Duration 3.54s.
+  PRODUCER_EXIT (PIPESTATUS[0]): 0 — LEG PASSED.
+  Result: `Test Files  1 passed (1)` · `Tests  1 passed (1)` · 0 skipped.
+  Executed: "T14-AC1/AC4/AC6: one explicit resume creates the new child
+  attempt under the same execution; no implicit path resumes" (:348).
+
+POST-RUN GATES (all five producers complete):
+  Symphony worktree: HEAD still 12fd6686edc26a3fa0382e8bdeb83a1be8045539
+    (detached); tracked delta 0 lines; named-surface working diff EMPTY.
+  Alfie worktree: HEAD still 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+    (detached); status 0 lines (clean).
+  Main checkout: staged 0; status exactly the three protected WIP files +
+    new WP-02 evidence artifacts; WIP aggregate diff hash re-computed
+    ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8 — EXACT.
+  Zero-delta gate (12fd6686..HEAD on the named surface): EMPTY.
+
+7. WORKTREE DISPOSITION
+-----------------------
+Both worktrees remain at their exact pins with zero tracked delta after the
+producers (re-verified post-run), retained for WP-03 (manual destructive run)
+consumption. No `git worktree remove` executed by WP-02.
+
+8. LEG-SET OUTCOME AND STOP
+---------------------------
+Verification contract requires five legs exit 0 standalone. Observed:
+2/5 legs passed (restart 0, resume 0); 3/5 legs FAILED exit 1 (realpi,
+canonical-identity, lifecycle-containment). Per WP-02 §Escalation ("any leg
+fails" → challenge) and PLAN §11, execution stopped at this record; WP-02 was
+NOT marked completed; no commit was made by the attempt-1 run; Ticket 06 did
+not advance. See WP-02-nondestructive-disposition.md §4 for the
+failing-row detail and the differential root-cause evidence (isolated Alfie
+worktree lacks gitignored ext-local node_modules — @sinclair/typebox, croner,
+nanoid, yaml — and the user checkout's built outputs, which Ticket 05's
+passing legs implicitly consumed via ALFIE_REPO_DIR=/Users/anhpham99/alfie).
+
+9. CORRECTION AMENDMENT (recorded 2026-08-28, before any rerun)
+---------------------------------------------------------------
+This §9 amends §6/§8 with the owner-resolved, source-grounded correction;
+§1–§8 above stand unchanged as the attempt-1 record.
+
+- Attempt-1 classification: ENVIRONMENT/RUNNER EVIDENCE, NOT a behavioral
+  PASS. The three failed-leg raw logs are durably preserved byte-identical
+  under new explicit names (never to be overwritten or deleted):
+    WP-02-attempt-01-realpi-acceptance.log
+      SHA-256 c666c1e644bcd4c2dd74cb14a4bff177ac540b22c8290af3c40da3ed492f24f2
+    WP-02-attempt-01-canonical-identity-acceptance.log
+      SHA-256 8543253556bf745a7fa3480582f42281e1189e4501d12e696d06b9158949876c
+    WP-02-attempt-01-lifecycle-containment-realpi.log
+      SHA-256 14c505321efc374a32fda4c75dbfc299c86742499c38ab764fe4be152d9a93cd
+  The two passing logs keep their canonical names unchanged
+  (WP-02-restart-acceptance.log bd85766c5955d429eda11d97f7b4784f04bcf93b69fc7e6b6d43096c736d935e,
+  WP-02-resume-acceptance.log a115ec4dba98b4af68a5a96bdc7e5a5da1383d3357468d94ce682250e3779d29)
+  and remain reusable final evidence.
+- Source-grounded correction: bounded `npm ci` at
+  `/tmp/alfie-t06/agent/extensions/pi-subagents` (the extension ships
+  package-lock.json; entry `"pi": {"extensions": ["./src/index.ts"]}`).
+  The provenance verifier (piSubagentRealPiAcceptanceHelpers.ts:561–580)
+  explicitly ignores `node_modules` in `git status --porcelain`, so this is
+  environment preparation, NOT an Alfie source/pin change; §1's clean-status
+  and pin invariants are unaffected. Zero-tracked-delta proof required
+  post-install (WP-02 §"Attempt 2" item 1).
+- Runner correction: all three corrected legs run under Node v24.14.1
+  (root engines node ^24.13.1; apps/server >=24.10; Node-wallclock policy),
+  because attempt-1 legs 2–3 additionally failed on Bun-only Effect
+  SocketCloseError schema exceptions (`code` undefined) from the harness
+  dispose path (§6b/§6c; helpers :2151).
+- Producer-window rule: no concurrent FFF/semantic/search or other
+  agent-tool activity during the three rerun commands (bounds the §6a
+  frecency-digest interference class; WP-02 §"Attempt 2" item 3).
+- Scope: exactly one corrected attempt of ONLY the three failed legs, after
+  the npm ci; corrected-attempt logs take the original canonical WP-02
+  names; attempt-01 names above are permanent. No producer was executed as
+  part of this amendment record.
+
+10. POST-AMENDMENT GATES (at this correction commit, pre-rerun)
+---------------------------------------------------------------
+Main HEAD parent: 9208e17288a4dd0862c8078f4ecdd332fff02652 (WP-01 evidence
+commit). Protected WIP files still modified-unstaged; aggregate diff hash
+re-verified ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+— EXACT. Staged before this correction commit: 0. Zero-delta gate
+(12fd6686..HEAD named surface): EMPTY. Symphony worktree /tmp/symphony-t06:
+12fd6686, tracked delta 0. Alfie worktree /tmp/alfie-t06: 3fe340b4, status
+clean, ext-local node_modules still ABSENT (no npm ci run yet).
