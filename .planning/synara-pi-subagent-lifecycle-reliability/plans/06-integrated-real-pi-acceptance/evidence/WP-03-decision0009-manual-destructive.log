@@ -1,0 +1,12 @@
+
+ RUN  v4.1.10 /private/tmp/symphony-t06/apps/server
+
+(node:28949) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T17-AC6 manual teardown RUN_RECORD executionId=exec_c5fcab13-1c13-40f7-91ca-73b725a981fd attemptId=att_e2a5d51f-29ca-43cc-8640-fc4adc0bd3cb rootPid=29538 descendantPid=29552 termEvidence=root,descendant noBand76WhileLive=true harnessRoot=/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/synara-realpi-t17-h0XFZK bands=75,76 generation=1->2
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 10 skipped (11)
+   Start at  00:06:44
+   Duration  34.85s (transform 1.65s, setup 0ms, import 2.22s, tests 32.56s, environment 0ms)
+
