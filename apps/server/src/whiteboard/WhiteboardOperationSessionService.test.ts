@@ -627,6 +627,92 @@ describe("WhiteboardOperationSessionService", () => {
     );
   });
 
+  it("rejects mismatched Take Over batch without dispatch or pending state", async () => {
+    let dispatchCount = 0;
+    await runScoped(
+      (service) =>
+        Effect.gen(function*() {
+          const attached = yield* service.attachSession(attachInput("batch-mismatch"));
+          const identity = identityOf(attached);
+          const operation = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-correct",
+          });
+          const mismatch = Effect.runPromise(
+            service.takeOver({
+              ...identity,
+              batchId: "batch-wrong",
+              operationId: operation.operationId,
+              expectedGeneration: operation.generation,
+              takeOverRequestId: "take-over-batch-mismatch",
+            }),
+          );
+          yield* Effect.promise(() =>
+            expectCode(mismatch, WHITEBOARD_OPERATION_ERROR.identityMismatch),
+          );
+          expect(dispatchCount).toBe(0);
+          const progress = yield* service.publishProgress(
+            progressInput(identity, operation, 1),
+          );
+          expect(progress.kind).toBe("operation-progress");
+        }),
+      {
+        serverInstanceId: SERVER_ID,
+        containmentDispatcher: async () => {
+          dispatchCount += 1;
+          return "acknowledged";
+        },
+      },
+    );
+  });
+
+  it("refuses release while a subscriber remains registered", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("subscribed-release"));
+        const identity = identityOf(attached);
+        yield* service.subscribe({ ...identity, lastServerSequence: 1 });
+        const release = Effect.runPromise(service.releaseSession(identity));
+        yield* Effect.promise(() =>
+          expectCode(release, WHITEBOARD_OPERATION_ERROR.sessionActive),
+        );
+        const secondSubscription = yield* service.subscribe({
+          ...identity,
+          lastServerSequence: 1,
+        });
+        expect(secondSubscription).toBeDefined();
+      }),
+    );
+  });
+
+  it("returns sessionLost when releasing a cap-lost protected session", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("lost-release"));
+        const identity = identityOf(attached);
+        const operation = yield* service.admitOperation({
+          ...identity,
+          batchId: "batch-lost-release",
+        });
+        for (let sequence = 1; sequence <= 254; sequence += 1) {
+          yield* service.publishProgress(
+            progressInput(identity, operation, sequence),
+          );
+        }
+        const overflow = Effect.runPromise(
+          service.publishProgress(progressInput(identity, operation, 255)),
+        );
+        yield* Effect.promise(() =>
+          expectCode(overflow, WHITEBOARD_OPERATION_ERROR.sessionLost),
+        );
+        const release = Effect.runPromise(service.releaseSession(identity));
+        yield* Effect.promise(() =>
+          expectCode(release, WHITEBOARD_OPERATION_ERROR.sessionLost),
+        );
+      }),
+    );
+  });
+
   it("records an Effect-clock acknowledgement timeout without synthesizing terminal truth", async () => {
     await runScoped(
       (service) =>
@@ -710,6 +796,41 @@ describe("WhiteboardOperationSessionService", () => {
         expect(events[1]?.serverSequence).toBe(1);
         expect(events[2]?.serverSequence).toBe(operation.serverSequence);
       }),
+    );
+  });
+
+  it("preflights acknowledged containment plus terminal before publishing either", async () => {
+    await runScoped(
+      (service) =>
+        Effect.gen(function*() {
+          const attached = yield* service.attachSession(attachInput("containment-cap"));
+          const identity = identityOf(attached);
+          const operation = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-containment-cap",
+          });
+          for (let sequence = 1; sequence <= 252; sequence += 1) {
+            yield* service.publishProgress(
+              progressInput(identity, operation, sequence),
+            );
+          }
+          yield* service.takeOver({
+            ...identity,
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            expectedGeneration: operation.generation,
+            takeOverRequestId: "take-over-containment-cap",
+          });
+          yield* Effect.sleep(Duration.millis(5));
+          const release = Effect.runPromise(service.releaseSession(identity));
+          yield* Effect.promise(() =>
+            expectCode(release, WHITEBOARD_OPERATION_ERROR.sessionLost),
+          );
+        }),
+      {
+        serverInstanceId: SERVER_ID,
+        containmentDispatcher: async () => "acknowledged",
+      },
     );
   });
 

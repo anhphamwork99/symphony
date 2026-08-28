@@ -699,6 +699,36 @@ export const makeWhiteboardOperationSessionService = (options: {
       }
     };
 
+    const canRetainTransition = (
+      state: ServiceState,
+      session: SessionRecord,
+      events: ReadonlyArray<WhiteboardOperationSessionEvent>,
+    ): boolean => {
+      const addedBytes = events.reduce(
+        (total, event) => total + byteLengthOf(event),
+        0,
+      );
+      if (state.retainedBytesTotal + addedBytes > limits.maxReplayBytesTotal) {
+        const candidates = [...state.sessions.values()]
+          .filter((candidate) => candidate !== session)
+          .sort((a, b) => a.order - b.order);
+        for (const candidate of candidates) {
+          compactSession(state, candidate);
+          if (
+            state.retainedBytesTotal + addedBytes <=
+            limits.maxReplayBytesTotal
+          ) {
+            break;
+          }
+        }
+      }
+      return (
+        session.rows.length + events.length <= limits.maxReplayEventsPerSession &&
+        session.retainedBytes + addedBytes <= limits.maxReplayBytesPerSession &&
+        state.retainedBytesTotal + addedBytes <= limits.maxReplayBytesTotal
+      );
+    };
+
     const terminateSubscriber = (
       state: ServiceState,
       session: SessionRecord,
@@ -1154,6 +1184,58 @@ export const makeWhiteboardOperationSessionService = (options: {
           requestedGeneration: takeOver.requestedGeneration,
           result: outcome,
         };
+        const operation = session.operations.get(
+          operationKeyOf(takeOver.operationId, takeOver.requestedGeneration),
+        );
+        let terminal: WhiteboardOperationTerminalRecord | undefined;
+        let terminalEvent: WhiteboardOperationTerminalEvent | undefined;
+        if (
+          outcome === "acknowledged" &&
+          operation !== undefined &&
+          operation.terminal === undefined
+        ) {
+          const record = deriveTerminal(
+            operation,
+            operation.acknowledgementSummary,
+            "complete",
+          );
+          if (record !== undefined) {
+            terminal =
+              record.outcome === "zero-valid"
+                ? {
+                    ...record,
+                    generation: takeOver.generation,
+                    containmentResult: "acknowledged",
+                  }
+                : record.rejectedCount > 0
+                  ? {
+                      ...record,
+                      generation: takeOver.generation,
+                      outcome: "failed-partial",
+                      terminalReason: "browser-application-failed",
+                      containmentResult: "acknowledged",
+                    }
+                  : {
+                      ...record,
+                      generation: takeOver.generation,
+                      outcome: "interrupted",
+                      terminalReason: "take-over-acknowledged",
+                      containmentResult: "acknowledged",
+                    };
+            terminalEvent = {
+              kind: "operation-terminal",
+              ...identityOf(session),
+              serverSequence: session.lastServerSequence + 2,
+              ...terminal,
+            };
+          }
+        }
+        const transitionEvents =
+          terminalEvent === undefined ? [event] : [event, terminalEvent];
+        if (!canRetainTransition(state, session, transitionEvents)) {
+          yield* enterLostState(state, session);
+          return;
+        }
         const retained = yield* pushEvent(state, session, event);
         if (!retained) {
           yield* enterLostState(state, session);
@@ -1161,54 +1243,13 @@ export const makeWhiteboardOperationSessionService = (options: {
         }
         takeOver.status = "resolved";
         takeOver.containmentResult = outcome;
-        if (outcome !== "acknowledged") {
-          // The generation fence remains; the lineage stays non-retryable;
-          // the session remains protected with no interrupted-success claim.
+        if (outcome !== "acknowledged" || operation === undefined) {
           return;
         }
-        const operation = session.operations.get(
-          operationKeyOf(takeOver.operationId, takeOver.requestedGeneration),
-        );
-        if (operation === undefined || operation.terminal !== undefined) {
+        if (terminal === undefined || terminalEvent === undefined) {
           return;
         }
-        const record = deriveTerminal(
-          operation,
-          operation.acknowledgementSummary,
-          "complete",
-        );
-        if (record === undefined) {
-          return;
-        }
-        const terminal: WhiteboardOperationTerminalRecord =
-          record.outcome === "zero-valid"
-            ? {
-                ...record,
-                generation: takeOver.generation,
-                containmentResult: "acknowledged",
-              }
-            : record.rejectedCount > 0
-              ? {
-                  ...record,
-                  generation: takeOver.generation,
-                  outcome: "failed-partial",
-                  terminalReason: "browser-application-failed",
-                  containmentResult: "acknowledged",
-                }
-              : {
-                  ...record,
-                  generation: takeOver.generation,
-                  outcome: "interrupted",
-                  terminalReason: "take-over-acknowledged",
-                  containmentResult: "acknowledged",
-                };
-        const interruptedEvent: WhiteboardOperationTerminalEvent = {
-          kind: "operation-terminal",
-          ...identityOf(session),
-          serverSequence: session.lastServerSequence + 1,
-          ...terminal,
-        };
-        const terminalRetained = yield* pushEvent(state, session, interruptedEvent);
+        const terminalRetained = yield* pushEvent(state, session, terminalEvent);
         if (!terminalRetained) {
           yield* enterLostState(state, session);
           return;
@@ -1650,6 +1691,12 @@ export const makeWhiteboardOperationSessionService = (options: {
             );
           }
           const operation = exactOperation;
+          if (operation.batchId !== decoded.batchId) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.identityMismatch,
+              "take over batch identity does not match the admitted operation",
+            );
+          }
           if (operation.terminal !== undefined) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationTerminal,
@@ -1862,13 +1909,14 @@ export const makeWhiteboardOperationSessionService = (options: {
           const session = yield* classifySession(state, decoded);
           if (session.lost) {
             return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.sessionActive,
+              WHITEBOARD_OPERATION_ERROR.sessionLost,
               "lost sessions remain protected and cannot be released",
             );
           }
           if (
             session.activeOperationKey !== undefined ||
-            session.takeOver !== undefined
+            session.takeOver !== undefined ||
+            session.subscribers.size > 0
           ) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.sessionActive,
