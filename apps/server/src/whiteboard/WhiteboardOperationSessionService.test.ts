@@ -363,6 +363,130 @@ describe("WhiteboardOperationSessionService", () => {
     );
   });
 
+  it("does not complete with unacknowledged progress and preserves exact terminal/conflict codes", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("fences"));
+        const identity = identityOf(attached);
+        const operation = yield* service.admitOperation({
+          ...identity,
+          batchId: "batch-fences",
+        });
+        const first = yield* service.publishProgress(
+          progressInput(identity, operation, 1),
+        );
+        const second = yield* service.publishProgress(
+          progressInput(identity, operation, 2),
+        );
+        yield* service.acknowledgeApplication(
+          acknowledgementInput(identity, first, "applied-semantic"),
+        );
+
+        const incomplete = Effect.runPromise(
+          service.completeOperation({
+            ...identity,
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            generation: operation.generation,
+          }),
+        );
+        yield* Effect.promise(() =>
+          expectCode(
+            incomplete,
+            WHITEBOARD_OPERATION_ERROR.semanticVerificationFailed,
+          ),
+        );
+
+        const wrongServerSequence = Effect.runPromise(
+          service.acknowledgeApplication({
+            ...acknowledgementInput(identity, first, "applied-semantic"),
+            serverSequence: second.serverSequence,
+          }),
+        );
+        yield* Effect.promise(() =>
+          expectCode(wrongServerSequence, WHITEBOARD_OPERATION_ERROR.ackConflict),
+        );
+
+        yield* service.acknowledgeApplication(
+          acknowledgementInput(identity, second, "applied-semantic"),
+        );
+        yield* service.completeOperation({
+          ...identity,
+          batchId: operation.batchId,
+          operationId: operation.operationId,
+          generation: operation.generation,
+        });
+        const postTerminal = Effect.runPromise(
+          service.publishProgress(progressInput(identity, operation, 3)),
+        );
+        yield* Effect.promise(() =>
+          expectCode(postTerminal, WHITEBOARD_OPERATION_ERROR.operationTerminal),
+        );
+      }),
+    );
+  });
+
+  it("scopes an acknowledged Take Over fence to one lineage and permits later operations", async () => {
+    await runScoped(
+      (service) =>
+        Effect.gen(function*() {
+          const attached = yield* service.attachSession(attachInput("lineage"));
+          const identity = identityOf(attached);
+          const operation = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-lineage",
+          });
+          const progress = yield* service.publishProgress(
+            progressInput(identity, operation, 1),
+          );
+          const acknowledgement = acknowledgementInput(
+            identity,
+            progress,
+            "applied-semantic",
+          );
+          yield* service.acknowledgeApplication(acknowledgement);
+          const takeOverInput = {
+            ...identity,
+            batchId: operation.batchId,
+            operationId: operation.operationId,
+            expectedGeneration: operation.generation,
+            takeOverRequestId: "take-over-lineage",
+          };
+          const resolved = yield* awaitResolvedTakeOver(service, takeOverInput);
+          expect(resolved.containmentResult).toBe("acknowledged");
+
+          const staleAck = Effect.runPromise(
+            service.acknowledgeApplication(acknowledgement),
+          );
+          yield* Effect.promise(() =>
+            expectCode(staleAck, WHITEBOARD_OPERATION_ERROR.ackStale),
+          );
+
+          const nextOperation = yield* service.admitOperation({
+            ...identity,
+            batchId: "batch-next",
+          });
+          const nextProgress = yield* service.publishProgress(
+            progressInput(identity, nextOperation, 1),
+          );
+          yield* service.acknowledgeApplication(
+            acknowledgementInput(identity, nextProgress, "applied-semantic"),
+          );
+          const nextTerminal = yield* service.completeOperation({
+            ...identity,
+            batchId: nextOperation.batchId,
+            operationId: nextOperation.operationId,
+            generation: nextOperation.generation,
+          });
+          expect(nextTerminal.outcome).toBe("completed");
+        }),
+      {
+        serverInstanceId: SERVER_ID,
+        containmentDispatcher: async () => "acknowledged",
+      },
+    );
+  });
+
   it("records an Effect-clock acknowledgement timeout without synthesizing terminal truth", async () => {
     await runScoped(
       (service) =>
@@ -445,6 +569,55 @@ describe("WhiteboardOperationSessionService", () => {
         expect(events[0]?.serverSequence).toBe(progress.serverSequence);
         expect(events[1]?.serverSequence).toBe(1);
         expect(events[2]?.serverSequence).toBe(operation.serverSequence);
+      }),
+    );
+  });
+
+  it("keeps composite authority identities collision-free", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const first = yield* service.attachSession({
+          projectId: "project-delimiter",
+          documentKind: "file-canvas",
+          documentId: "d|c",
+          canvasIdentity: "x",
+          expectedDocumentRevision: 0,
+        });
+        const second = yield* service.attachSession({
+          projectId: "project-delimiter",
+          documentKind: "file-canvas",
+          documentId: "d",
+          canvasIdentity: "c|x",
+          expectedDocumentRevision: 0,
+        });
+        expect(first.operationSessionId).not.toBe(second.operationSessionId);
+      }),
+    );
+  });
+
+  it("delivers snapshot plus the maximum retained replay without consuming live queue capacity", async () => {
+    await runScoped((service) =>
+      Effect.gen(function*() {
+        const attached = yield* service.attachSession(attachInput("max-replay"));
+        const identity = identityOf(attached);
+        const operation = yield* service.admitOperation({
+          ...identity,
+          batchId: "batch-max-replay",
+        });
+        for (let sequence = 1; sequence <= 254; sequence += 1) {
+          yield* service.publishProgress(
+            progressInput(identity, operation, sequence),
+          );
+        }
+        const stream = yield* service.subscribe({
+          ...identity,
+          lastServerSequence: 0,
+        });
+        const collected = yield* Stream.runCollect(Stream.take(stream, 257));
+        const events = Array.from(collected);
+        expect(events).toHaveLength(257);
+        expect(events[0]?.kind).toBe("session-snapshot");
+        expect(events.at(-1)?.serverSequence).toBe(256);
       }),
     );
   });

@@ -262,6 +262,9 @@ export const makeWhiteboardOperationSessionService = (options: {
         { readonly canonical: string; readonly serverSequence: number }
       >;
       readonly acknowledgementSummary: AcknowledgementSummary;
+      readonly acknowledgedProducerSequences: Set<number>;
+      nonRetryable: boolean;
+      takeOverGeneration: number | undefined;
       terminal: WhiteboardOperationTerminalRecord | undefined;
     }
 
@@ -295,6 +298,7 @@ export const makeWhiteboardOperationSessionService = (options: {
       activeOperationKey: string | undefined;
       latestTerminal: WhiteboardOperationTerminalRecord | undefined;
       takeOver: TakeOverRecord | undefined;
+      readonly takeOverHistory: Map<string, TakeOverRecord>;
       lineageNonRetryable: boolean;
       lost: boolean;
       readonly subscribers: Map<number, SubscriberEntry>;
@@ -387,24 +391,41 @@ export const makeWhiteboardOperationSessionService = (options: {
         "projectId" | "documentKind" | "documentId" | "canvasIdentity"
       >,
     ): string =>
-      `${identity.projectId}|${identity.documentKind}|${identity.documentId}|${identity.canvasIdentity}`;
+      JSON.stringify([
+        identity.projectId,
+        identity.documentKind,
+        identity.documentId,
+        identity.canvasIdentity,
+      ]);
 
     const operationKeyOf = (operationId: string, generation: number): string =>
-      `${operationId}@${generation}`;
+      JSON.stringify([operationId, generation]);
 
     const ackKeyOf = (
       operationId: string,
       generation: number,
       producerSequence: number,
       serverSequence: number,
-    ): string => `${operationId}@${generation}@${producerSequence}@${serverSequence}`;
+    ): string =>
+      JSON.stringify([
+        operationId,
+        generation,
+        producerSequence,
+        serverSequence,
+      ]);
 
     const retryTupleKeyOf = (
       batchId: string,
       failedOperationId: string,
       failedGeneration: number,
       failedRetryAttempt: number,
-    ): string => `${batchId}@${failedOperationId}@${failedGeneration}@${failedRetryAttempt}`;
+    ): string =>
+      JSON.stringify([
+        batchId,
+        failedOperationId,
+        failedGeneration,
+        failedRetryAttempt,
+      ]);
 
     /**
      * Deterministic canonical encoding of schema-decoded values (D8):
@@ -549,7 +570,9 @@ export const makeWhiteboardOperationSessionService = (options: {
     const isSessionQuiescent = (session: SessionRecord): boolean =>
       !session.lost &&
       session.activeOperationKey === undefined &&
-      session.takeOver === undefined &&
+      (session.takeOver === undefined ||
+        (session.takeOver.status === "resolved" &&
+          session.takeOver.containmentResult === "acknowledged")) &&
       session.subscribers.size === 0;
 
     /**
@@ -1052,7 +1075,7 @@ export const makeWhiteboardOperationSessionService = (options: {
           return;
         }
         const operation = session.operations.get(
-          operationKeyOf(takeOver.operationId, takeOver.generation),
+          operationKeyOf(takeOver.operationId, takeOver.requestedGeneration),
         );
         if (
           operation === undefined ||
@@ -1075,12 +1098,14 @@ export const makeWhiteboardOperationSessionService = (options: {
           record.rejectedCount > 0
             ? {
                 ...record,
+                generation: takeOver.generation,
                 outcome: "failed-partial",
                 terminalReason: "browser-application-failed",
                 containmentResult: "acknowledged",
               }
             : {
                 ...record,
+                generation: takeOver.generation,
                 outcome: "interrupted",
                 terminalReason: "take-over-acknowledged",
                 containmentResult: "acknowledged",
@@ -1099,6 +1124,8 @@ export const makeWhiteboardOperationSessionService = (options: {
         operation.terminal = terminal;
         session.latestTerminal = terminal;
         session.activeOperationKey = undefined;
+        session.takeOverHistory.set(takeOver.takeOverRequestId, takeOver);
+        session.takeOver = undefined;
       });
 
     // ------------------------------------------------------------------
@@ -1172,6 +1199,7 @@ export const makeWhiteboardOperationSessionService = (options: {
             activeOperationKey: undefined,
             latestTerminal: undefined,
             takeOver: undefined,
+            takeOverHistory: new Map(),
             lineageNonRetryable: false,
             lost: false,
             subscribers: new Map(),
@@ -1272,15 +1300,15 @@ export const makeWhiteboardOperationSessionService = (options: {
             id: ++session.nextSubscriberId,
             queue,
           };
-          // Register the bounded queue before capturing state (D5.3).
+          // Register the bounded live queue before capturing the prefix (D5.3).
           session.subscribers.set(subscriber.id, subscriber);
           state.subscriberTotal += 1;
-          // Snapshot first, at the captured high-water sequence (D5.7).
-          yield* offerOrTerminate(state, session, subscriber, buildSnapshotEvent(session));
-          // Retained replay events ascending below the high water (D5.8).
+          const prefix: Array<WhiteboardOperationSessionEvent> = [
+            buildSnapshotEvent(session),
+          ];
           for (const row of session.rows) {
             if (row.serverSequence <= cursor || row.serverSequence > highWater) continue;
-            yield* offerOrTerminate(state, session, subscriber, row.event);
+            prefix.push(row.event);
           }
           session.order = ++state.orderCounter;
           const unregister = withLock(
@@ -1291,8 +1319,12 @@ export const makeWhiteboardOperationSessionService = (options: {
               yield* terminateSubscriber(current, live, subscriber);
             }),
           );
+          // Snapshot/replay is a finite prefix and does not consume live queue capacity.
           // Disconnect/shutdown releases the subscriber through stream finalization.
-          return Stream.fromQueue(queue).pipe(Stream.ensuring(unregister));
+          return Stream.concat(
+            Stream.fromIterable(prefix),
+            Stream.fromQueue(queue),
+          ).pipe(Stream.ensuring(unregister));
         }),
       );
 
@@ -1323,13 +1355,25 @@ export const makeWhiteboardOperationSessionService = (options: {
             decoded.producerSequence,
             decoded.serverSequence,
           );
+          const evidenceOperation = session.operations.get(
+            operationKeyOf(decoded.operationId, decoded.generation),
+          );
+          const expectedProducer = evidenceOperation?.producerSequences.get(
+            decoded.producerSequence,
+          );
+          if (
+            expectedProducer !== undefined &&
+            expectedProducer.serverSequence !== decoded.serverSequence
+          ) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.ackConflict,
+              "acknowledgement server sequence conflicts with admitted producer evidence",
+            );
+          }
           // D4.2: find the admitted progress event by serverSequence.
           const progress = session.progressByServerSequence.get(decoded.serverSequence);
           if (progress === undefined || progress.row.event.kind !== "operation-progress") {
             // Classify retained evidence as stale when possible (D4).
-            const evidenceOperation = session.operations.get(
-              operationKeyOf(decoded.operationId, decoded.generation),
-            );
             if (evidenceOperation !== undefined) {
               if (evidenceOperation.terminal !== undefined) {
                 return yield* fail(
@@ -1337,7 +1381,7 @@ export const makeWhiteboardOperationSessionService = (options: {
                   "operation already reached a terminal outcome",
                 );
               }
-              if (session.takeOver !== undefined) {
+              if (evidenceOperation.takeOverGeneration !== undefined) {
                 return yield* fail(
                   WHITEBOARD_OPERATION_ERROR.ackStale,
                   "take over fenced this generation",
@@ -1382,7 +1426,7 @@ export const makeWhiteboardOperationSessionService = (options: {
               "operation already reached a terminal outcome",
             );
           }
-          if (session.takeOver !== undefined) {
+          if (operation.takeOverGeneration !== undefined) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.ackStale,
               "take over fenced this generation",
@@ -1423,6 +1467,7 @@ export const makeWhiteboardOperationSessionService = (options: {
               summary.rejectedCount += 1;
             }
           }
+          operation.acknowledgedProducerSequences.add(decoded.producerSequence);
           const result: WhiteboardAcknowledgeApplicationResult = {
             ...identityOf(session),
             batchId: decoded.batchId,
@@ -1458,6 +1503,16 @@ export const makeWhiteboardOperationSessionService = (options: {
             );
           }
           const canonicalRequest = canonicalJson(decoded);
+          const historical = session.takeOverHistory.get(decoded.takeOverRequestId);
+          if (historical !== undefined) {
+            if (historical.canonicalRequest === canonicalRequest) {
+              return buildTakeOverResult(session, historical);
+            }
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.takeOverRequestIdConflict,
+              "take over request id conflicts with a completed request",
+            );
+          }
           const existing = session.takeOver;
           if (existing !== undefined) {
             if (existing.canonicalRequest === canonicalRequest) {
@@ -1494,24 +1549,16 @@ export const makeWhiteboardOperationSessionService = (options: {
             );
           }
           // 1. Atomically validated. 2. Recorded (below). 3. Generation
-          // advances before dispatch. 4. Lineage becomes non-retryable.
-          operation.generation = decoded.expectedGeneration + 1;
-          const advancedOperationKey = operationKeyOf(
-            operation.operationId,
-            operation.generation,
-          );
-          session.operations.delete(originalOperationKey);
-          session.operations.set(advancedOperationKey, operation);
-          if (session.activeOperationKey === originalOperationKey) {
-            session.activeOperationKey = advancedOperationKey;
-          }
-          session.lineageNonRetryable = true;
+          // advances before dispatch. 4. Only this lineage becomes non-retryable.
+          const advancedGeneration = decoded.expectedGeneration + 1;
+          operation.nonRetryable = true;
+          operation.takeOverGeneration = advancedGeneration;
           const record: TakeOverRecord = {
             canonicalRequest,
             takeOverRequestId: decoded.takeOverRequestId,
             batchId: decoded.batchId,
             operationId: decoded.operationId,
-            generation: operation.generation,
+            generation: advancedGeneration,
             requestedGeneration: decoded.expectedGeneration,
             status: "pending",
             containmentResult: undefined,
@@ -1575,12 +1622,6 @@ export const makeWhiteboardOperationSessionService = (options: {
               "retry identity conflicts with the recorded retry",
             );
           }
-          if (session.lineageNonRetryable || session.takeOver !== undefined) {
-            return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.operationNotRetryable,
-              "take over marked this lineage non-retryable",
-            );
-          }
           const predecessor = session.operations.get(
             operationKeyOf(decoded.failedOperationId, decoded.failedGeneration),
           );
@@ -1592,6 +1633,12 @@ export const makeWhiteboardOperationSessionService = (options: {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationUnknown,
               "retry names an unknown failed operation for this session",
+            );
+          }
+          if (predecessor.nonRetryable) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.operationNotRetryable,
+              "take over marked this lineage non-retryable",
             );
           }
           if (predecessor.terminal === undefined) {
@@ -1631,6 +1678,9 @@ export const makeWhiteboardOperationSessionService = (options: {
             lastProducerSequence: 0,
             producerSequences: new Map(),
             acknowledgementSummary: emptyAcknowledgementSummary(),
+            acknowledgedProducerSequences: new Set(),
+            nonRetryable: false,
+            takeOverGeneration: undefined,
             terminal: undefined,
           };
           const event: WhiteboardOperationSessionEvent = {
@@ -1768,6 +1818,9 @@ export const makeWhiteboardOperationSessionService = (options: {
             lastProducerSequence: 0,
             producerSequences: new Map(),
             acknowledgementSummary: emptyAcknowledgementSummary(),
+            acknowledgedProducerSequences: new Set(),
+            nonRetryable: false,
+            takeOverGeneration: undefined,
             terminal: undefined,
           };
           const event: WhiteboardOperationSessionEvent = {
@@ -1810,7 +1863,25 @@ export const makeWhiteboardOperationSessionService = (options: {
           }
           const key = operationKeyOf(decoded.operationId, decoded.generation);
           const operation = session.operations.get(key);
-          if (operation === undefined || session.activeOperationKey !== key) {
+          if (operation === undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.operationUnknown,
+              "progress names an unknown operation for this session",
+            );
+          }
+          if (operation.terminal !== undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.operationTerminal,
+              "operation already reached a terminal outcome",
+            );
+          }
+          if (operation.takeOverGeneration !== undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.postContainmentInput,
+              "take over stopped this operation lineage",
+            );
+          }
+          if (session.activeOperationKey !== key) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationUnknown,
               "progress names an operation that is not active for this session",
@@ -1820,18 +1891,6 @@ export const makeWhiteboardOperationSessionService = (options: {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationUnknown,
               "progress batch identity does not match the admitted operation",
-            );
-          }
-          if (operation.terminal !== undefined) {
-            return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.operationTerminal,
-              "operation already reached a terminal outcome",
-            );
-          }
-          if (session.takeOver !== undefined) {
-            return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.postContainmentInput,
-              "take over stopped this operation lineage",
             );
           }
           const canonicalInput = canonicalJson(decoded);
@@ -1921,7 +1980,25 @@ export const makeWhiteboardOperationSessionService = (options: {
           }
           const key = operationKeyOf(decoded.operationId, decoded.generation);
           const operation = session.operations.get(key);
-          if (operation === undefined || session.activeOperationKey !== key) {
+          if (operation === undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.operationUnknown,
+              "completion names an unknown operation for this session",
+            );
+          }
+          if (operation.terminal !== undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.operationTerminal,
+              "operation already reached a terminal outcome",
+            );
+          }
+          if (operation.takeOverGeneration !== undefined) {
+            return yield* fail(
+              WHITEBOARD_OPERATION_ERROR.postContainmentInput,
+              "take over owns this operation lineage",
+            );
+          }
+          if (session.activeOperationKey !== key) {
             return yield* fail(
               WHITEBOARD_OPERATION_ERROR.operationUnknown,
               "completion names an operation that is not active for this session",
@@ -1933,16 +2010,14 @@ export const makeWhiteboardOperationSessionService = (options: {
               "completion batch identity does not match the admitted operation",
             );
           }
-          if (operation.terminal !== undefined) {
+          if (
+            mode === "complete" &&
+            operation.acknowledgedProducerSequences.size !==
+              operation.producerSequences.size
+          ) {
             return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.operationTerminal,
-              "operation already reached a terminal outcome",
-            );
-          }
-          if (session.takeOver !== undefined) {
-            return yield* fail(
-              WHITEBOARD_OPERATION_ERROR.postContainmentInput,
-              "take over owns this operation lineage",
+              WHITEBOARD_OPERATION_ERROR.semanticVerificationFailed,
+              "completion requires acknowledgement for every admitted progress item",
             );
           }
           const record = deriveTerminal(
