@@ -317,8 +317,42 @@ in the bounded §4b form above.
 WP-02 (five legs exit 0 — restart/resume PASS from attempt 1; integrated leg
 FAILED in attempt 2 on the external FFF digest interference with all managed
 stages passing; canonical-identity and lifecycle-containment corrected legs
-NOT yet rerun) → a FRESH owner decision is required before any attempt 3
-(process-HOME-isolated run covering the three corrected legs under Node) →
-then WP-03 (owner-authorized exactly-one manual destructive run) → WP-04
-quality gate + Implementation Report → WP-05 integrated review → WP-06
-Supervisor acceptance → WP-07 closure.
+NOT yet rerun) → attempt 3 authorized by the owner on 2026-08-28 (current
+session, verbatim `Cho phép tất cả các cổng`; executable contract WP-02
+§"Attempt 3", PLAN §7c) → then WP-03 (exactly-one manual destructive run,
+conditional on attempt-3 PASS) → WP-04 quality gate + Implementation Report
+(conditional on WP-03 PASS) → WP-05 integrated review → WP-06 Supervisor
+acceptance → WP-07 closure.
+
+## 7. Owner authorization record — remaining Ticket 06 gates (2026-08-28, current session)
+
+Classification: P (planning/provenance authorization record). This section
+records an owner decision; it executes nothing, produces no behavioral
+evidence, and claims no completion.
+
+- **Authorization quote (verbatim, current session):** `Cho phép tất cả các
+  cổng`.
+- **Scope granted (three gates, fixed conditional sequence per PLAN §7c):**
+  1. WP-02 attempt 3 — exactly one non-destructive run of the three pending
+     legs (integrated, canonical-identity, lifecycle-containment) under Node
+     with process-level temporary HOME isolation (fresh `mktemp -d` outer
+     HOME per producer, `HOME` set only for that Node/Vitest process,
+     `EXIT`-trap removal, `ALFIE_REPO_DIR=/tmp/alfie-t06` explicit, manual
+     env unset, canonical logs, attempt-01/attempt-02 logs preserved). No
+     retry.
+  2. WP-03 — exactly one isolated manual destructive real-Pi run under the
+     existing accepted recipe, ONLY conditional on WP-02 attempt 3 PASS;
+     TERM→KILL bounded to the exact child-owned process tree only; no PID
+     guessing, no external signalling, no retry.
+  3. WP-04 — exactly one final quality gate (`bun fmt`, `bun lint`,
+     `bun typecheck`) in the isolated Symphony worktree, ONLY conditional on
+     WP-03 PASS; stop if the formatter touches out-of-scope paths.
+- **Stop gates for attempt 3 (any one → immediate stop, no retry):** outer-
+  HOME cleanup failure; pin drift (`12fd6686` / `3fe340b4`); protected WIP
+  hash drift from `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`;
+  non-empty Pi acceptance-surface zero-delta gate; unexpected skip in any
+  leg; any nonzero producer exit.
+- **Interpretation rule:** attempt-01 canonical/lifecycle logs remain
+  historical environment/runner evidence and are NOT current results;
+  attempt-2 integrated remains a non-PASS environment record; no WP-02
+  completion exists until the attempt-3 five-legs-exit-0 record.

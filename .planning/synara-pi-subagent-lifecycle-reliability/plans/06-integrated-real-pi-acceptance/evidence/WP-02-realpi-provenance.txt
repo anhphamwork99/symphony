@@ -338,3 +338,33 @@ challenge gate.
   lifecycle-containment corrected legs under Node. Canonical/lifecycle
   corrected legs were NOT run in attempt 2 and remain pending. WP-03–WP-07
   stay gated behind a five-legs-exit-0 WP-02 record.
+
+12. AUTHORIZATION RECORD (2026-08-28, current session) — supersedes the
+    §11e owner-decision gate only; no evidence in §1–§11 changes.
+---------------------------------------------------------------------
+The owner replied in the current session, verbatim: `Cho phép tất cả các
+cổng`, authorizing the three remaining gates in the fixed conditional
+sequence of PLAN §7c:
+  1. WP-02 attempt 3 (exactly one, non-destructive): the three pending legs
+     under Node with process-level temporary HOME isolation — fresh
+     `mktemp -d` outer HOME per producer, HOME set only for that
+     Node/Vitest process, EXIT-trap removal, ALFIE_REPO_DIR=/tmp/alfie-t06
+     explicit, manual env unset, canonical log names,
+     attempt-01/attempt-02 logs preserved byte-identical. Executable
+     contract: WP-02 §"Attempt 3". No retry.
+  2. WP-03 (exactly one, M): isolated manual destructive real-Pi run under
+     the existing accepted recipe — CONDITIONAL on WP-02 attempt 3 PASS
+     (five legs exit 0). Exact child-owner TERM→KILL scope only; no PID
+     guessing, no external signalling, no retry.
+  3. WP-04 (exactly one, Q): one `bun fmt` + `bun lint` + `bun typecheck`
+     gate in the isolated Symphony worktree — CONDITIONAL on WP-03 PASS.
+     Stop if the formatter touches out-of-scope paths.
+Attempt-3 stop gates (any one stops immediately, no retry): outer-HOME
+cleanup failure; pin drift (12fd6686 / 3fe340b4); protected WIP hash drift
+from ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8;
+non-empty Pi acceptance-surface zero-delta gate; unexpected skip in any
+leg; any nonzero producer exit.
+Interpretation: §10 attempt-01 canonical/lifecycle logs remain historical
+environment/runner evidence and are NOT current; the §11 attempt-02 log
+remains a non-PASS environment record. This record authorizes execution
+only and contains no behavioral result.

@@ -1,16 +1,21 @@
 # WP-03 — exactly-one owner-authorized manual destructive run
 
 **State:** pending — mandatory for T06-AC6 closure; cannot be skipped or
-substituted
+substituted. **Conditionally authorized (2026-08-28, current session,
+owner verbatim `Cho phép tất cả các cổng`, PLAN §7c item 2): exactly one
+run, ONLY if WP-02 attempt 3 passes with five legs exit 0.** Until that
+condition holds, this WP does not execute — no operator run, no recipe
+record.
 
 **Owner role:** operator (the owner personally executes the destructive run
 inside the isolated environment; the worker records it)
 
-**Dependencies:** WP-01 and WP-02 committed and PASS; **explicit
-current-session owner authorization naming this WP and the destructive
-scope**. Historical manual evidence (H, 2026-08-20 operator run, durable-
-subagents Decision 0034) is **supporting-only** and cannot close AC6 for this
-project.
+**Dependencies:** WP-01 committed and PASS; **WP-02 attempt 3 PASS — five
+standalone legs exit 0**; explicit current-session owner authorization for
+this WP and the destructive scope (granted 2026-08-28, conditional as
+recorded above). Historical manual evidence (H, 2026-08-20 operator run,
+durable-subagents Decision 0034) is **supporting-only** and cannot close
+AC6 for this project.
 
 ## Objective and observable outcome
 
@@ -24,6 +29,11 @@ environment.
 ## Exactly-one and no-retry rule
 
 - The run is attempted **exactly once** under this authorization.
+- Scope of process interaction: TERM→KILL escalation addresses only the
+  exact child-owned root and descendant PIDs of this run's own isolated
+  environment, per the accepted recipe. No PID guessing, no process-name
+  kills, no external signalling of any process outside that exact tree, no
+  Symphony kill authority.
 - If it aborts, fails, or yields ambiguous evidence: record the outcome
   truthfully and return `challenge`. A rerun requires a **fresh owner
   decision** after material-cause review. No automatic, silent, or
@@ -57,7 +67,9 @@ quality gate, review, or Supervisor artifact.
 ## Required record fields (`WP-03-manual-run-record.md`)
 
 1. Authorization provenance: who authorized, in which session, quoting the
-   current-session authorization.
+   current-session authorization — 2026-08-28 owner verbatim
+   `Cho phép tất cả các cổng` (PLAN §7c item 2), consumed here exactly once
+   conditional on the WP-02 attempt-3 five-legs-exit-0 PASS.
 2. Environment: isolated root/home/state/workspace/ports; worktree SHAs.
 3. Exact recipe steps as executed (verbatim commands; no deviation from the
    accepted recipe — any needed deviation is a `challenge` before execution).
@@ -86,7 +98,9 @@ Stage only the three allowed WP-03 paths.
 
 ## Escalation
 
-- `blocked`: no current-session authorization (WP-03 and the ticket stay
-  pending — do not close Ticket 06 without AC6's M leg).
+- `blocked`: the WP-02 attempt-3 PASS condition has not occurred yet (do
+  not execute; the conditional authorization stays reserved), or missing
+  current-session authorization (WP-03 and the ticket stay pending — do not
+  close Ticket 06 without AC6's M leg).
 - `challenge`: ambiguous/failed run (no-retry rule), recipe deviation need,
   or any destructive automation proposal.

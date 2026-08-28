@@ -4,8 +4,12 @@
 (9208e1728); WP-02 executed twice (attempt 1 and the authorized corrected
 attempt 2, both 2026-08-28), stopped at challenge after each (see WP-02,
 disposition §4c, provenance §11, and §7b below). The attempt-2 authorization
-is SPENT; any further attempt requires a fresh owner decision. No Ticket 06
-completion, review, or acceptance exists.
+is SPENT. On 2026-08-28 the owner granted, in the current session and
+verbatim (`Cho phép tất cả các cổng`), a fresh decision authorizing the
+three remaining gates in a fixed conditional sequence — WP-02 attempt 3
+(authorized, NOT yet executed), then conditionally WP-03, then
+conditionally WP-04 (§7c). No Ticket 06 completion, review, or acceptance
+exists.
 
 **Project Home:** [`../../PROJECT.md`](../../PROJECT.md)
 
@@ -323,6 +327,48 @@ stop gates. Outcome (details: disposition §4c, provenance §11):
   five-legs-exit-0 WP-02 record. This section records the outcome only; it
   grants no authorization.
 
+## 7c. Owner authorization for the remaining Ticket 06 gates (2026-08-28, current session)
+
+The owner replied in the current session, verbatim: **`Cho phép tất cả các
+cổng`** — authorizing all three previously enumerated gates. This section
+records the authorization only; it executes nothing and claims no evidence.
+
+1. **WP-02 attempt 3 (non-destructive, R) — authorized exactly once, no
+   condition.** Exactly one run of the three pending legs (integrated,
+   canonical-identity, lifecycle-containment) under the supported Node
+   runner with process-level temporary HOME isolation. The executable
+   contract is WP-02 §"Attempt 3": each producer gets a fresh `mktemp -d`
+   outer HOME; `HOME` is set only for that Node/Vitest process; the
+   temporary HOME is removed afterward via a shell `EXIT` trap;
+   `ALFIE_REPO_DIR=/tmp/alfie-t06` stays explicit; the manual env stays
+   unset; attempt-3 logs take the canonical WP-02 names while
+   `WP-02-attempt-01-*` and `WP-02-attempt-02-realpi-acceptance.log` stay
+   preserved byte-identical. The attempt-01 canonical/lifecycle logs are
+   historical environment/runner evidence and must NOT be interpreted as
+   current.
+2. **WP-03 manual destructive run (M) — authorized exactly once,
+   conditional on WP-02 attempt 3 PASS (five legs exit 0).** One isolated
+   operator run under the existing accepted recipe, unmodified;
+   TERM→KILL bounded to the exact child-owned process tree of the run's
+   own isolated environment only; no PID guessing, no process-name kills,
+   no external signalling, no retry (§8 no-retry rule).
+3. **WP-04 quality gate (Q) — authorized exactly once, conditional on
+   WP-03 PASS.** Exactly one `bun fmt`, `bun lint`, `bun typecheck` inside
+   the isolated Symphony worktree; if the formatter touches out-of-scope
+   paths, stop immediately with `challenge` (§8 fmt-hazard rule).
+
+Stop gates for attempt 3 (any one stops immediately into a challenge
+package, no retry): outer-HOME cleanup failure; worktree pin drift
+(`12fd6686` / `3fe340b4`); protected WIP hash drift from
+`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`; a
+non-empty zero-delta gate on the named Pi acceptance surface; an unexpected
+skip in any leg; a nonzero producer exit.
+
+No gate above authorizes a source, test, harness, fixture, config,
+migration, manifest, lockfile, or Alfie change. WP-05–WP-07 keep their
+existing gates (main-agent convening with the owner's go-ahead; exactly one
+each).
+
 ## 8. Authorization gates and no-retry rule
 
 | Gate | WP | Authorization wording (exact requirement) |
@@ -330,6 +376,12 @@ stop gates. Outcome (details: disposition §4c, provenance §11):
 | Manual destructive run | WP-03 | Proceed only with explicit **current-session owner authorization** naming this plan's WP-03 and the destructive scope. No authorization → WP-03 stays pending; Ticket 06 cannot close (AC6 mandatory). |
 | Quality gate | WP-04 | Proceed only with explicit **current-session owner authorization** for `bun fmt`, `bun lint`, `bun typecheck`. |
 | Review / Supervisor | WP-05/06 | Convened by the main agent with the owner's current-session go-ahead; each is consumed exactly once. |
+
+Authorization status (2026-08-28, current session): the owner's verbatim
+reply `Cho phép tất cả các cổng` authorizes all three gates above in the
+fixed conditional sequence of §7c — WP-02 attempt 3 first, then WP-03 only
+on attempt-3 PASS, then WP-04 only on WP-03 PASS. Each gate remains
+exactly-once and consumes its authorization only when its condition holds.
 
 **No-retry rule (WP-03):** the manual destructive run is attempted **exactly
 once**. If it aborts, fails, or produces ambiguous evidence, record the

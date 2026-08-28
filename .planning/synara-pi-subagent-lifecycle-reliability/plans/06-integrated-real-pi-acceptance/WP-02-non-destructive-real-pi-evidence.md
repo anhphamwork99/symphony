@@ -17,11 +17,12 @@ outside the harness (root cause and owner-decision gate in the disposition
 §4c and provenance §11). Corrected-attempt log preserved byte-identical as
 `evidence/WP-02-attempt-02-realpi-acceptance.log` (SHA-256
 `cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0`).
-**The §"Attempt 2" authorization is SPENT; any further attempt (identified
-next correction: process-level HOME isolation for the Vitest process,
-covering integrated + canonical + lifecycle under Node) requires a fresh
-owner decision.** Per WP-02 §Escalation and PLAN §11 no completion was
-claimed and Ticket 06 did not advance.
+**The §"Attempt 2" authorization is SPENT. On 2026-08-28 the owner granted,
+in the current session and verbatim (`Cho phép tất cả các cổng`), the fresh
+authorization for attempt 3 — §"Attempt 3" below is the executable contract
+(authorized, NOT yet executed; exactly once, no retry).** Per WP-02
+§Escalation and PLAN §11 no completion was claimed and Ticket 06 did not
+advance.
 
 Attempt 1 (2026-08-28 12:23–12:54 local): all five authorized standalone
 producers ran exactly once each against the retained pinned worktrees
@@ -185,6 +186,89 @@ The owner-resolved, source-grounded correction for the three failed legs is
    `ab8f8f54…eaa8` or any protected file becomes staged; zero-delta gate on
    the named Pi acceptance surface non-empty; provenance verifier failure at
    any stage; an unexpected skip in any leg.
+
+## Attempt 3 — process-HOME-isolated rerun authorization (exactly one; authorized 2026-08-28, current session)
+
+Owner authorization (current session, verbatim): **`Cho phép tất cả các
+cổng`** (PLAN §7c item 1). Exactly one run of the three pending legs —
+integrated, canonical-identity, lifecycle-containment — under the supported
+Node runner with process-level temporary HOME isolation. This authorization
+runs the producers only; it grants no source/test/harness/fixture/config/
+manifest/lockfile/Alfie change and no retry. The two passing restart/resume
+legs keep their attempt-1 canonical logs; they are NOT rerun.
+
+**Executable producer pattern (mandatory, per producer; the exact shell
+shape, not pseudocode):**
+
+```bash
+cd /tmp/symphony-t06/apps/server
+set -o pipefail
+T06_HOME=$(mktemp -d) || exit 125
+trap 'rm -rf "$T06_HOME"' EXIT
+env -u SYNARA_T17_MANUAL_TEARDOWN HOME="$T06_HOME" \
+  ALFIE_REPO_DIR=/tmp/alfie-t06 \
+  node ../../node_modules/vitest/vitest.mjs run \
+    --project wallclock --maxWorkers=1 --no-file-parallelism \
+    src/provider/piSubagentRealPiAcceptance.test.ts \
+    2>&1 | tee /Users/anhpham99/symphony/.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-realpi-acceptance.log
+status=${PIPESTATUS[0]}; exit "$status"
+```
+
+Requirements bound into this pattern:
+
+1. **Fresh temporary outer HOME per producer** — `mktemp -d` creates a new
+   directory for EACH of the three producers; never share one across legs.
+   The `EXIT` trap removes it afterward; the trap fires exactly once per
+   producer process whether the leg passes or fails.
+2. **HOME only for the Node/Vitest process** — `HOME="$T06_HOME"` is set in
+   the producer's env only; no profile/rc file, shell state, worktree, or
+   other file is modified; the harness-owned dirs and
+   `ALFIE_REPO_DIR=/tmp/alfie-t06` remain explicit. The manual env stays
+   unset (`env -u SYNARA_T17_MANUAL_TEARDOWN`). The temporary outer HOME
+   removes user Pi settings (`~/.pi/agent/settings.json`, FFF frecency)
+   from discovery, correcting attempt 2's sole failure class at
+   piSubagentRealPiAcceptance.test.ts:1877.
+3. **Legs and log mapping (canonical names, overwrite in place):**
+   integrated → `WP-02-realpi-acceptance.log` (command above);
+   canonical-identity →
+   `src/provider/piSubagentCanonicalIdentityAcceptance.test.ts` →
+   `WP-02-canonical-identity-acceptance.log`; lifecycle-containment →
+   `src/provider/piSubagentLifecycleContainmentRealPiAcceptance.test.ts` →
+   `WP-02-lifecycle-containment-realpi.log`. Identical pattern, only the
+   test path, tee target, and fresh `T06_HOME` differ per leg.
+4. **Preserved logs (never overwritten/deleted):**
+   `WP-02-attempt-01-realpi-acceptance.log`,
+   `WP-02-attempt-01-canonical-identity-acceptance.log`,
+   `WP-02-attempt-01-lifecycle-containment-realpi.log`,
+   `WP-02-attempt-02-realpi-acceptance.log`, and the attempt-1
+   restart/resume PASS logs. The attempt-01 canonical/lifecycle logs are
+   historical environment/runner evidence and must NOT be interpreted as
+   current results.
+5. **No-concurrent-tool producer window** — after launching each producer,
+   ONLY wait for it to exit; no other tool call until it exits (same
+   discipline as §"Attempt 2" item 3; bounds the frecency-digest
+   interference class).
+6. **Exactly once, no retry** — the three legs run exactly once each under
+   this authorization. Any failure preserves its log at the canonical name
+   and stops into a challenge package; a further attempt requires a fresh
+   owner decision.
+7. **Stop gates (any one stops immediately, no retry):** outer-HOME
+   cleanup failure (`mktemp -d` fails → exit 125 without running the
+   producer, or the `EXIT` trap cannot remove the temporary HOME);
+   worktree pin drift (`12fd6686` / `3fe340b4`); protected WIP hash drift
+   from `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`
+   or any protected file staged; non-empty zero-delta gate on the named Pi
+   acceptance surface; provenance verifier failure; an unexpected skip in
+   any leg; any nonzero producer exit.
+8. **Post-attempt bookkeeping (before the WP-02 commit):** re-verify pin
+   SHAs, Alfie clean status (node_modules-filtered), surface zero-delta,
+   and protected WIP hash; record in the disposition that the fresh-HOME
+   per-producer pattern and cleanup traps ran for all three legs; then
+   commit under the existing WP-02 boundary
+   (`test(pi): record Ticket 06 non-destructive real-Pi evidence`).
+
+WP-03 (conditional on a five-legs-exit-0 WP-02 record), WP-04 (conditional
+on WP-03 PASS), WP-05–WP-07 keep their own gates per PLAN §7c/§8.
 
 ## Prohibited changes
 

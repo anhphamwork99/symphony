@@ -1,12 +1,16 @@
 # WP-04 — owner-authorized quality gate and complete Implementation Report
 
-**State:** pending
+**State:** pending — **conditionally authorized (2026-08-28, current
+session, owner verbatim `Cho phép tất cả các cổng`, PLAN §7c item 3):
+exactly one gate run, ONLY if WP-03 has PASSED.** Until that condition
+holds, this WP does not execute — no fmt, lint, or typecheck command is run.
 
 **Owner role:** implementation worker
 
-**Dependencies:** WP-01–WP-03 committed; **explicit current-session owner
-authorization for `bun fmt`, `bun lint`, `bun typecheck`** (PLAN §8). The
-quality gate runs exactly once.
+**Dependencies:** WP-01–WP-03 committed; **WP-03 PASS**; explicit
+current-session owner authorization for `bun fmt`, `bun lint`,
+`bun typecheck` (granted 2026-08-28, conditional as recorded above; PLAN
+§8). The quality gate runs exactly once.
 
 ## Objective and observable outcome
 
@@ -96,7 +100,10 @@ Stage only the three allowed WP-04 paths.
 
 ## Escalation
 
-- `blocked`: authorization absent (gate not run; do not fabricate), or
-  environment failure.
-- `challenge`: gate failure, fmt-hazard rule triggered, evidence/report
+- `blocked`: WP-03 has not passed yet (gate not run; the conditional
+  authorization stays reserved), authorization absent (gate not run; do not
+  fabricate), or environment failure.
+- `challenge`: gate failure, fmt-hazard rule triggered (formatter touches
+  out-of-scope paths — stop, list every touched file, no silent
+  restore-and-continue, no formatter-drift commit), evidence/report
   inconsistency, or an AC that cannot cite executed evidence.
