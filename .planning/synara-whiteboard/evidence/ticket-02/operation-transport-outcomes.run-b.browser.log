@@ -1,0 +1,26 @@
+SOURCE_SHA=8a737d4302b377340b4df7a4b72afb4ea29a54e6
+RUN_B_PORT=63352
+RUN_B_STARTED_AT=2026-08-28T17:41:10Z
+$ vitest run --config vitest.browser.stable.config.ts "src/components/whiteboard/ticket02/SynaraOperationTransportOutcomes.acceptance.browser.tsx"
+
+ RUN  v4.1.10 /private/tmp/synara-t02-browser/apps/web
+
+The request id "/Users/anhpham99/symphony/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Regular.woff2" is outside of Vite serving allow list.
+
+- /private/tmp/synara-t02-browser/apps/web
+- /private/tmp/synara-t02-browser
+- /Users/anhpham99/symphony/node_modules/.bun/vitest@4.1.10+b675788e84e571f1/node_modules/vitest
+- /Users/anhpham99/symphony/node_modules/.bun/@vitest+browser@4.1.10+81ecffb7a7dc0e03/node_modules/@vitest/browser/dist
+- /Users/anhpham99/symphony/node_modules/.bun/vite@8.1.5+c07c6cebe09319b1/node_modules/vite/dist/client
+- /Users/anhpham99/symphony/node_modules/.bun/@vitest+browser-playwright@4.1.10+4ee149e80d5959ba/node_modules/@vitest/browser-playwright/dist/locators.js
+
+Refer to docs https://vite.dev/config/server-options.html#server-fs-allow for configurations and more details.
+
+The request id "/Users/anhpham99/symphony/node_modules/.bun/@excalidraw+excalidraw@0.18.1+243b16c7711ca280/node_modules/@excalidraw/excalidraw/dist/dev/fonts/Assistant/Assistant-Medium.woff2" is outside of Vite serving allow list.
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  00:41:11
+   Duration  6.30s (transform 0ms, setup 0ms, import 537ms, tests 4.96s, environment 0ms)
+
+RUN_B_EXIT=0

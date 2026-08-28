@@ -1,0 +1,73 @@
+SOURCE_SHA=8a737d4302b377340b4df7a4b72afb4ea29a54e6
+FOCUSED_STARTED_AT=2026-08-28T17:39:52Z
+$ vitest run src/whiteboardOperation.test.ts src/ws.test.ts
+
+ RUN  v4.1.10 /private/tmp/synara-t02-browser/packages/contracts
+
+ ❯ src/ws.test.ts (0 test)
+ ❯ src/whiteboardOperation.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/whiteboardOperation.test.ts [ src/whiteboardOperation.test.ts ]
+Error: Cannot find package '@effect/vitest' imported from /private/tmp/synara-t02-browser/packages/contracts/src/whiteboardOperation.test.ts
+ ❯ src/whiteboardOperation.test.ts:1:1
+      1| import { assert, it } from "@effect/vitest";
+       | ^
+      2| import { Effect, Schema } from "effect";
+      3| import { describe, expect } from "vitest";
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/ws.test.ts [ src/ws.test.ts ]
+Error: Cannot find package '@effect/vitest' imported from /private/tmp/synara-t02-browser/packages/contracts/src/ws.test.ts
+ ❯ src/ws.test.ts:1:1
+      1| import { assert, it } from "@effect/vitest";
+       | ^
+      2| import { Effect, Schema } from "effect";
+      3|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  no tests
+   Start at  00:39:53
+   Duration  104ms (transform 49ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+error: script "test" exited with code 1
+FOCUSED_EXIT=1
+FOCUSED_RETRY_STARTED_AT=2026-08-28T17:40:30Z
+FOCUSED_RETRY_REASON=worktree dependency symlinks restored after @effect/vitest resolution failure
+$ vitest run src/whiteboardOperation.test.ts src/ws.test.ts
+
+ RUN  v4.1.10 /private/tmp/synara-t02-browser/packages/contracts
+
+
+ Test Files  2 passed (2)
+      Tests  38 passed (38)
+   Start at  00:40:30
+   Duration  402ms (transform 269ms, setup 0ms, import 624ms, tests 24ms, environment 0ms)
+
+
+ RUN  v4.1.10 /private/tmp/synara-t02-browser/apps/server
+
+(node:27591) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  3 passed (3)
+      Tests  32 passed (32)
+   Start at  00:40:30
+   Duration  3.70s (transform 1.59s, setup 0ms, import 2.36s, tests 1.16s, environment 0ms)
+
+$ vitest run --passWithNoTests "src/components/whiteboard/ticket02/SynaraWhiteboardOperationBridge.test.ts" "src/components/whiteboard/ticket02/SynaraHistoryGate.test.ts" src/wsTransport.test.ts
+
+ RUN  v4.1.10 /private/tmp/synara-t02-browser/apps/web
+
+
+ Test Files  3 passed (3)
+      Tests  107 passed (107)
+   Start at  00:40:35
+   Duration  5.53s (transform 442ms, setup 0ms, import 646ms, tests 7.39s, environment 0ms)
+
+FOCUSED_RETRY_EXIT=0
