@@ -1,6 +1,38 @@
 # WP-01 — freeze at 12fd6686 and 19-file deterministic integrated evidence
 
-**State:** pending
+**State:** completed (2026-08-28)
+
+## Result
+
+Executed exactly per this packet; evidence-only, zero production writes.
+
+- **Worktrees (retained for WP-02):** `/tmp/symphony-t06` detached at
+  `12fd6686edc26a3fa0382e8bdeb83a1be8045539`; `/tmp/alfie-t06` detached at
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`. Both verified detached
+  (`HEAD (no branch)`), clean at every record, and unchanged through WP-01.
+  Alfie remote URL matches the provenance fixture; all 5 pinned Alfie file
+  hashes recomputed and byte-exact; user Alfie checkout untouched at
+  `c6a27714`. Provenance: `evidence/WP-01-worktree-provenance.txt`.
+- **Install:** `bun install --frozen-lockfile` exit 0 (2887 packages,
+  10.32s); post-install tracked delta in the worktree: zero.
+- **Unit producer (18 files, serialized, `--project unit
+  --maxWorkers=1 --no-file-parallelism`):** exit 0 — 18/18 files, 256/256
+  tests, 0 failed, 0 skipped, 16.79s. Log: `evidence/WP-01-deterministic.log`.
+- **Contracts producer (`bun run test src/piSubagents.test.ts`):** exit 0 —
+  1/1 file, 40/40 tests, 181ms. Log: `evidence/WP-01-contracts.log`.
+- **Matrix:** `evidence/WP-01-ac-diagnostic-matrix.md` — T06-AC2/3/4/5/7
+  criterion rows (D class), positive rows paired with material
+  failure/diagnostic rows, stable diagnostic codes, per-file executed-case
+  inventory (256+40 = 296 cases), R legs explicitly pending for WP-02.
+- **Gates at every record:** protected WIP aggregate hash exactly
+  `ab8f8f54…aa8` (pre and post); staging 0; Pi-acceptance-surface diff from
+  `12fd6686` empty pre/post (main checkout and worktree); worktrees zero
+  tracked delta post-run.
+- **Commit:** `test(pi): record Ticket 06 deterministic integrated
+  evidence` — exactly the five allowed WP-01 paths, explicit-path staging.
+- One clean full re-execution of the unit producer was performed after an
+  aborted first launch (evidence directory absent at tee time; no tests ran;
+  disclosed in the provenance record).
 
 **Owner role:** implementation worker
 

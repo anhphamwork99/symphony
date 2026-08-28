@@ -1,0 +1,171 @@
+WP-01 worktree provenance and zero-delta gate record — Ticket 06
+================================================================
+Recorded: 2026-08-28 (UTC 05:13Z) · host: Darwin arm64 (macOS)
+Executor: WP-01 implementation worker, evidence-only packet
+Class of this record: P (planning/provenance). Producers below are D class.
+
+1. FROZEN COMPOSITION
+---------------------
+Symphony behavioral candidate (detached):
+  commit  : 12fd6686edc26a3fa0382e8bdeb83a1be8045539
+  subject : docs(planning): accept Ticket 05 lifecycle recovery
+  path    : /tmp/symphony-t06 (kernel path /private/tmp/symphony-t06)
+  detached proof: `git status -b --short` → "## HEAD (no branch)"
+
+Alfie controlled provider worktree (detached):
+  commit  : 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  subject : test(pi-subagents): expose gated exact-manager steer race hook
+  path    : /tmp/alfie-t06 (kernel path /private/tmp/alfie-t06)
+  remote  : https://github.com/anhphamwork99/alfie.git
+            == fixture expectedRepositoryUrl (exact match)
+  detached proof: `git status -b --short` → "## HEAD (no branch)"
+
+User Alfie checkout (UNTOUCHED):
+  /Users/anhpham99/alfie @ c6a27714b2e42351133aa5d8d35108e526f4ce13,
+  `git status --short` → 0 lines at both pre-run and post-run records.
+
+2. ALFIE PROVENANCE FIXTURE COMPARISON
+--------------------------------------
+Fixture: apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json
+(computed at the frozen candidate). All 5 pinned hashes recomputed from
+/tmp/alfie-t06 with `shasum -a 256` — ALL MATCH, byte-exact:
+
+  expectedRepositoryUrl      https://github.com/anhphamwork99/alfie.git   MATCH
+  pinnedCommit               3fe340b401ca86bcbe8b55abd4de107e1d93482e     MATCH
+  packageName                @alfie/pi-subagents                          (fixture value)
+  packageVersion             0.15.0-alfie.6                               (fixture value)
+  agent/extensions/pi-subagents/package.json
+    expected 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f
+    observed 954c5297446149d2e6a997c4f0eefac768611f92599cecab2a5f96255dafa22f  MATCH
+  agent/extensions/pi-subagents/src/index.ts
+    expected c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9
+    observed c843406cf94bffdfa7304e2c412766b7cbbcdbfc17fa2846046c77992288d1f9  MATCH
+  agent/extensions/pi-subagents/src/agent-manager.ts
+    expected 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783
+    observed 1f99fd0794c8c32a2229b4f7bc7f3da221ce50d69b221875ba7e8f0f8d879783  MATCH
+  agent/extensions/pi-subagents/src/agent-runner.ts
+    expected 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2
+    observed 98a4c592b14bd7b66b42ea26aabf337d01b6146e618e2c2d67852449a755b1d2  MATCH
+  agent/extensions/pi-subagents/src/child-bash-supervisor.ts
+    expected ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0
+    observed ef44dc6d91ba400187967568b18483792eef3715c616b56aea24e3bb0c48f3c0  MATCH
+
+Note: the 18-file unit producer and the contracts producer (D class) do not
+consume the fixture or ALFIE_REPO_DIR (only wallclock real-Pi files do).
+The Alfie worktree verification here is the standing controlled-boundary
+provenance that WP-02 consumes.
+
+3. TOOLCHAIN
+------------
+bun  1.3.12
+node v24.14.1
+vitest 4.1.10 (repository-pinned, from `RUN v4.1.10` in both producer logs;
+installed as vitest@4.1.10 by `bun install --frozen-lockfile`)
+
+4. WORKTREE SETUP
+-----------------
+Commands (paths absent beforehand; verified before creation — nothing
+pre-existing was deleted or modified):
+  git worktree add --detach /tmp/symphony-t06 12fd6686edc26a3fa0382e8bdeb83a1be8045539
+  git -C /Users/anhpham99/alfie worktree add --detach /tmp/alfie-t06 3fe340b401ca86bcbe8b55abd4de107e1d93482e
+  cd /tmp/symphony-t06 && bun install --frozen-lockfile
+
+Install result: exit 0 — "2887 packages installed [10.32s]".
+Post-install tracked-file integrity (lockfile-pinned, no manifest drift):
+  `git -C /tmp/symphony-t06 status --short --untracked-files=no` → empty
+  worktree Pi-acceptance-surface diff (`git diff --stat` over the named
+  surface, 7 paths from PLAN §premise) → 0 lines.
+Ignored dependency artifacts (node_modules etc.) are ignored-only and
+authorized; zero tracked delta.
+
+5. PROTECTED OWNER WIP GATE (main checkout /Users/anhpham99/symphony)
+---------------------------------------------------------------------
+Pre-run  aggregate diff hash:
+  git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+  → ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+Post-run aggregate diff hash: identical
+  → ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+Required: ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8 — EXACT.
+Staged files at every record: 0 (`git diff --cached --name-only` → empty).
+Main-checkout `git status --short` during WP-01: exactly the three protected
+files modified-unstaged, plus (post-producers) the new untracked evidence
+directory of this plan. Nothing else.
+Pi-acceptance-surface zero-delta gate, pre-run and post-run:
+  git diff --name-status 12fd6686edc26a3fa0382e8bdeb83a1be8045539..HEAD -- \
+    apps/server/src/provider apps/server/src/persistence apps/server/src/orchestration \
+    apps/server/scripts/wallclock-tests.ts apps/server/vitest.config.ts \
+    packages/contracts/src/piSubagents.ts
+  → EMPTY both times.
+
+6. PRODUCER RUNS (D class)
+--------------------------
+Worktree gates around the producers:
+  pre-run:  Symphony worktree tracked delta 0; Alfie worktree status 0 lines.
+  post-run: Symphony worktree tracked delta 0 (`status --short
+            --untracked-files=no` empty; named-surface diff 0 lines);
+            Alfie worktree status 0 lines; both still detached at pins.
+
+6a. Unit producer (serialized, 18 files) — cwd /tmp/symphony-t06/apps/server
+  set -o pipefail
+  bun run ../../node_modules/vitest/vitest.mjs run \
+    --project unit --maxWorkers=1 --no-file-parallelism \
+    src/provider/piSubagentCancellationCoordinator.test.ts \
+    src/provider/piSubagentWatchdogEscalation.test.ts \
+    src/provider/piSubagentProcessTeardown.test.ts \
+    src/provider/piSubagentWatchdogSweep.test.ts \
+    src/provider/piSubagentProcessTeardownSweep.test.ts \
+    src/provider/piSubagentBridge.test.ts \
+    src/provider/piSubagentLiveLifecycleContainment.test.ts \
+    src/provider/piSubagentChildOwnerTeardownWiring.test.ts \
+    src/provider/piSubagentTeardownWiring.test.ts \
+    src/provider/piSubagentCanonicalRouting.test.ts \
+    src/orchestration/Layers/piSubagentExecutionCardSurface.test.ts \
+    src/provider/piSubagentRestartReconciliation.test.ts \
+    src/provider/piSubagentStartupRecoveryOrder.test.ts \
+    src/provider/piSubagentResumeCoordinator.test.ts \
+    src/provider/piSubagentTerminalLifecycle.test.ts \
+    src/provider/piSubagentCompletionOutbox.test.ts \
+    src/wsSnapshotLiveStream.test.ts \
+    src/provider/piSubagentExecutionReadBoundary.test.ts \
+    2>&1 | tee <plan>/evidence/WP-01-deterministic.log
+  status=${PIPESTATUS[0]}
+  PRODUCER_EXIT (PIPESTATUS[0]): 0
+  Result: Test Files 18 passed (18) · Tests 256 passed (256) · 0 failed, 0 skipped
+  Vitest duration 16.79s; producer wall 17s; vitest start 11:53:13 local.
+
+  Disclosure: a first launch of this identical command aborted before any
+  test executed because the evidence target directory did not exist yet
+  (tee: "No such file or directory"). PIPESTATUS[0] still read 0 because it
+  captures the vitest leg, so the run was voided as evidence on the tee
+  failure itself; the directory was created and the recorded run above is a
+  full clean re-execution whose log is the committed evidence file.
+
+6b. Contracts producer — cwd /tmp/symphony-t06/packages/contracts
+  set -o pipefail
+  bun run test src/piSubagents.test.ts \
+    2>&1 | tee <plan>/evidence/WP-01-contracts.log
+  status=${PIPESTATUS[0]}
+  PRODUCER_EXIT (PIPESTATUS[0]): 0
+  Result: Test Files 1 passed (1) · Tests 40 passed (40) · 0 failed, 0 skipped
+  Vitest duration 181ms; producer wall 1s; vitest start 11:54:19 local.
+
+19-file set accounting: 18 unit files + 1 contracts file = 19 files, all
+executed in this record's two producer invocations at the frozen candidate.
+Per-file case inventory with file:line locators: WP-01-ac-diagnostic-matrix.md.
+
+7. COMMIT BOUNDARY
+------------------
+Message: test(pi): record Ticket 06 deterministic integrated evidence
+Staged by explicit path, exactly five files:
+  plans/06-integrated-real-pi-acceptance/evidence/WP-01-worktree-provenance.txt
+  plans/06-integrated-real-pi-acceptance/evidence/WP-01-deterministic.log
+  plans/06-integrated-real-pi-acceptance/evidence/WP-01-contracts.log
+  plans/06-integrated-real-pi-acceptance/evidence/WP-01-ac-diagnostic-matrix.md
+  plans/06-integrated-real-pi-acceptance/WP-01-freeze-and-deterministic-evidence.md
+(under .planning/synara-pi-subagent-lifecycle-reliability/)
+Post-commit gates re-recorded in the WP-01 result block.
+
+8. WORKTREE DISPOSITION
+-----------------------
+Both worktrees are retained at their pins for WP-02 consumption. No
+`git worktree remove` was executed by WP-01.
