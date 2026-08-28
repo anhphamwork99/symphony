@@ -66,7 +66,9 @@ import {
   DETERMINISTIC_BATCH_DRIVER_MODEL_ID,
   DETERMINISTIC_DRIVER_MODEL_ID,
   DETERMINISTIC_MANUAL_TEARDOWN_CHILD_MODEL,
+  DETERMINISTIC_SLOW_MODEL_ID,
   DETERMINISTIC_RESTART_DRIVER_MODEL_ID,
+  createDeterministicModelServer,
   makeRealPiWsHarness,
   verifyRealPiExtensionProvenance,
   writeBridgeAbsentAgentDir,
@@ -153,6 +155,58 @@ const metadataReason = (metadata: unknown): string | undefined => {
   }
   return typeof metadata.reason === "string" ? metadata.reason : undefined;
 };
+
+describe("Decision 0007 causal slow-response fixture contract", () => {
+  it("activates the runtime hold immediately before future slow requests", async () => {
+    const modelServer = await createDeterministicModelServer({ slowDelayMs: 5 });
+    const requestSlowResponse = () =>
+      fetch(`${modelServer.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: DETERMINISTIC_SLOW_MODEL_ID,
+          messages: [{ role: "user", content: "fixture contract" }],
+        }),
+      }).then(async (response) => {
+        expect(response.ok).toBe(true);
+        await response.text();
+      });
+    const waitForPending = async (expected: number) => {
+      const deadline = Date.now() + 2_000;
+      for (;;) {
+        const pending = modelServer.pendingSlowResponseCount();
+        if (pending > 2) throw new Error(`fixture pending count exceeded two: ${pending}`);
+        if (pending === expected) return;
+        if (Date.now() >= deadline) {
+          throw new Error(`fixture pending count ${pending}; expected ${expected}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+
+    try {
+      // Runtime holding is disabled by default, and activation is not
+      // retroactive for a slow request already in flight.
+      expect(modelServer.pendingSlowResponseCount()).toBe(0);
+      await requestSlowResponse();
+      expect(modelServer.pendingSlowResponseCount()).toBe(0);
+
+      modelServer.holdSlowResponses();
+      const heldResponses = [requestSlowResponse(), requestSlowResponse()];
+      await waitForPending(2);
+      expect(modelServer.pendingSlowResponseCount()).toBe(2);
+      modelServer.releaseSlowResponses();
+      await Promise.all(heldResponses);
+      await waitForPending(0);
+      expect(modelServer.pendingSlowResponseCount()).toBe(0);
+    } finally {
+      // Release is intentionally unconditional and idempotent.
+      modelServer.releaseSlowResponses();
+      modelServer.releaseSlowResponses();
+      await modelServer.close();
+    }
+  });
+});
 
 describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", () => {
   // -------------------------------------------------------------------------
@@ -1019,6 +1073,10 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         worktreePath: harness.workspaceDir,
         createdAt: new Date().toISOString(),
       });
+      expect(harness.modelServer.pendingSlowResponseCount()).toBe(0);
+      // Causally hold only the future slow child requests, immediately before
+      // the first public turn that can produce a child.
+      harness.modelServer.holdSlowResponses();
       await stageClient.dispatchCommand({
         type: "thread.turn.start",
         commandId: CommandId.makeUnsafe("cmd-t17-turn-4"),
@@ -1062,25 +1120,42 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
         createdAt: new Date().toISOString(),
       });
 
-      const admissions = await waitFor(
-        () =>
-          harness
+      const admissionBarrier = await waitFor(
+        () => {
+          const pending = harness.modelServer.pendingSlowResponseCount();
+          if (pending > 2) {
+            throw new Error(`${stage} fixture barrier count=${pending}; expected no more than two`);
+          }
+          const accepted = harness
             .observedAdmissions()
-            .filter((event) => String(event.threadId) === String(threadId)),
-        (events) =>
-          events !== undefined &&
-          events.length >= 2 &&
-          events.slice(0, 2).every((event) => event.result.status !== "rejected"),
+            .filter(
+              (event) =>
+                String(event.threadId) === String(threadId) && event.result.status !== "rejected",
+            );
+          return { accepted, pending };
+        },
+        ({ accepted, pending }) =>
+          accepted.length >= 2 &&
+          new Set(accepted.map((event) => event.result.executionId)).size === 2 &&
+          pending === 2,
         120_000,
-        `${stage} two managed admissions`,
+        `${stage} two distinct managed admissions with pending count exactly two`,
       );
       const executionIds = [
-        firstAdmission,
-        ...admissions.filter((event) => event !== firstAdmission),
-      ]
-        .slice(0, 2)
-        .map((event) => event.result.executionId);
-      expect(new Set(executionIds).size).toBe(2);
+        ...new Set(admissionBarrier.accepted.map((event) => event.result.executionId)),
+      ].slice(0, 2);
+      expect(admissionBarrier.pending).toBe(2);
+      expect(executionIds).toHaveLength(2);
+      process.stdout.write(
+        `${stage} fixture barrier: accepted=${admissionBarrier.accepted.length} pending=${admissionBarrier.pending}\n`,
+      );
+      harness.modelServer.releaseSlowResponses();
+      await waitFor(
+        () => harness.modelServer.pendingSlowResponseCount(),
+        (pending) => pending === 0,
+        30_000,
+        `${stage} slow-response drain (pending count)`,
+      );
 
       const durableRows = await Promise.all(
         executionIds.map((executionId) =>
@@ -1192,10 +1267,15 @@ describe("Ticket 17 integrated real-Pi acceptance — slice 3 (stages 0–4)", (
     } catch (error) {
       throw new Error(
         `${stage} failed: ${error instanceof Error ? error.message : String(error)}; ` +
+          `pendingSlowResponses=${harness.modelServer.pendingSlowResponseCount()}; ` +
           `modelRequests=${JSON.stringify(harness.modelServer.requests())}`,
         { cause: error },
       );
     } finally {
+      // This release is unconditional and idempotent, and must happen before
+      // closing the public client even when the barrier or batch assertions fail.
+      harness.modelServer.releaseSlowResponses();
+      harness.modelServer.releaseSlowResponses();
       await stageClient.close();
     }
   }, 240_000);

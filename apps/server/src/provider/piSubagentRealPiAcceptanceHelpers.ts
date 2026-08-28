@@ -646,6 +646,8 @@ export interface LoopbackModelServer {
   readonly requests: () => ReadonlyArray<LoopbackModelRequestLogEntry>;
   /** Number of deterministic slow-model responses held before their first byte. */
   readonly pendingSlowResponseCount: () => number;
+  /** Enables holding only future deterministic slow-model requests. */
+  readonly holdSlowResponses: () => void;
   /** Releases every currently held deterministic slow-model response exactly once. */
   readonly releaseSlowResponses: () => void;
   readonly setManualTeardownCommand: (command: string) => void;
@@ -666,6 +668,9 @@ export function createDeterministicModelServer(
   let manualBashDispatched = false;
   let manualTeardownCommand: string | undefined;
   const server = http.createServer((req, res) => {
+    // Snapshot at request arrival so runtime activation never retroactively
+    // captures a slow request that was already in flight.
+    const holdSlowResponseForRequest = holdSlowResponses;
     let raw = "";
     req.on("data", (chunk) => {
       raw += chunk;
@@ -847,7 +852,7 @@ export function createDeterministicModelServer(
         res.write("data: [DONE]\n\n");
         res.end();
       };
-      if (holdSlowResponses && requestedModel === DETERMINISTIC_SLOW_MODEL_ID) {
+      if (holdSlowResponseForRequest && requestedModel === DETERMINISTIC_SLOW_MODEL_ID) {
         const release = () => {
           if (!pendingSlowResponses.delete(release)) return;
           respond();
@@ -870,6 +875,9 @@ export function createDeterministicModelServer(
         requestCount: () => log.length,
         requests: () => [...log],
         pendingSlowResponseCount: () => pendingSlowResponses.size,
+        holdSlowResponses: () => {
+          holdSlowResponses = true;
+        },
         releaseSlowResponses: () => {
           holdSlowResponses = false;
           for (const release of pendingSlowResponses) release();
