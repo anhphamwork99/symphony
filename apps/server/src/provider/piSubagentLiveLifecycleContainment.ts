@@ -21,9 +21,10 @@
  *   classifies as outcome-unknown, and is only returned as `applied` when the
  *   current, still-live registration revalidates after the bounded snapshot
  *   resolves.
- * - Internal reasons are a closed, bounded vocabulary.  They reach only the
- *   injected trace seam; the public result surface stays the fixed diagnostic
- *   code.  Timeout reasons are reachable only through `markTimedOut`.
+ * - Internal reasons are a closed, bounded vocabulary.  Unavailable results
+ *   retain their bounded reason for the managed binding; it never becomes a
+ *   public diagnostic or serialized provider data.  Timeout reasons are
+ *   reachable only through `markTimedOut`.
  */
 
 export type PiSubagentLiveLifecycleDiagnosticCode =
@@ -85,8 +86,9 @@ export interface PiSubagentLiveLifecycleInvocationContext {
   readonly markResponseLost: () => void;
   /**
    * Marks a structured pre-acceptance provider failure with a closed
-   * bounded reason.  Only the `provider_inactive` member is used by the
-   * managed binding today; the full set keeps the seam typed and closed.
+   * bounded reason.  Only the exact `provider_inactive` marker is used by the
+   * managed binding today; route state uses `provider_route_inactive` so the
+   * two cases cannot be conflated.
    */
   readonly markUnavailable: (reason: PiSubagentLiveLifecycleUnavailableReason) => void;
 }
@@ -117,17 +119,21 @@ export interface PiSubagentLiveLifecycleDispatchInput<T> {
 export interface PiSubagentLiveLifecycleResult<T> {
   readonly status: "applied" | "unavailable" | "outcome_unknown" | "stale";
   readonly diagnosticCode?: PiSubagentLiveLifecycleDiagnosticCode;
+  /** Internal-only bounded reason; present only when status is unavailable. */
+  readonly unavailableReason?: PiSubagentLiveLifecycleUnavailableReason;
   /** Present only for an applied, post-response-revalidated invocation. */
   readonly value?: T;
 }
 
 /**
  * Bounded, closed internal reason vocabulary for the unavailable shape.
- * These values are emitted to the trace seam only; they never become public
- * diagnostics or arbitrary error text.
+ * These values are emitted to the trace seam and retained for the internal
+ * managed binding seam; they never become public diagnostics or arbitrary error
+ * text.
  */
 export type PiSubagentLiveLifecycleUnavailableReason =
   | "provider_inactive"
+  | "provider_route_inactive"
   | "callback_missing"
   | "callback_disposed"
   | "callback_mismatched"
@@ -301,7 +307,7 @@ export function makePiSubagentLiveLifecycleContainment(
       return { reason: "callback_mismatched" };
     }
     if (state.cleared || state.retired) return { state, reason: "callback_disposed" };
-    if (!state.active) return { state, reason: "provider_inactive" };
+    if (!state.active) return { state, reason: "provider_route_inactive" };
     return { state, reason: "active" };
   };
 
@@ -319,6 +325,7 @@ export function makePiSubagentLiveLifecycleContainment(
       return {
         status: "unavailable",
         diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+        unavailableReason: reason,
       };
     }
     const captured = kind === "observe" ? state.observe : state.control;
@@ -328,6 +335,7 @@ export function makePiSubagentLiveLifecycleContainment(
       return {
         status: "unavailable",
         diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+        unavailableReason: "callback_missing",
       };
     }
 
@@ -393,6 +401,7 @@ export function makePiSubagentLiveLifecycleContainment(
       return {
         status: "unavailable",
         diagnosticCode: "pi_subagent_live_lifecycle_unavailable",
+        unavailableReason: failure.reason,
       };
     };
 

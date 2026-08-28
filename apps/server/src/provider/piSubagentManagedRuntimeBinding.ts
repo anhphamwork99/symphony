@@ -631,7 +631,15 @@ export function wrapPiSubagentManagedTool(
             : liveResult.status === "stale"
               ? "stale response ignored"
               : "unavailable";
-        return managedRoutingFailure(code, `Managed live lifecycle ${classification} [${code}].`);
+        const publicCode =
+          liveResult.status === "unavailable" &&
+          liveResult.unavailableReason === "provider_inactive"
+            ? "pi_subagent_read_live_record_unavailable"
+            : code;
+        return managedRoutingFailure(
+          publicCode,
+          `Managed live lifecycle ${classification} [${publicCode}].`,
+        );
       }
       providerResult = liveResult.value;
     } else {
