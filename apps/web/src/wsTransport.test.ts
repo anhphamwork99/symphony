@@ -150,6 +150,15 @@ interface WsTransportInternals {
   readonly streamCompletionRetryTimers: Map<string, number>;
   readonly activeThreadStreamInputs: Map<string, unknown>;
   readonly threadSubscriptions: Map<string, unknown>;
+  readonly whiteboardOperationSubscriptions: Map<
+    string,
+    {
+      identity: unknown;
+      lastAcceptedServerSequence: number;
+      readonly acceptedEvents: Map<number, unknown>;
+      listener: (event: unknown) => boolean | void;
+    }
+  >;
   shellSubscribed: boolean;
   readonly threadStreamFailureListeners: Set<(failure: WsThreadStreamFailure) => void>;
   disposed: boolean;
@@ -192,6 +201,8 @@ function makeBareTransport(): {
     streamCompletionRetryTimers: new Map(),
     activeThreadStreamInputs: new Map(),
     threadSubscriptions: new Map(),
+    whiteboardOperationSubscriptions: new Map(),
+    whiteboardOperationFailureListeners: new Set(),
     threadStreamFailureListeners: new Set(),
     disposed: false,
     sessionVersion: 1,
@@ -239,6 +250,13 @@ async function waitForSockets(count: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   expect(sockets.length).toBeGreaterThanOrEqual(count);
+}
+
+/** Drains the microtask queue far enough for mock stream events to land. */
+async function flushStreamDelivery(): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await Promise.resolve();
+  }
 }
 
 beforeEach(() => {
@@ -1159,8 +1177,10 @@ describe("WsTransport", () => {
         closeRuntime: vi.fn(async () => undefined),
         startChannelStream,
         startShellStream,
+        startWhiteboardOperationStream: vi.fn(),
         refreshThreadSubscriptionInput: () => input,
         startThreadStream,
+        whiteboardOperationSubscriptions: new Map(),
       });
 
       const recovery = internals.openReconnectSession();
@@ -1595,5 +1615,524 @@ describe("WsTransport", () => {
     await transport.dispose();
 
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  describe("Whiteboard operation-session transport (WP-B1)", () => {
+    const OPERATION_SESSION_ID = "wb-op-session-1";
+    const IDENTITY = {
+      serverInstanceId: "server-instance-1",
+      operationSessionId: OPERATION_SESSION_ID,
+      sessionEpoch: 1,
+      projectId: "project-1",
+      documentKind: "file-canvas" as const,
+      documentId: "doc-1",
+      canvasIdentity: "canvas-1",
+    };
+    const ATTACH_INPUT = {
+      projectId: IDENTITY.projectId,
+      documentKind: IDENTITY.documentKind,
+      documentId: IDENTITY.documentId,
+      canvasIdentity: IDENTITY.canvasIdentity,
+      expectedDocumentRevision: 0,
+    };
+
+    function makeSnapshot(serverSequence: number, identity = IDENTITY) {
+      return {
+        kind: "session-snapshot" as const,
+        ...identity,
+        serverSequence,
+        documentRevision: 0,
+        acknowledgementSummary: {
+          acceptedSemanticCount: 0,
+          acceptedNoOpCount: 0,
+          rejectedCount: 0,
+          lastAcceptedProducerSequence: 0,
+        },
+      };
+    }
+
+    function makeProgressEvent(serverSequence: number, fingerprint: string, identity = IDENTITY) {
+      return {
+        kind: "operation-progress" as const,
+        ...identity,
+        serverSequence,
+        batchId: "batch-1",
+        operationId: "operation-1",
+        generation: 1,
+        producerSequence: serverSequence,
+        dependsOnProducerSequences: [],
+        expectedBeforeRevision: 0,
+        expectedAfterRevision: 1,
+        expectedSemanticFingerprint: fingerprint,
+        mutation: {
+          format: "synara.whiteboard.progress/v1" as const,
+          elements: [
+            { id: "el-1", type: "rectangle" as const, x: 0, y: 0 },
+          ],
+        },
+      };
+    }
+
+    function makeCapabilityTransport(capabilities: readonly string[] = []) {
+      const { transport, internals } = makeBareTransport();
+      Object.assign(internals, {
+        compatibility: {
+          ...NEGOTIATION_RESULT,
+          capabilities: [...capabilities],
+        } satisfies WsBootstrapNegotiateResult,
+        disposed: false,
+      });
+      return { transport, internals };
+    }
+
+    it("reports the exact whiteboard operation capability from negotiation", () => {
+      const missing = makeCapabilityTransport(["transport.http-negotiate"]);
+      expect(missing.transport.hasWhiteboardOperationCapability()).toBe(false);
+
+      const present = makeCapabilityTransport(["whiteboard.operation-session-v1"]);
+      expect(present.transport.hasWhiteboardOperationCapability()).toBe(true);
+
+      // Exact-string match only: a version bump is a different capability.
+      const wrongVersion = makeCapabilityTransport(["whiteboard.operation-session-v2"]);
+      expect(wrongVersion.transport.hasWhiteboardOperationCapability()).toBe(false);
+
+      const none = makeCapabilityTransport();
+      expect(none.transport.hasWhiteboardOperationCapability()).toBe(false);
+    });
+
+    it("fails closed unary seam calls without the capability", async () => {
+      const { transport } = makeCapabilityTransport([]);
+
+      await expect(transport.whiteboardOperationAttachSession(ATTACH_INPUT)).rejects.toMatchObject({
+        _tag: "WsTransportWhiteboardOperationError",
+        code: "WHITEBOARD_OPERATION_CAPABILITY_MISSING",
+      });
+      expect(() =>
+        transport.whiteboardOperationSubscribe(ATTACH_INPUT, () => undefined),
+      ).toThrow();
+    });
+
+    it("wraps attach as a typed unary request", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const result = { ...IDENTITY, documentRevision: 3 };
+      const request = vi.fn(async () => result);
+      Object.assign(internals, { request });
+
+      await expect(transport.whiteboardOperationAttachSession(ATTACH_INPUT)).resolves.toEqual(
+        result,
+      );
+      expect(request).toHaveBeenCalledWith(
+        WS_METHODS.whiteboardOperationAttachSession,
+        ATTACH_INPUT,
+        undefined,
+      );
+    });
+
+    it("wraps acknowledge, take over, retry, and release as typed unary requests", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const request = vi.fn(async () => ({}));
+      Object.assign(internals, { request });
+      const ackInput = {
+        ...IDENTITY,
+        batchId: "batch-1",
+        operationId: "operation-1",
+        generation: 1,
+        producerSequence: 1,
+        serverSequence: 1,
+        adapterCorrelationId: "adapter-1",
+        applicationResult: "applied-semantic" as const,
+        resultingMutationRevision: 1,
+        verifiedSemanticFingerprint: "fingerprint-1",
+      };
+      const takeOverInput = {
+        ...IDENTITY,
+        batchId: "batch-1",
+        operationId: "operation-1",
+        expectedGeneration: 1,
+        takeOverRequestId: "tor-1",
+      };
+      const retryInput = {
+        ...IDENTITY,
+        batchId: "batch-1",
+        failedOperationId: "operation-1",
+        failedGeneration: 1,
+        failedRetryAttempt: 0,
+      };
+      const releaseInput = { ...IDENTITY };
+
+      await transport.whiteboardOperationAcknowledgeApplication(ackInput);
+      await transport.whiteboardOperationTakeOver(takeOverInput);
+      await transport.whiteboardOperationRetry(retryInput);
+      await transport.whiteboardOperationReleaseSession(releaseInput);
+
+      expect(request).toHaveBeenNthCalledWith(
+        1,
+        WS_METHODS.whiteboardOperationAcknowledgeApplication,
+        ackInput,
+        undefined,
+      );
+      expect(request).toHaveBeenNthCalledWith(
+        2,
+        WS_METHODS.whiteboardOperationTakeOver,
+        takeOverInput,
+        undefined,
+      );
+      expect(request).toHaveBeenNthCalledWith(
+        3,
+        WS_METHODS.whiteboardOperationRetry,
+        retryInput,
+        undefined,
+      );
+      expect(request).toHaveBeenNthCalledWith(
+        4,
+        WS_METHODS.whiteboardOperationReleaseSession,
+        releaseInput,
+        undefined,
+      );
+    });
+
+    it("delivers snapshot-first events in order and retains the immutable identity", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const client = {
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
+      };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const seen: unknown[] = [];
+
+      const unsubscribe = transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        (event) => {
+          seen.push(event);
+          return true;
+        },
+      );
+      await flushStreamDelivery();
+
+      expect(seen).toEqual([snapshot, progress]);
+      expect(client[WS_METHODS.whiteboardOperationSubscribe]).toHaveBeenCalledWith({
+        ...IDENTITY,
+        lastServerSequence: 0,
+      });
+      const subscription = internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID);
+      expect(subscription?.identity).toEqual(IDENTITY);
+      expect(subscription?.lastAcceptedServerSequence).toBe(2);
+
+      unsubscribe();
+      expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);
+    });
+
+    it("drops equivalent duplicate deliveries of the same serverSequence", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const replay = { ...makeProgressEvent(2, "fingerprint-2") };
+      const client = {
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
+          Stream.make(snapshot, progress, replay),
+        ),
+      };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const listener = vi.fn(() => true);
+
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        listener,
+      );
+      await flushStreamDelivery();
+
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)).toBeDefined();
+    });
+
+    it("fails closed on a conflicting duplicate serverSequence", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const conflicting = makeProgressEvent(2, "fingerprint-conflict");
+      const client = {
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
+          Stream.make(snapshot, progress, conflicting),
+        ),
+      };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const failures: unknown[] = [];
+      transport.onWhiteboardOperationFailure((failure) => failures.push(failure));
+      const listener = vi.fn(() => true);
+
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        listener,
+      );
+      await flushStreamDelivery();
+
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
+        _tag: "WsTransportWhiteboardOperationError",
+        code: "WHITEBOARD_OPERATION_CONFLICTING_PRODUCER_INPUT",
+        operationSessionId: OPERATION_SESSION_ID,
+      });
+      expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);
+    });
+
+    it("does not advance the cursor when the listener rejects an event", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const client = {
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
+      };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+
+      const unsubscribe = transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        (event) => event.kind !== "operation-progress",
+      );
+      await flushStreamDelivery();
+
+      const subscription = internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID);
+      expect(subscription?.lastAcceptedServerSequence).toBe(1);
+
+      // A restart (replacement) must replay from the unchanged cursor: the
+      // subscribe input asks for lastServerSequence 1, not 2.
+      Object.assign(internals, {
+        streamCleanups: new Map(),
+        streamSettled: new Map(),
+      });
+      const startStream = vi.fn();
+      Object.assign(internals, { startStream });
+      (
+        transport as unknown as {
+          startWhiteboardOperationStream: (client: unknown, id: string) => void;
+        }
+      ).startWhiteboardOperationStream(client, OPERATION_SESSION_ID);
+      expect(startStream).toHaveBeenCalledTimes(1);
+      const input = (
+        client[WS_METHODS.whiteboardOperationSubscribe] as ReturnType<typeof vi.fn>
+      ).mock.calls.at(-1)?.[0] as { lastServerSequence: number };
+      expect(input.lastServerSequence).toBe(1);
+      unsubscribe();
+    });
+
+    it("replaces a same-session local subscription instead of stacking streams", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const subscribe = vi.fn(() => Stream.make(snapshot, progress));
+      const client = { [WS_METHODS.whiteboardOperationSubscribe]: subscribe };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const firstListener = vi.fn(() => true);
+      const secondListener = vi.fn(() => true);
+
+      const unsubscribeFirst = transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        firstListener,
+      );
+      await flushStreamDelivery();
+      expect(firstListener).toHaveBeenCalledTimes(2);
+
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 2 },
+        secondListener,
+      );
+      await flushStreamDelivery();
+      await Promise.resolve();
+
+      // The replacement resumed from the first subscription's accepted cursor
+      // (2): the new subscribe input carries lastServerSequence 2, and the
+      // replayed snapshot at the same sequence did not reach the new listener
+      // as a fresh event.
+      const lastCall = subscribe.mock.calls.at(-1)?.[0] as { lastServerSequence: number };
+      expect(lastCall.lastServerSequence).toBe(2);
+      expect(secondListener).not.toHaveBeenCalled();
+      expect(
+        internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)?.listener,
+      ).not.toBe(firstListener);
+
+      // The stale disposer must not remove the replacement subscription.
+      unsubscribeFirst();
+      expect(
+        internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID),
+      ).toBe(true);
+    });
+
+    it("resumes from the last accepted cursor after a same-authority reconnect", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const progress = makeProgressEvent(2, "fingerprint-2");
+      const client = {
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
+      };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const listener = vi.fn(() => true);
+
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        listener,
+      );
+      await flushStreamDelivery();
+      expect(internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)
+        ?.lastAcceptedServerSequence).toBe(2);
+
+      // Simulate the reconnect path: rebuild the subscribe input from the
+      // retained identity and the advanced cursor.
+      const rebuilt = (
+        transport as unknown as {
+          buildWhiteboardOperationSubscribeInput: (
+            subscription: { identity: unknown; lastAcceptedServerSequence: number },
+          ) => { lastServerSequence: number } | null;
+        }
+      ).buildWhiteboardOperationSubscribeInput(
+        internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)!,
+      );
+      expect(rebuilt).toEqual({ ...IDENTITY, lastServerSequence: 2 });
+    });
+
+    it("surfaces a changed server authority instead of silently resuming", () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      internals.whiteboardOperationSubscriptions.set(OPERATION_SESSION_ID, {
+        identity: IDENTITY,
+        lastAcceptedServerSequence: 4,
+        acceptedEvents: new Map(),
+        listener: () => undefined,
+      });
+      const failures: unknown[] = [];
+      transport.onWhiteboardOperationFailure((failure) => failures.push(failure));
+      Object.assign(internals, {
+        lastServerInstanceId: "server-instance-1",
+        sequence: 5,
+        latestPushByChannel: new Map([["server.welcome", { stale: true }]]),
+        compatibilityListeners: new Set(),
+        compatibilityResultListeners: new Set(),
+      });
+
+      // A reconnect negotiated a different server instance.
+      (
+        transport as unknown as {
+          adoptNegotiation: (compatibility: WsBootstrapNegotiateResult) => void;
+        }
+      ).adoptNegotiation({ ...NEGOTIATION_RESULT, serverInstanceId: "server-instance-2" });
+
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
+        _tag: "WsTransportWhiteboardOperationError",
+        code: "WHITEBOARD_OPERATION_AUTHORITY_CHANGED",
+        operationSessionId: OPERATION_SESSION_ID,
+      });
+      expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);
+    });
+
+    it("surfaces a typed whiteboard stream failure without reconnecting", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      const snapshot = makeSnapshot(1);
+      const subscribe = vi.fn(() =>
+        Stream.concat(
+          Stream.make(snapshot),
+          Stream.fail({ code: "operation-session-lost", message: "lost", retryable: false }),
+        ),
+      );
+      const client = { [WS_METHODS.whiteboardOperationSubscribe]: subscribe };
+      Object.assign(internals, { getClient: vi.fn(async () => client) });
+      const failures: unknown[] = [];
+      transport.onWhiteboardOperationFailure((failure) => failures.push(failure));
+      const listener = vi.fn(() => true);
+
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        listener,
+      );
+      await flushStreamDelivery();
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
+        _tag: "WsTransportWhiteboardOperationError",
+        code: "WHITEBOARD_OPERATION_TRANSPORT_CLOSED",
+        operationSessionId: OPERATION_SESSION_ID,
+      });
+      expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);
+      expect(
+        shouldReconnectAfterStreamFailure(
+          Cause.fail({ code: "operation-session-lost", retryable: false }),
+        ),
+      ).toBe(false);
+    });
+
+    it("does not trigger transport reconnects for typed whiteboard failures", () => {
+      expect(
+        shouldReconnectAfterStreamFailure(
+          Cause.fail({ code: "WHITEBOARD_OPERATION_SESSION_UNKNOWN", retryable: false }),
+        ),
+      ).toBe(false);
+      expect(
+        shouldReconnectAfterStreamFailure(
+          Cause.fail({ code: "WHITEBOARD_OPERATION_SESSION_EPOCH_STALE", retryable: false }),
+        ),
+      ).toBe(false);
+      expect(
+        shouldReconnectAfterStreamFailure(
+          Cause.fail({ code: "operation-session-lost", retryable: false }),
+        ),
+      ).toBe(false);
+      expect(
+        shouldReconnectAfterStreamFailure(
+          Cause.fail({ code: "operation-session-reset-required", retryable: false }),
+        ),
+      ).toBe(false);
+      expect(
+        shouldReconnectAfterStreamFailure(Cause.fail(new Error("transient"))),
+      ).toBe(true);
+    });
+
+    it("cleans up whiteboard state on dispose", async () => {
+      const { transport, internals } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      internals.whiteboardOperationSubscriptions.set(OPERATION_SESSION_ID, {
+        identity: IDENTITY,
+        lastAcceptedServerSequence: 0,
+        acceptedEvents: new Map(),
+        listener: () => undefined,
+      });
+      const failureListener = vi.fn();
+      const off = transport.onWhiteboardOperationFailure(failureListener);
+      Object.assign(internals, {
+        lifetime: new AbortController(),
+        state: "open" as const,
+        stateListeners: new Set(),
+        clientPromise: Promise.resolve({}),
+        reconnectPromise: null,
+        runtime: null,
+        clientScope: null,
+      });
+
+      await transport.dispose();
+
+      expect(internals.whiteboardOperationSubscriptions.size).toBe(0);
+      expect(internals.whiteboardOperationFailureListeners.size).toBe(0);
+      off();
+    });
   });
 });

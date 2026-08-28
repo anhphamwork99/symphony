@@ -19,6 +19,22 @@ import {
   WS_PROTOCOL_MIN_REVISION,
   DEVICE_WS_CHANNELS,
   DEVICE_WS_METHODS,
+  WHITEBOARD_OPERATION_SESSION_CAPABILITY as WHITEBOARD_OPERATION_CAPABILITY,
+  WHITEBOARD_OPERATION_ERROR,
+  type WhiteboardOperationErrorCode,
+  type WhiteboardAcknowledgeApplicationInput,
+  type WhiteboardAcknowledgeApplicationResult,
+  type WhiteboardOperationAttachSessionInput,
+  type WhiteboardOperationAttachSessionResult,
+  type WhiteboardOperationReleaseSessionInput,
+  type WhiteboardOperationReleaseSessionResult,
+  type WhiteboardOperationRetryInput,
+  type WhiteboardOperationRetryResult,
+  type WhiteboardOperationSessionEvent,
+  type WhiteboardOperationSessionIdentity,
+  type WhiteboardOperationSubscribeInput,
+  type WhiteboardOperationTakeOverInput,
+  type WhiteboardOperationTakeOverResult,
   WsBootstrapNegotiateResult,
   WsBootstrapRpcGroup,
   WsDeviceRpcGroup,
@@ -114,6 +130,100 @@ export function isRuntimeInterruptFailure(error: unknown): boolean {
     error.message.includes("ManagedRuntime disposed")
   );
 }
+
+/** Stream key prefix for Whiteboard operation-session subscriptions. */
+const WHITEBOARD_OPERATION_STREAM_KEY_PREFIX = "whiteboard.operation:";
+
+/**
+ * Typed browser-side failure for the Whiteboard operation-session seam. Raised
+ * when a session cannot be opened, a subscription violates its contract
+ * (conflicting duplicate, identity mismatch, delivery gap), or the server
+ * authority changed. Receiving this failure means the subscription was torn
+ * down; recovery requires an explicit re-attach against the current server.
+ */
+export class WsTransportWhiteboardOperationError extends Data.TaggedError(
+  "WsTransportWhiteboardOperationError",
+)<{
+  readonly message: string;
+  readonly code: WhiteboardOperationErrorCode | "WHITEBOARD_OPERATION_TRANSPORT_CLOSED";
+  readonly operationSessionId?: string;
+  readonly cause?: unknown;
+}> {}
+
+/** Per-session browser-side state for one live Whiteboard operation subscription. */
+interface WhiteboardOperationSubscription {
+  /**
+   * Identity fields minted by the server and fixed by the session snapshot.
+   * Immutable while subscribed; null until the first snapshot arrives.
+   */
+  identity: WhiteboardOperationSessionIdentity | null;
+  /** Identity the subscriber attached with; the snapshot must agree with it. */
+  readonly expectedIdentity: WhiteboardOperationSessionIdentity;
+  /** Last server sequence the listener accepted. The resume cursor. */
+  lastAcceptedServerSequence: number;
+  /**
+   * Bounded dedupe window of accepted events by server sequence. Replayed
+   * events within the window are dropped when equivalent and fail the session
+   * when they conflict; sequences below the window are silently dropped.
+   */
+  readonly acceptedEvents: Map<number, WhiteboardOperationSessionEvent>;
+  readonly listener: (event: WhiteboardOperationSessionEvent) => boolean | void;
+}
+
+function whiteboardOperationStreamKey(operationSessionId: string): string {
+  return `${WHITEBOARD_OPERATION_STREAM_KEY_PREFIX}${operationSessionId}`;
+}
+
+function whiteboardOperationSessionIdFromStreamKey(key: string): string | null {
+  return key.startsWith(WHITEBOARD_OPERATION_STREAM_KEY_PREFIX)
+    ? key.slice(WHITEBOARD_OPERATION_STREAM_KEY_PREFIX.length)
+    : null;
+}
+
+/** Identity fields shared by every session event; compared on arrival. */
+const WHITEBOARD_IDENTITY_FIELDS = [
+  "serverInstanceId",
+  "operationSessionId",
+  "sessionEpoch",
+  "projectId",
+  "documentKind",
+  "documentId",
+  "canvasIdentity",
+] as const satisfies readonly (keyof WhiteboardOperationSessionIdentity)[];
+
+function identityFromEvent(
+  event: WhiteboardOperationSessionEvent,
+): WhiteboardOperationSessionIdentity {
+  return Object.fromEntries(
+    WHITEBOARD_IDENTITY_FIELDS.map((field) => [field, event[field]]),
+  ) as WhiteboardOperationSessionIdentity;
+}
+
+function identityFromSubscribeInput(
+  input: WhiteboardOperationSubscribeInput,
+): WhiteboardOperationSessionIdentity {
+  return Object.fromEntries(
+    WHITEBOARD_IDENTITY_FIELDS.map((field) => [field, input[field]]),
+  ) as WhiteboardOperationSessionIdentity;
+}
+
+function whiteboardIdentityEquals(
+  left: WhiteboardOperationSessionIdentity,
+  right: WhiteboardOperationSessionIdentity,
+): boolean {
+  return WHITEBOARD_IDENTITY_FIELDS.every((field) => left[field] === right[field]);
+}
+
+/** Wire payloads are bounded; a stable string form is enough to detect conflicts. */
+function whiteboardEventEquals(
+  left: WhiteboardOperationSessionEvent,
+  right: WhiteboardOperationSessionEvent,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Dedupe window size; matches the bounded replay scale of the server journal. */
+const WHITEBOARD_OPERATION_DEDUPE_WINDOW = 256;
 
 export interface WsRequestOptions {
   readonly timeoutMs?: number | null;
@@ -424,13 +534,28 @@ export function getTerminalCompatibilityError(error: unknown): WsCompatibilityEr
   return Schema.is(WsCompatibilityError)(error) && error.retryable === false ? error : null;
 }
 
+/**
+ * Whiteboard operation-session codes describe per-session authority or
+ * contract state, not socket health. A transport-wide reconnect cannot heal
+ * an unknown/stale/lost session and would interrupt unrelated streams in a
+ * 500ms loop; those subscriptions surface a typed failure instead and recover
+ * only through an explicit re-attach.
+ */
+const WHITEBOARD_OPERATION_NO_RECONNECT_ERROR_CODES = new Set<string>(
+  Object.values(WHITEBOARD_OPERATION_ERROR),
+);
+
 export function shouldReconnectAfterStreamFailure(cause: Cause.Cause<unknown>): boolean {
   return !cause.reasons.some((reason) => {
     if (!Cause.isFailReason(reason)) return false;
     const error = reason.error;
     if (!error || typeof error !== "object") return false;
     const code = "code" in error ? error.code : undefined;
-    return typeof code === "string" && STREAM_ADMISSION_ERROR_CODES.has(code);
+    if (typeof code !== "string") return false;
+    return (
+      STREAM_ADMISSION_ERROR_CODES.has(code) ||
+      WHITEBOARD_OPERATION_NO_RECONNECT_ERROR_CODES.has(code)
+    );
   });
 }
 
@@ -728,6 +853,13 @@ export class WsTransport {
   // is absorbed (bootstrap coalescing).
   private shellSnapshotDelivered = false;
   private readonly threadSubscriptions = new Map<string, unknown>();
+  private readonly whiteboardOperationSubscriptions = new Map<
+    string,
+    WhiteboardOperationSubscription
+  >();
+  private readonly whiteboardOperationFailureListeners = new Set<
+    (failure: WsTransportWhiteboardOperationError) => void
+  >();
   private compatibility: WsBootstrapNegotiateResult | null = null;
   private compatibilityIssue: WsCompatibilityError | null = null;
   // Tracks the last server generation this transport observed so cross-restart
@@ -957,6 +1089,356 @@ export class WsTransport {
     }
   }
 
+  /**
+   * True when the negotiated server advertised the exact Whiteboard
+   * operation-session capability. Every seam call fails closed while this is
+   * false, so callers can gate Whiteboard UI without probing the server.
+   */
+  hasWhiteboardOperationCapability(): boolean {
+    return (
+      this.compatibility?.capabilities.includes(WHITEBOARD_OPERATION_CAPABILITY) === true
+    );
+  }
+
+  /**
+   * Fires when a Whiteboard operation subscription fails closed: conflicting
+   * duplicate, identity/authority mismatch, delivery gap, or a typed server
+   * refusal (unknown session, stale epoch, lost history). The subscription is
+   * already torn down when this fires; recovery is an explicit re-attach.
+   */
+  onWhiteboardOperationFailure(
+    listener: (failure: WsTransportWhiteboardOperationError) => void,
+  ): () => void {
+    this.whiteboardOperationFailureListeners.add(listener);
+    return () => {
+      this.whiteboardOperationFailureListeners.delete(listener);
+    };
+  }
+
+  private emitWhiteboardOperationFailure(
+    failure: WsTransportWhiteboardOperationError,
+  ): void {
+    for (const listener of this.whiteboardOperationFailureListeners) {
+      try {
+        listener(failure);
+      } catch {
+        // Listener errors must not break transport teardown.
+      }
+    }
+  }
+
+  private requireWhiteboardOperationCapability(): void {
+    if (!this.hasWhiteboardOperationCapability()) {
+      throw new WsTransportWhiteboardOperationError({
+        message:
+          "The server did not advertise the Whiteboard operation-session capability.",
+        code: WHITEBOARD_OPERATION_ERROR.capabilityMissing,
+      });
+    }
+  }
+
+  async whiteboardOperationAttachSession(
+    input: WhiteboardOperationAttachSessionInput,
+    options?: WsRequestOptions,
+  ): Promise<WhiteboardOperationAttachSessionResult> {
+    this.requireWhiteboardOperationCapability();
+    return this.request<WhiteboardOperationAttachSessionResult>(
+      WS_METHODS.whiteboardOperationAttachSession,
+      input,
+      options,
+    );
+  }
+
+  async whiteboardOperationAcknowledgeApplication(
+    input: WhiteboardAcknowledgeApplicationInput,
+    options?: WsRequestOptions,
+  ): Promise<WhiteboardAcknowledgeApplicationResult> {
+    this.requireWhiteboardOperationCapability();
+    return this.request<WhiteboardAcknowledgeApplicationResult>(
+      WS_METHODS.whiteboardOperationAcknowledgeApplication,
+      input,
+      options,
+    );
+  }
+
+  async whiteboardOperationTakeOver(
+    input: WhiteboardOperationTakeOverInput,
+    options?: WsRequestOptions,
+  ): Promise<WhiteboardOperationTakeOverResult> {
+    this.requireWhiteboardOperationCapability();
+    return this.request<WhiteboardOperationTakeOverResult>(
+      WS_METHODS.whiteboardOperationTakeOver,
+      input,
+      options,
+    );
+  }
+
+  async whiteboardOperationRetry(
+    input: WhiteboardOperationRetryInput,
+    options?: WsRequestOptions,
+  ): Promise<WhiteboardOperationRetryResult> {
+    this.requireWhiteboardOperationCapability();
+    return this.request<WhiteboardOperationRetryResult>(
+      WS_METHODS.whiteboardOperationRetry,
+      input,
+      options,
+    );
+  }
+
+  async whiteboardOperationReleaseSession(
+    input: WhiteboardOperationReleaseSessionInput,
+    options?: WsRequestOptions,
+  ): Promise<WhiteboardOperationReleaseSessionResult> {
+    this.requireWhiteboardOperationCapability();
+    return this.request<WhiteboardOperationReleaseSessionResult>(
+      WS_METHODS.whiteboardOperationReleaseSession,
+      input,
+      options,
+    );
+  }
+
+  /**
+   * Subscribes to one Whiteboard operation session's snapshot-first,
+   * sequenced event stream.
+   *
+   * - The listener receives events strictly in serverSequence order and only
+   *   after it accepts an event does the resume cursor advance; returning
+   *   `false` (or throwing) rejects the event and keeps the cursor, so the
+   *   next (re)start replays it.
+   * - A second subscribe for the same session replaces the previous local
+   *   subscription and resumes from the last accepted cursor.
+   * - Reconnects to the same server authority resume automatically from the
+   *   last accepted cursor; a changed authority surfaces a typed failure
+   *   instead of silently resuming.
+   * - Duplicate delivery of an already accepted sequence is dropped when the
+   *   replay is equivalent and fails the session closed when it conflicts.
+   */
+  whiteboardOperationSubscribe(
+    input: WhiteboardOperationSubscribeInput,
+    listener: (event: WhiteboardOperationSessionEvent) => boolean | void,
+  ): () => void {
+    this.requireWhiteboardOperationCapability();
+    if (this.disposed) throw new Error("Transport disposed");
+    const { operationSessionId } = input;
+    const key = whiteboardOperationStreamKey(operationSessionId);
+    const existing = this.whiteboardOperationSubscriptions.get(operationSessionId);
+    const subscription: WhiteboardOperationSubscription = {
+      identity: existing?.identity ?? null,
+      expectedIdentity: identityFromSubscribeInput(input),
+      lastAcceptedServerSequence: existing?.lastAcceptedServerSequence ?? input.lastServerSequence,
+      acceptedEvents: existing?.acceptedEvents ?? new Map(),
+      listener,
+    };
+    this.whiteboardOperationSubscriptions.set(operationSessionId, subscription);
+    if (existing) {
+      // Replacement must tear the old stream down first so the new start owns
+      // the key and replays from the cursor instead of racing the old fiber.
+      void this.stopStream(key);
+    }
+    void this.getClient()
+      .then((client) => {
+        if (
+          !this.disposed &&
+          this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription
+        ) {
+          this.startWhiteboardOperationStream(client, operationSessionId);
+        }
+      })
+      .catch((error) => {
+        if (
+          !this.disposed &&
+          this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription &&
+          !isTerminalCompatibilityFailure(error)
+        ) {
+          console.warn("WebSocket RPC whiteboard operation stream failed to start", error);
+          window.setTimeout(() => {
+            if (
+              !this.disposed &&
+              this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription
+            ) {
+              void this.getClient()
+                .then((nextClient) => {
+                  if (
+                    !this.disposed &&
+                    this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription
+                  ) {
+                    this.startWhiteboardOperationStream(nextClient, operationSessionId);
+                  }
+                })
+                .catch((retryError) => {
+                  if (
+                    !this.disposed &&
+                    this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription
+                  ) {
+                    console.warn(
+                      "WebSocket RPC whiteboard operation stream failed to restart",
+                      retryError,
+                    );
+                  }
+                });
+            }
+          }, 500);
+        }
+      });
+    return () => {
+      if (this.whiteboardOperationSubscriptions.get(operationSessionId) === subscription) {
+        this.whiteboardOperationSubscriptions.delete(operationSessionId);
+        void this.stopStream(key);
+      }
+    };
+  }
+
+  /**
+   * Rebuilds a subscribed session's stream input from its immutable identity
+   * and the current resume cursor. Transport-managed restarts must never
+   * replay the input captured at subscribe time: a cursor advanced since then
+   * would redeliver already-accepted events to the listener.
+   */
+  private buildWhiteboardOperationSubscribeInput(
+    subscription: WhiteboardOperationSubscription,
+  ): WhiteboardOperationSubscribeInput | null {
+    // Until the snapshot fixes the identity the expected identity from the
+    // subscribe input is what the server must honor; afterwards the snapshot
+    // identity plus the current cursor is the exact resume position.
+    const identity = subscription.identity ?? subscription.expectedIdentity;
+    if (!identity) return null;
+    return {
+      ...identity,
+      lastServerSequence: subscription.lastAcceptedServerSequence,
+    };
+  }
+
+  private startWhiteboardOperationStream(
+    client: RpcClientInstance,
+    operationSessionId: string,
+  ): void {
+    const subscription = this.whiteboardOperationSubscriptions.get(operationSessionId);
+    if (!subscription) return;
+    const input = this.buildWhiteboardOperationSubscribeInput(subscription);
+    if (!input) return;
+    const key = whiteboardOperationStreamKey(operationSessionId);
+    const restartWhiteboard = () => {
+      // Only transport-liveness conditions (unexpected completion, transient
+      // failure after reconnect) reach this callback; typed Whiteboard
+      // refusals never reconnect and never restart. The rebuild path re-reads
+      // identity and cursor so the resumed stream continues where the
+      // listener last accepted.
+      const current = this.whiteboardOperationSubscriptions.get(operationSessionId);
+      if (!current) return;
+      void this.getClient()
+        .then((nextClient) => this.startWhiteboardOperationStream(nextClient, operationSessionId))
+        .catch((error) =>
+          console.warn("WebSocket RPC whiteboard operation stream failed to restart", error),
+        );
+    };
+    this.startStream(
+      client,
+      key,
+      client[WS_METHODS.whiteboardOperationSubscribe](input as never),
+      (event: WhiteboardOperationSessionEvent) =>
+        this.handleWhiteboardOperationEvent(operationSessionId, subscription, event),
+      restartWhiteboard,
+    );
+  }
+
+  /**
+    * Order-gated, fail-closed event gate. Contract violations (identity or
+    * authority mismatch, conflicting duplicate, delivery gap) tear the
+    * subscription down and surface a typed failure instead of guessing.
+    */
+  private handleWhiteboardOperationEvent(
+    operationSessionId: string,
+    subscription: WhiteboardOperationSubscription,
+    event: WhiteboardOperationSessionEvent,
+  ): void {
+    const failClosed = (code: WhiteboardOperationErrorCode, message: string): void => {
+      const key = whiteboardOperationStreamKey(operationSessionId);
+      this.whiteboardOperationSubscriptions.delete(operationSessionId);
+      void this.stopStream(key);
+      this.emitWhiteboardOperationFailure(
+        new WsTransportWhiteboardOperationError({
+          message,
+          code,
+          operationSessionId,
+          cause: event,
+        }),
+      );
+    };
+
+    if (!subscription.identity) {
+      // The server contract is snapshot-first; fix identity from it.
+      if (event.kind !== "session-snapshot") {
+        failClosed(
+          WHITEBOARD_OPERATION_ERROR.identityMismatch,
+          "Whiteboard operation stream delivered an event before its session snapshot.",
+        );
+        return;
+      }
+      const snapshotIdentity = identityFromEvent(event);
+      if (
+        snapshotIdentity.operationSessionId !== operationSessionId ||
+        !whiteboardIdentityEquals(snapshotIdentity, subscription.expectedIdentity)
+      ) {
+        failClosed(
+          WHITEBOARD_OPERATION_ERROR.identityMismatch,
+          "Whiteboard operation snapshot identity does not match the subscribed session.",
+        );
+        return;
+      }
+      subscription.identity = snapshotIdentity;
+    } else if (!whiteboardIdentityEquals(subscription.identity, identityFromEvent(event))) {
+      failClosed(
+        WHITEBOARD_OPERATION_ERROR.authorityChanged,
+        "Whiteboard operation event identity no longer matches the subscribed session.",
+      );
+      return;
+    }
+
+    const { serverSequence } = event;
+    if (serverSequence <= subscription.lastAcceptedServerSequence) {
+      const accepted = subscription.acceptedEvents.get(serverSequence);
+      if (accepted === undefined) {
+        // Already-accepted replay beyond the dedupe window; the listener has
+        // acknowledged a later sequence, so this is a safe duplicate drop.
+        return;
+      }
+      if (whiteboardEventEquals(accepted, event)) {
+        // Equivalent duplicate (replay overlap after restart): drop.
+        return;
+      }
+      failClosed(
+        WHITEBOARD_OPERATION_ERROR.conflictingProducerInput,
+        "Whiteboard operation replay conflicts with the previously accepted event.",
+      );
+      return;
+    }
+    if (serverSequence > subscription.lastAcceptedServerSequence + 1) {
+      failClosed(
+        WHITEBOARD_OPERATION_ERROR.producerSequenceSkipped,
+        "Whiteboard operation stream skipped a server sequence.",
+      );
+      return;
+    }
+
+    let acceptedListener = false;
+    try {
+      acceptedListener = subscription.listener(event) !== false;
+    } catch (error) {
+      // A throwing listener rejected the event; keep the cursor and stop so
+      // the next explicit resubscribe replays from the last accepted cursor.
+      console.warn("Whiteboard operation listener rejected an event", error);
+      acceptedListener = false;
+    }
+    if (!acceptedListener) return;
+
+    subscription.lastAcceptedServerSequence = serverSequence;
+    subscription.acceptedEvents.set(serverSequence, event);
+    if (subscription.acceptedEvents.size > WHITEBOARD_OPERATION_DEDUPE_WINDOW) {
+      const oldest = subscription.acceptedEvents.keys().next().value;
+      if (oldest !== undefined) subscription.acceptedEvents.delete(oldest);
+    }
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -970,6 +1452,8 @@ export class WsTransport {
     this.streamCleanups.clear();
     this.activeThreadStreamInputs.clear();
     this.threadStreamFailureListeners.clear();
+    this.whiteboardOperationSubscriptions.clear();
+    this.whiteboardOperationFailureListeners.clear();
     // Dispose can race with initial connection or reconnect promises. Mark them
     // handled before closing the runtime so test/browser teardown stays quiet.
     void this.clientPromise.catch(() => undefined);
@@ -1039,6 +1523,22 @@ export class WsTransport {
       // snapshots as stragglers and leave the pane showing pre-restart devices
       // and attachments forever, so the cache is dropped with the cursors.
       useDeviceStateStore.getState().clear();
+      // Whiteboard operation sessions are bound to the server instance that
+      // minted their identity. Surface the authority change per subscription
+      // instead of silently resuming against a possibly foreign journal; the
+      // reconnect loop that follows tears the streams down and the browser
+      // bridge must re-attach explicitly.
+      for (const operationSessionId of this.whiteboardOperationSubscriptions.keys()) {
+        this.whiteboardOperationSubscriptions.delete(operationSessionId);
+        this.emitWhiteboardOperationFailure(
+          new WsTransportWhiteboardOperationError({
+            message:
+              "The Whiteboard operation session belongs to a different server authority.",
+            code: WHITEBOARD_OPERATION_ERROR.authorityChanged,
+            operationSessionId,
+          }),
+        );
+      }
     }
     this.lastServerInstanceId = compatibility.serverInstanceId;
     this.setCompatibility(compatibility);
@@ -1334,6 +1834,12 @@ export class WsTransport {
           const input = this.refreshThreadSubscriptionInput(threadId);
           if (input === undefined) continue;
           await this.startThreadStream(client, threadId, input);
+        }
+        // Whiteboard operation sessions resume from each subscription's last
+        // accepted cursor; a changed server authority already dropped the
+        // state in adoptNegotiation, so only same-authority sessions remain.
+        for (const operationSessionId of this.whiteboardOperationSubscriptions.keys()) {
+          this.startWhiteboardOperationStream(client, operationSessionId);
         }
         this.reconnectFailures = 0;
         return client;
@@ -1746,6 +2252,22 @@ export class WsTransport {
           if (Exit.isFailure(exit) && !this.disposed && !Cause.hasInterruptsOnly(exit.cause)) {
             const error = causeToError(exit.cause);
             console.warn("WebSocket RPC stream failed", error);
+            const whiteboardOperationId = whiteboardOperationSessionIdFromStreamKey(key);
+            if (whiteboardOperationId !== null) {
+              // Typed Whiteboard refusals never reconnect and never restart:
+              // the subscription is torn down and the failure surfaced; the
+              // browser bridge decides on an explicit re-attach.
+              this.whiteboardOperationSubscriptions.delete(whiteboardOperationId);
+              this.emitWhiteboardOperationFailure(
+                new WsTransportWhiteboardOperationError({
+                  message: "Whiteboard operation subscription failed.",
+                  code: "WHITEBOARD_OPERATION_TRANSPORT_CLOSED",
+                  operationSessionId: whiteboardOperationId,
+                  cause: error,
+                }),
+              );
+              return;
+            }
             const threadId = threadIdFromStreamKey(key);
             if (threadId !== null && this.threadSubscriptions.has(threadId)) {
               this.emitThreadStreamFailure({
