@@ -1,156 +1,207 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** Package C candidate-freeze record persisted under binding [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md). Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is frozen; renewed WP-01 is **PASS** at 19/19 files and 296/296 tests with zero skips. The renewed WP-02 attempt started exactly once: integrated passed, canonical-identity failed, and the atomic attempt stopped before lifecycle/restart/resume. WP-02 is **CHALLENGED**, with no current PASS and no retry; WP-03 and WP-04 remain blocked. The renewed raw logs are preserved immutably; no producer is run by this evidence transaction.
+**Plan state:** Decision 0008 reassessment/reset persisted before containment
+implementation. Historical candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`,
+historical WP-01 PASS, and the renewed WP-02 integrated-pass/canonical-failure
+attempt are supporting only. The renewed attempt stopped after the canonical
+failure; its raw logs, hashes, failure details, and spent no-retry state remain
+immutable. No current D/R PASS exists.
 
-**Historical base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`. Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is its sole-parent exact two-file child. Integration merge `064b49f1d954b64343006da9240cdadf58bc0ff2` has parents Package A `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`; it is integration provenance only.
-
-**Exact candidate correction scope:**
-
-```text
-apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
-apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
-```
-
-The base→candidate delta is exactly those two files. A third behavioral file,
-production/configuration/manifest/lockfile change, or Alfie change is forbidden.
-After candidate freeze, all renewed evidence commits have zero source delta.
-
-**Protected owner WIP:** `apps/web/package.json`, `apps/web/src/main.tsx`, and
-`bun.lock`, aggregate diff hash exactly
-`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`, unstaged.
+**Aspect-scoped authorities:** [Decision 0008](../../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
+is binding and Authoritative only for the post-await live-control retirement
+classification and its exact correction boundary. [Decision 0007](../../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
+remains Authoritative only for the batching-fixture correction, historical
+rebaseline, attempt-3 erratum, and downstream state. Decisions 0002/0003/0006
+remain binding for canonical identity, synchronous provider acceptance,
+terminal truth, and all other lifecycle invariants.
 
 **Date:** 2026-08-28
 
-## Candidate freeze record — Package C
+## 1. Objective and reassessment conclusion
 
-- **Base:** `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
-- **Candidate:** `ffd45bd867e94c9003415f5f2e937cc9c616e399`; sole parent exactly
-  `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
-- **Candidate delta:** exactly two files, and no others:
-  `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` and
-  `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`.
-- **Integration identity:** no-ff merge
-  `064b49f1d954b64343006da9240cdadf58bc0ff2`, parents Package A
-  `8c9b8bcbb4cc39f5b0ddf7feab66dcded22bb79e` and candidate
-  `ffd45bd867e94c9003415f5f2e937cc9c616e399`; candidate remains reachable.
-- **Byte identity:** production coordinator
-  `apps/server/src/provider/piSubagentCompletionCoordinator.ts` is
-  `baded01d075a988e6402c5d603e1a7cddfe1a8e6aca9d95ef0a5f5f85d276dc8` at
-  both base and candidate; server configuration `apps/server/vitest.config.ts`
-  is `8d865bcfb7ae4bdbcf33c4eaaba2dbb4b1036032fb23d7054c4e4b3bbba687e0` at
-  both; extension provenance fixture is
-  `05ba0b7cf2d80afba3185c6469a81c832275ebc989b453985bb03c9da2d3a478` at
-  both.
-- **Composition:** Alfie remains pinned at
-  `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
-  `@alfie/pi-subagents@0.15.0-alfie.6`; existing ext-local `node_modules`
-  remains ignored and is not a tracked change.
-- **Producer identity:** every future behavioral producer must run from a
-  worktree at candidate `ffd45bd867e`, never from merge `064b49f1d`.
-- **Protected WIP:** `apps/web/package.json`, `apps/web/src/main.tsx`, and
-  `bun.lock` remain outside this transaction, unstaged, with aggregate hash
+Prove the accepted Tickets 01–05 seams against the pinned real-Pi composition,
+without changing their canonical expectations, by first implementing the
+Decision 0008 post-await classification correction and then resetting all
+behavioral evidence at its frozen candidate.
+
+The exact implementation write set is only:
+
+```text
+apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+```
+
+The correction distinguishes ordinary retirement of the same exact
+registration/epoch from replacement or invalidation. It must cover all eight
+Decision 0008 semantic rows, preserve provider-owned acceptance, and add no
+retry, reconstruction, route restoration, replay, Resume, provider-ID/PID
+authority, or terminal/cleanup/generation change. Any third file, canonical
+expectation change, Alfie change, or broader seam is a stop/challenge requiring
+another decision.
+
+## 2. Candidate and evidence reset
+
+- Historical base: `12fd6686edc26a3fa0382e8bdeb83a1be8045539`.
+- Historical candidate: `ffd45bd867e94c9003415f5f2e937cc9c616e399`, the exact
+  two-file Decision 0007 fixture child of the historical base. It is historical
+  only, not the next producer candidate.
+- New candidate: exact two-file containment child of `ffd45bd`; its SHA is
+  unknown until implementation and must be recorded before evidence is
+  accepted.
+- New candidate delta from `ffd45bd`: exactly the two containment paths above.
+- Total delta from `12fd6686`: exactly four files — the two Decision 0007
+  fixture paths plus the two containment paths. Production coordinator,
+  configuration, canonical expectations, all other source/test paths, lockfiles,
+  and Alfie remain byte-identical/pinned.
+- Integration merge `064b49f1d` is provenance only and never a producer identity.
+- Pinned Alfie remains commit `3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
+  `@alfie/pi-subagents@0.15.0-alfie.6`; no Alfie source/pin change.
+- Protected owner WIP remains outside this transaction and must stay unstaged,
+  byte-identical, with required aggregate diff hash
   `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
-- **Focused correction logs:** red exit 1, `1 failed / 10 skipped`, SHA-256
-  `bd78416cf860427fb222e8a5c7a33c54559c930d96a10289ec81743866d624a8`;
-  green exit 0, `1 passed / 10 skipped`, SHA-256
-  `07f42c2c266a39d11945c71d06c1e294060f492042c6e6e6d6e7813e32108d09`.
-  These are focused candidate-correction diagnostics, not WP-01/WP-02 PASS.
 
-## 1. Objective and planning conclusion
+The historical renewed WP-02 evidence reset is recorded in the two renewed
+artifacts. Preserve the integrated PASS, canonical failure at lines 913/924,
+not-run lifecycle/restart/resume legs, exact raw-log hashes, and no-retry state;
+none is current proof for the corrected candidate.
 
-Prove the complete project candidate — Tickets 01–05 accepted seams — against
-the pinned real-Pi composition with a corrected-candidate integrated acceptance,
-then close the project through exactly one integrated review and exactly one
-Supervisor final acceptance.
+## 3. Evidence classes and acceptance
 
-Planning conclusion: **bounded two-file correction rebaseline** under Decision 0007; the old zero-source-delta assumption is superseded only for the exact helper/test correction. The five accepted
-tickets already supply identity, lifecycle, failure, recovery, and control
-evidence at their own boundaries; Ticket 06 integrates them at the pinned
-boundary. No source/test/harness/fixture/config/migration/manifest/lockfile or
-Alfie change is authorized anywhere in this plan. Any perceived need for one
-stops at §11's challenge gate.
+P = planning/provenance; D = deterministic; R = controlled real-Pi
+non-destructive; M = the exactly-one owner-authorized manual destructive leg;
+Q = quality gate; H = historical supporting-only; A = review and acceptance
+artifacts. Classes are not substituted or relabeled.
 
-## 2. Binding authorities and invariants
+Ticket 06 closes only after D/R/M/Q evidence, one integrated review (G-M), and
+exactly one final Supervisor acceptance (G-Q). Decision 0008 is not final
+acceptance; the final decision filename and number are **Decision 0009**.
 
-This plan preserves:
+## 4. Serial route and gates
 
-- Local [Decision 0001](../../decisions/0001-project-charter-and-inherited-authority.md)
-  (charter and inherited authority), [Decision 0002](../../decisions/0002-canonical-execution-identity-and-result-read-contract.md)
-  (`executionId` public identity, bounded authorized result read),
-  [Decision 0006](../../decisions/0006-live-lifecycle-containment-linearization-contract.md)
-  (exact-tuple live containment; DG-4 owner boundary closed).
-- Inherited durable-subagents Decisions 0031–0034 — the authoritative
-  destructive boundary: three-leg AC6 evidence split, owner-approved testing
-  seam, no automated destructive real-Pi claim, and the recorded isolated
-  manual operator run of 2026-08-20 accepted for its sole purpose only.
-- Inherited Decision 0001 testing governance: highest stable boundary, paired
-  success/failure evidence, wall-clock standalone discipline, no relabeling of
-  fixture, real-Pi, or manual evidence classes.
-- Project Home review governance: one integrated feature-level review, then
-  exactly one Supervisor final acceptance for the full project.
+```text
+ffd45bd historical candidate
+  -> exact two-file containment implementation child
+  -> freeze new candidate and record exact SHA
+  -> rerun same closed WP-01 baseline (296 + exact focused additions)
+  -> exactly one new full five-file WP-02
+  -> fresh owner authorization, WP-03 (M)
+  -> fresh owner authorization after WP-03 PASS, WP-04 (Q)
+  -> WP-05 exactly one integrated review (G-M)
+  -> WP-06 exactly one final Supervisor Decision 0009 (G-Q)
+  -> WP-07 closure/routing
+```
 
-Immutable constraints:
+The expected WP-01 aggregate is not guessed before implementation: retain the
+296-test baseline and record the exact added focused-case count and resulting
+aggregate only after the two-file correction exists. WP-02 is a complete,
+serial, exactly-once run of its five closed files; any nonzero leg, unexpected
+skip, provenance drift, or diagnostic contradiction stops it with no retry.
+Old WP-03/WP-04 authorizations are non-transferable and not executable.
 
-1. `executionId` public identity; `attemptId`/generation fencing;
-   proof-before-fence; journal-first terminal truth.
-2. `cleanup_uncertain`, `survivors`, `owner_unproven` remain non-terminal.
-3. No automatic replay or Resume; no provider bootstrap; no crash guardian,
-   durable owner receipt, or orphan-terminal exception.
-4. No PID guessing, process-name kill, or Symphony PID kill authority. The
-   manual destructive run operates only through the accepted operator recipe
-   within its own isolated environment.
-5. No push, release, deploy, or unrelated-project work.
-6. Base→candidate acceptance-surface delta is exactly the two Decision 0007
-   files; from the frozen candidate through the evidence package, source delta
-   is empty and all other production/Alfie paths remain zero-delta.
+## 5. WP contracts
 
-## 3. Evidence classes
+### WP-01 — reset deterministic evidence (D)
 
-All Ticket 06 evidence is labeled with exactly one class. Classes are never
-merged, substituted, or relabeled.
+Rerun the same 19-file closed set at the new candidate, including the
+containment suite, with baseline 296 tests plus only the exact focused cases
+introduced by the implementation. Record the expected aggregate after
+implementation, all positive and material failure rows, exact candidate SHA,
+zero source delta after freeze, Alfie pin, and protected-WIP/staging proofs.
+The historical ffd WP-01 PASS is supporting only and cannot satisfy this gate.
 
-| Class | Name | Meaning | Producers |
-|---|---|---|---|
-| **P** | Planning/provenance | Router state, frozen candidate, worktree/pin provenance, zero-delta proofs | `git` records in WP-01+ workspace-state artifacts |
-| **D** | Deterministic | Serialized deterministic unit/contracts suites at the frozen candidate in the isolated Symphony worktree | WP-01 vitest producers |
-| **R** | Controlled real-Pi (non-destructive) | Real Pi + pinned controlled Alfie worktree, isolated roots/home/state/workspace/ports, no destructive process claim | WP-02 five standalone wallclock files |
-| **M** | Manual destructive (operator) | The exactly-one owner-authorized isolated manual real-Pi destructive run; sole source of the zero-owned-child claim for AC6 | WP-03 operator recipe record |
-| **Q** | Quality gate | Owner-authorized `bun fmt` / `bun lint` / `bun typecheck` final gate | WP-04 |
-| **H** | Historical (supporting-only) | The inherited 2026-08-20 operator manual run and prior-ticket accepted evidence; context only, never Ticket 06 acceptance evidence by itself | Decision 0034 §Evidence; prior ticket reports |
-| **A** | Acceptance artifacts | The integrated review verdict and the persisted Supervisor final-acceptance decision | WP-05, WP-06 |
+### WP-02 — one new full non-destructive real-Pi run (R)
 
-### AC1–AC8 mapping (T06-AC1–AC8 from the issue)
+Run exactly the five existing standalone wallclock files, serially, once, from
+a fresh candidate worktree with pinned Alfie and isolated roots/HOME/state/
+ports. Preserve the historical renewed attempt unchanged. The new run must
+prove canonical F5 terminal-first/enqueue-first behavior at the corrected
+boundary, all required lifecycle/restart/resume rows, exact tuple traces,
+cleanup/isolation, expected skip discipline, and no destructive claim.
 
-| Criterion | Summary | Primary evidence classes | Owning WP |
-|---|---|---|---|
-| T06-AC1 | Pinned composition starts with exact provenance and full isolation | P, R | WP-01, WP-02 |
-| T06-AC2 | Public `executionId` usable through detached output, durable read, terminal, reconnect, control | D, R | WP-01, WP-02 |
-| T06-AC3 | Real lifecycle: progress, terminal-before-cleanup, cancellation, watchdog handoff, truthful diagnostics | D, R | WP-01, WP-02 |
-| T06-AC4 | Restart/reconnect restores terminal/live-owner/orphan truth; no auto replay; explicit Resume proven or truthfully denied | D, R | WP-01, WP-02 |
-| T06-AC5 | Stale attempt/generation and duplicate delivery/control fenced and bounded | D, R | WP-01, WP-02 |
-| T06-AC6 | Destructive cleanup via inherited three-leg split | D, R, M (H supporting-only) | WP-01, WP-02, WP-03 |
-| T06-AC7 | Every stage failure reports stage and stable diagnostic; mock-only success impossible | D, R | WP-01, WP-02 |
-| T06-AC8 | Exactly one integrated review and exactly one Supervisor final acceptance recorded | A, Q | WP-04–WP-06 |
+### WP-03 — fresh owner manual destructive run (M)
 
-## 4. Plan-persistence transaction and routing
+Blocked until the new five-file WP-02 exits 0 and a fresh explicit owner
+authorization is recorded. Exactly one isolated operator run only; the accepted
+TERM→bounded-KILL owner-tree recipe is unchanged; no automation, PID guessing,
+external signalling, or retry. Historical H evidence is supporting only.
 
-This transaction creates the plan files in this directory and changes only:
+### WP-04 — fresh owner quality gate and report (Q)
 
-- `../../issues/06-integrated-real-pi-acceptance.md`
-  - `blocked` → `ready-for-agent`;
-  - remove the stale `Implementation: forbidden while blocked` line;
-  - discharge the Tickets 01–05 dependency;
-  - add this plan link and the bounded Decision 0007 rebaseline authorization;
-  - preserve the Implementation Report placeholder and the Unlock gate.
-- `../../PROJECT.md`
-  - lifecycle stays `active`;
-  - Ticket 06 remains the **sole frontier**, now `ready-for-agent`;
-  - state that G-M (integrated project review) and G-Q (Supervisor final
-    acceptance) are pending and that exactly one review and exactly one
-    Supervisor consultation remain reserved;
-  - state explicitly that no Ticket 06 evidence, review, or acceptance exists.
+Blocked until the newly authorized WP-03 PASS and fresh explicit owner
+authorization. Run the one `bun fmt` + `bun lint` + `bun typecheck` gate in the
+isolated worktree; stop on formatter drift. Complete the issue Implementation
+Report without evidence-class mixing.
 
-Exact plan-persistence write set (the only paths this transaction commits):
+### WP-05 / WP-06 / WP-07
+
+WP-05 performs exactly one integrated review after WP-01–WP-04. WP-06 performs
+exactly one final Supervisor consultation after WP-05 PASS and persists
+`decisions/0009-integrated-real-pi-acceptance-final-acceptance.md`; it does not
+edit or relabel Decision 0008. WP-07 closes/routs only after that accepted
+Decision 0009 and all gates.
+
+## 6. Exact implementation boundary and prohibited changes
+
+No implementation is performed in this planning transaction. The later source
+transaction may touch only the two Decision 0008 paths. It may not modify the
+PiAdapter, completion coordinator, contracts, persistence, orchestration,
+watchdog, teardown, canonical expectations, configuration, manifests,
+lockfiles, Alfie source/pin, or any third test/source file.
+
+No producer, test, formatter, lint, typecheck, destructive process action,
+review, or Supervisor consultation is run by this reset. No raw log is edited.
+
+## 7. Stop gates and reopening
+
+Stop with `challenge` before advancing when any of the following occurs:
+
+- the implementation needs a third file, changes canonical expectations,
+  changes Alfie/source/configuration, or changes terminal/cleanup/generation
+  semantics;
+- the new candidate delta is not exactly two files from ffd and four total from
+  `12fd6686`;
+- Decision 0008's eight rows cannot be causally proven, or deterministic and
+  real-Pi F5 disagree;
+- any WP-01/WP-02 failure, unexpected skip, nonzero exit, retry, second
+  provider action, replay, Resume, reconstruction, parent fallback, or route
+  restoration appears;
+- candidate/Alfie provenance, Pi acceptance-surface zero delta, protected WIP
+  hash, raw-log hashes, or exact expected-skip/cleanup evidence drifts;
+- any old authorization is treated as transferable, or WP-03 automation is
+  proposed; or
+- formatter drift, evidence-class mixing, premature review/acceptance, or a
+  material reviewer/Supervisor finding occurs.
+
+A challenge records candidate, command/exit, failing row, observed versus
+required behavior, minimum gap, and the next material question. Historical
+ffd/WP-01/current renewed WP-02 artifacts remain supporting and immutable.
+
+## 8. Workspace and verification contract
+
+Behavioral producers use fresh detached Symphony/Alfie worktrees, never the
+main checkout or user Alfie checkout. Every producer records exact HEADs,
+fixture hashes, environment restoration, isolation, and zero tracked delta.
+The protected files remain unstaged and exact. Before and after the planning
+commit verify:
+
+```bash
+git diff --check
+git status --short
+git diff --cached --name-only
+git diff --name-only
+printf 'protected: '; git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
+git diff --name-only 12fd6686edc26a3fa0382e8bdeb83a1be8045539..HEAD -- apps packages
+git hash-object .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/*.log
+```
+
+The planning commit must contain exactly the 12 paths named below; no
+`apps/`/`packages/` path may be in it, and after commit the index is clean.
+Raw log hashes must equal their pre-transaction values. Do not run tests or
+quality commands for this reset.
+
+## 9. Planning transaction and commit
+
+Modify and stage exactly these 12 paths:
 
 ```text
 .planning/synara-pi-subagent-lifecycle-reliability/PROJECT.md
@@ -163,270 +214,15 @@ Exact plan-persistence write set (the only paths this transaction commits):
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-05-integrated-review.md
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-06-supervisor-final-acceptance.md
 .planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/WP-07-closure-and-routing.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-renewed-nondestructive-disposition.md
+.planning/synara-pi-subagent-lifecycle-reliability/plans/06-integrated-real-pi-acceptance/evidence/WP-02-renewed-realpi-provenance.txt
 ```
 
-No source implementation is authorized in the plan-persistence transaction.
-
-## 5. Serial dependency graph and Work Packages
+Commit message:
 
 ```text
-12fd6686 historical base
-  └──> ffd45bd exact two-file child candidate + freeze (Package C)
-       └──> renewed WP-01 at ffd45bd: PASS, same 19 files, 296/296 (D)
-            └──> WP-02 ready for exactly one renewed full five-file attempt (R)
-                 └──> fresh owner authorization, WP-03 (M)
-                      └──> fresh owner authorization after new WP-03 PASS, WP-04 (Q)
-                           └──> WP-05 one integrated review (A)
-                                └──> WP-06 final Supervisor Decision 0008 (A)
-                                     └──> WP-07 closure and routing
+docs(planning): reassess Ticket 06 under Decision 0008
 ```
 
-The historical WP-01 `9208e1728` and attempts 1–3 remain supporting only. The
-old WP-03/WP-04 authorizations are unspent but non-transferable and not
-executable. WP-05/WP-06 reservations remain unused. Fresh owner authorization
-is required after renewed WP-02 PASS and again after the newly authorized WP-03
-PASS.
-
-
-## 6. Isolated worktree lifecycle (Symphony and Alfie)
-
-Behavioral producers never run in the user's main Symphony checkout or the
-user Alfie checkout.
-
-1. **Create** a fresh detached Symphony worktree outside the repository:
-   `git worktree add --detach <tmp>/symphony-t06 ffd45bd867e94c9003415f5f2e937cc9c616e399`.
-2. **Install** dependencies inside it (`bun install` at the worktree root).
-   Record lockfile-pinned resolution; the worktree must stay at exactly
-   `ffd45bd867e94c9003415f5f2e937cc9c616e399` (detached HEAD) for the whole
-   lifecycle. The integration merge `064b49f1d` is never a producer identity.
-3. **Create** a fresh detached Alfie worktree:
-   `git -C /Users/anhpham99/alfie worktree add --detach <tmp>/alfie-t06 3fe340b401ca86bcbe8b55abd4de107e1d93482e`.
-   Verify clean status and provenance hashes against
-   `apps/server/src/provider/test-fixtures/piSubagentExtensionProvenance.json`.
-4. **Run** all D and R producers from the Symphony worktree with
-   `ALFIE_REPO_DIR=<tmp>/alfie-t06`.
-5. **Verify after every producer** that the Symphony worktree's Pi acceptance
-   surface is still exactly at frozen candidate `ffd45bd867e` (zero
-   working-tree delta on the named surface) and the Alfie worktree is clean.
-6. **Freeze evidence** into this plan's `evidence/` directory in the main
-   checkout (the only place commits happen).
-7. **Remove** both worktrees with `git worktree remove` only after WP-03 (or
-   at closure if the owner defers WP-03). Never `git worktree remove --force`
-   over uncommitted evidence.
-
-The main checkout keeps only planning/evidence writes; the three protected
-owner WIP files stay modified-unstaged with hash
-`ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8` at every
-record.
-
-## 7. Runner and verification policy
-
-- Never `bun test` and never `bun run test <paths>` for focused evidence (the
-  package runner expands to the full project). Use repository-pinned Vitest
-  directly:
-  `bun run ../../node_modules/vitest/vitest.mjs run --project <project> --maxWorkers=1 --no-file-parallelism <file>`.
-- Unit evidence: `--project unit`, one serialized invocation, from
-  `<worktree>/apps/server`.
-- Wallclock evidence: each file in its own standalone process with
-  `--project wallclock`, exactly as the manifest in
-  `apps/server/scripts/wallclock-tests.ts` requires.
-- `piSubagentRealPiAcceptance.test.ts` imports `node:sqlite`. The supported
-  Node engine (>=24.10) resolves it; Bun 1.3.12 does not. This file's
-  behavioral producer must use
-  `node ../../node_modules/vitest/vitest.mjs …`. A Bun pre-collection failure
-  (0 tests) is environment evidence — preserve it in the same log, never
-  relabel it as a behavior result.
-- Real-Pi isolation: exact controlled Alfie provenance, isolated
-  roots/home/state/workspace/agent directories, deterministic loopback model
-  endpoint, non-default ports, no user live-instance mutation.
-- Every criterion needs positive plus material failure/diagnostic evidence.
-  No AC may pass from inherited totals (H), source comments, compile success,
-  or an unexecuted command.
-
-## 7a. Candidate freeze and historical attempts (2026-08-28)
-
-Package C freezes candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` before
-renewed behavioral evidence. No WP-01 or WP-02 producer ran in this package.
-Any renewed producer must use the candidate SHA, not integration merge
-`064b49f1d954b64343006da9240cdadf58bc0ff2`.
-
-Attempts 1–3 are historical supporting evidence only and their raw logs remain
-immutable. Decision 0007 classifies attempt 3 as an acceptance-fixture causal-
-control defect and authorizes only the exact two-file correction and candidate
-rebaseline; it does not authorize production, Alfie, destructive, or quality-
-gate changes.
-
-## 7b. Historical attempt outcome (supporting only)
-
-Attempt 2 remains an environment/isolation challenge and attempt 3 remains a
-failed historical run. Neither supplies current D/R evidence. The renewed
-attempt is recorded in §7e below; its integrated PASS and canonical-identity
-failure do not constitute a complete WP-02 PASS.
-
-## 7c. Current downstream gate status
-
-The prior WP-03/WP-04 owner authorizations are **unspent but non-transferable**
-and not executable. Renewed WP-02 PASS does not activate WP-03 automatically:
-fresh explicit owner authorization is required for exactly one WP-03 run after
-renewed WP-02 PASS, and fresh explicit owner authorization is required for WP-04
-only after the newly authorized WP-03 PASS. WP-05 and WP-06 remain unused.
-
-## 7d. Attempt-3 dated erratum (2026-08-28)
-
-> Attempt 3 failed at `piSubagentRealPiAcceptance.test.ts:1125`, where the test
-> required the two acknowledged outbox rows to share one durable
-> `dispatchBatchId`. The rows instead had two distinct batch IDs. The test
-> stopped before the later public follow-up replay/count assertion, so attempt 3
-> did not observe or establish that two public follow-up message events were
-> emitted.
-
-Line 1125 compared `Set(dispatchBatchIds).size`; the observed values were two
-distinct durable batch IDs among acknowledged outboxes. No duplicate follow-up
-count was observed. Preserve exit 1, the stopped status, and all raw attempt
-logs byte-for-byte unchanged. Do not infer a production duplicate-follow-up
-defect from this failure.
-
-## 7e. Renewed WP-02 attempt — canonical-identity challenge (2026-08-28)
-
-The renewed complete WP-02 attempt started exactly once under the frozen
-candidate and the authorized process-level HOME isolation. It ran only two
-standalone legs before the atomic attempt stopped:
-
-- **Integrated leg — PASS, exit 0.** Node v24.14.1, fresh outer HOME
-  `tmp.gLZPdTzMaC` (removed; absence verified), `ALFIE_REPO_DIR` pointed at the
-  pinned Alfie worktree, and `env -u SYNARA_T17_MANUAL_TEARDOWN` was used. The
-  log records 1/1 file passed, 10 tests passed, and exactly 1 expected manual
-  skip. The T17-AC4 exact-two fixture barrier was accepted with `accepted=2`
-  and `pending=2`.
-- **Canonical-identity leg — FAILED, exit 1.** Node v24.14.1, fresh outer HOME
-  `tmp.wX79oSZqVb` (removed; absence verified), same candidate/Alfie and manual
-  exclusion. The log records 1 file failed, 2 tests failed, and 7 passed. The
-  terminal-first row at `:913` expected
-  `pi_subagent_read_live_record_unavailable` but observed
-  `pi_subagent_live_lifecycle_stale_ignored`; the enqueue-first row at `:924`
-  expected `Steer state: applied` but observed
-  `Managed live lifecycle stale response ignored`.
-- **Not run after the canonical failure:** lifecycle-containment,
-  restart, and resume. The renewed attempt is not a five-leg PASS and no
-  lifecycle/restart/resume conclusion is inferred.
-
-The two renewed logs are immutable evidence under `evidence/` and their
-SHA-256 values are recorded in the renewed provenance artifact. No current
-WP-02 PASS exists. The no-retry rule is spent for this attempt; source
-diagnosis is pending a fresh owner decision. WP-03 remains blocked on a
-renewed five-leg WP-02 PASS plus fresh authorization; WP-04 remains blocked on
-a newly authorized WP-03 PASS. No destructive, quality, review, or Supervisor
-work was run.
-
-## 8. Authorization gates and no-retry rule
-
-| Gate | Current status |
-|---|---|
-| Renewed WP-01 | **PASS** at frozen candidate `ffd45bd`; same 19 files, 296/296; zero failed/skipped |
-| Renewed WP-02 | **CHALLENGED**; integrated leg passed, canonical-identity leg failed, and the atomic attempt stopped; no retry |
-| WP-03 | blocked; fresh owner authorization required after renewed WP-02 PASS; old authorization unspent/non-transferable/not executable |
-| WP-04 | blocked; fresh owner authorization required after the newly authorized WP-03 PASS; old authorization unspent/non-transferable/not executable |
-| WP-05 | one integrated review reservation unused; after complete current package |
-| WP-06 | one final Supervisor reservation unused; persists Decision 0008 after WP-05 PASS |
-
-WP-03 retains the exactly-one/no-retry manual rule. WP-04 retains the
-formatter-hazard rule. Package A authorizes none of these executions.
-
-## 9. Git and workspace safety
-
-Protected unrelated owner work: `apps/web/package.json`,
-`apps/web/src/main.tsx`, `bun.lock` — modified-unstaged, byte-identical
-(aggregate diff hash `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`),
-absent from every Ticket 06 index/commit.
-
-Before and after each package record:
-
-```bash
-git rev-parse HEAD
-git status --short
-git diff --name-status ffd45bd867e94c9003415f5f2e937cc9c616e399..HEAD -- apps/server/src/provider apps/server/src/persistence apps/server/src/orchestration apps/server/scripts/wallclock-tests.ts apps/server/vitest.config.ts packages/contracts/src/piSubagents.ts
-git diff --name-only
-git diff --cached --name-only
-git diff -- apps/web/package.json apps/web/src/main.tsx bun.lock | shasum -a 256
-```
-
-The candidate gate allows exactly the two Decision 0007 files in
-`12fd6686..ffd45bd867e94c9003415f5f2e937cc9c616e399`; from frozen candidate
-`ffd45bd867e` through the evidence package the source-surface diff must be
-**empty** at every record. Behavioral producers identify `ffd45bd867e`, never
-merge `064b49f1d`. Explicit staging only — never `git add .` or
-`git add -A`. No reset, clean, checkout of protected paths, push, release,
-deploy, default dev instance, or destructive process operation is authorized.
-PID discovery is bounded to the operator recipe's own isolated child tree in
-WP-03; no guessing, no process-name kills, nothing outside that tree.
-
-## 10. Commit boundaries
-
-Each WP commits its own artifacts with explicit paths:
-
-```text
-WP-01: test(pi): record Ticket 06 deterministic integrated evidence
-WP-02: test(pi): record Ticket 06 non-destructive real-Pi evidence
-WP-03: docs(planning): record Ticket 06 manual destructive run
-WP-04: docs(planning): record Ticket 06 quality gate and implementation report
-WP-05: docs(planning): record Ticket 06 integrated review
-WP-06: docs(planning): record Ticket 06 supervisor final acceptance
-WP-07: docs(planning): accept Ticket 06 and close project
-```
-
-Evidence files live only under
-`plans/06-integrated-real-pi-acceptance/evidence/`; WPs update their own file
-plus the shared files their contract names. No WP stages another WP's files.
-
-## 11. Diagnostic and challenge gates
-
-Stop with `challenge` before continuing when:
-
-- any criterion (D or R evidence) fails or cannot produce its failure-leg
-  proof;
-- controlled real-Pi contradicts deterministic truth;
-- provenance is dirty, unpinned, or mismatched (Symphony worktree hash,
-  Alfie worktree hash, extension version, Pi SDK, fixture hashes);
-- the Pi acceptance-surface zero-delta gate fails at any record;
-- the protected WIP hash changes or any protected file gets staged;
-- a source/test/contract/configuration/migration/manifest/lockfile/Alfie
-  change appears necessary for any reason;
-- an automated destructive real-Pi claim is proposed (Decisions 0031–0032
-  prohibit it);
-- WP-03 cannot complete within its exactly-one authorization, or its evidence
-  is ambiguous;
-- `bun fmt` touches prohibited/unrelated files in the isolated worktree
-  (§8 fmt-hazard rule — no silent restore-and-continue);
-- a reviewer or Supervisor finding requires a material decision.
-
-The challenge package must record the frozen candidate, exact command/exit,
-failing row, observed vs required behavior, minimum gap, and the exact
-material question. Do not advance Ticket 06 across a challenge.
-
-## 12. Completion and routing
-
-Ticket 06 closes only when all hold:
-
-1. WP-01 19-file deterministic evidence passes with failure legs (D);
-2. WP-02 five standalone real-Pi legs pass with exact provenance (R);
-3. WP-03's recorded operator run exists and supports AC6 (M) — no retry;
-4. WP-04's gate passes and the Implementation Report is complete with the
-   AC1–AC8 matrix (Q);
-5. WP-05's integrated review verdict is PASS (A) — exactly one review;
-6. WP-06's Supervisor decision is persisted and accepted (A) — exactly one;
-7. zero-delta, WIP-hash, and staging-safety gates hold at every record;
-8. no unresolved challenge remains.
-
-WP-07 then marks Ticket 06 accepted, records the project-closure state in
-Project Home, and preserves the full commit lineage. No further review or
-Supervisor consultation exists or may be created without a material
-reopening.
-
-## 13. Reopening conditions
-
-Reopen only for: an AC failure at any class; provenance divergence; measured
-source contradicting a grounding assumption of Tickets 01–05; evidence-class
-contamination discovered post-hoc; or a new binding decision that changes
-identity, lifecycle, owner, cleanup, Resume, or destructive-boundary
-authority. Reopening a closed review/Supervisor gate requires a material
-reopening decision, never a second routine consultation.
+No source implementation, test execution, or producer execution is part of
+this transaction.

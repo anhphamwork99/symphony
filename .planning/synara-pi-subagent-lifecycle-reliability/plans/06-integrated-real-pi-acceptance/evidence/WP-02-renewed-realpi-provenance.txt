@@ -1,3 +1,40 @@
+WP-02 renewed provenance — HISTORICAL supporting record and Decision 0008 reset
+====================================================================================
+Recorded: 2026-08-28 (local, UTC+7)
+This artifact preserves the renewed attempt provenance at historical candidate
+ffd45bd. It is not current WP-02 proof. The integrated leg passed, the
+canonical-identity leg failed, lifecycle/restart/resume were not run, and the
+attempt's no-retry state is spent. The raw logs are immutable.
+
+BINDING RESET
+-------------
+Decision 0008 is aspect-scoped Authoritative for the post-await live-control
+retirement classification only. Before any new D/R evidence, implement and
+freeze an exact two-file candidate child of ffd:
+  apps/server/src/provider/piSubagentLiveLifecycleContainment.ts
+  apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts
+The new candidate SHA is unknown until implementation. Its delta from ffd must
+be exactly those two files; its total delta from 12fd6686 must be exactly four
+files including the two Decision 0007 fixture files. No canonical expectation,
+Alfie source/pin, third file, coordinator/configuration, or unrelated path may
+change. Alfie remains 3fe340b401ca86bcbe8b55abd4de107e1d93482e /
+@alfie/pi-subagents@0.15.0-alfie.6.
+
+EVIDENCE RESET ROUTE
+--------------------
+containment two-file child of ffd -> freeze -> same WP-01 closed set (296
+baseline plus exact focused cases added by implementation; record expected count
+only after implementation) -> exactly one new full five-file WP-02 -> fresh
+owner WP-03 -> fresh owner WP-04 -> WP-05 -> WP-06 Decision 0009 -> closure.
+Historical ffd/WP-01/current renewed WP-02 evidence is supporting only.
+Old WP-03/WP-04 authorization is non-transferable; no retry is authorized.
+No producer, test, source implementation, or quality command is run by this
+planning reset. Protected owner WIP remains outside the transaction and must
+remain unstaged with required aggregate hash:
+  ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8
+
+PRESERVED HISTORICAL PROVENANCE APPENDIX
+-----------------------------------------
 WP-02 non-destructive real-Pi provenance and zero-delta gate record — Ticket 06
 ===============================================================================
 Recorded: 2026-08-28 (local, UTC+7) · host: Darwin arm64 (macOS)
@@ -404,7 +441,7 @@ After freeze, renewed evidence has zero source delta.
 
 Route: exact two-file candidate → freeze → renewed WP-01 same 19 files 296/296
 → one renewed full five-file WP-02 → fresh owner auth WP-03 → fresh owner auth
-WP-04 conditional on new WP-03 PASS → WP-05 one review → WP-06 Decision 0008
+WP-04 conditional on new WP-03 PASS → WP-05 one review → WP-06 Decision 0009
 → WP-07. Old WP-03/WP-04 authorization is unspent, non-transferable, and not
 executable. WP-05/WP-06 reservations are unused. No current PASS is claimed.
 

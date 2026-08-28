@@ -1,15 +1,27 @@
 # Ticket 06 — integrated real-Pi acceptance
 
-**Status:** ready-for-agent — sole project frontier; Package C candidate frozen; renewed WP-01 ready
-**Dependencies:** discharged — Tickets 01–05 accepted; local Decisions
-0001/0002/0006, applicable inherited decisions (especially durable-subagents
-0031–0034), and this reassessed plan remain binding
+**Status:** ready-for-agent — sole project frontier; Decision 0008 reassessment
+persisted; historical candidate/evidence reset pending implementation
+**Dependencies:** Tickets 01–05 accepted. [Decision 0008](../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
+is aspect-scoped **Authoritative** for the post-await live-control retirement
+classification only; [Decision 0007](../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
+remains authoritative only for its fixture/rebaseline/erratum aspects.
 **Plan:** [`../plans/06-integrated-real-pi-acceptance/PLAN.md`](../plans/06-integrated-real-pi-acceptance/PLAN.md)
-**Authoritative reassessment:** [Decision 0007](../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md) is authoritative only for the two-file fixture correction, candidate rebaseline, attempt-3 erratum, and downstream gate state.
-**Execution authorization:** Package C planning/provenance freeze only. Historical base `12fd6686` and WP-01 `9208e1728`/attempts 1–3 are supporting only. Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` is the sole-parent child of `12fd6686`, with exactly the two Decision 0007 files; it was integrated by merge `064b49f1d954b64343006da9240cdadf58bc0ff2` (parents `8c9b8bcbb` and `ffd45bd867e`). No third file, production/config/manifest/lockfile, or Alfie change is allowed.
-**Required route:** exact two-file candidate → freeze → renewed WP-01 (same 19 files, 296/296) → one renewed full five-file WP-02 → fresh owner authorization WP-03 → fresh owner authorization WP-04 conditional on new WP-03 PASS → WP-05 one review → WP-06 Decision 0008 → WP-07.
-**Gate status:** renewed WP-01 is ready at candidate `ffd45bd867e`; renewed WP-02 remains blocked until WP-01 passes 296/296; old WP-03/WP-04 authorizations are unspent but non-transferable and not executable; WP-05/WP-06 reservations are unused.
-**Evidence status:** candidate-freeze provenance and focused correction logs are recorded; no current D/R PASS, review, or acceptance exists. No WP-01/WP-02 producer ran in Package C.
+**Historical state:** `ffd45bd867e94c9003415f5f2e937cc9c616e399`, its WP-01 PASS,
+and the renewed WP-02 integrated-pass/canonical-identity-failure attempt are
+supporting only. The attempt stopped atomically after the canonical failure;
+its raw logs/hashes and no-retry disposition are immutable.
+**Current route:** exact two-file containment candidate child of `ffd45bd` →
+freeze → same closed WP-01 (296 baseline plus exact implementation-added
+focused cases, expected count recorded after implementation) → exactly one
+new full five-file WP-02 → fresh owner WP-03 → fresh owner WP-04 → WP-05 →
+WP-06 final Supervisor Decision 0009 → closure.
+**Implementation authorization:** the future source write set is exactly
+`apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
+`apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`. No
+canonical expectation, Alfie source/pin, third file, configuration, or
+unrelated change is allowed. This planning transaction runs no implementation,
+tests, or producers.
 
 ## Objective
 

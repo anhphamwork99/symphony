@@ -94,6 +94,7 @@ or resumed through one durable identity.
 4. **Binding Supervisor decisions** persisted in this project's `decisions/`
    directory are authoritative for their named ticket and material question.
    [Decision 0002](decisions/0002-canonical-execution-identity-and-result-read-contract.md)
+   [Decision 0008](decisions/0008-reassessment-live-control-post-await-retirement-classification.md) is aspect-scoped Authoritative for Ticket 06 live-control post-await retirement classification; it does not accept the ticket or consume G-M/G-Q.
    governs Ticket 02's canonical identity and result-read boundary.
 5. **Ticket-level decisions** may refine a ticket only within those boundaries;
    material changes require a new decision record and owner/Supervisor route.
@@ -151,31 +152,45 @@ Out of scope:
 ## Current frontier and statuses
 
 **Current frontier: Ticket 06 is the sole project frontier
-(`ready-for-agent`).** [Decision 0007](decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
-is aspect-scoped Authoritative for the exact two-file fixture correction,
-candidate rebaseline, attempt-3 evidence erratum, and downstream gate status.
-It does not alter settled invariants or consume the reserved review/final-
-acceptance gates.
+(`ready-for-agent`).** [Decision 0008](decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
+is aspect-scoped **Authoritative** for the live-control post-await retirement
+classification only. [Decision 0007](decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
+remains aspect-scoped Authoritative for the batching-fixture correction,
+historical candidate rebaseline, attempt-3 erratum, and its downstream gate
+state. Neither decision accepts Ticket 06 or consumes G-M/G-Q.
 
-Historical candidate `12fd6686edc26a3fa0382e8bdeb83a1be8045539` and historical
-WP-01 commit `9208e1728` are supporting only. Package C freezes candidate
-`ffd45bd867e94c9003415f5f2e937cc9c616e399`, the sole-parent child of `12fd6686`,
-with exactly the two Decision 0007 files. The integration merge is
-`064b49f1d954b64343006da9240cdadf58bc0ff2` (parents Package A `8c9b8bcbb` and
-candidate `ffd45bd867e`). All later evidence commits must have zero source
-delta and all behavioral producers must identify `ffd45bd867e`, never the
-integration merge.
+Historical candidate `12fd6686edc26a3fa0382e8bdeb83a1be8045539` and candidate
+`ffd45bd867e94c9003415f5f2e937cc9c616e399` are supporting only. The `ffd45bd`
+candidate is the historical sole-parent child of `12fd6686` containing exactly
+the two Decision 0007 fixture files; merge `064b49f1d` is integration
+provenance only. Its WP-01 PASS and the renewed WP-02 attempt are historical
+supporting evidence, not the current candidate or current D/R proof.
 
-The candidate freeze is recorded; renewed WP-01 is ready to run with the same
-19-file set and **296/296** requirement. No current D or R PASS exists. The
-required serial route is frozen candidate → renewed WP-01 → one renewed full
-five-file WP-02 → fresh owner authorization for WP-03 → fresh owner
-authorization for WP-04 conditional on the new WP-03 PASS → WP-05 one
-integrated review → WP-06 final Supervisor **Decision 0008** → WP-07.
+Decision 0008 binds a new exact two-file containment correction candidate child
+of `ffd45bd`: only
+`apps/server/src/provider/piSubagentLiveLifecycleContainment.ts` and
+`apps/server/src/provider/piSubagentLiveLifecycleContainment.test.ts`. The new
+candidate SHA is intentionally unknown until that implementation is completed
+and frozen. From `ffd45bd` the delta must be exactly those two files; from
+`12fd6686` the total delta must be exactly four files (the two Decision 0007
+fixture files plus the two containment files). Production/configuration,
+canonical expectations, Alfie source/pin, and every third file remain unchanged.
 
-The old WP-03/WP-04 authorizations are **unspent but non-transferable** and
-not executable. WP-05/WP-06 reservations are unused. No current Ticket 06
-M/Q/review/final-acceptance evidence exists.
+The current renewed WP-02 attempt is a preserved historical challenge: the
+integrated leg passed, the canonical-identity leg failed with the recorded
+stale-versus-unavailable/applied classification mismatch, and lifecycle,
+restart, and resume were not run after the atomic stop. Its no-retry state is
+spent; its raw logs and hashes are immutable and supporting only.
+
+The required serial route is: exact containment two-file candidate child of
+`ffd45bd` → freeze → rerun the same closed WP-01 baseline (296 tests, plus any
+exact focused cases added by the two-file implementation; record the expected
+aggregate only after implementation) → exactly one new full five-file WP-02 →
+fresh owner authorization WP-03 → fresh owner authorization WP-04 after the
+new WP-03 PASS → WP-05 one integrated review → WP-06 final Supervisor Decision
+0009 → WP-07 closure. Old WP-03/WP-04 authorizations are non-transferable and
+not executable. G-M and G-Q remain pending and exactly one of each remains
+reserved.
 
 | Ticket | Status | Current meaning |
 |---|---|---|
@@ -184,7 +199,7 @@ M/Q/review/final-acceptance evidence exists.
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
-| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Package C candidate frozen at `ffd45bd`; renewed WP-01 ready; no current D/R PASS |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Decision 0008 reassessment; containment candidate pending; historical ffd/WP-01/WP-02 only |
 
 The prior evidence-only/zero-source-delta execution contract is superseded only
 for the Decision 0007 aspects. No source implementation or renewed producer is
@@ -274,28 +289,29 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — Package C freezes candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399` from `12fd6686`; renewed WP-01 is ready and renewed D/R evidence has not started.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — Decision 0008 reassessment router: historical ffd/WP-01/WP-02 are supporting only; the exact containment two-file child, WP-01 reset, and one new five-file WP-02 remain ahead.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
 Tickets 01–05 are accepted. Ticket 06 remains the sole `ready-for-agent`
-frontier. Package C freezes candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`
-as the exact two-file child of `12fd6686`; merge `064b49f1d954b64343006da9240cdadf58bc0ff2`
-is integration provenance only. Historical WP-01 `9208e1728` and attempts
-1–3 are supporting only.
+frontier under binding [Decision 0008](decisions/0008-reassessment-live-control-post-await-retirement-classification.md),
+which is authoritative only for the post-await live-control classification
+aspect. [Decision 0007](decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
+remains authoritative only for its historical fixture/rebaseline/erratum
+aspects.
 
-The dated attempt-3 erratum is binding for derivative summaries: line 1125
-compared `Set(dispatchBatchIds).size`; two acknowledged outboxes had two
-distinct durable batch IDs; the test stopped before public follow-up
-replay/count, and no duplicate follow-up count was observed. Exit 1 and raw-log
-bytes remain preserved.
+Candidate `ffd45bd867e94c9003415f5f2e937cc9c616e399`, its WP-01 PASS, and the
+renewed WP-02 integrated-pass/canonical-failure attempt are historical
+supporting evidence. Preserve the attempt's failure details, raw bytes, hashes,
+and spent no-retry state; do not treat it as current proof or retry it.
 
-Renewed WP-01 is ready at the frozen candidate with the same 19 files and
-296/296 requirement. No current D/R PASS exists; no producer was run in Package
-C. Route: frozen candidate → renewed WP-01 → one renewed full five-file WP-02
-→ fresh owner-authorized WP-03 → fresh owner-authorized WP-04 conditional on
-new WP-03 PASS → WP-05 → WP-06 Decision 0008 → WP-07. Old WP-03/WP-04
-authorization is unspent, non-transferable, and not executable; G-M/G-Q remain
-pending and reserved.
+The next candidate is an exact two-file child of `ffd45bd`: the containment
+production file and its focused test only. Freeze that candidate, rerun WP-01
+with the 296-test baseline plus any exact added focused cases (expected count
+recorded after implementation), then run exactly one fresh full five-file
+WP-02. Only a fresh WP-02 PASS can permit fresh owner WP-03; only a new WP-03
+PASS can permit fresh owner WP-04; then WP-05, WP-06 Decision 0009, and closure.
+No canonical expectation, Alfie, third-file, or unrelated source change is
+permitted. G-M/G-Q remain pending and reserved exactly once each.
