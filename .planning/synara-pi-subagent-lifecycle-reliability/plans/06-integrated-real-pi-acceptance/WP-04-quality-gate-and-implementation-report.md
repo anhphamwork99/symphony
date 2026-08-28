@@ -1,16 +1,16 @@
 # WP-04 — owner-authorized quality gate and complete Implementation Report
 
-**State:** pending — **conditionally authorized (2026-08-28, current
-session, owner verbatim `Cho phép tất cả các cổng`, PLAN §7c item 3):
-exactly one gate run, ONLY if WP-03 has PASSED.** Until that condition
-holds, this WP does not execute — no fmt, lint, or typecheck command is run.
+**State:** blocked — not executable. Decision 0007 marks the prior conditional
+authorization unspent but non-transferable. Fresh explicit owner authorization
+is required only after the newly authorized WP-03 PASS; Package A runs no
+fmt, lint, or typecheck command.
 
 **Owner role:** implementation worker
 
-**Dependencies:** WP-01–WP-03 committed; **WP-03 PASS**; explicit
-current-session owner authorization for `bun fmt`, `bun lint`,
-`bun typecheck` (granted 2026-08-28, conditional as recorded above; PLAN
-§8). The quality gate runs exactly once.
+**Dependencies:** renewed WP-01–WP-03 committed; **newly authorized WP-03
+PASS**; and fresh explicit current-session owner authorization for `bun fmt`,
+`bun lint`, and `bun typecheck` (PLAN §8). The prior authorization is unspent
+but non-transferable and is not executable. The quality gate runs exactly once.
 
 ## Objective and observable outcome
 
@@ -100,8 +100,8 @@ Stage only the three allowed WP-04 paths.
 
 ## Escalation
 
-- `blocked`: WP-03 has not passed yet (gate not run; the conditional
-  authorization stays reserved), authorization absent (gate not run; do not
+- `blocked`: the newly authorized WP-03 has not passed or fresh authorization is absent
+  (gate not run; the old authorization is non-transferable), authorization absent (gate not run; do not
   fabricate), or environment failure.
 - `challenge`: gate failure, fmt-hazard rule triggered (formatter touches
   out-of-scope paths — stop, list every touched file, no silent

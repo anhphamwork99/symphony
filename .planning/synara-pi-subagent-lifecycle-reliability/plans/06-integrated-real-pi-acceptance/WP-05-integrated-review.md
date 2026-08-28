@@ -1,6 +1,6 @@
 # WP-05 — exactly-one integrated feature-level review
 
-**State:** pending
+**State:** pending but blocked until renewed D/R, fresh-authorized M/Q, and the complete current Implementation Report exist. Decision 0007 does not consume the one integrated review reservation.
 
 **Owner role:** independent reviewer (convened by the main agent with the
 owner's current-session go-ahead)

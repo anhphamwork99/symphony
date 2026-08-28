@@ -1,6 +1,6 @@
 # WP-06 — exactly-one Supervisor final acceptance and persisted decision
 
-**State:** pending
+**State:** pending but blocked until WP-05 PASS and the complete current package exist. Decision 0007 does not consume the one final Supervisor reservation; this WP must persist Decision 0008.
 
 **Owner role:** Project Supervisor (convened by the main agent with the
 owner's current-session go-ahead, after WP-05 PASS)
@@ -21,7 +21,7 @@ the project.
 Path:
 
 ```text
-.planning/synara-pi-subagent-lifecycle-reliability/decisions/0007-integrated-real-pi-acceptance-final-acceptance.md
+.planning/synara-pi-subagent-lifecycle-reliability/decisions/0008-integrated-real-pi-acceptance-final-acceptance.md
 ```
 
 Minimum fields (house style of decisions 0001–0006):

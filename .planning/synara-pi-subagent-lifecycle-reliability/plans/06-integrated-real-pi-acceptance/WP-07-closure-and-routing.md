@@ -1,6 +1,6 @@
 # WP-07 — Ticket 06 closure and project routing
 
-**State:** pending
+**State:** blocked until renewed D/R, fresh-authorized M/Q, WP-05 PASS, and accepted persisted Decision 0008. Package A makes no closure claim.
 
 **Owner role:** implementation worker
 

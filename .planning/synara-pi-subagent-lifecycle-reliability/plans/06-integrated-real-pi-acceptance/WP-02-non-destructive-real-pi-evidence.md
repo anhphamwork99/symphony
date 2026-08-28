@@ -1,38 +1,25 @@
 # WP-02 — non-destructive real-Pi evidence, five standalone files
 
-**State:** pending — RUN EXECUTED TWICE (attempt 1 and the corrected
-attempt 2, both 2026-08-28), STOPPED AT CHALLENGE after each; no behavioral
-PASS claimed for any corrected leg. Attempt 1: legs 4–5 (restart, resume)
-PASSED exit 0; legs 1–3 FAILED exit 1 (environment/runner: missing gitignored
-ext-local `node_modules`, Bun-only `SocketCloseError`, external Pi-FFF
-frecency digest interference); attempt-1 logs preserved under explicit
-`WP-02-attempt-01-*` names (never overwritten/deleted). The authorized
-corrected attempt (§"Attempt 2", exactly one) then ran: `npm ci` environment
-preparation PASSED (zero tracked delta), and the integrated leg rerun under
-Node moved from 8 failed / 1 passed to **8 passed / 1 failed / 1 skipped,
-exit 1** — every managed/non-manual behavioral stage now functions; the sole
-failure is the teardown user-Pi-home digest, caused by user Pi settings
-enabling `npm:@ff-labs/pi-fff` writing `~/.pi/agent/fff/frecency/data.mdb`
-outside the harness (root cause and owner-decision gate in the disposition
-§4c and provenance §11). Corrected-attempt log preserved byte-identical as
-`evidence/WP-02-attempt-02-realpi-acceptance.log` (SHA-256
-`cf6db25f045030cb7be2949322820d283c9a32b5bf7459c44051b9ee12a9d1b0`).
-**The §"Attempt 2" authorization is SPENT. On 2026-08-28 the owner granted,
-in the current session and verbatim (`Cho phép tất cả các cổng`), the fresh
-authorization for attempt 3 — §"Attempt 3" below is the executable contract
-(authorized, NOT yet executed; exactly once, no retry).** Per WP-02
-§Escalation and PLAN §11 no completion was claimed and Ticket 06 did not
-advance. **Attempt-3 status (2026-08-28, post-run): the integrated leg ran
-exactly once under the §"Attempt 3" process-HOME-isolated pattern, exited 1
-(8 passed, 1 failed, 1 manual skipped, 39.45s) on a REAL BEHAVIORAL failure —
-T17-AC4 stage 4 expected exactly 1 accepted batched parent follow-up,
-received 2 (piSubagentRealPiAcceptance.test.ts:1125, wrapped :1193). The
-canonical-identity and lifecycle-containment attempt-3 legs were NOT run.
-WP-02 is CHALLENGED — NO RETRY; source diagnosis PENDING; the attempt-3
-authorization is SPENT; WP-03/WP-04 conditional authorizations REMAIN
-UNSPENT. Evidence: `evidence/WP-02-attempt-03-realpi-acceptance.log`
-(SHA-256 `798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99`,
-byte-identical to the canonical log), disposition §8, provenance §13.**
+**State:** historical attempts preserved; no current WP-02 PASS exists. The
+renewed full five-file run is blocked until the exact two-file Decision 0007
+candidate is frozen and renewed WP-01 passes 296/296.
+
+Decision 0007 is aspect-scoped Authoritative for this rebaseline. Attempts 1–3
+are supporting only. Attempt 3 ran its integrated leg exactly once and exited
+1; its canonical/lifecycle legs did not run. The old WP-03/WP-04 authorizations
+are unspent but non-transferable and not executable. Fresh owner authorization
+is required after renewed WP-02 PASS and again after the newly authorized
+WP-03 PASS. WP-05/WP-06 reservations are unused.
+
+The detailed attempt-1/attempt-2 command records below are historical and
+supporting only; the attempt-3 record is corrected by the erratum below. No
+historical command or log is a current execution authorization.
+
+**Attempt-3 erratum (2026-08-28):** line 1125 compared
+`Set(dispatchBatchIds).size`; two acknowledged outboxes had two distinct
+durable batch IDs. The test stopped before the later public follow-up
+replay/count assertion. No duplicate follow-up count was observed. Preserve
+exit 1 and the raw logs byte-for-byte.
 
 Attempt 1 (2026-08-28 12:23–12:54 local): all five authorized standalone
 producers ran exactly once each against the retained pinned worktrees

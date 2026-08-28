@@ -3,14 +3,12 @@
 **Status:** ready-for-agent — sole project frontier
 **Dependencies:** discharged — Tickets 01–05 accepted; local Decisions
 0001/0002/0006, applicable inherited decisions (especially durable-subagents
-0031–0034), and this evidence-only plan remain binding
+0031–0034), and this reassessed plan remain binding
 **Plan:** [`../plans/06-integrated-real-pi-acceptance/PLAN.md`](../plans/06-integrated-real-pi-acceptance/PLAN.md)
-**Execution authorization:** serial evidence-only WPs (WP-01–WP-07) in the
-accepted plan; no source/test/harness/fixture/config/migration/manifest/
-lockfile/Alfie change anywhere; no manual destructive run and no quality gate
-until explicit current-session owner authorization; behavioral producers run
-in an isolated Symphony worktree at `12fd6686` with controlled Alfie worktree
-`3fe340b4` via `ALFIE_REPO_DIR`
+**Authoritative reassessment:** [Decision 0007](../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md) is authoritative only for the two-file fixture correction, candidate rebaseline, attempt-3 erratum, and downstream gate state.
+**Execution authorization:** planning-only rebaseline. Historical base `12fd6686` and WP-01 `9208e1728`/attempts 1–3 are supporting only. The future candidate is an exact two-file child changing only `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts` and `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`; no third file, production/config/manifest/lockfile, or Alfie change is allowed.
+**Required route:** exact two-file candidate → freeze → renewed WP-01 (same 19 files, 296/296) → one renewed full five-file WP-02 → fresh owner authorization WP-03 → fresh owner authorization WP-04 conditional on new WP-03 PASS → WP-05 one review → WP-06 Decision 0008 → WP-07.
+**Gate status:** old WP-03/WP-04 authorizations are unspent but non-transferable and not executable; WP-05/WP-06 reservations are unused. No current Ticket 06 evidence or acceptance exists.
 **Evidence status:** none yet — no Ticket 06 evidence, review, or acceptance
 exists
 

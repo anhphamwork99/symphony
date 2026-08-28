@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–05 accepted; Ticket 06 is the sole frontier (`ready-for-agent`); G-M (integrated project review) and G-Q (Supervisor final acceptance) pending — exactly one of each reserved
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-agent`) under the Decision 0007 two-file correction rebaseline; G-M and G-Q remain pending and exactly one of each is reserved
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -151,125 +151,40 @@ Out of scope:
 ## Current frontier and statuses
 
 **Current frontier: Ticket 06 is the sole project frontier
-(`ready-for-agent`) under its accepted evidence-only plan at
-[`plans/06-integrated-real-pi-acceptance/PLAN.md`](plans/06-integrated-real-pi-acceptance/PLAN.md)**
-(planning baseline `4bf368a492e42382c3e064ae7a5be5a6624bdbf0`; frozen
-behavioral candidate `12fd6686edc26a3fa0382e8bdeb83a1be8045539`; controlled
-Alfie worktree `3fe340b401ca86bcbe8b55abd4de107e1d93482e` via
-`ALFIE_REPO_DIR`). Tickets 01–05 are accepted. Ticket 01 is accepted
-as the read-only grounding report. Ticket 02 is accepted at Symphony
-candidate `cb023e587` plus Implementation Report `d77a566e0`, against
-controlled Alfie
-`3fe340b401ca86bcbe8b55abd4de107e1d93482e` /
-`@alfie/pi-subagents@0.15.0-alfie.6`. Its deterministic,
-controlled-Alfie, and isolated real-Pi evidence passed independent review; the
-report-only closure introduced no material reopening, so no second review or
-ticket-level Supervisor final-acceptance consultation is required. Binding
-[Decision 0006](decisions/0006-live-lifecycle-containment-linearization-contract.md)
-settles DG-3 through an exact-tuple live lifecycle proxy and preserves the
-already-closed DG-4 owner boundary. Ticket 03 is accepted at frozen Symphony
-candidate `5a1ff1d42`, including exact-tuple remediation `1913a9a61`,
-controlled/real-Pi evidence `1a92d1cfa`, Implementation Report `db27626b7`,
-and independent PASS review `c3dbc328a`. Its final gate passed `bun fmt`,
-`bun lint` with 0 warnings/0 errors, and `bun typecheck` 7/7. Ticket 04 is
-accepted at frozen candidate
-`08b65ebb466470d71814c4467d74e68f43991138` from evidence-only execution:
-WP-01 evidence `bab07af82d31c7fc128fd561fc0dc06eed0f7300` passed 11/11
-files and 177/177 tests; WP-02 report
-`e160ccd8c6bfbd9839b67618ffdbaf7d85ee8e11` verified the exact clean
-Alfie pin and recorded non-destructive real-Pi cancellation 2/2 plus
-watchdog 2/2 PASS. No Ticket 04 source, test, contract, manifest, lockfile,
-or Alfie change exists; no destructive manual run was run or claimed. Its
-final gate passed `bun fmt`, `bun lint` with 0 warnings/0 errors, and
-`bun typecheck` 7/7 with non-failing console advisories recorded. Ticket-level
-review and Supervisor acceptance were intentionally unused. Ticket 05 is
-accepted from evidence-only execution under its accepted plan at
-[`plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md`](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md):
-WP-01 evidence `4090ccee8cf39b9164a9653fc41b239bc59b5173` passed 9/9 files
-and 118/118 deterministic tests at frozen candidate
-`7521b92c7cb8a614346f994e963aa379175f540b`; runner correction
-`d12e1a2e071afcdc63f630fbff467b76779e7d42` authorized the Node producer;
-WP-02 evidence and Implementation Report
-`b5d0feefc26bf88d59d1759132c9a8b051c54865` verified the exact clean Alfie
-pin and Pi SDK 0.83.0 (5/5 fixture hashes) and recorded non-destructive real-
-Pi restart 1/1, explicit Resume 1/1, and fresh production boot 1 passed/9
-skipped under the supported Node producer, with the Bun 1.3.12 `node:sqlite`
-pre-collection failure preserved as environment evidence only. Provider-
-inactive Resume fails closed at `ProviderService.resumePiSubagentExecution`
-with `allowRecovery: false` — a truthful denial without provider bootstrap.
-No Ticket 05 source, test, contract, configuration, migration, manifest,
-lockfile, or Alfie change exists (`7521b92c7..HEAD` apps/packages delta is
-empty); no Ticket 05 destructive manual run was claimed or executed. Its owner-
-authorized final gate passed `bun fmt` (exit 0), `bun lint` with 0 warnings/
-0 errors, and `bun typecheck` 7/7 (0 cached) with non-failing console
-advisories recorded. Ticket-level review and Supervisor acceptance were
-intentionally unused. Ticket 06 is now the sole project frontier,
-`ready-for-agent`, with Tickets 01–05 accepted and all
-provenance/evidence gates available; no Ticket 06 implementation, review, or
-acceptance has occurred. One integrated
-project review and exactly one Supervisor final-acceptance consultation
-remain reserved for the complete integrated candidate. The Ticket 06 plan is
-now persisted: WP-01 freezes deterministic evidence (D), WP-02 runs the five
-standalone non-destructive real-Pi files (R), WP-03 is the exactly-one
-owner-authorized manual destructive run (M, mandatory for AC6; no retry),
-WP-04 is the owner-authorized quality gate plus Implementation Report (Q),
-WP-05 is the exactly-one integrated review (A), WP-06 is the exactly-one
-Supervisor final acceptance (A), WP-07 closes. **No Ticket 06 evidence,
-review, or acceptance exists yet** — the plan only authorizes execution; no
-producer has been run under it and no gate has been consumed.
+(`ready-for-agent`).** [Decision 0007](decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
+is aspect-scoped Authoritative for the exact two-file fixture correction,
+candidate rebaseline, attempt-3 evidence erratum, and downstream gate status.
+It does not alter settled invariants or consume the reserved review/final-
+acceptance gates.
 
-| Ticket                                                                    | Status                                 | Dependency / unlock                                                                                           |
-| ------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [01](issues/01-baseline-reproduction-and-decision-matrix.md)              | **accepted**                           | grounding report accepted; no source edits                                                                    |
-| [02](issues/02-canonical-identity-and-result-continuity.md)               | **accepted**                           | canonical identity/read contract implemented, evidenced, reviewed, and reported against controlled Alfie `.6` |
-| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted**                           | Decision 0006 implemented, evidenced, reviewed, and closed at frozen candidate `5a1ff1d42`                    |
-| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md)          | **accepted**                           | T04-AC1–AC5 deterministically evidenced and reported; no source change                                        |
-| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md)         | **accepted**                           | T05-AC1–AC6 evidenced and reported; no source change                                                          |
-| [06](issues/06-integrated-real-pi-acceptance.md)                          | **ready-for-agent — sole frontier**   | Tickets 01–05 accepted; evidence-only plan persisted; no evidence/acceptance yet                            |
+Historical candidate `12fd6686edc26a3fa0382e8bdeb83a1be8045539` and historical
+WP-01 commit `9208e1728` are supporting only. The future candidate is an exact
+two-file child changing only `apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts`
+and `apps/server/src/provider/piSubagentRealPiAcceptance.test.ts`; its SHA is
+frozen before renewed evidence and all later source delta is zero.
 
-Ticket 04's evidence-first plan executed in full: WP-01 froze deterministic
-criterion evidence, WP-02 verified controlled provenance and completed the
-Implementation Report, and WP-03 closed the ticket from that evidence only.
-Ticket 05's evidence-first plan likewise executed in full: WP-01
-(`4090ccee8`) froze deterministic criterion evidence at frozen candidate
-`7521b92c7`, WP-02 (`b5d0feefc`) verified controlled provenance and completed
-the Implementation Report, and WP-03 closed the ticket from that evidence
-only. Under the Router rule, this Project Home remains the sole status and
-frontier authority. Ticket 06 is the sole `ready-for-planning` frontier; its
-plan does not yet exist and no implementation, review, or acceptance is
-claimed. It does not authorize source remediation or claim Ticket 06 or the
-integrated project accepted.
+Required serial route: exact two-file candidate from `12fd6686` → freeze →
+renewed WP-01 with the same 19 files and **296/296** → one renewed full
+five-file WP-02 → fresh owner authorization for WP-03 → fresh owner
+authorization for WP-04 conditional on the new WP-03 PASS → WP-05 one
+integrated review → WP-06 final Supervisor **Decision 0008** → WP-07.
 
-The [canonical identity decision gate](handoffs/01-canonical-identity-decision-gate.md)
-is discharged by Decision 0002. It remains a historical consultation link;
-the decision record is now the authoritative contract for Ticket 02.
+The old WP-03/WP-04 authorizations are **unspent but non-transferable** and
+not executable. WP-05/WP-06 reservations are unused. No current Ticket 06
+D/R/M/Q/review/final-acceptance evidence exists.
 
-Ticket 06's plan is evidence-only and strictly serial (WP-01→WP-07). It
-requires zero committed delta on the Pi acceptance surface (`apps/server/src/
-provider/**`, `apps/server/src/persistence/**`, `apps/server/src/
-orchestration/**`, `apps/server/scripts/wallclock-tests.ts`,
-`apps/server/vitest.config.ts`, `packages/contracts/src/piSubagents.ts`) from
-`12fd6686` through the evidence package, runs all behavioral producers in an
-isolated Symphony worktree at `12fd6686` with the controlled Alfie detached
-worktree `3fe340b4` selected by `ALFIE_REPO_DIR` (user Alfie checkout
-`c6a27714` untouched), defines evidence classes P/D/R/M/Q/H/A, and reserves
-the destructive manual leg (WP-03) and the quality gate (WP-04) behind
-explicit current-session owner authorization with a strict no-retry rule for
-the manual run.
+| Ticket | Status | Current meaning |
+|---|---|---|
+| [01](issues/01-baseline-reproduction-and-decision-matrix.md) | **accepted** | accepted baseline and decision matrix |
+| [02](issues/02-canonical-identity-and-result-continuity.md) | **accepted** | canonical identity/read contract accepted |
+| [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
+| [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
+| [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-agent — sole frontier** | Decision 0007 two-file correction rebaseline pending; historical attempts supporting only |
 
-Dependency graph:
-
-```text
-01 baseline/reproduction/decision matrix
- └──> 02 canonical identity + durable result-read continuity
-       └──> 03 terminal-before-cleanup + live lifecycle containment
-             └──> 04 cancellation/watchdog/owned teardown retry settlement
-                   └──> 05 restart/reconnect/Resume/projection truth + crash diagnostics
-                         └──> 06 integrated real-Pi acceptance
-```
-
-Parallel research is allowed as supporting evidence only; it does not change
-this serial frontier.
+The prior evidence-only/zero-source-delta execution contract is superseded only
+for the Decision 0007 aspects. No source implementation or renewed producer is
+claimed by this planning package.
 
 ## Settled invariants and open design points
 
@@ -355,25 +270,24 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — persisted evidence-only integrated acceptance plan (WP-01–WP-07); not yet executed; no evidence, review, or acceptance exists.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — Decision 0007 two-file correction rebaseline; historical evidence is supporting only and renewed D/R evidence has not started.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
-Tickets 01–05 are accepted. Ticket 03 implements Decision 0006's exact-tuple
-Alternative A proxy, preserves the inherited closed DG-4 owner boundary, and
-is closed at frozen candidate `5a1ff1d42` with PASS review `c3dbc328a`.
-Ticket 04 is accepted at frozen candidate `08b65ebb4` from evidence-only
-execution with no source or Alfie change; its cancellation/watchdog/owned
-teardown evidence preserves bands 70–78, proof-before-fence, and
-exact-owner-only authority. Ticket 05 is accepted at frozen candidate
-`7521b92c7` from evidence-only execution with no source or Alfie change; its
-reconnect/restart/Resume/no-replay evidence preserves identity, restart,
-Resume, owner, cleanup, and no-replay authority, and provider-inactive
-Resume remains a truthful fail-closed denial. Ticket 06 is the sole
-`ready-for-agent` frontier under its persisted evidence-only plan; no Ticket
-06 producer has run and no evidence or acceptance exists. The one integrated
-project review (G-M) and exactly one Supervisor final-acceptance consultation
-(G-Q) remain pending and reserved for the complete project candidate; each is
-to be consumed exactly once by WP-05/WP-06 of the Ticket 06 plan.
+Tickets 01–05 are accepted. Ticket 06 remains the sole `ready-for-agent`
+frontier under the Decision 0007 two-file correction rebaseline. Historical
+candidate `12fd6686`, WP-01 `9208e1728`, and attempts 1–3 are supporting only.
+
+The dated attempt-3 erratum is binding for derivative summaries: line 1125
+compared `Set(dispatchBatchIds).size`; two acknowledged outboxes had two
+distinct durable batch IDs; the test stopped before public follow-up
+replay/count, and no duplicate follow-up count was observed. Exit 1 and raw-log
+bytes remain preserved.
+
+Route: exact two-file candidate → freeze → renewed WP-01 same 19 files 296/296
+→ one renewed full five-file WP-02 → fresh owner-authorized WP-03 → fresh
+owner-authorized WP-04 conditional on new WP-03 PASS → WP-05 → WP-06 Decision
+0008 → WP-07. Old WP-03/WP-04 authorization is unspent, non-transferable, and
+not executable; G-M/G-Q remain pending and reserved.

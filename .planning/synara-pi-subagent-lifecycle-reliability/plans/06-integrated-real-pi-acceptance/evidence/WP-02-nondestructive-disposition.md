@@ -320,12 +320,11 @@ in the bounded §4b form above.
 WP-02 (five legs exit 0 — restart/resume PASS from attempt 1; integrated leg
 FAILED in attempt 2 on the external FFF digest interference with all managed
 stages passing; canonical-identity and lifecycle-containment corrected legs
-NOT yet rerun) → attempt 3 authorized by the owner on 2026-08-28 (current
-session, verbatim `Cho phép tất cả các cổng`; executable contract WP-02
-§"Attempt 3", PLAN §7c) → then WP-03 (exactly-one manual destructive run,
-conditional on attempt-3 PASS) → WP-04 quality gate + Implementation Report
-(conditional on WP-03 PASS) → WP-05 integrated review → WP-06 Supervisor
-acceptance → WP-07 closure.
+NOT yet rerun) → renewed WP-02 full five-file PASS → fresh owner authorization for WP-03 (exactly
+one manual destructive run) → fresh owner authorization for WP-04 conditional
+on the new WP-03 PASS → WP-05 one integrated review → WP-06 Decision 0008 →
+WP-07 closure. The old WP-03/WP-04 authorizations are unspent but
+non-transferable and not executable.
 
 ## 7. Owner authorization record — remaining Ticket 06 gates (2026-08-28, current session)
 
@@ -360,80 +359,45 @@ evidence, and claims no completion.
   attempt-2 integrated remains a non-PASS environment record; no WP-02
   completion exists until the attempt-3 five-legs-exit-0 record.
 
-## 8. Attempt-3 integrated leg outcome — behavioral challenge record (2026-08-28)
+## 8. Attempt-3 dated erratum — 2026-08-28
 
-Classification: R (controlled real-Pi, non-destructive), executed exactly once.
-Scope executed: the INTEGRATED leg only, per WP-02 §"Attempt 3" and PLAN §7c
-item 1. **The canonical-identity and lifecycle-containment attempt-3 legs were
-NOT run** — the integrated leg's nonzero exit consumed the exactly-once
-attempt-3 authorization for this record's boundary and stopped into this
-challenge package; those two legs therefore remain pending, and the
-five-legs-exit-0 WP-02 record does not exist.
+This section supersedes the earlier attempt-3 authorization wording in §7; that
+authorization is spent and cannot transfer to the renewed candidate.
 
-1. **Exact attempt-3 command discipline (as executed).** Per producer, per
-   WP-02 §"Attempt 3" executable pattern: cwd `/tmp/symphony-t06/apps/server`;
-   `set -o pipefail`; fresh temporary outer HOME via `mktemp -d` created for
-   THIS producer alone (`T06_HOME`, never shared across legs; producer-exit
-   code would have been 125 on `mktemp -d` failure without running anything);
-   `trap 'rm -rf "$T06_HOME"' EXIT`; then
-   `env -u SYNARA_T17_MANUAL_TEARDOWN HOME="$T06_HOME" ALFIE_REPO_DIR=/tmp/alfie-t06 node ../../node_modules/vitest/vitest.mjs run --project wallclock --maxWorkers=1 --no-file-parallelism src/provider/piSubagentRealPiAcceptance.test.ts 2>&1 | tee <evidence>/WP-02-realpi-acceptance.log`;
-   exit status taken from `PIPESTATUS[0]`. `HOME` was set ONLY for that
-   Node/Vitest process — no profile, rc file, shell state, worktree, or any
-   other file was modified; the manual env stayed unset; the no-concurrent-tool
-   producer window was observed (the worker only waited between launch and
-   exit). Start 15:01:40 local; vitest Duration **39.45s** (transform 1.70s,
-   import 2.29s, tests 37.09s).
-2. **Temporary-HOME cleanup proof.** The outer HOME for this producer was
-   `/var/folders/_v/54jgtd2x4nq1h94b1c5qnv400000gn/T/tmp.dfn6E3LpgR`; after the
-   producer process exited, `tmp.dfn6E3LpgR` is ABSENT on the host
-   (`ls` → "No such file or directory"; no live process references it), i.e.
-   the `EXIT` trap fired and removed it exactly once. Outer-HOME cleanup
-   stop gate: NOT triggered.
-3. **Producer outcome — FAILED, exit 1 (behavioral).**
-   `Tests  1 failed | 8 passed | 1 skipped (10)`; PRODUCER_EXIT
-   (PIPESTATUS[0]) = **1**. The one skip is exactly the MANUAL T17-AC6
-   destructive test (`it.skipIf(SYNARA_T17_MANUAL_TEARDOWN !== "1")`) — the
-   expected skip set; no unexpected skip. ALL of attempt 2's previously
-   passing stages kept passing, INCLUDING the attempt-2 failure surface:
-   the teardown user-Pi-home digest (piSubagentRealPiAcceptance.test.ts:1877)
-   PASSED — the process-HOME isolation correction is confirmed effective for
-   its target class.
-4. **Sole failing row — T17-AC4 stage 4 (REAL BEHAVIORAL failure, unlike
-   attempt 2's FFF-isolation failure).** Test: "T17-AC4 stage 4: two real
-   background slow children under one parent thread complete into one
-   accepted bounded batch, produce exactly one parent follow-up, and each
-   result is retrievable individually through the public read RPC with stable
-   denial on unknown identity" (8700ms). Assertion
-   `expect(followUps).toHaveLength(1)` at
-   `piSubagentRealPiAcceptance.test.ts:1125` — **expected exactly 1 accepted
-   batched parent follow-up (`background subagents finished:` message event),
-   received 2** (`AssertionError: expected 2 to be 1 // Object.is equality`),
-   wrapped and rethrown with stage label + full modelRequests dump by the
-   stage wrapper at `:1193` (`T17-AC4 stage 4 failed: expected 2 to be 1 …
-   modelRequests=[…20 requests…, including the two real
-   `agent-driver-background` delegations, both `delegated:true`]"). The two
-   real background children ran; the bounded batch dispatched; the parent
-   thread emitted the batched completion follow-up TWICE instead of exactly
-   once. This is a behavior-under-test discrepancy in the duplicate/once-only
-   follow-up path, NOT an environment/runner/isolation artifact: stage 0
-   provenance+isolation, managed negotiation, detach/reconnect, cancellation,
-   slice-4 stages 4/5 (generation bump), and watchdog handoff all passed in
-   the same run under the isolated temporary HOME.
-5. **Evidence preservation.** The attempt-3 raw log is durably preserved
-   byte-identical as `evidence/WP-02-attempt-03-realpi-acceptance.log` —
-   SHA-256
-   `798148d1944242b68014e753fe05a15aec947cf22376f6c7ec6248887cbd0f99`.
-   The canonical `WP-02-realpi-acceptance.log` currently holds those same
-   bytes and must not be read as a PASS record. Attempt-01 and attempt-02
-   logs remain untouched and preserved byte-identical.
-6. **No-retry and gate state (STOP).** The §7 attempt-3 authorization is
-   SPENT by this exactly-once integrated run (nonzero producer exit is itself
-   an attempt-3 stop gate). **WP-02 is CHALLENGED: NO RETRY.** The source
-   diagnosis of the duplicate follow-up (why the once-only parent follow-up
-   path emitted 2 events for one acknowledged bounded batch) is PENDING and is
-   explicitly NOT attempted here — this record makes no root-cause claim
-   beyond the observed expected-vs-received counts. WP-03's destructive and
-   WP-04's quality conditional authorizations DID NOT activate (their
-   condition — five-legs-exit-0 WP-02 PASS — was not met) and REMAIN UNSPENT
-   and available exactly once each to a future owner-gated sequence. A further
-   attempt of any leg requires a fresh owner decision after source diagnosis.
+Decision 0007 is aspect-scoped Authoritative and corrects the derivative
+attempt-3 description:
+
+> Attempt 3 failed at `piSubagentRealPiAcceptance.test.ts:1125`, where the test
+> required the two acknowledged outbox rows to share one durable
+> `dispatchBatchId`. The rows instead had two distinct batch IDs. The test
+> stopped before the later public follow-up replay/count assertion, so attempt 3
+> did not observe or establish that two public follow-up message events were
+> emitted.
+
+Line 1125 compared `Set(dispatchBatchIds).size`; the observation was two
+distinct durable batch IDs among acknowledged outboxes. The test stopped before
+public follow-up replay/count, and **no duplicate follow-up count was observed**.
+Preserve exit 1, the stopped status, and the raw attempt-3 log byte-for-byte.
+Claims that two follow-ups were received, one accepted batch was proven, or
+production had a duplicate-follow-up defect are superseded and must not be used.
+
+## 9. Current rebaseline and gate state
+
+Attempts 1–3 and historical WP-01 `9208e1728` remain supporting only. From
+historical base `12fd6686`, the future candidate is an exact two-file child:
+
+```text
+apps/server/src/provider/piSubagentRealPiAcceptanceHelpers.ts
+apps/server/src/provider/piSubagentRealPiAcceptance.test.ts
+```
+
+Required route: exact candidate → freeze → renewed WP-01, same 19 files and
+296/296 → one renewed full five-file WP-02 → fresh owner authorization WP-03 →
+fresh owner authorization WP-04 conditional on new WP-03 PASS → WP-05 one
+review → WP-06 Decision 0008 → WP-07. Old WP-03/WP-04 authorizations are
+unspent but non-transferable and not executable. WP-05/WP-06 reservations are
+unused. No current WP-02 PASS or downstream evidence is claimed.
+
+Candidate gate: exactly the two Decision 0007 files in the base→candidate
+delta; no third file, production change, or Alfie change; zero source delta
+after candidate freeze. All historical logs remain immutable.
