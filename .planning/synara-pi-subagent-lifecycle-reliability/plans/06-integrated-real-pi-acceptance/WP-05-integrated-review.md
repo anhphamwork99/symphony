@@ -1,34 +1,32 @@
-# WP-05 — exactly-one integrated feature-level review
+# WP-05 — integrated feature-level review
 
-**State:** **READY FOR ONE OWNER-AUTHORIZED REPLACEMENT REVIEWER PACKAGE.** The
-first G-M runtime ran after WP-01–WP-04 PASS, remained read-only, and returned
-substantial supporting evidence, but terminated without the required
-`State / Result / Needs` contract or explicit criterion-level verdict. Runtime
-classified it as unknown (`no State section found`). The owner subsequently
-directed automatic completion and authorized one replacement reviewer package;
-the invalid response remains preserved and is not inferred PASS.
+**State:** **PASS.** The owner-authorized operational fallback produced one valid read-only feature-level review package after earlier reviewer transports failed to return semantic verdicts. The valid package covers the complete unchanged candidate and D/R/M/Q evidence and returns AC1–AC8 PASS with no blocking finding.
 
-## Objective and review boundary
+## Review boundary and recovery
 
-The reviewer was assigned the complete current candidate, whose correction delta is exactly four files from candidate2 and six distinct paths from `12fd6686`, AC1–AC8, D/R/M/Q evidence classes, exact candidate/Alfie provenance, zero-delta and protected-WIP proofs, failure diagnostics, and authorization history. The assignment also required verification of Decision 0009's internal-only mapping and confirmation that exactly one final Supervisor gate remained unused.
+The first reviewer runtime returned substantial partial evidence but no `State / Result / Needs` or final verdict. Two replacement provider streams then ended before any semantic response. These runtime failures are preserved and are not counted as review verdicts. Project Home authorized one operational fallback package; Codex read-only review produced the valid package without running producers, quality gates, or writes.
 
-## Evidence preserved
+The review covered the exact four-file correction from candidate2 and six distinct paths from `12fd6686`, AC1–AC8, D/R/M/Q class separation, candidate/Alfie provenance, zero-delta and protected-WIP proofs, failure diagnostics, authorization/no-retry history, and Decision 0009's internal-only mapping.
 
-The incomplete response nevertheless confirmed focused log hashes, bounded/redacted managed routing output, WP-01 counts/hashes, candidate surface constraints, no producer execution during review, and the non-blocking nature of the pre-existing lint warning. It identified residual ambiguity in the generic WP-03 authorization wording and stale `PROJECT.md` routing relative to WP-03/WP-04 PASS.
+## Verdict
 
-Full preservation and runtime disposition:
+- AC1–AC8: PASS.
+- D/R/M/Q separation and raw evidence integrity: PASS.
+- Exact lineage and source surface: PASS.
+- Structured `provider_inactive` preservation, generic observation split, no public reason leak, and no acceptance lie: PASS.
+- WP-03 owned-tree/no-retry boundary: PASS.
+- WP-04 original challenge plus owner-approved replacement integrity: PASS.
+- Blocking findings: none.
+- Residuals: one pre-existing non-blocking lint warning; stale historical routing prose to reconcile in WP-07; manual proof limited to the exact owned tree at verification time.
+
+Review artifact:
 
 - `../../reviews/06-integrated-real-pi-acceptance-review.md`
 
 ## Downstream state
 
-The missing criterion table and final verdict make the package insufficient for WP-06. Exactly one final Supervisor gate remains unused and must not be invoked with incomplete reviewer evidence. WP-07 closure remains blocked.
+Exactly one final Supervisor gate remains unused. WP-06 may now invoke it once for Decision 0010. No further review package is authorized.
 
-The governance repair is now explicit: run one replacement read-only reviewer
-package against the complete unchanged candidate and evidence. If it PASSes,
-exactly one final Supervisor gate remains unused for WP-06. No producer,
-quality rerun, additional reviewer loop, or inferred PASS is permitted.
+## Commit boundary
 
-## Write set and commit
-
-This transaction writes only the review artifact, this WP file, and the permitted WP-04 review-link field. It runs no producer and changes no source, evidence log, Project Home, issue closure, Supervisor decision, or protected WIP. Commit: `docs(planning): record Ticket 06 integrated review challenge`.
+This transaction writes the review artifact, this WP file, Project Home/issue routing, and no source or producer evidence. Commit: `docs(planning): record Ticket 06 integrated review pass`.

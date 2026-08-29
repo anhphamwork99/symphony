@@ -1,6 +1,6 @@
 # Ticket 06 — integrated real-Pi acceptance
 
-**Status:** ready-for-review — Decision 0009 candidate
+**Status:** ready-for-final-acceptance — Decision 0009 candidate
 `9b55649050b76feffdc4279ceaec92ac74a78686` frozen; WP-01 **PASS** (`19/19`
 files, `306/306` tests); WP-02 **PASS** (exactly one complete five-file
 non-destructive attempt: `22` passed, `1` expected skip, all exits `0`, no
@@ -166,7 +166,9 @@ schema, third source/test path, lockfile, or Alfie change is authorized.
 - Manual destructive run record: `WP-03-decision0009-operator-record.md`, PASS.
 - Quality report: `WP-04-decision0009-quality-gate-report.md`, PASS with the
   original challenge and owner-approved replacement both preserved.
-- Review package link and verdict: not run; blocked by WP-04.
+- Review package link and verdict:
+  `../reviews/06-integrated-real-pi-acceptance-review.md`,
+  AC1–AC8 PASS with no blocker.
 - Supervisor final-acceptance link and verdict: not run; blocked by WP-04.
 - Reopening conditions and residual risk: one non-blocking lint warning remains
   reported; any source/candidate/pin/evidence drift reopens acceptance.

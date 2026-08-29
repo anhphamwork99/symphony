@@ -7,7 +7,7 @@
 - **Primary repository:** Symphony, base `a7827cae7`
 - **Conditional secondary repository:** `/Users/anhpham99/alfie`
 - **Lifecycle:** active
-- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`review-repair`) under aspect-scoped Authoritative Decision 0009; candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen as candidate2's exact sole-parent correction child; WP-01 D, WP-02 R, WP-03 M, and WP-04 Q are **PASS**; the first G-M runtime returned no valid semantic verdict, and the owner has authorized exactly one replacement reviewer package; G-Q remains unused and reserved
+- **Triage status:** Tickets 01–05 accepted; Ticket 06 remains the sole frontier (`ready-for-final-acceptance`) under aspect-scoped Authoritative Decision 0009; candidate `9b55649050b76feffdc4279ceaec92ac74a78686` is frozen; WP-01 D, WP-02 R, WP-03 M, WP-04 Q, and WP-05 integrated review are **PASS**; exactly one G-Q Supervisor consultation remains unused and is now the sole next gate
 - **Tracker:** Local Markdown under this Project Home
 
 > **Router rule:** This `PROJECT.md` is the sole status and frontier router for
@@ -162,7 +162,7 @@ Out of scope:
 ## Current frontier and statuses
 
 **Current frontier: Ticket 06 is the sole project frontier
-(`review-repair`).** Decision 0008 remains aspect-scoped **Authoritative** for
+(`ready-for-final-acceptance`).** Decision 0008 remains aspect-scoped **Authoritative** for
 post-await same-registration retirement/replacement classification. Decision
 0007 remains authoritative only for its historical fixture/rebaseline, erratum,
 and gate-reset aspects. **Decision 0009 is aspect-scoped Authoritative** for
@@ -231,8 +231,9 @@ original formatter challenge remains preserved, exactly ten formatter-only
 mutations were explicitly discarded, no formatter rerun occurred, and lint /
 typecheck exited `0` with a clean candidate. The first G-M reviewer runtime
 returned useful evidence but no valid `State / Result / Needs` verdict; it is
-preserved as an invalid response, not inferred PASS. The owner has authorized
-exactly one replacement reviewer package. G-Q remains unused and reserved.
+preserved as an invalid response, not inferred PASS. The operational fallback
+review package is PASS for AC1–AC8 with no blocker. G-Q remains unused and is
+the sole next gate.
 
 | Ticket | Status | Current meaning |
 |---|---|---|
@@ -241,7 +242,7 @@ exactly one replacement reviewer package. G-Q remains unused and reserved.
 | [03](issues/03-terminal-before-cleanup-and-live-lifecycle-containment.md) | **accepted** | Decision 0006 lifecycle contract accepted |
 | [04](issues/04-cancellation-watchdog-and-teardown-settlement.md) | **accepted** | watchdog/cancellation/teardown evidence accepted |
 | [05](issues/05-restart-reconnect-resume-and-crash-diagnostics.md) | **accepted** | restart/reconnect/Resume evidence accepted |
-| [06](issues/06-integrated-real-pi-acceptance.md) | **review-repair — sole frontier** | frozen candidate `9b556490`; D/R/M/Q PASS; one invalid reviewer response preserved; exactly one replacement reviewer package authorized; final Supervisor gate unused |
+| [06](issues/06-integrated-real-pi-acceptance.md) | **ready-for-final-acceptance — sole frontier** | frozen candidate `9b556490`; D/R/M/Q and integrated review PASS; exactly one final Supervisor gate unused |
 
 The prior evidence-only/zero-source-delta execution contract is superseded only
 for the Decision 0007 and Decision 0008 candidate aspects. This planning
@@ -332,13 +333,13 @@ and [research/002](research/002-candidate-solution-contract.md).
 - [Ticket 03 WP-03 handoff](handoffs/03-wp03-controlled-real-pi-evidence-handoff.md) — historical evidence-package handoff, superseded by Ticket 03 closure.
 - [Ticket 04 plan](plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md) — completed evidence-first plan with WP-01 deterministic evidence (`bab07af82`), WP-02 controlled-provider report (`e160ccd8c`), and WP-03 closure.
 - [Ticket 05 plan](plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md) — completed evidence-first plan: WP-01 deterministic evidence (`4090ccee8`), runner correction (`d12e1a2e0`), WP-02 controlled real-Pi evidence and Implementation Report (`b5d0feefc`), and WP-03 evidence-only closure.
-- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0009 candidate `9b556490`, exact four-file child of candidate2, six-path total from `12fd6686`; D/R/M/Q PASS; replacement G-M authorized after one invalid runtime response; final Decision 0010 remains unused.
+- [Ticket 06 plan](plans/06-integrated-real-pi-acceptance/PLAN.md) — frozen Decision 0009 candidate `9b556490`, exact four-file child of candidate2, six-path total from `12fd6686`; D/R/M/Q and integrated review PASS; final Decision 0010 remains unused.
 - [issues/](issues/) — exact six-ticket decomposition.
 - [research/](research/) — supporting evidence only.
 
 ## Handoff note
 
-Tickets 01–05 are accepted. Ticket 06 remains the sole `review-repair`
+Tickets 01–05 are accepted. Ticket 06 remains the sole `ready-for-final-acceptance`
 frontier. Decision 0009 is the aspect-scoped Authority for structured
 unavailable-value preservation, managed mapping, exact four-file correction,
 and rebaseline only; it is not final acceptance. Candidate
@@ -348,8 +349,8 @@ non-authoritative incident details.
 
 WP-01 D, WP-02 R, WP-03 M, and WP-04 Q are **PASS**. The original WP-04
 formatter challenge and its owner-approved replacement are both preserved.
-The first reviewer runtime returned no valid final verdict; its partial
-evidence is preserved without inferred acceptance. Exactly one replacement
-reviewer package is now authorized. On replacement PASS, invoke exactly one
-final Supervisor Decision 0010, persist it before dependent closure, then run
-WP-07. No additional producer or quality gate is authorized or required.
+The first reviewer runtime returned no valid final verdict and is preserved
+without inferred acceptance. The authorized operational fallback review is
+PASS for AC1–AC8 with no blocker. Invoke exactly one final Supervisor Decision
+0010, persist it before dependent closure, then run WP-07. No additional
+producer, quality gate, or review is authorized or required.
