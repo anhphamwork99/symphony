@@ -35,4 +35,7 @@ Per the project Response Contract, an unknown/unparseable response cannot be inf
 
 WP-05 is **CHALLENGE**. WP-06 final Supervisor consultation is not invoked because missing reviewer verdict evidence cannot pass final acceptance. WP-07 closure is blocked.
 
-The original review invocation consumed the exactly-once G-M attempt under the current contract. No second review loop was opened automatically. Resolution requires an explicit governance decision repairing the review gate contract (for example, authorizing continuation/recovery of the incomplete reviewer execution or authorizing one replacement reviewer package) and reconciliation of the stale Project Home router before final acceptance.
+The original review invocation returned no semantic outcome and is retained as
+invalid runtime evidence. The owner subsequently directed automatic completion
+and authorized exactly one replacement reviewer package. Project Home routing
+has been reconciled to `review-repair`. No further reviewer loop is authorized.

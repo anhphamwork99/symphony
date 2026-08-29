@@ -1,6 +1,12 @@
 # WP-05 — exactly-one integrated feature-level review
 
-**State:** **CHALLENGE.** The exactly-one G-M reviewer invocation ran after WP-01–WP-04 PASS, remained read-only, and returned substantial supporting evidence, but its response terminated without the required `State / Result / Needs` contract or an explicit criterion-level verdict. Runtime classified the outcome as unknown (`no State section found`). No PASS may be inferred and no second review loop was opened.
+**State:** **READY FOR ONE OWNER-AUTHORIZED REPLACEMENT REVIEWER PACKAGE.** The
+first G-M runtime ran after WP-01–WP-04 PASS, remained read-only, and returned
+substantial supporting evidence, but terminated without the required
+`State / Result / Needs` contract or explicit criterion-level verdict. Runtime
+classified it as unknown (`no State section found`). The owner subsequently
+directed automatic completion and authorized one replacement reviewer package;
+the invalid response remains preserved and is not inferred PASS.
 
 ## Objective and review boundary
 
@@ -18,7 +24,10 @@ Full preservation and runtime disposition:
 
 The missing criterion table and final verdict make the package insufficient for WP-06. Exactly one final Supervisor gate remains unused and must not be invoked with incomplete reviewer evidence. WP-07 closure remains blocked.
 
-Resolution requires an explicit governance repair authorizing recovery/replacement of the invalid reviewer response; no automatic second review or inferred PASS is permitted.
+The governance repair is now explicit: run one replacement read-only reviewer
+package against the complete unchanged candidate and evidence. If it PASSes,
+exactly one final Supervisor gate remains unused for WP-06. No producer,
+quality rerun, additional reviewer loop, or inferred PASS is permitted.
 
 ## Write set and commit
 
