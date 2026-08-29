@@ -109,11 +109,12 @@ This section records raw-log-backed evidence for the browser operation transport
 WP-B1: 8bea5c509 feat(whiteboard): typed browser transport for operation-session seam
 WP-B2: 9b9436e05 feat(whiteboard): bridge operation outcomes into AI history
 WP-B3: 8a737d430 test(whiteboard): prove operation transport outcomes in stable Chromium
+Remediation: 52d606d68..09d609b8d — snapshot/replay, Take Over generation, truthful ack failure, pending-proof, terminal-snapshot, and ack-verdict races closed
 ```
 
 ```text
 baseline: 9a78a0bc0cd491bbbbe0b97c93f9354e6e71ae50
-source:   8a737d4302b377340b4df7a4b72afb4ea29a54e6
+source:   09d609b8d4852fcb6a88d3f8a3a1515e773952ea
 ```
 
 ### Raw evidence logs and SHA-256
@@ -122,22 +123,22 @@ Logs are committed unmodified; hashes were computed over the exact committed byt
 
 | Log | Content | SHA-256 |
 |---|---|---|
-| `operation-transport-outcomes.focused.log` | focused unit/contract retry run (initial environment failure + clean retry) | `938f5a45e350ce9da8c42a43af9c53909f940ff032216bd92277a2ac445a3d0d` |
-| `operation-transport-outcomes.run-a.browser.log` | browser run A (port 63351) | `b353a7dcd87dd1766b168bb2f6ef89478870d51f5bf8f94d2f837585669df357` |
-| `operation-transport-outcomes.run-b.browser.log` | browser run B (port 63352) | `83e7423f63136d544ae65d10adfbfb6666b8469ea640465eec84bed6c36c0521` |
+| `operation-transport-outcomes.focused.log` | clean remediated contracts/server/web focused run | `f0400ba4c39bc79383e301e130c6de0d83e3fc6380563c8e63f158386a0354ae` |
+| `operation-transport-outcomes.run-a.browser.log` | browser run A (port 63371) | `917fef5a97b8863bbea3e78bbc98facb2a44efc7fb50ccc86a3a6c61d8049dd0` |
+| `operation-transport-outcomes.run-b.browser.log` | browser run B (port 63372) | `308889ad2eabf3fdf730f4f0a2a87a32c192ff2267b758130dc76151d9ed2721` |
 
-All three logs record `SOURCE_SHA=8a737d4302b377340b4df7a4b72afb4ea29a54e6`, matching the reviewed source commit.
+All three logs record `SOURCE_SHA=09d609b8d4852fcb6a88d3f8a3a1515e773952ea`, matching the reviewed source commit.
 
-### Focused run — counts, exits, and disclosed retry
+### Focused run — counts and exit
 
-The focused log intentionally contains an initial environment failure followed by an appended clean retry; both legs are recorded verbatim and unmodified:
+The exact remediated source completed one clean focused run:
 
-- Initial leg: `vitest run src/whiteboardOperation.test.ts src/ws.test.ts` failed with `Cannot find package '@effect/vitest'` in both suites because the gitignored worktree dependency symlink was absent at start time. `Test Files 2 failed (2)`, `FOCUSED_EXIT=1`. This leg evidences an environment resolution failure, not a source regression.
-- Retry leg (`FOCUSED_RETRY_STARTED_AT=2026-08-28T17:40:30Z`, reason: worktree dependency symlinks restored after the `@effect/vitest` resolution failure):
-  - `packages/contracts` direct Vitest — `Test Files 2 passed (2)`, `Tests 38 passed (38)`;
-  - `apps/server` direct Vitest — `Test Files 3 passed (3)`, `Tests 32 passed (32)` (run directly via `vitest` because the package test script ignores filters);
-  - `apps/web` — `vitest run --passWithNoTests` over `SynaraWhiteboardOperationBridge.test.ts`, `SynaraHistoryGate.test.ts`, `wsTransport.test.ts` — `Test Files 3 passed (3)`, `Tests 107 passed (107)`;
-  - `FOCUSED_RETRY_EXIT=0`.
+- `packages/contracts` — `Test Files 2 passed (2)`, `Tests 38 passed (38)`;
+- `apps/server` direct focused Vitest — `Test Files 3 passed (3)`, `Tests 32 passed (32)`;
+- `apps/web` — `Test Files 3 passed (3)`, `Tests 119 passed (119)`;
+- `FOCUSED_EXIT=0`.
+
+The earlier worktree dependency-resolution failure is historical only and is no longer present in this regenerated formal log.
 
 ### Browser runs — ports, counts, exits
 
@@ -145,14 +146,14 @@ Both runs execute `vitest run --config vitest.browser.stable.config.ts` over `Sy
 
 | Run | Port | Files | Tests | Exit |
 |---|---|---|---|---|
-| A (`RUN_A_STARTED_AT=2026-08-28T17:40:56Z`) | 63351 | 1 passed | 8 passed | 0 |
-| B (`RUN_B_STARTED_AT=2026-08-28T17:41:10Z`) | 63352 | 1 passed | 8 passed | 0 |
+| A (`RUN_A_STARTED_AT=2026-08-29T04:57:53Z`) | 63371 | 1 passed | 8 passed | 0 |
+| B (`RUN_B_STARTED_AT=2026-08-29T04:58:19Z`) | 63372 | 1 passed | 8 passed | 0 |
 
 Both browser logs contain non-fatal Vite `server.fs.allow` warnings for the pinned Excalidraw font assets resolved through the worktree dependency symlink path (`@excalidraw/excalidraw@0.18.1` under the host `node_modules/.bun` store). The warnings are font-asset serving notices only; the tests use the real pinned Excalidraw 0.18.1 harness and pass in both runs.
 
 ### Exact changed paths baseline → source
 
-`git diff --name-status 9a78a0bc0..8a737d430` — 9 paths, all inside the Decision 0063 `apps/web` write set:
+`git diff --name-status 9a78a0bc0..09d609b8d` — 9 paths, all inside the Decision 0063 `apps/web` write set:
 
 ```text
 M  apps/web/src/components/whiteboard/ticket02/ExcalidrawTicket02Harness.tsx
@@ -168,7 +169,7 @@ M  apps/web/src/wsTransport.ts
 
 ### Prohibited path audit
 
-No path outside the authorized `apps/web` write set changed between baseline and source (audited via `git diff --name-only 9a78a0bc0..8a737d430` filtered against non-`apps/web` prefixes): none. The evidence delta itself is limited to the four evidence files listed below.
+No path outside the authorized `apps/web` write set changed between baseline and source (audited via `git diff --name-only 9a78a0bc0..09d609b8d` filtered against non-`apps/web` prefixes): none. The evidence delta itself is limited to the four evidence files listed below.
 
 ### Evidence write set (this record)
 
@@ -207,11 +208,11 @@ The browser transport and bridge never fabricate operation-session truth: the tr
 ### Behavioral matrices proven in Chromium (8 tests, both runs PASS)
 
 - **Identity / admission**: attach result identity (`serverInstanceId`, `operationSessionId`, `sessionEpoch`, project/document/canvas identity, revision) is consumed as contract truth; same-authority resume replays snapshots gap-free and duplicate admission applies each mutation exactly once before live continuation.
-- **Acknowledge**: delayed truthful acknowledgements are resent without reapplication; every non-acknowledged containment path stays protected with no interruption success.
+- **Acknowledge**: only typed transport interruptions are resent exactly without reapplication; typed server rejection fails closed; resend intent survives snapshot-before-interruption ordering; terminal cursor acceptance waits for the ack verdict.
 - **Retry**: exactly-one settlement semantics — completed outcomes settle exactly once through the real coordinator and duplicate terminals are idempotent; failed-partial commits exactly one event for the verified valid prefix and never applies the failed remainder.
 - **Outcome**: zero-valid outcomes create no AI event, no native-history clear, and no cursor movement; resumed terminal outcomes are adopted from the snapshot without re-running settlement and post-terminal progress is fenced.
-- **Reconnect / lost session**: a lost active operation session stays protected with no event, no clear, and no unlock; recovery is an explicit re-attach.
-- **TakeOver**: the Take Over pending lock is held until acknowledged containment, unlocks on exactly one interrupted event, and post-TakeOver producer input is fenced.
+- **Reconnect / lost session**: the high-water snapshot is a state fence that does not consume replay cursor; retained replay and live continuation remain gap-free; terminal snapshots cannot bypass local settlement checks; a lost active session stays protected.
+- **TakeOver**: the pending lock tracks the server-advanced generation; only matching acknowledged containment permits advanced-generation terminal settlement; original-generation and counter-mismatched outcomes stay protected.
 
 These matrices are recorded as raw-log-backed evidence from the two browser runs; they remain bounded PASS candidate claims subject to independent review and do not establish package PASS, AC6, or Ticket 02 acceptance.
 
@@ -219,10 +220,9 @@ These matrices are recorded as raw-log-backed evidence from the two browser runs
 
 Everything in the WP1 deferred list remains deferred. Additionally, this section does not claim:
 
-- server-side operation-session authority or production WebSocket handlers/stream (Decision 0065 frontier);
 - production mounting of the bridge or provider integration;
 - package bounded PASS, AC6, Ticket 02 acceptance, or final acceptance — the WP-B1/B2/B3 result is recorded strictly as a **bounded PASS candidate pending independent review**.
 
 ## Current frontier
 
-Proceed within Decision 0065 to the server operation-session authority and production WebSocket seam. The package remains `active-operation-transport-outcomes`; the WP-B1/B2/B3 result awaits independent review before any PASS upgrade.
+The contracts, server authority, canonical WebSocket seam, browser transport, bridge, remediations, and fresh evidence now form the bounded package candidate. Await one final independent package review before the `BOUNDED PASS` upgrade and governance return required by Decision 0063 §17.
