@@ -629,6 +629,33 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
   });
 
+  it("queues one durable resend when reconnect snapshot arrives before the in-flight ack interrupts", async () => {
+    let rejectFirst!: (reason: unknown) => void;
+    transport.ackReplies.push(
+      new Promise((_, reject) => {
+        rejectFirst = reject;
+      }),
+    );
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.ackRequests).toHaveLength(1);
+
+    transport.emit(makeSnapshot(3));
+    expect(transport.ackRequests).toHaveLength(1);
+
+    rejectFirst(
+      Object.assign(new Error("reconnected"), {
+        _tag: "WsTransportRequestInterruptedError",
+        retryable: true,
+      }),
+    );
+    await vi.waitFor(() => expect(transport.ackRequests).toHaveLength(2));
+    expect(transport.ackRequests[1]).toEqual(transport.ackRequests[0]);
+    expect(host.callbackSequence).toBe(1);
+  });
+
   it("does not enqueue a second ack while the first send is unresolved or after rejection", async () => {
     let rejectFirst!: (reason: unknown) => void;
     transport.ackReplies.push(

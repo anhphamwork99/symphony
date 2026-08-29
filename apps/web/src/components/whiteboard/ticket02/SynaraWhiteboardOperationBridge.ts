@@ -107,6 +107,8 @@ interface AppliedProgressLedgerRecord {
   readonly resultingMutationRevision: number;
   /** Delivery truth: only transport interruptions are eligible for exact resend. */
   ackState: "sending" | "sent" | "interrupted" | "rejected";
+  /** A reconnect/replay asked for one resend while the prior send was in flight. */
+  ackResendRequested: boolean;
   readonly diagnosticCode?: WhiteboardApplicationDiagnosticCode;
 }
 
@@ -319,7 +321,9 @@ export class SynaraWhiteboardOperationBridge {
         // interrupted acknowledgement evidence now even when the progress row
         // is already behind the resume cursor and will not replay.
         for (const record of this.ledger.values()) {
-          if (record.ackState === "interrupted") this.queueAck(record);
+          if (record.ackState === "interrupted" || record.ackState === "sending") {
+            this.queueAck(record);
+          }
         }
         return true;
       }
@@ -351,7 +355,9 @@ export class SynaraWhiteboardOperationBridge {
     // whose request/response transport was interrupted. Resend the exact
     // idempotent evidence without waiting for duplicate progress or reapplying.
     for (const record of this.ledger.values()) {
-      if (record.ackState === "interrupted") this.queueAck(record);
+      if (record.ackState === "interrupted" || record.ackState === "sending") {
+        this.queueAck(record);
+      }
     }
     return true;
   }
@@ -522,6 +528,7 @@ export class SynaraWhiteboardOperationBridge {
           verifiedSemanticFingerprint: proof.semanticFingerprint,
           resultingMutationRevision: proof.mutationRevision,
           ackState: "interrupted",
+          ackResendRequested: false,
         };
         this.pendingProgress.delete(event.producerSequence);
         this.ledger.set(record.producerSequence, record);
@@ -543,8 +550,13 @@ export class SynaraWhiteboardOperationBridge {
   }
 
   private queueAck(record: AppliedProgressLedgerRecord): void {
-    if (this.sessionIdentity === null || record.ackState === "sending") return;
+    if (this.sessionIdentity === null) return;
+    if (record.ackState === "sending") {
+      record.ackResendRequested = true;
+      return;
+    }
     record.ackState = "sending";
+    record.ackResendRequested = false;
     const identity = this.sessionIdentity;
     const input: WhiteboardAcknowledgeApplicationInput = {
       ...identity,
@@ -569,15 +581,19 @@ export class SynaraWhiteboardOperationBridge {
           // Interrupted transport: the exact idempotent acknowledgement is
           // resent on an equivalent replay or the next same-authority snapshot.
           record.ackState = "interrupted";
+          const resendRequested = record.ackResendRequested;
+          record.ackResendRequested = false;
           this.options.onDiagnostic?.({
             code: "ack-delivery-interrupted",
             producerSequence: record.producerSequence,
           });
+          if (resendRequested) this.queueAck(record);
           return;
         }
         // A typed server rejection (stale/conflict/unknown) is authoritative,
         // not a transport interruption. Never retry or expose success.
         record.ackState = "rejected";
+        record.ackResendRequested = false;
         this.coordinator?.protectAiOperationOnSessionLoss({
           reason: "server rejected Whiteboard semantic acknowledgement evidence",
           code: "operation-session-lost",
