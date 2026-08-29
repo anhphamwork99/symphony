@@ -748,6 +748,24 @@ export class SynaraWhiteboardOperationBridge {
       return true;
     }
 
+    const unsettledAcknowledgement = [...this.ledger.values()].find(
+      (record) => record.ackState === "sending" || record.ackState === "interrupted",
+    );
+    if (unsettledAcknowledgement !== undefined) {
+      if (unsettledAcknowledgement.ackState === "interrupted") {
+        this.queueAck(unsettledAcknowledgement);
+      }
+      // Do not advance the transport cursor past terminal truth while semantic
+      // acknowledgement delivery is unresolved. Returning false makes the
+      // same-authority stream replay this terminal after the ack has a verdict.
+      this.options.onDiagnostic?.({
+        code: "terminal-awaiting-acknowledgement",
+        producerSequence: unsettledAcknowledgement.producerSequence,
+        ackState: unsettledAcknowledgement.ackState,
+      });
+      return false;
+    }
+
     const appliedSemanticCount = this.ledger.size;
     const hasRejectedAcknowledgement = [...this.ledger.values()].some(
       (record) => record.ackState === "rejected",

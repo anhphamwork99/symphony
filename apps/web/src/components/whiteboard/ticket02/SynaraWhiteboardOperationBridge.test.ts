@@ -686,6 +686,41 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(transport.ackRequests).toHaveLength(1);
   });
 
+  it("defers terminal cursor acceptance until an in-flight resend gets its server verdict", async () => {
+    let rejectResend!: (reason: unknown) => void;
+    transport.ackRejectNext = true;
+    transport.ackReplies.push(
+      new Promise((_, reject) => {
+        rejectResend = reject;
+      }),
+    );
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(1);
+
+    transport.emit(makeSnapshot(3));
+    await vi.waitFor(() => expect(transport.ackRequests).toHaveLength(2));
+    const accepted = transport.emit(makeTerminal(4, "completed"));
+    expect(accepted).toBe(false);
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("operation-active");
+
+    rejectResend(
+      Object.assign(new Error("ack stale"), {
+        code: "ackStale",
+        retryable: false,
+      }),
+    );
+    await transport.drainAckChain();
+    expect(bridge.state).toBe("protected");
+
+    transport.emit(makeTerminal(4, "completed"));
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+  });
+
   it("fences progress for a stale or foreign operation before any scene write", async () => {
     await startActiveOperation({ host, transport, bridge, outcomes });
     const foreign = {
@@ -781,12 +816,13 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
 
     transport.emit(makeTakeOverPending(4));
     transport.emit(makeContainmentResult(5, "acknowledged"));
-    transport.emit(
-      makeTerminal(6, "zero-valid", {
-        generation: 2,
-        containmentResult: "acknowledged",
-      }),
-    );
+    const zeroValid = makeTerminal(6, "zero-valid", {
+      generation: 2,
+      containmentResult: "acknowledged",
+    });
+    expect(transport.emit(zeroValid)).toBe(false);
+    await vi.waitFor(() => expect(transport.ackRequests).toHaveLength(2));
+    transport.emit(zeroValid);
 
     expect(outcomes).toHaveLength(0);
     expect(host.current.elements[0]!.x).toBe(10);
