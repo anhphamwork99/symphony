@@ -998,7 +998,7 @@ describe("Decision 0016 completion coordinator (WP5)", () => {
           script: [
             { kind: "transient", error: "t1" },
             { kind: "transient", error: "t2" },
-            { kind: "transient", error: "t3" },
+            { kind: "transient", error: "retry-3" },
             { kind: "transient", error: "t4" },
             { kind: "transient", error: "t5" },
           ],
