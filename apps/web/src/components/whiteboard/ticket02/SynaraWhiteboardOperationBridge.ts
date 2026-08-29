@@ -105,9 +105,20 @@ interface AppliedProgressLedgerRecord {
   readonly applicationResult: WhiteboardApplicationResult;
   readonly verifiedSemanticFingerprint: string;
   readonly resultingMutationRevision: number;
-  /** "sent": delivered; "interrupted": transport-interrupted, resend on replay. */
-  ackState: "sent" | "interrupted";
+  /** Delivery truth: only transport interruptions are eligible for exact resend. */
+  ackState: "sent" | "interrupted" | "rejected";
   readonly diagnosticCode?: WhiteboardApplicationDiagnosticCode;
+}
+
+function isRetryableTransportInterruption(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    error._tag === "WsTransportRequestInterruptedError" &&
+    "retryable" in error &&
+    error.retryable === true
+  );
 }
 
 function progressRecordEquivalent(
@@ -508,13 +519,29 @@ export class SynaraWhiteboardOperationBridge {
       try {
         await this.transport.whiteboardOperationAcknowledgeApplication(input);
         record.ackState = "sent";
-      } catch {
-        // Interrupted transport: the exact idempotent acknowledgement is
-        // resent on an equivalent replay or the next same-authority snapshot.
-        record.ackState = "interrupted";
+      } catch (error) {
+        if (isRetryableTransportInterruption(error)) {
+          // Interrupted transport: the exact idempotent acknowledgement is
+          // resent on an equivalent replay or the next same-authority snapshot.
+          record.ackState = "interrupted";
+          this.options.onDiagnostic?.({
+            code: "ack-delivery-interrupted",
+            producerSequence: record.producerSequence,
+          });
+          return;
+        }
+        // A typed server rejection (stale/conflict/unknown) is authoritative,
+        // not a transport interruption. Never retry or expose success.
+        record.ackState = "rejected";
+        this.coordinator?.protectAiOperationOnSessionLoss({
+          reason: "server rejected Whiteboard semantic acknowledgement evidence",
+          code: "operation-session-lost",
+        });
+        this.state = "protected";
         this.options.onDiagnostic?.({
-          code: "ack-delivery-interrupted",
+          code: "acknowledgement-rejected",
           producerSequence: record.producerSequence,
+          error,
         });
       }
     });
@@ -637,12 +664,36 @@ export class SynaraWhiteboardOperationBridge {
         ? matchesAcknowledgedTakeOverGeneration
         : event.outcome === "completed"
           ? matchesActiveGeneration && pending === null
-          : matchesActiveGeneration || matchesAcknowledgedTakeOverGeneration;
+          : pending === null
+            ? matchesActiveGeneration
+            : matchesAcknowledgedTakeOverGeneration;
     if (this.terminalOutcome !== null || !identityMatches) {
       return this.protectConflicting(
         "a conflicting terminal outcome arrived for the active operation",
         event.operationId,
       );
+    }
+
+    const appliedSemanticCount = this.ledger.size;
+    const hasRejectedAcknowledgement = [...this.ledger.values()].some(
+      (record) => record.ackState === "rejected",
+    );
+    if (
+      hasRejectedAcknowledgement ||
+      event.acceptedSemanticCount !== appliedSemanticCount
+    ) {
+      this.coordinator?.protectAiOperationOnSessionLoss({
+        reason:
+          "server terminal acknowledgement counters do not match locally applied semantic work",
+        code: "operation-session-lost",
+      });
+      this.state = "protected";
+      this.options.onDiagnostic?.({
+        code: "terminal-acknowledgement-mismatch",
+        expectedAcceptedSemanticCount: appliedSemanticCount,
+        observedAcceptedSemanticCount: event.acceptedSemanticCount,
+      });
+      return true;
     }
 
     if (event.outcome === "zero-valid") {

@@ -156,6 +156,7 @@ class FakeTransport implements SynaraWhiteboardOperationTransport {
   >();
   public ackReplies: Promise<unknown>[] = [];
   public ackRejectNext = false;
+  public ackRejectNextError: unknown = null;
 
   private readonly capabilities: readonly string[];
   private readonly attachResult: typeof ATTACH_RESULT;
@@ -202,7 +203,15 @@ class FakeTransport implements SynaraWhiteboardOperationTransport {
     this.ackRequests.push(input);
     if (this.ackRejectNext) {
       this.ackRejectNext = false;
-      throw Object.assign(new Error("interrupted"), { retryable: true });
+      throw Object.assign(new Error("interrupted"), {
+        _tag: "WsTransportRequestInterruptedError",
+        retryable: true,
+      });
+    }
+    if (this.ackRejectNextError !== null) {
+      const error = this.ackRejectNextError;
+      this.ackRejectNextError = null;
+      throw error;
     }
     await this.ackReplies.shift();
     return { ...IDENTITY };
@@ -510,6 +519,25 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(host.current.elements[0]!.x).toBe(10);
   });
 
+  it("fails closed and never retries a server-rejected acknowledgement", async () => {
+    transport.ackRejectNextError = Object.assign(new Error("ack conflict"), {
+      _tag: "WhiteboardOperationSessionError",
+      code: "ackConflict",
+      retryable: false,
+    });
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+
+    expect(transport.ackRequests).toHaveLength(1);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+
+    transport.emit(makeSnapshot(3));
+    await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(1);
+  });
+
   it("fences progress for a stale or foreign operation before any scene write", async () => {
     await startActiveOperation({ host, transport, bridge, outcomes });
     const foreign = {
@@ -577,6 +605,43 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     transport.emit(makeTerminal(6, "interrupted", { generation: 1 }));
 
     expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+  });
+
+  it("rejects original-generation failed-partial after Take Over fenced the lineage", async () => {
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+
+    transport.emit(makeTakeOverPending(4));
+    transport.emit(makeTerminal(5, "failed-partial"));
+
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+  });
+
+  it("keeps applied work protected when advanced zero-valid counters omit the local semantic mutation", async () => {
+    transport.ackRejectNext = true;
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+    expect(host.current.elements[0]!.x).toBe(10);
+
+    transport.emit(makeTakeOverPending(4));
+    transport.emit(makeContainmentResult(5, "acknowledged"));
+    transport.emit(
+      makeTerminal(6, "zero-valid", {
+        generation: 2,
+        containmentResult: "acknowledged",
+      }),
+    );
+
+    expect(outcomes).toHaveLength(0);
+    expect(host.current.elements[0]!.x).toBe(10);
     expect(bridge.state).toBe("protected");
     expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
     expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");

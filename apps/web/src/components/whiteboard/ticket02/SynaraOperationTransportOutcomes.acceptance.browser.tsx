@@ -160,7 +160,10 @@ class TransportFixture implements SynaraWhiteboardOperationTransport {
     if (this.ackRejectNext) {
       this.ackRejectNext = false;
       this.ackInterruptCount += 1;
-      throw Object.assign(new Error("transport interrupted"), { retryable: true });
+      throw Object.assign(new Error("transport interrupted"), {
+        _tag: "WsTransportRequestInterruptedError",
+        retryable: true,
+      });
     }
     return { ...IDENTITY };
   }
@@ -422,6 +425,10 @@ function emitTerminal(
     readonly outcome: "completed" | "interrupted" | "failed-partial" | "zero-valid";
   },
 ): void {
+  const acceptedSemanticCount =
+    input.outcome === "zero-valid"
+      ? 0
+      : (rig.handle.getOperationBridge()?.getAppliedProgressCount() ?? 0);
   const shared = {
     kind: "operation-terminal" as const,
     ...IDENTITY,
@@ -429,10 +436,10 @@ function emitTerminal(
     batchId: BATCH_ID,
     operationId: OPERATION_ID,
     generation: input.outcome === "interrupted" ? GENERATION + 1 : GENERATION,
-    acceptedSemanticCount: input.outcome === "zero-valid" ? 0 : 1,
+    acceptedSemanticCount,
     acceptedNoOpCount: 0,
     rejectedCount: 0,
-    lastAcceptedProducerSequence: input.outcome === "zero-valid" ? 0 : 1,
+    lastAcceptedProducerSequence: acceptedSemanticCount,
   };
   if (input.outcome === "completed") {
     rig.transport.emit({ ...shared, outcome: "completed", terminalReason: "completed" } as unknown as WhiteboardOperationSessionEvent);
