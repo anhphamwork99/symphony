@@ -28,7 +28,9 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The full workspace test orchestrator now includes serialized wallclock
+    # acceptance suites and regularly exceeds the old 15-minute ceiling.
+    timeout-minutes: 45
     outputs:
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}

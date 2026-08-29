@@ -27,6 +27,7 @@ import {
 } from "./whiteboardOperation";
 import { WS_METHODS } from "./ws";
 import { WsFeatureRpcGroup } from "./rpc";
+import { ProjectId } from "./baseSchemas";
 
 const decode = <S extends Schema.Top>(
   schema: S,
@@ -42,7 +43,9 @@ const sessionIdentity = {
   serverInstanceId: "server-1",
   operationSessionId: "session-1",
   sessionEpoch: 1,
-  projectId: "project-1",
+  // `projectId` is branded on the wire (ProjectId); decode it through the
+  // schema instead of weakening the brand, so encode-side calls stay typed.
+  projectId: Schema.decodeUnknownSync(ProjectId)("project-1"),
   documentKind: "untitled-canvas" as const,
   documentId: "doc-1",
   canvasIdentity: "canvas-1",
@@ -751,7 +754,10 @@ describe("Whiteboard operation-session contracts", () => {
       assert.deepStrictEqual(decoded, completedEvent);
 
       const exitUnknownField = yield* Effect.exit(
-        Schema.decodeUnknownEffect(codec)({ ...encoded, unknownTerminalField: true }),
+        Schema.decodeUnknownEffect(codec)({
+          ...(encoded as Record<string, unknown>),
+          unknownTerminalField: true,
+        }),
       );
       assert.strictEqual(exitUnknownField._tag, "Failure");
     }),

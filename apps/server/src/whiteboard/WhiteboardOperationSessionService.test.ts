@@ -127,7 +127,9 @@ const awaitResolvedTakeOver = (
       if (result.status === "resolved") return result;
       yield* Effect.sleep(Duration.millis(1));
     }
-    return yield* Effect.dieMessage("take over did not resolve within the bounded test window");
+    return yield* Effect.die(
+      new Error("take over did not resolve within the bounded test window"),
+    );
   });
 
 describe("WhiteboardOperationSessionService", () => {
@@ -349,7 +351,7 @@ describe("WhiteboardOperationSessionService", () => {
               retry,
               WHITEBOARD_OPERATION_ERROR.operationNotRetryable,
             ),
-          );
+          ).pipe(Effect.orDie);
         }),
       {
         serverInstanceId: SERVER_ID,
@@ -395,7 +397,7 @@ describe("WhiteboardOperationSessionService", () => {
             incomplete,
             WHITEBOARD_OPERATION_ERROR.semanticVerificationFailed,
           ),
-        );
+        ).pipe(Effect.orDie);
 
         const wrongServerSequence = Effect.runPromise(
           service.acknowledgeApplication({
@@ -460,7 +462,7 @@ describe("WhiteboardOperationSessionService", () => {
           );
           yield* Effect.promise(() =>
             expectCode(staleAck, WHITEBOARD_OPERATION_ERROR.ackStale),
-          );
+          ).pipe(Effect.orDie);
 
           const nextOperation = yield* service.admitOperation({
             ...identity,
@@ -740,7 +742,7 @@ describe("WhiteboardOperationSessionService", () => {
           const release = Effect.runPromise(service.releaseSession(identity));
           yield* Effect.promise(() =>
             expectCode(release, WHITEBOARD_OPERATION_ERROR.sessionActive),
-          );
+          ).pipe(Effect.orDie);
         }),
       {
         serverInstanceId: SERVER_ID,
@@ -895,7 +897,7 @@ describe("WhiteboardOperationSessionService", () => {
         const replacement = yield* service.attachSession(attachInput("cap-new"));
         expect(replacement.operationSessionId).toBeTruthy();
 
-        const firstIdentity = identityOf(sessions[0]);
+        const firstIdentity = identityOf(sessions[0]!);
         const evicted = Effect.runPromise(
           service.subscribe({ ...firstIdentity, lastServerSequence: 0 }),
         );
@@ -903,7 +905,7 @@ describe("WhiteboardOperationSessionService", () => {
           expectCode(evicted, WHITEBOARD_OPERATION_ERROR.sessionUnknown),
         );
 
-        const liveIdentity = identityOf(sessions[1]);
+        const liveIdentity = identityOf(sessions[1]!);
         for (let index = 0; index < 8; index += 1) {
           yield* service.subscribe({ ...liveIdentity, lastServerSequence: 1 });
         }
