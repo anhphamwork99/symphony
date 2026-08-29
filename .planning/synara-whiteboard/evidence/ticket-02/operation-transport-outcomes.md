@@ -1,6 +1,6 @@
 # Ticket 02 — Operation Transport Outcomes Evidence
 
-Status: active package evidence; bounded PASS candidate only — subject to independent review; package PASS not yet claimed
+Status: WP-OPERATION-TRANSPORT-OUTCOMES — BOUNDED PASS; independently reviewed; downstream Ticket claims remain deferred
 Authority: Decisions 0063, 0064, and 0065
 Routing: `active-operation-transport-outcomes`
 
@@ -99,7 +99,7 @@ The following remain open and are not implied by this WP1 PASS:
 
 ## WP-B1/B2/B3 — Browser transport, AI-history bridge, and Chromium outcome proof
 
-Bounded result: **PASS candidate — recorded as evidence only; not yet independently reviewed, so package PASS is not claimed.**
+Bounded result: **WP-OPERATION-TRANSPORT-OUTCOMES: BOUNDED PASS**
 
 This section records raw-log-backed evidence for the browser operation transport (`wsTransport` typed seam), the dormant AI-history bridge, and the operation-outcome behavior in stable Chromium, at the reviewed source commit. It does not establish server authority, production mounting, package PASS, AC6, or Ticket 02 acceptance.
 
@@ -214,15 +214,37 @@ The browser transport and bridge never fabricate operation-session truth: the tr
 - **Reconnect / lost session**: the high-water snapshot is a state fence that does not consume replay cursor; retained replay and live continuation remain gap-free; terminal snapshots cannot bypass local settlement checks; a lost active session stays protected.
 - **TakeOver**: the pending lock tracks the server-advanced generation; only matching acknowledged containment permits advanced-generation terminal settlement; original-generation and counter-mismatched outcomes stay protected.
 
-These matrices are recorded as raw-log-backed evidence from the two browser runs; they remain bounded PASS candidate claims subject to independent review and do not establish package PASS, AC6, or Ticket 02 acceptance.
+These matrices are recorded as raw-log-backed evidence from the two browser runs and were independently reviewed PASS under R1–R9. They establish only the bounded package result and do not establish AC6 or Ticket 02 acceptance.
 
 ### Deferred claims
 
 Everything in the WP1 deferred list remains deferred. Additionally, this section does not claim:
 
 - production mounting of the bridge or provider integration;
-- package bounded PASS, AC6, Ticket 02 acceptance, or final acceptance — the WP-B1/B2/B3 result is recorded strictly as a **bounded PASS candidate pending independent review**.
+- AC6, Ticket 02 acceptance, feature review, or final acceptance.
+
+### Independent package review
+
+An independent structured Codex review inspected evidence commit `e887be895`, measured source `09d609b8d4852fcb6a88d3f8a3a1515e773952ea`, Decisions 0063–0065, the package source/tests, raw logs, hashes, and path history. It returned:
+
+```text
+State: completed
+Verdict: PASS
+R1–R9: PASS
+Blocking findings: none
+Scope confirmed: true
+Evidence integrity confirmed: true
+Deferred claims preserved: true
+```
+
+Reviewer conclusion:
+
+```text
+WP-OPERATION-TRANSPORT-OUTCOMES: BOUNDED PASS
+```
+
+The review explicitly preserves as deferred/not claimed: Ticket 02/AC6, AI assets/restore/failure, lifecycle/cap/accessibility/RightDock/persistence, production provider/UI mounting, workspace gates, feature review, and final acceptance.
 
 ## Current frontier
 
-The contracts, server authority, canonical WebSocket seam, browser transport, bridge, remediations, and fresh evidence now form the bounded package candidate. Await one final independent package review before the `BOUNDED PASS` upgrade and governance return required by Decision 0063 §17.
+Decision 0063 §17 is satisfied: bounded PASS plus one independent read-only package review. Return to governance to authorize `WP-AI-ASSETS-RESTORE-FAILURE` or require another explicitly bounded next package. No downstream scope follows by inference.
