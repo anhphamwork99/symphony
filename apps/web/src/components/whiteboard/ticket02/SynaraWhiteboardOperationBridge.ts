@@ -106,7 +106,7 @@ interface AppliedProgressLedgerRecord {
   readonly verifiedSemanticFingerprint: string;
   readonly resultingMutationRevision: number;
   /** Delivery truth: only transport interruptions are eligible for exact resend. */
-  ackState: "sent" | "interrupted" | "rejected";
+  ackState: "sending" | "sent" | "interrupted" | "rejected";
   readonly diagnosticCode?: WhiteboardApplicationDiagnosticCode;
 }
 
@@ -163,6 +163,7 @@ export class SynaraWhiteboardOperationBridge {
   private readonly ledger = new Map<number, AppliedProgressLedgerRecord>();
   /** Writes issued to the adapter whose correlated semantic proof is still pending. */
   private readonly pendingProgress = new Map<number, WhiteboardOperationProgressEvent>();
+  private applicationProofFailed = false;
   private lastVerifiedSemanticFingerprint: string | null = null;
   private pendingTakeOver: {
     readonly batchId: string;
@@ -501,6 +502,8 @@ export class SynaraWhiteboardOperationBridge {
           proof.semanticFingerprint !== expectedFingerprint ||
           proof.mutationRevision !== expectedRevision
         ) {
+          this.pendingProgress.delete(event.producerSequence);
+          this.applicationProofFailed = true;
           this.protectConflicting(
             "canonical semantic verification failed for the applied progress",
             event.operationId,
@@ -528,15 +531,20 @@ export class SynaraWhiteboardOperationBridge {
       })
       .catch(() => {
         this.pendingProgress.delete(event.producerSequence);
-        // The adapter callback never correlated or verified; the coordinator
-        // faulted the lock and reported. Remain protected.
+        this.applicationProofFailed = true;
+        this.coordinator?.protectAiOperationOnSessionLoss({
+          reason: "adapter callback did not produce correlated semantic proof",
+          code: "operation-session-lost",
+        });
+        // The adapter callback never correlated or verified. Remain protected.
         this.state = "protected";
       });
     return true;
   }
 
   private queueAck(record: AppliedProgressLedgerRecord): void {
-    if (this.sessionIdentity === null) return;
+    if (this.sessionIdentity === null || record.ackState === "sending") return;
+    record.ackState = "sending";
     const identity = this.sessionIdentity;
     const input: WhiteboardAcknowledgeApplicationInput = {
       ...identity,
@@ -729,6 +737,7 @@ export class SynaraWhiteboardOperationBridge {
       (record) => record.ackState === "rejected",
     );
     if (
+      this.applicationProofFailed ||
       hasRejectedAcknowledgement ||
       event.acceptedSemanticCount !== appliedSemanticCount
     ) {

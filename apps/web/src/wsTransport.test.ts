@@ -1994,6 +1994,28 @@ describe("WsTransport", () => {
       ).toBe(true);
     });
 
+    it("rejects a same-session replacement with conflicting document identity", () => {
+      const { transport } = makeCapabilityTransport([
+        "whiteboard.operation-session-v1",
+      ]);
+      transport.whiteboardOperationSubscribe(
+        { ...IDENTITY, lastServerSequence: 0 },
+        () => true,
+      );
+
+      expect(() =>
+        transport.whiteboardOperationSubscribe(
+          { ...IDENTITY, documentId: "doc-foreign", lastServerSequence: 0 },
+          () => true,
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          _tag: "WsTransportWhiteboardOperationError",
+          code: "WHITEBOARD_OPERATION_IDENTITY_MISMATCH",
+        }),
+      );
+    });
+
     it("resumes from the last accepted cursor after a same-authority reconnect", async () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
@@ -2121,7 +2143,7 @@ describe("WsTransport", () => {
       expect(failures).toHaveLength(1);
       expect(failures[0]).toMatchObject({
         _tag: "WsTransportWhiteboardOperationError",
-        code: "WHITEBOARD_OPERATION_TRANSPORT_CLOSED",
+        code: "operation-session-lost",
         operationSessionId: OPERATION_SESSION_ID,
       });
       expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);

@@ -71,6 +71,7 @@ class FakeGateHost implements SynaraAiHistoryHost {
   public viewModeEnabled = false;
   public nativeClearCount = 0;
   public callbackSequence = 0;
+  public rejectNextSemanticCallback = false;
   public readonly syntheticTrace: SynaraSyntheticTraceEntry[] = [];
   public readonly adapterDiagnostics: string[] = [];
   private readonly syntheticSequence = { current: 0 };
@@ -105,7 +106,11 @@ class FakeGateHost implements SynaraAiHistoryHost {
     };
     this.callbackSequence += 1;
     this.callbackSequenceRef.current = this.callbackSequence;
-    this.registry.associate(this.callbackSequence, semanticFingerprint(this.current));
+    const observed = this.rejectNextSemanticCallback
+      ? "forced-semantic-mismatch"
+      : semanticFingerprint(this.current);
+    this.rejectNextSemanticCallback = false;
+    this.registry.associate(this.callbackSequence, observed);
   }
 
   public restoreScene(snapshot: SynaraSceneSnapshot) {
@@ -599,6 +604,55 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(transport.ackRequests).toHaveLength(1);
     expect(bridge.state).toBe("protected");
     expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+
+    transport.emit(makeSnapshot(3));
+    await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(1);
+  });
+
+  it("keeps semantic callback rejection durably protected against a later zero-valid terminal", async () => {
+    host.rejectNextSemanticCallback = true;
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(host.current.elements[0]!.x).toBe(10);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+
+    transport.emit(makeTerminal(4, "zero-valid"));
+    expect(outcomes).toHaveLength(0);
+    expect(host.current.elements[0]!.x).toBe(10);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+  });
+
+  it("does not enqueue a second ack while the first send is unresolved or after rejection", async () => {
+    let rejectFirst!: (reason: unknown) => void;
+    transport.ackReplies.push(
+      new Promise((_, reject) => {
+        rejectFirst = reject;
+      }),
+    );
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.ackRequests).toHaveLength(1);
+
+    transport.emit(makeSnapshot(3));
+    expect(transport.ackRequests).toHaveLength(1);
+
+    rejectFirst(
+      Object.assign(new Error("ack stale"), {
+        code: "ackStale",
+        retryable: false,
+      }),
+    );
+    await transport.drainAckChain();
+    expect(bridge.state).toBe("protected");
 
     transport.emit(makeSnapshot(3));
     await transport.drainAckChain();

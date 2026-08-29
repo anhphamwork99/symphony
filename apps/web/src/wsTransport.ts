@@ -1224,9 +1224,20 @@ export class WsTransport {
     const { operationSessionId } = input;
     const key = whiteboardOperationStreamKey(operationSessionId);
     const existing = this.whiteboardOperationSubscriptions.get(operationSessionId);
+    const requestedIdentity = identityFromSubscribeInput(input);
+    if (
+      existing !== undefined &&
+      !whiteboardIdentityEquals(existing.expectedIdentity, requestedIdentity)
+    ) {
+      throw new WsTransportWhiteboardOperationError({
+        message: "Replacement Whiteboard subscription identity conflicts with the live session.",
+        code: WHITEBOARD_OPERATION_ERROR.identityMismatch,
+        operationSessionId,
+      });
+    }
     const subscription: WhiteboardOperationSubscription = {
       identity: existing?.identity ?? null,
-      expectedIdentity: identityFromSubscribeInput(input),
+      expectedIdentity: requestedIdentity,
       lastAcceptedServerSequence:
         existing?.lastAcceptedServerSequence ?? input.lastServerSequence,
       awaitingSnapshotFence: true,
@@ -2286,6 +2297,10 @@ export class WsTransport {
             console.warn("WebSocket RPC stream failed", error);
             const whiteboardOperationId = whiteboardOperationSessionIdFromStreamKey(key);
             if (whiteboardOperationId !== null) {
+              const failureCode = getStreamFailureCode(exit.cause);
+              const recognizedCode = Object.values(WHITEBOARD_OPERATION_ERROR).find(
+                (code) => code === failureCode,
+              );
               // Typed Whiteboard refusals never reconnect and never restart:
               // the subscription is torn down and the failure surfaced; the
               // browser bridge decides on an explicit re-attach.
@@ -2293,7 +2308,7 @@ export class WsTransport {
               this.emitWhiteboardOperationFailure(
                 new WsTransportWhiteboardOperationError({
                   message: "Whiteboard operation subscription failed.",
-                  code: "WHITEBOARD_OPERATION_TRANSPORT_CLOSED",
+                  code: recognizedCode ?? "WHITEBOARD_OPERATION_TRANSPORT_CLOSED",
                   operationSessionId: whiteboardOperationId,
                   cause: error,
                 }),
