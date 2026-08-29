@@ -1,8 +1,8 @@
 # Synara Whiteboard
 
 Owner: repository owner
-Lifecycle: operation transport/outcomes implementation active
-Triage: active-operation-transport-outcomes
+Lifecycle: AI assets/restore/failure implementation active
+Triage: active-ai-assets-restore-failure
 Tracker: Local Markdown
 
 ## Artifacts
@@ -29,6 +29,8 @@ Tracker: Local Markdown
 - [Decision 0062 — Ticket 02 native-image drop Gate PASS and governance routing](./decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md)
 - [Decision 0063 — Ticket 02 operation transport/outcomes authorization](./decisions/0063-ticket-02-operation-transport-outcomes-authorization.md)
 - [Decision 0064 — Ticket 02 canonical RPC write-set reassessment](./decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md)
+- [Decision 0065 — Ticket 02 server authority/WebSocket mechanics](./decisions/0065-ticket-02-server-authority-websocket-seam.md)
+- [Decision 0066 — Ticket 02 AI assets/restore/failure authorization](./decisions/0066-ticket-02-ai-assets-restore-failure-authorization.md)
 - [Ticket 02 fallback WP-GATE evidence](./evidence/ticket-02/fallback-gate.md)
 - [Ticket 02 native-image Gate BLOCKER evidence](./evidence/ticket-02/native-image-gate.md)
 - [Ticket 02 fallback contract challenge review](./reviews/ticket-02-fallback-contract-challenge.md)
@@ -45,4 +47,6 @@ Completed bounded phase: Ticket 02 WP-NATIVE-IMAGE-GATE stopped as a valid `BLOC
 
 Completed bounded phase: Ticket 02's native-image drag-and-drop Gate passed on measured source `c37dbf1b3f8ccc8cc6fc2ad16057a1fb337247a2`. Two stable-Chromium runs passed 1/1 at exit `0`, and independent remediation re-review returned `PASS` with high confidence. The result proves bounded native package behavior only; it does not pass AC6 or Ticket 02.
 
-Current boundary: Ticket 02 is `active-operation-transport-outcomes` under [Decision 0063](./decisions/0063-ticket-02-operation-transport-outcomes-authorization.md), as narrowly amended by [Decision 0064](./decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md) to authorize additive canonical `WsFeatureRpcGroup` membership in `packages/contracts/src/rpc.ts`. Only the exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set is authorized. AI assets/restore/failure, cap/lifecycle, accessibility, RightDock, persistence, provider/UI mounting, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.
+Completed bounded phase: `WP-OPERATION-TRANSPORT-OUTCOMES` achieved independently reviewed **BOUNDED PASS** on measured source `09d609b8d4852fcb6a88d3f8a3a1515e773952ea`, integrated through `8aa47efb9`. Contracts 38/38, server 32/32, web focused 119/119, and two stable-Chromium runs 8/8 passed; R1–R9 passed with no blockers. This does not accept Ticket 02 or any deferred package.
+
+Current boundary: Ticket 02 is `active-ai-assets-restore-failure` under [Decision 0066](./decisions/0066-ticket-02-ai-assets-restore-failure-authorization.md). Only browser-local immutable AI asset ownership, exact public addFiles/`captureUpdate: "NEVER"` restore, meaningful SVG/PNG verification, rollback, locked-fault behavior, exact authorized tests, and evidence paths are authorized. Operation protocol/server/WebSocket remain image-free and unchanged. Cap/lifecycle, accessibility, RightDock, persistence, provider/UI mounting, final integration/review/acceptance, package/lockfile/browser-config changes, protected concurrent work, and `bun fmt`/`bun lint`/`bun typecheck` remain prohibited.

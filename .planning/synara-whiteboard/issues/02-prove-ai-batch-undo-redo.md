@@ -2,9 +2,9 @@
 
 **What to build:** Plan and then prove, with the pinned real Excalidraw embed, the approved fallback contract: Excalidraw-native human history remains separate from Synara-owned AI-batch history, while every mutated AI batch remains exactly one AI-batch event with exact scene and asset recovery.
 
-**Bounded by:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md) — exact image-free operation transport/outcomes implementation authority — following [Decision 0062](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md), [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md), [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
+**Bounded by:** [Decision 0066](../decisions/0066-ticket-02-ai-assets-restore-failure-authorization.md) — exact browser-local AI assets/restore/rollback authority — following [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md) and [Decision 0062](../decisions/0062-ticket-02-native-image-drop-gate-passed-routing.md), [Decision 0061](../decisions/0061-ticket-02-native-image-drop-normalization-amendment.md), [Decision 0060](../decisions/0060-ticket-02-native-image-drop-gate-authorization.md), [Decision 0057](../decisions/0057-ticket-02-fallback-wp-gate-passed-routing.md), and the owner-approved [Decision 0055](../decisions/0055-ticket-02-fallback-dual-history-contract-approved.md).
 
-**Status:** active-operation-transport-outcomes
+**Status:** active-ai-assets-restore-failure
 
 Decision 0060 authorizes only a replacement real-Chromium Gate through Excalidraw's actual drag-and-drop handler. It permits standard `File`, `DataTransfer`, `DragEvent`, and `dispatchEvent` on the real `.excalidraw` container, while preserving all direct-insertion, runtime, config, package, and private-API prohibitions. The Gate must prove complete image/file closure, meaningful official SVG and PNG exports, user Delete, native Undo recovery, native Redo removal, and second native Undo recovery in two exact-candidate runs.
 
@@ -15,6 +15,8 @@ Decision 0062 records `TICKET 02 NATIVE IMAGE DROP GATE: BOUNDED PASS` on exact 
 Decision 0063 authorizes `WP-OPERATION-TRANSPORT-OUTCOMES` with the minimal image-free ephemeral operation-session seam across strict contracts, server authority, production WebSocket RPC/stream, truthful browser acknowledgement, and the existing AI-history coordinator. Web-only operation ownership is rejected. AI assets/restore/failure remains a separate deferred package.
 
 Decision 0064 narrowly repairs Decision 0063's write set by adding `packages/contracts/src/rpc.ts`, the actual canonical `WsFeatureRpcGroup` assembly point. A supplemental or parallel Whiteboard RPC group remains prohibited.
+
+Decision 0066 records the independently reviewed operation transport/outcomes BOUNDED PASS and authorizes only `WP-AI-ASSETS-RESTORE-FAILURE`: browser-local immutable asset ownership, exact public image-aware restore, meaningful exports, rollback, and locked-fault proof. Cap/lifecycle, accessibility, production mounting, persistence, workspace gates, and Ticket acceptance remain deferred.
 
 ## Acceptance criteria
 
@@ -77,6 +79,6 @@ Do not modify `@excalidraw/excalidraw`, `bun.lock`, runtime source, package mani
 - Timing-probe source/evidence: `49c679888` / `fe8fa88ed`
 - Completed three-progress Synara Undo/Redo remains partial evidence only; the prior native-route AC4/AC7 failure remains historical evidence for the fallback boundary.
 
-**Routing:** `active-operation-transport-outcomes`
+**Routing:** `active-ai-assets-restore-failure`
 
-**Current authorization boundary:** [Decision 0063](../decisions/0063-ticket-02-operation-transport-outcomes-authorization.md), as amended only by [Decision 0064](../decisions/0064-ticket-02-canonical-rpc-write-set-reassessment.md), authorizes its exact image-free contracts/server/WebSocket/browser bridge, focused tests, and evidence write set including additive canonical RPC membership in `packages/contracts/src/rpc.ts`. Assets, lifecycle/cap, accessibility, RightDock, persistence, provider/UI mounting, workspace gates, later work packages, AC claims, feature review, and final acceptance do not follow by inference.
+**Current authorization boundary:** [Decision 0066](../decisions/0066-ticket-02-ai-assets-restore-failure-authorization.md) authorizes only browser-local immutable AI asset ownership, exact image-aware restore through public `addFiles` and `captureUpdate: "NEVER"`, meaningful SVG/PNG proof, rollback, locked-fault behavior, focused tests, two browser runs, and exact evidence paths. Operation contracts/server/WebSocket/bridge remain image-free and unchanged. Lifecycle/cap, accessibility, RightDock, persistence, provider/UI mounting, workspace gates, AC claims, feature review, and final acceptance do not follow by inference.
