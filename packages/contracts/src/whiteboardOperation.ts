@@ -116,11 +116,13 @@ const WhiteboardOperationLineageFields = {
 
 const HasValidOperationLineage = Schema.makeFilter(
   (operation: {
+    readonly batchId: string;
     readonly operationId: string;
     readonly generation: number;
-    readonly retryOfOperationId?: string;
-    readonly retryOfGeneration?: number;
-    readonly retryOfAttempt?: number;
+    readonly expectedDocumentRevision: number;
+    readonly retryOfOperationId?: string | undefined;
+    readonly retryOfGeneration?: number | undefined;
+    readonly retryOfAttempt?: number | undefined;
     readonly retryAttempt: number;
   }) =>
     operation.retryAttempt === 0
@@ -378,16 +380,6 @@ const FailedContainmentResults = new Set<WhiteboardContainmentResult>([
  * no-op). Rejected attempts never occupy accepted sequence space, so they
  * carry no last-accepted-sequence constraint.
  */
-const HasZeroLastAcceptedSequenceIffZeroAcceptedTotals = Schema.makeFilter(
-  (terminal: {
-    readonly acceptedSemanticCount: number;
-    readonly acceptedNoOpCount: number;
-    readonly lastAcceptedProducerSequence: number;
-  }) =>
-    terminal.lastAcceptedProducerSequence === 0 ===
-    (terminal.acceptedSemanticCount + terminal.acceptedNoOpCount === 0),
-);
-
 const WhiteboardTerminalRecordFields = {
   batchId: BoundedId(128),
   operationId: BoundedId(128),
@@ -404,17 +396,25 @@ const WhiteboardTerminalRecordFields = {
 
 const HasValidTerminalRecord = Schema.makeFilter(
   (terminal: {
+    readonly batchId: string;
+    readonly operationId: string;
+    readonly generation: number;
     readonly outcome: WhiteboardTerminalOutcome;
     readonly terminalReason: WhiteboardTerminalReason;
-    readonly zeroValidReason?: WhiteboardZeroValidReason;
+    readonly zeroValidReason?: WhiteboardZeroValidReason | undefined;
     readonly acceptedSemanticCount: number;
     readonly acceptedNoOpCount: number;
     readonly rejectedCount: number;
     readonly lastAcceptedProducerSequence: number;
-    readonly containmentResult?: WhiteboardContainmentResult;
+    readonly containmentResult?: WhiteboardContainmentResult | undefined;
   }) => {
+    // Shared wire invariant across every terminal outcome: the last accepted
+    // producer sequence is zero exactly when nothing was accepted (semantic or
+    // no-op). Rejected attempts never occupy accepted sequence space, so they
+    // carry no last-accepted-sequence constraint.
     if (
-      HasZeroLastAcceptedSequenceIffZeroAcceptedTotals.run(terminal) !== undefined
+      (terminal.lastAcceptedProducerSequence === 0) !==
+      (terminal.acceptedSemanticCount + terminal.acceptedNoOpCount === 0)
     ) {
       return false;
     }
