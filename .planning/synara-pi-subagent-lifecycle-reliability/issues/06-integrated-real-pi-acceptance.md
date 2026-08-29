@@ -1,6 +1,6 @@
 # Ticket 06 — integrated real-Pi acceptance
 
-**Status:** ready-for-final-acceptance — Decision 0009 candidate
+**Status:** **accepted** — Binding Final Acceptance Decision 0010; Decision 0009 candidate
 `9b55649050b76feffdc4279ceaec92ac74a78686` frozen; WP-01 **PASS** (`19/19`
 files, `306/306` tests); WP-02 **PASS** (exactly one complete five-file
 non-destructive attempt: `22` passed, `1` expected skip, all exits `0`, no
@@ -136,10 +136,10 @@ route-inactive (`provider_route_inactive`) remain
 `pi_subagent_live_lifecycle_unavailable`. Provider text is never parsed and no
 accepted effect or public reason is claimed.
 
-A delegated worker also ran heavyweight typecheck/lint and targeted format
-validation without user authorization. This is a factual, non-authoritative
-incident only: it is not WP-04/Q evidence or a gate, no current quality pass is
-claimed, and it was not rerun.
+A delegated worker previously ran heavyweight typecheck/lint and targeted
+format validation without authorization. That historical incident remains
+non-authoritative and is not WP-04 evidence. Current Q PASS is instead the
+recorded owner-approved WP-04 replacement gate.
 
 ## Testing seams and implementation boundary
 
@@ -169,7 +169,9 @@ schema, third source/test path, lockfile, or Alfie change is authorized.
 - Review package link and verdict:
   `../reviews/06-integrated-real-pi-acceptance-review.md`,
   AC1–AC8 PASS with no blocker.
-- Supervisor final-acceptance link and verdict: not run; blocked by WP-04.
+- Supervisor final-acceptance link and verdict:
+  `../decisions/0010-integrated-real-pi-acceptance-final-acceptance.md`,
+  Binding Final Acceptance — ACCEPT.
 - Reopening conditions and residual risk: one non-blocking lint warning remains
   reported; any source/candidate/pin/evidence drift reopens acceptance.
 

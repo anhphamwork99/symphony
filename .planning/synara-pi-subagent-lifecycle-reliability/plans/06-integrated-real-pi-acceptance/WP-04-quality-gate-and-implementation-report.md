@@ -45,11 +45,10 @@ Additional evidence:
 
 ## Downstream route
 
-WP-04 is PASS. The one lint warning is reported as residual evidence and is not
-an error or mutation. WP-05 invoked its independent reviewer exactly once, but
-the runtime returned an invalid response without a final verdict; see
-`../../reviews/06-integrated-real-pi-acceptance-review.md`. WP-06 Decision 0010
-and WP-07 closure remain blocked.
+WP-04 is PASS. The one lint warning is residual evidence, not an error or
+mutation. The invalid first reviewer runtime remains preserved, while the
+authorized operational fallback review passed AC1–AC8. WP-06 persisted accepted
+Decision 0010 and WP-07 closed routing.
 
 ## Commit boundary
 

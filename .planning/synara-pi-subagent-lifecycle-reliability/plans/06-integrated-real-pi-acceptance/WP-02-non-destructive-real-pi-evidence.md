@@ -115,11 +115,9 @@ The historical Decision 0008 challenge evidence remains supporting only:
 with its own records in `evidence/WP-02-decision0008-realpi-provenance.txt`
 and `evidence/WP-02-decision0008-nondestructive-disposition.md`.
 
-WP-02 is **PASS**. WP-03 — the exactly-one manual destructive M leg — is **not
-authorized** and requires fresh owner authorization before it may run. WP-04
-requires fresh owner authorization after WP-03 PASS. WP-05 one integrated
-review, WP-06 one final Supervisor Decision 0010, and WP-07 closure follow in
-order. No retry or missing-leg rerun is permitted. The unauthorized heavyweight
+WP-02 is **PASS** and must not be rerun. WP-03 M, WP-04 Q, and WP-05 review
+subsequently passed; WP-06 persisted accepted Decision 0010; WP-07 closed the
+ticket/project. No retry or missing-leg rerun is permitted. The unauthorized heavyweight
 typecheck/lint/targeted-format incident is not WP-04/Q evidence, not a gate,
 and was not rerun.
 

@@ -25,7 +25,8 @@ Evidence:
 
 ## Downstream route
 
-WP-03 is complete and must not be rerun. WP-04 remains a separate exactly-one quality/report gate and requires fresh explicit owner authorization at this post-WP-03 dependency boundary. WP-05 review, WP-06 final Supervisor Decision 0010, and WP-07 closure remain blocked until their preceding gates complete.
+WP-03 is complete and must not be rerun. WP-04 Q and WP-05 review subsequently
+passed; WP-06 persisted accepted Decision 0010; WP-07 closed routing.
 
 ## Write set and commit
 

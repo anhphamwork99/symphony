@@ -1,14 +1,14 @@
 # Ticket 06 Plan — integrated real-Pi acceptance
 
-**Plan state:** Candidate3 `9b55649050b76feffdc4279ceaec92ac74a78686` remains
+**Plan state:** **COMPLETE / ACCEPTED.** Candidate3 `9b55649050b76feffdc4279ceaec92ac74a78686` remains
 frozen; WP-01 is **PASS** with `19/19` files and `306/306` deterministic tests,
 zero failures, and zero skips. The `308` estimate is superseded by the actual
 producer count. WP-02 is **PASS** with exactly one complete five-file
 non-destructive real-Pi attempt: `22` passed and `1` expected skip across the
 five serial legs, all exits `0`, fresh per-leg HOME cleanup proven, and the
-frozen candidate surface zero-delta. WP-03 now requires fresh owner
-authorization; no WP-03 authorization exists yet.
-**Date:** 2026-08-28
+frozen candidate surface zero-delta. WP-03 M, WP-04 Q, and WP-05 review passed;
+Decision 0010 finally accepted Ticket 06 and the project.
+**Closure date:** 2026-08-29
 
 ## 1. Objective and governing authorities
 
@@ -100,9 +100,9 @@ observation and generic route-inactive (`provider_route_inactive`) remain
 no accepted effect or public reason is claimed.
 
 A delegated worker also ran heavyweight typecheck/lint and targeted format
-validation without user authorization. This factual incident is
-non-authoritative, not WP-04/Q evidence or a gate, no current quality pass is
-claimed, and it was not rerun. Candidate2's WP-01 producer records remain
+validation without user authorization. This factual incident remains
+non-authoritative and is not WP-04/Q evidence. Current Q PASS comes from the
+owner-approved WP-04 replacement gate. Candidate2's WP-01 producer records remain
 historical supporting evidence only; the frozen candidate requires a fresh
 WP-01 collection and actual count.
 
@@ -190,18 +190,15 @@ with result `applied`.
 
 ### WP-03 and WP-04
 
-WP-03 requires fresh owner authorization after the new five-leg WP-02 PASS
-(now recorded) and is the exactly-one manual destructive M leg. No WP-03
-authorization exists yet. WP-04 requires fresh owner authorization after WP-03
-PASS and is the exactly-one Q/report gate. Neither is authorized or run by
-this package.
+WP-03 completed the exactly-one manual destructive M leg. WP-04 preserved its
+formatter challenge, applied the explicit owner disposition, and passed the
+replacement lint/typecheck Q gate. Neither may be rerun.
 
 ### WP-05 / WP-06 / WP-07
 
-WP-05 performs exactly one integrated review after WP-01–WP-04. WP-06 performs
-exactly one final Supervisor consultation after WP-05 PASS and persists
-`decisions/0010-integrated-real-pi-acceptance-final-acceptance.md`. WP-07
-closes/routes only after accepted Decision 0010 and all gates.
+WP-05 produced the valid integrated AC1–AC8 PASS review. WP-06 consumed exactly
+one final Supervisor consultation and persisted accepted Decision 0010. WP-07
+closed Ticket 06 and Project Home routing without rerunning any gate.
 
 ## 7. Exact implementation boundary and prohibited changes
 
@@ -225,14 +222,13 @@ correction delta and six-path total from `12fd6686`, byte-identical current-log
 hashes, detached and clean candidate truth, Alfie pin, and the protected-WIP
 hash record. Stop before advancing on any candidate, provenance, protected-WIP,
 source, count, or evidence contradiction. Candidate2 D/R and the focused
-candidate3 logs remain supporting only; WP-01 is **PASS** at `306/306`, WP-02
-is only READY and has not run, and all downstream gates remain gated until the
-serial route. The unauthorized heavyweight command incident is not a quality
-pass or gate and is not rerun.
+candidate3 logs remain supporting only. Current WP-01 through WP-06 gates all
+completed and Decision 0010 accepted the candidate. The unauthorized historical
+heavyweight command incident is not the current quality evidence.
 
 The inherited manual destructive boundary remains unchanged: no automation,
-PID guessing, external signalling, or retry. G-M and G-Q remain pending with
-one reservation each.
+PID guessing, external signalling, or retry. G-M and G-Q were each consumed
+exactly once and may not be repeated absent material reopening.
 
 ## 9. Planning transaction and commit
 
@@ -258,6 +254,6 @@ integrated review, or final-acceptance consultation is part of this WP-01
 evidence transaction. The two current `WP-01-decision0009-*` logs are copied
 byte-identically and force-added; the four focused candidate3 logs remain
 supporting implementation evidence only. No source change is made. The
-unauthorized heavyweight typecheck/lint/targeted-format incident is recorded as
-non-authoritative and non-Q, with no current quality pass and no rerun. All
-downstream gates remain gated pending the serial route.
+unauthorized heavyweight typecheck/lint/targeted-format incident remains
+non-authoritative and non-Q; the owner-approved replacement gate is current Q
+evidence. Decision 0010 and WP-07 complete the route.

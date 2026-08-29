@@ -25,7 +25,10 @@ One pre-existing nonblocking lint warning remains; manual proof is bounded to th
 
 ## Downstream state
 
-G-Q is consumed exactly once. No second review or final Supervisor consultation is authorized absent a material reopening condition. After this Decision 0010 record is persisted and tracked, WP-07 may close Ticket 06 and Project Home routing without rerunning any producer or gate.
+G-Q is consumed exactly once. No second review or final Supervisor consultation
+is authorized absent a material reopening condition. Decision 0010 was
+persisted and tracked, and WP-07 closed Ticket 06 and Project Home routing
+without rerunning any producer or gate.
 
 ## Prohibited work and commit
 
