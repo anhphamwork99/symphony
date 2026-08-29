@@ -159,12 +159,14 @@ interface WhiteboardOperationSubscription {
   identity: WhiteboardOperationSessionIdentity | null;
   /** Identity the subscriber attached with; the snapshot must agree with it. */
   readonly expectedIdentity: WhiteboardOperationSessionIdentity;
-  /** Last server sequence the listener accepted. The resume cursor. */
+  /** Last non-snapshot server sequence the listener accepted. The resume cursor. */
   lastAcceptedServerSequence: number;
+  /** Each stream start must accept exactly one high-water snapshot fence first. */
+  awaitingSnapshotFence: boolean;
   /**
-   * Bounded dedupe window of accepted events by server sequence. Replayed
-   * events within the window are dropped when equivalent and fail the session
-   * when they conflict; sequences below the window are silently dropped.
+   * Bounded dedupe window of accepted non-snapshot events by server sequence.
+   * Replayed events within the window are dropped when equivalent and fail the
+   * session when they conflict; sequences below the window are silently dropped.
    */
   readonly acceptedEvents: Map<number, WhiteboardOperationSessionEvent>;
   readonly listener: (event: WhiteboardOperationSessionEvent) => boolean | void;
@@ -1225,7 +1227,9 @@ export class WsTransport {
     const subscription: WhiteboardOperationSubscription = {
       identity: existing?.identity ?? null,
       expectedIdentity: identityFromSubscribeInput(input),
-      lastAcceptedServerSequence: existing?.lastAcceptedServerSequence ?? input.lastServerSequence,
+      lastAcceptedServerSequence:
+        existing?.lastAcceptedServerSequence ?? input.lastServerSequence,
+      awaitingSnapshotFence: true,
       acceptedEvents: existing?.acceptedEvents ?? new Map(),
       listener,
     };
@@ -1317,6 +1321,7 @@ export class WsTransport {
     const input = this.buildWhiteboardOperationSubscribeInput(subscription);
     if (!input) return;
     const key = whiteboardOperationStreamKey(operationSessionId);
+    subscription.awaitingSnapshotFence = true;
     const restartWhiteboard = () => {
       // Only transport-liveness conditions (unexpected completion, transient
       // failure after reconnect) reach this callback; typed Whiteboard
@@ -1395,6 +1400,33 @@ export class WsTransport {
     }
 
     const { serverSequence } = event;
+    if (subscription.awaitingSnapshotFence) {
+      if (event.kind !== "session-snapshot") {
+        failClosed(
+          WHITEBOARD_OPERATION_ERROR.identityMismatch,
+          "Whiteboard operation stream did not begin with its session snapshot fence.",
+        );
+        return;
+      }
+      if (serverSequence < subscription.lastAcceptedServerSequence) {
+        failClosed(
+          WHITEBOARD_OPERATION_ERROR.producerSequenceSkipped,
+          "Whiteboard operation snapshot fence is behind the accepted replay cursor.",
+        );
+        return;
+      }
+      let acceptedSnapshot = false;
+      try {
+        acceptedSnapshot = subscription.listener(event) !== false;
+      } catch (error) {
+        console.warn("Whiteboard operation listener rejected a snapshot", error);
+      }
+      if (acceptedSnapshot) subscription.awaitingSnapshotFence = false;
+      // Decision 0065 D5: the first high-water snapshot is a state fence, not
+      // an instruction to discard retained replay rows cursor+1..F. A retained
+      // baseline snapshot after this point is an ordinary sequenced data row.
+      return;
+    }
     if (serverSequence <= subscription.lastAcceptedServerSequence) {
       const accepted = subscription.acceptedEvents.get(serverSequence);
       if (accepted === undefined) {

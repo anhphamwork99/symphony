@@ -1795,14 +1795,19 @@ describe("WsTransport", () => {
       );
     });
 
-    it("delivers snapshot-first events in order and retains the immutable identity", async () => {
+    it("delivers the high-water snapshot fence, retained replay, and live continuation in order", async () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
-      const progress = makeProgressEvent(2, "fingerprint-2");
+      const snapshotFence = makeSnapshot(3);
+      const baseline = makeSnapshot(1);
+      const progressTwo = makeProgressEvent(2, "fingerprint-2");
+      const progressThree = makeProgressEvent(3, "fingerprint-3");
+      const liveFour = makeProgressEvent(4, "fingerprint-4");
       const client = {
-        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
+          Stream.make(snapshotFence, baseline, progressTwo, progressThree, liveFour),
+        ),
       };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
       const seen: unknown[] = [];
@@ -1816,14 +1821,20 @@ describe("WsTransport", () => {
       );
       await flushStreamDelivery();
 
-      expect(seen).toEqual([snapshot, progress]);
+      expect(seen).toEqual([
+        snapshotFence,
+        baseline,
+        progressTwo,
+        progressThree,
+        liveFour,
+      ]);
       expect(client[WS_METHODS.whiteboardOperationSubscribe]).toHaveBeenCalledWith({
         ...IDENTITY,
         lastServerSequence: 0,
       });
       const subscription = internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID);
       expect(subscription?.identity).toEqual(IDENTITY);
-      expect(subscription?.lastAcceptedServerSequence).toBe(2);
+      expect(subscription?.lastAcceptedServerSequence).toBe(4);
 
       unsubscribe();
       expect(internals.whiteboardOperationSubscriptions.has(OPERATION_SESSION_ID)).toBe(false);
@@ -1833,12 +1844,13 @@ describe("WsTransport", () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
+      const snapshotFence = makeSnapshot(2);
+      const baseline = makeSnapshot(1);
       const progress = makeProgressEvent(2, "fingerprint-2");
       const replay = { ...makeProgressEvent(2, "fingerprint-2") };
       const client = {
         [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
-          Stream.make(snapshot, progress, replay),
+          Stream.make(snapshotFence, baseline, progress, replay),
         ),
       };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
@@ -1850,7 +1862,7 @@ describe("WsTransport", () => {
       );
       await flushStreamDelivery();
 
-      expect(listener).toHaveBeenCalledTimes(2);
+      expect(listener).toHaveBeenCalledTimes(3);
       expect(internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)).toBeDefined();
     });
 
@@ -1858,12 +1870,13 @@ describe("WsTransport", () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
+      const snapshotFence = makeSnapshot(2);
+      const baseline = makeSnapshot(1);
       const progress = makeProgressEvent(2, "fingerprint-2");
       const conflicting = makeProgressEvent(2, "fingerprint-conflict");
       const client = {
         [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
-          Stream.make(snapshot, progress, conflicting),
+          Stream.make(snapshotFence, baseline, progress, conflicting),
         ),
       };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
@@ -1877,7 +1890,7 @@ describe("WsTransport", () => {
       );
       await flushStreamDelivery();
 
-      expect(listener).toHaveBeenCalledTimes(2);
+      expect(listener).toHaveBeenCalledTimes(3);
       expect(failures).toHaveLength(1);
       expect(failures[0]).toMatchObject({
         _tag: "WsTransportWhiteboardOperationError",
@@ -1891,10 +1904,13 @@ describe("WsTransport", () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
+      const snapshotFence = makeSnapshot(2);
+      const baseline = makeSnapshot(1);
       const progress = makeProgressEvent(2, "fingerprint-2");
       const client = {
-        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
+        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() =>
+          Stream.make(snapshotFence, baseline, progress),
+        ),
       };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
 
@@ -1932,9 +1948,14 @@ describe("WsTransport", () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
+      const snapshotFence = makeSnapshot(2);
+      const baseline = makeSnapshot(1);
       const progress = makeProgressEvent(2, "fingerprint-2");
-      const subscribe = vi.fn(() => Stream.make(snapshot, progress));
+      const subscribe = vi.fn((input: { lastServerSequence: number }) =>
+        input.lastServerSequence === 0
+          ? Stream.make(snapshotFence, baseline, progress)
+          : Stream.make(snapshotFence),
+      );
       const client = { [WS_METHODS.whiteboardOperationSubscribe]: subscribe };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
       const firstListener = vi.fn(() => true);
@@ -1945,7 +1966,7 @@ describe("WsTransport", () => {
         firstListener,
       );
       await flushStreamDelivery();
-      expect(firstListener).toHaveBeenCalledTimes(2);
+      expect(firstListener).toHaveBeenCalledTimes(3);
 
       transport.whiteboardOperationSubscribe(
         { ...IDENTITY, lastServerSequence: 2 },
@@ -1956,11 +1977,12 @@ describe("WsTransport", () => {
 
       // The replacement resumed from the first subscription's accepted cursor
       // (2): the new subscribe input carries lastServerSequence 2, and the
-      // replayed snapshot at the same sequence did not reach the new listener
-      // as a fresh event.
+      // current high-water snapshot reaches the replacement listener, but no
+      // already-accepted data rows replay after cursor 2.
       const lastCall = subscribe.mock.calls.at(-1)?.[0] as { lastServerSequence: number };
       expect(lastCall.lastServerSequence).toBe(2);
-      expect(secondListener).not.toHaveBeenCalled();
+      expect(secondListener).toHaveBeenCalledTimes(1);
+      expect(secondListener).toHaveBeenCalledWith(snapshotFence);
       expect(
         internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)?.listener,
       ).not.toBe(firstListener);
@@ -1976,11 +1998,17 @@ describe("WsTransport", () => {
       const { transport, internals } = makeCapabilityTransport([
         "whiteboard.operation-session-v1",
       ]);
-      const snapshot = makeSnapshot(1);
+      const snapshotFence = makeSnapshot(2);
+      const baseline = makeSnapshot(1);
       const progress = makeProgressEvent(2, "fingerprint-2");
-      const client = {
-        [WS_METHODS.whiteboardOperationSubscribe]: vi.fn(() => Stream.make(snapshot, progress)),
-      };
+      const resumedSnapshotFence = makeSnapshot(3);
+      const resumedProgress = makeProgressEvent(3, "fingerprint-3");
+      const subscribe = vi.fn((input: { lastServerSequence: number }) =>
+        input.lastServerSequence === 0
+          ? Stream.make(snapshotFence, baseline, progress)
+          : Stream.make(resumedSnapshotFence, resumedProgress),
+      );
+      const client = { [WS_METHODS.whiteboardOperationSubscribe]: subscribe };
       Object.assign(internals, { getClient: vi.fn(async () => client) });
       const listener = vi.fn(() => true);
 
@@ -2004,6 +2032,30 @@ describe("WsTransport", () => {
         internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)!,
       );
       expect(rebuilt).toEqual({ ...IDENTITY, lastServerSequence: 2 });
+
+      Object.assign(internals, {
+        streamCleanups: new Map(),
+        streamSettled: new Map(),
+      });
+      (
+        transport as unknown as {
+          startWhiteboardOperationStream: (client: unknown, id: string) => void;
+        }
+      ).startWhiteboardOperationStream(client, OPERATION_SESSION_ID);
+      await flushStreamDelivery();
+
+      expect(subscribe.mock.calls.at(-1)?.[0]).toEqual({
+        ...IDENTITY,
+        lastServerSequence: 2,
+      });
+      expect(listener.mock.calls.slice(-2).map(([event]) => event)).toEqual([
+        resumedSnapshotFence,
+        resumedProgress,
+      ]);
+      expect(
+        internals.whiteboardOperationSubscriptions.get(OPERATION_SESSION_ID)
+          ?.lastAcceptedServerSequence,
+      ).toBe(3);
     });
 
     it("surfaces a changed server authority instead of silently resuming", () => {

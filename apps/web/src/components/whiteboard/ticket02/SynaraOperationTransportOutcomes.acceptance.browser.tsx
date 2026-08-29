@@ -24,6 +24,7 @@ import {
   ExcalidrawTicket02Harness,
   type ExcalidrawTicket02HarnessHandle,
 } from "./ExcalidrawTicket02Harness";
+import { WsTransport } from "../../../wsTransport";
 import type { SynaraWhiteboardOperationTransport } from "./SynaraWhiteboardOperationBridge";
 
 const CAPABILITY = "whiteboard.operation-session-v1";
@@ -68,6 +69,15 @@ function imageFreeFixture(): SynaraSceneInput {
  * no socket, no timers, and no server. It delivers real session events to the
  * real dormant bridge only when a test emits them.
  */
+interface ProductionGateSubscription {
+  identity: typeof IDENTITY | null;
+  readonly expectedIdentity: typeof IDENTITY;
+  lastAcceptedServerSequence: number;
+  awaitingSnapshotFence: boolean;
+  readonly acceptedEvents: Map<number, WhiteboardOperationSessionEvent>;
+  readonly listener: (event: WhiteboardOperationSessionEvent) => boolean | void;
+}
+
 class TransportFixture implements SynaraWhiteboardOperationTransport {
   public attachInputs: unknown[] = [];
   public subscribeInputs: unknown[] = [];
@@ -78,13 +88,24 @@ class TransportFixture implements SynaraWhiteboardOperationTransport {
   public ackInterruptCount = 0;
 
   private readonly capabilities: readonly string[];
-  private listener: ((event: WhiteboardOperationSessionEvent) => boolean | void) | null = null;
+  private readonly productionGate = new WsTransport("ws://whiteboard-gate.invalid");
+  private gateSubscription: ProductionGateSubscription | null = null;
   private readonly failureListeners = new Set<
     (failure: { readonly code: string; readonly operationSessionId?: string }) => void
   >();
 
   public constructor(capabilities: readonly string[] = [CAPABILITY]) {
     this.capabilities = capabilities;
+    this.productionGate.onWhiteboardOperationFailure((failure) => {
+      this.gateSubscription = null;
+      this.failureInputs.push({
+        code: failure.code,
+        operationSessionId: failure.operationSessionId,
+      });
+      for (const listener of [...this.failureListeners]) {
+        listener({ code: failure.code, operationSessionId: failure.operationSessionId });
+      }
+    });
   }
 
   public hasWhiteboardOperationCapability(): boolean {
@@ -114,9 +135,23 @@ class TransportFixture implements SynaraWhiteboardOperationTransport {
     listener: (event: WhiteboardOperationSessionEvent) => boolean | void,
   ): () => void {
     this.subscribeInputs.push(input);
-    this.listener = listener;
+    const subscribeInput = input as typeof IDENTITY & { readonly lastServerSequence: number };
+    const subscription: ProductionGateSubscription = {
+      identity: null,
+      expectedIdentity: IDENTITY,
+      lastAcceptedServerSequence: subscribeInput.lastServerSequence,
+      awaitingSnapshotFence: true,
+      acceptedEvents: new Map(),
+      listener,
+    };
+    this.gateSubscription = subscription;
+    (
+      this.productionGate as unknown as {
+        whiteboardOperationSubscriptions: Map<string, ProductionGateSubscription>;
+      }
+    ).whiteboardOperationSubscriptions.set(IDENTITY.operationSessionId, subscription);
     return () => {
-      this.listener = null;
+      if (this.gateSubscription === subscription) this.gateSubscription = null;
     };
   }
 
@@ -130,8 +165,27 @@ class TransportFixture implements SynaraWhiteboardOperationTransport {
     return { ...IDENTITY };
   }
 
-  public emit(event: WhiteboardOperationSessionEvent): boolean | void {
-    return this.listener?.(event);
+  public beginStream(): void {
+    if (this.gateSubscription !== null) {
+      this.gateSubscription.awaitingSnapshotFence = true;
+    }
+  }
+
+  public emit(event: WhiteboardOperationSessionEvent): void {
+    if (this.gateSubscription === null) return;
+    (
+      this.productionGate as unknown as {
+        handleWhiteboardOperationEvent: (
+          operationSessionId: string,
+          subscription: ProductionGateSubscription,
+          event: WhiteboardOperationSessionEvent,
+        ) => void;
+      }
+    ).handleWhiteboardOperationEvent(
+      IDENTITY.operationSessionId,
+      this.gateSubscription,
+      event,
+    );
   }
 
   public emitFailure(code: string, operationSessionId = IDENTITY.operationSessionId): void {
@@ -226,13 +280,20 @@ function emitSnapshot(rig: HarnessRig, serverSequence: number, summary = {
   rejectedCount: 0,
   lastAcceptedProducerSequence: 0,
 }): void {
-  rig.transport.emit({
+  const snapshot = {
     kind: "session-snapshot",
     ...IDENTITY,
     serverSequence,
     documentRevision: 0,
     acknowledgementSummary: summary,
-  } as unknown as WhiteboardOperationSessionEvent);
+  } as unknown as WhiteboardOperationSessionEvent;
+  rig.transport.beginStream();
+  rig.transport.emit(snapshot);
+  if (serverSequence === 1) {
+    // The attached session retains its baseline snapshot as data row 1 after
+    // the current high-water snapshot fence (Decision 0065 D5).
+    rig.transport.emit(snapshot);
+  }
 }
 
 function emitAdmitted(rig: HarnessRig, serverSequence: number): void {
@@ -367,7 +428,7 @@ function emitTerminal(
     serverSequence: input.serverSequence,
     batchId: BATCH_ID,
     operationId: OPERATION_ID,
-    generation: GENERATION,
+    generation: input.outcome === "interrupted" ? GENERATION + 1 : GENERATION,
     acceptedSemanticCount: input.outcome === "zero-valid" ? 0 : 1,
     acceptedNoOpCount: 0,
     rejectedCount: 0,
@@ -594,11 +655,15 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
       expect(cardX(rig.handle)).toBe(340);
       expect(traceOfKind(rig.handle, "write-issued")).toHaveLength(2);
 
-      // Identical replay of the exact same event object: the identical
-      // truthful acknowledgement (same producer sequence, server sequence,
-      // correlation, and verified semantic proof) is resent as ackInputs[2];
-      // the real canvas is never written twice.
-      emitProgressEvent(rig, progressTwo);
+      // A same-authority reconnect snapshot reaches the real production event
+      // gate. The bridge resends the exact interrupted acknowledgement as
+      // ackInputs[2] without requiring duplicate progress or a second write.
+      emitSnapshot(rig, 4, {
+        acceptedSemanticCount: 1,
+        acceptedNoOpCount: 0,
+        rejectedCount: 0,
+        lastAcceptedProducerSequence: 1,
+      });
       await vi.waitFor(() => expect(rig.transport.ackInputs).toHaveLength(3));
       expect(rig.transport.ackInputs[1]).toMatchObject({
         producerSequence: 2,
@@ -742,10 +807,9 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
       await awaitAcks(rig, 1);
       expect(cardX(rig.handle)).toBe(240);
 
-      // Same-authority reconnect: current snapshot, then duplicate replay of
-      // the admitted operation and the already-applied progress (the exact
-      // same event object).
-      emitSnapshot(rig, 4, {
+      // Same-authority reconnect: current fence at the accepted cursor, then
+      // duplicate overlap that the real transport gate drops before the bridge.
+      emitSnapshot(rig, 3, {
         acceptedSemanticCount: 1,
         acceptedNoOpCount: 0,
         rejectedCount: 0,
@@ -764,7 +828,7 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
       emitProgressEvent(
         rig,
         buildProgressEvent(rig, {
-          serverSequence: 5,
+          serverSequence: 4,
           producerSequence: 2,
           x: 340,
         }),
@@ -773,7 +837,7 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
       expect(cardX(rig.handle)).toBe(340);
       expect(traceOfKind(rig.handle, "write-issued")).toHaveLength(2);
 
-      emitTerminal(rig, { serverSequence: 6, outcome: "completed" });
+      emitTerminal(rig, { serverSequence: 5, outcome: "completed" });
       await vi.waitFor(() => expect(rig.handle.getOperationOutcomes()).toHaveLength(1));
       expect(rig.handle.getHistory().events).toHaveLength(1);
       expect(rig.handle.getHistory().events[0]).toMatchObject({
@@ -790,7 +854,7 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
     const rig = await mountOperationHarness("wp-b3-resume-terminal");
     try {
       await startSession(rig);
-      rig.transport.emit({
+      const terminalSnapshot = {
         kind: "session-snapshot",
         ...IDENTITY,
         serverSequence: 1,
@@ -812,7 +876,10 @@ describe("Ticket 02 operation transport outcomes in stable Chromium (WP-B3)", ()
           rejectedCount: 0,
           lastAcceptedProducerSequence: 1,
         },
-      } as unknown as WhiteboardOperationSessionEvent);
+      } as unknown as WhiteboardOperationSessionEvent;
+      rig.transport.beginStream();
+      rig.transport.emit(terminalSnapshot);
+      rig.transport.emit(terminalSnapshot);
       expect(rig.handle.getOperationBridge()!.state).toBe("settled");
       expect(rig.handle.getOperationBridge()!.getCoordinator()).toBeNull();
       expect(rig.handle.getOperationOutcomes()).toHaveLength(0);

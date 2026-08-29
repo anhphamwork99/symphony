@@ -320,7 +320,7 @@ function makeTerminal(
     serverSequence,
     batchId: "batch-1",
     operationId: "operation-1",
-    generation: 1,
+    generation: outcome === "interrupted" ? 2 : 1,
     acceptedSemanticCount: outcome === "zero-valid" ? 0 : 1,
     acceptedNoOpCount: 0,
     rejectedCount: 0,
@@ -492,7 +492,7 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
   });
 
-  it("resends only the interrupted acknowledgement on identical replay without reapply", async () => {
+  it("resends only the interrupted acknowledgement on the next same-authority snapshot without reapply", async () => {
     transport.ackRejectNext = true;
     await startActiveOperation({ host, transport, bridge, outcomes });
     transport.emit(makeProgress(3, 1, 1));
@@ -500,9 +500,9 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(transport.ackRequests).toHaveLength(1);
     expect(host.callbackSequence).toBe(1);
 
-    // The identical replay reaches the ledger: identical ack resent, no
-    // second application.
-    transport.emit(makeProgress(3, 1, 1));
+    // A reconnect snapshot resends the exact ledger acknowledgement without
+    // requiring duplicate progress to pass the transport dedupe gate.
+    transport.emit(makeSnapshot(3));
     await transport.drainAckChain();
     expect(transport.ackRequests).toHaveLength(2);
     expect(transport.ackRequests[1]).toEqual(transport.ackRequests[0]);
@@ -556,6 +556,7 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
       kind: "terminal",
       outcome: "interrupted",
       operationId: "operation-1",
+      generation: 2,
     });
     expect(host.nativeClearCount).toBe(1);
     expect(bridge.getCoordinator()!.getState().lockState).toBe("unlocked");
@@ -564,6 +565,21 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     transport.emit(makeTerminal(6, "interrupted"));
     await transport.drainAckChain();
     expect(bridge.getCoordinator()!.getState().events).toHaveLength(1);
+  });
+
+  it("rejects an interrupted terminal at the original generation after Take Over advanced it", async () => {
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+
+    transport.emit(makeTakeOverPending(4));
+    transport.emit(makeContainmentResult(5, "acknowledged"));
+    transport.emit(makeTerminal(6, "interrupted", { generation: 1 }));
+
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
   });
 
   it("keeps the session protected when containment failed and never finalizes", async () => {

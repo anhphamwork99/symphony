@@ -95,6 +95,9 @@ export type SynaraWhiteboardBridgeState =
 
 /** One applied, correlated, verified progress mutation. */
 interface AppliedProgressLedgerRecord {
+  readonly batchId: string;
+  readonly operationId: string;
+  readonly generation: number;
   readonly producerSequence: number;
   readonly serverSequence: number;
   readonly expectedSemanticFingerprint: string;
@@ -112,6 +115,9 @@ function progressRecordEquivalent(
   event: WhiteboardOperationProgressEvent,
 ): boolean {
   return (
+    record.batchId === event.batchId &&
+    record.operationId === event.operationId &&
+    record.generation === event.generation &&
     record.producerSequence === event.producerSequence &&
     record.serverSequence === event.serverSequence &&
     record.expectedSemanticFingerprint === event.expectedSemanticFingerprint
@@ -145,9 +151,20 @@ export class SynaraWhiteboardOperationBridge {
   } | null = null;
   private readonly ledger = new Map<number, AppliedProgressLedgerRecord>();
   private lastVerifiedSemanticFingerprint: string | null = null;
-  private takeOverPending = false;
+  private pendingTakeOver: {
+    readonly batchId: string;
+    readonly operationId: string;
+    readonly generation: number;
+    readonly requestedGeneration: number;
+    readonly takeOverRequestId: string;
+  } | null = null;
   private containmentResult: WhiteboardContainmentResult | null = null;
   private terminalOutcome: WhiteboardTerminalOutcome | null = null;
+  private settledTerminal: {
+    readonly operationId: string;
+    readonly generation: number;
+    readonly outcome: WhiteboardTerminalOutcome;
+  } | null = null;
   private terminalEventSettled = false;
   private ackChain: Promise<void> = Promise.resolve();
 
@@ -248,8 +265,13 @@ export class SynaraWhiteboardOperationBridge {
   private handleEvent(event: WhiteboardOperationSessionEvent): boolean {
     if (this.disposed) return false;
     const accepted = this.dispatch(event);
-    if (accepted && event.serverSequence > this.lastAcceptedServerSequence) {
-      // Keep the stored resume cursor truthful for accepted events.
+    if (
+      accepted &&
+      event.kind !== "session-snapshot" &&
+      event.serverSequence > this.lastAcceptedServerSequence
+    ) {
+      // The high-water snapshot is a state fence. Only replay/live data
+      // advances the resume cursor (Decision 0065 D5).
       this.lastAcceptedServerSequence = event.serverSequence;
     }
     return accepted;
@@ -277,14 +299,32 @@ export class SynaraWhiteboardOperationBridge {
       // A resumed session whose operation already terminated: adopt the
       // terminal state without re-running any coordinator settlement.
       this.terminalOutcome = event.terminal.outcome;
+      this.settledTerminal = {
+        operationId: event.terminal.operationId,
+        generation: event.terminal.generation,
+        outcome: event.terminal.outcome,
+      };
       this.terminalEventSettled = true;
       this.activeOperation = null;
+      this.pendingTakeOver = null;
       this.state = "settled";
       return true;
     }
     if (event.takeOver !== undefined && event.takeOver.status === "pending") {
-      this.takeOverPending = true;
+      this.pendingTakeOver = {
+        batchId: event.takeOver.batchId,
+        operationId: event.takeOver.operationId,
+        generation: event.takeOver.generation,
+        requestedGeneration: event.takeOver.requestedGeneration,
+        takeOverRequestId: event.takeOver.takeOverRequestId,
+      };
       this.state = "take-over-pending";
+    }
+    // A same-authority snapshot is the reconnect signal for acknowledgements
+    // whose request/response transport was interrupted. Resend the exact
+    // idempotent evidence without waiting for duplicate progress or reapplying.
+    for (const record of this.ledger.values()) {
+      if (record.ackState === "interrupted") this.queueAck(record);
     }
     return true;
   }
@@ -307,6 +347,8 @@ export class SynaraWhiteboardOperationBridge {
         operationId: event.operationId,
         generation: event.generation,
       };
+      this.pendingTakeOver = null;
+      this.containmentResult = null;
       this.state = "operation-active";
       // Starts the coordinator only now: an admitted operation exists.
       void this.coordinator
@@ -347,7 +389,7 @@ export class SynaraWhiteboardOperationBridge {
         event.operationId,
       );
     }
-    if (this.takeOverPending) {
+    if (this.pendingTakeOver !== null) {
       // Post-TakeOver producer work for the fenced generation is inapplicable.
       return this.protectConflicting(
         "progress arrived after Take Over fenced the operation generation",
@@ -367,7 +409,7 @@ export class SynaraWhiteboardOperationBridge {
       if (existing.ackState === "interrupted") {
         // Identical replay after an interrupted acknowledgement: resend the
         // exact same acknowledgement. Never reapply.
-        this.queueAck(existing, event);
+        this.queueAck(existing);
       }
       return true;
     }
@@ -420,6 +462,9 @@ export class SynaraWhiteboardOperationBridge {
           return;
         }
         const record: AppliedProgressLedgerRecord = {
+          batchId: event.batchId,
+          operationId: event.operationId,
+          generation: event.generation,
           producerSequence: event.producerSequence,
           serverSequence: event.serverSequence,
           expectedSemanticFingerprint: expectedFingerprint,
@@ -432,7 +477,7 @@ export class SynaraWhiteboardOperationBridge {
         this.ledger.set(record.producerSequence, record);
         this.lastVerifiedSemanticFingerprint = proof.semanticFingerprint;
         // Acknowledge only now: correlated callback + semantic proof exist.
-        this.queueAck(record, event);
+        this.queueAck(record);
       })
       .catch(() => {
         // The adapter callback never correlated or verified; the coordinator
@@ -442,17 +487,14 @@ export class SynaraWhiteboardOperationBridge {
     return true;
   }
 
-  private queueAck(
-    record: AppliedProgressLedgerRecord,
-    event: WhiteboardOperationProgressEvent,
-  ): void {
+  private queueAck(record: AppliedProgressLedgerRecord): void {
     if (this.sessionIdentity === null) return;
     const identity = this.sessionIdentity;
     const input: WhiteboardAcknowledgeApplicationInput = {
       ...identity,
-      batchId: event.batchId,
-      operationId: event.operationId,
-      generation: event.generation,
+      batchId: record.batchId,
+      operationId: record.operationId,
+      generation: record.generation,
       producerSequence: record.producerSequence,
       serverSequence: record.serverSequence,
       adapterCorrelationId: record.adapterCorrelationId,
@@ -467,8 +509,8 @@ export class SynaraWhiteboardOperationBridge {
         await this.transport.whiteboardOperationAcknowledgeApplication(input);
         record.ackState = "sent";
       } catch {
-        // Interrupted transport: the identical acknowledgement is resent when
-        // the same progress replays (ledger record stays "interrupted").
+        // Interrupted transport: the exact idempotent acknowledgement is
+        // resent on an equivalent replay or the next same-authority snapshot.
         record.ackState = "interrupted";
         this.options.onDiagnostic?.({
           code: "ack-delivery-interrupted",
@@ -479,18 +521,68 @@ export class SynaraWhiteboardOperationBridge {
   }
 
   private handleTakeOverPending(event: WhiteboardTakeOverPendingEvent): boolean {
-    this.takeOverPending = true;
+    const active = this.activeOperation;
+    if (
+      active === null ||
+      event.batchId !== active.batchId ||
+      event.operationId !== active.operationId ||
+      event.requestedGeneration !== active.generation ||
+      event.generation <= event.requestedGeneration
+    ) {
+      return this.protectConflicting(
+        "Take Over pending identity does not advance the active operation generation",
+        event.operationId,
+      );
+    }
+    const pending = {
+      batchId: event.batchId,
+      operationId: event.operationId,
+      generation: event.generation,
+      requestedGeneration: event.requestedGeneration,
+      takeOverRequestId: event.takeOverRequestId,
+    };
+    if (this.pendingTakeOver !== null) {
+      if (
+        this.pendingTakeOver.batchId === pending.batchId &&
+        this.pendingTakeOver.operationId === pending.operationId &&
+        this.pendingTakeOver.generation === pending.generation &&
+        this.pendingTakeOver.requestedGeneration === pending.requestedGeneration &&
+        this.pendingTakeOver.takeOverRequestId === pending.takeOverRequestId
+      ) {
+        return true;
+      }
+      return this.protectConflicting(
+        "a conflicting Take Over request arrived while containment was pending",
+        event.operationId,
+      );
+    }
+    this.pendingTakeOver = pending;
     this.state = "take-over-pending";
-    // The Take Over pending lock stays until a containment result resolves
-    // it; no coordinator unlock happens here.
+    // The Take Over pending lock stays until the matching advanced-generation
+    // containment result and terminal resolve it; no unlock happens here.
     return true;
   }
 
   private handleContainmentResult(event: WhiteboardContainmentResultEvent): boolean {
+    const pending = this.pendingTakeOver;
+    if (
+      pending === null ||
+      event.batchId !== pending.batchId ||
+      event.operationId !== pending.operationId ||
+      event.generation !== pending.generation ||
+      event.requestedGeneration !== pending.requestedGeneration ||
+      event.takeOverRequestId !== pending.takeOverRequestId
+    ) {
+      return this.protectConflicting(
+        "containment result identity does not match the pending Take Over",
+        event.operationId,
+      );
+    }
     this.containmentResult = event.result;
     if (event.result === "acknowledged") {
-      // Only acknowledged containment may lead to interrupted settlement;
-      // the terminal event itself still drives the coordinator settlement.
+      // Only acknowledged containment may lead to advanced-generation
+      // interrupted/failed-partial/zero-valid settlement. The terminal event
+      // itself still drives coordinator settlement.
       this.state = "operation-active";
       return true;
     }
@@ -509,10 +601,13 @@ export class SynaraWhiteboardOperationBridge {
   private handleTerminal(event: WhiteboardOperationTerminalEvent): boolean {
     if (this.terminalEventSettled) {
       if (
-        this.terminalOutcome === event.outcome &&
+        this.settledTerminal !== null &&
+        this.settledTerminal.operationId === event.operationId &&
+        this.settledTerminal.generation === event.generation &&
+        this.settledTerminal.outcome === event.outcome &&
         this.activeOperation === null
       ) {
-        // Duplicate terminal for the already-settled operation: idempotent.
+        // Exact duplicate terminal for the already-settled operation.
         return true;
       }
       return this.protectConflicting(
@@ -520,12 +615,30 @@ export class SynaraWhiteboardOperationBridge {
         event.operationId,
       );
     }
-    if (
-      this.terminalOutcome !== null ||
-      (this.activeOperation !== null &&
-        (event.operationId !== this.activeOperation.operationId ||
-          event.generation !== this.activeOperation.generation))
-    ) {
+
+    const active = this.activeOperation;
+    const pending = this.pendingTakeOver;
+    const matchesActiveGeneration =
+      active !== null &&
+      event.batchId === active.batchId &&
+      event.operationId === active.operationId &&
+      event.generation === active.generation;
+    const matchesAcknowledgedTakeOverGeneration =
+      active !== null &&
+      pending !== null &&
+      event.batchId === active.batchId &&
+      event.operationId === active.operationId &&
+      event.generation === pending.generation &&
+      pending.requestedGeneration === active.generation &&
+      this.containmentResult === "acknowledged" &&
+      event.containmentResult === "acknowledged";
+    const identityMatches =
+      event.outcome === "interrupted"
+        ? matchesAcknowledgedTakeOverGeneration
+        : event.outcome === "completed"
+          ? matchesActiveGeneration && pending === null
+          : matchesActiveGeneration || matchesAcknowledgedTakeOverGeneration;
+    if (this.terminalOutcome !== null || !identityMatches) {
       return this.protectConflicting(
         "a conflicting terminal outcome arrived for the active operation",
         event.operationId,
@@ -536,6 +649,11 @@ export class SynaraWhiteboardOperationBridge {
       // Zero-valid: no AI event, no native-history clear, no cursor movement,
       // and no silent success — the coordinator aborts with a diagnostic.
       this.terminalOutcome = "zero-valid";
+      this.settledTerminal = {
+        operationId: event.operationId,
+        generation: event.generation,
+        outcome: event.outcome,
+      };
       this.terminalEventSettled = true;
       const coordinator = this.coordinator;
       const active = this.activeOperation;
@@ -546,6 +664,7 @@ export class SynaraWhiteboardOperationBridge {
         });
       }
       this.activeOperation = null;
+      this.pendingTakeOver = null;
       this.state = "settled";
       this.options.onOutcome?.({
         kind: "terminal",
@@ -558,7 +677,6 @@ export class SynaraWhiteboardOperationBridge {
     }
 
     const coordinator = this.coordinator;
-    const active = this.activeOperation;
     if (coordinator === null || active === null) {
       return this.protectConflicting(
         "a terminal outcome arrived without an admitted active operation",
@@ -599,8 +717,14 @@ export class SynaraWhiteboardOperationBridge {
         if (this.disposed) return;
         // Exactly one event — created after matching local proof and the
         // coordinator's verified native-history clear.
+        this.settledTerminal = {
+          operationId: event.operationId,
+          generation: event.generation,
+          outcome: event.outcome,
+        };
         this.terminalEventSettled = true;
         this.activeOperation = null;
+        this.pendingTakeOver = null;
         this.state = "settled";
         this.options.onOutcome?.({
           kind: "terminal",
