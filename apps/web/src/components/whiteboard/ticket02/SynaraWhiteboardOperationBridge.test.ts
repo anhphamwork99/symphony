@@ -437,10 +437,12 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(transport.subscribeInputs).toEqual([{ ...IDENTITY, lastServerSequence: 0 }]);
   });
 
-  it("keeps an active terminal snapshot as a fence until retained Take Over truth replays", async () => {
+  it("keeps an active terminal snapshot as a fence, resends interrupted ack, then settles retained Take Over truth", async () => {
+    transport.ackRejectNext = true;
     await startActiveOperation({ host, transport, bridge, outcomes });
     transport.emit(makeProgress(3, 1, 1));
     await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(1);
 
     const terminalEvent = makeTerminal(6, "interrupted") as Extract<
       WhiteboardOperationSessionEvent,
@@ -458,6 +460,10 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
       },
     } as WhiteboardOperationSessionEvent);
 
+    await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(2);
+    expect(transport.ackRequests[1]).toEqual(transport.ackRequests[0]);
+    expect(host.callbackSequence).toBe(1);
     expect(outcomes).toHaveLength(0);
     expect(bridge.state).toBe("operation-active");
     expect(bridge.getCoordinator()!.getState().lockState).toBe("ai-batch");

@@ -312,6 +312,12 @@ export class SynaraWhiteboardOperationBridge {
         // pending/containment/terminal rows after this fence. Do not let the
         // summary bypass generation, acknowledgement-counter, or coordinator
         // settlement checks; the sequenced terminal event remains authoritative.
+        // The snapshot still proves same-authority reconnect, so resend exact
+        // interrupted acknowledgement evidence now even when the progress row
+        // is already behind the resume cursor and will not replay.
+        for (const record of this.ledger.values()) {
+          if (record.ackState === "interrupted") this.queueAck(record);
+        }
         return true;
       }
       // With no local operation/coordinator to settle, adopt the already
