@@ -20,6 +20,7 @@ import {
   WS_PROTOCOL_MIN_REVISION,
   WS_PROTOCOL_EPOCH,
   WS_SERVER_CAPABILITIES,
+  WhiteboardOperationSessionEvent,
   WsBootstrapNegotiateResult,
   WsFeatureRpcGroup,
   WHITEBOARD_OPERATION_ERROR,
@@ -333,7 +334,7 @@ function identityOf(result: Record<string, unknown>) {
 }
 
 async function expectRpcError(
-  effect: Effect.Effect<unknown>,
+  effect: Effect.Effect<unknown, unknown, never>,
   runtime: ManagedRuntime.ManagedRuntime<never, never>,
   expected: Record<string, unknown>,
 ) {
@@ -371,7 +372,9 @@ describe("canonical Whiteboard operation WebSocket route", () => {
         ),
       );
       expect(second[0]).toMatchObject({ kind: "session-snapshot", ...identity });
-      const firstEvents = Array.from(await firstCompletion);
+      const firstEvents = Array.from(
+        await firstCompletion,
+      ) as Array<typeof WhiteboardOperationSessionEvent.Type>;
       expect(firstEvents.length).toBeGreaterThanOrEqual(1);
       expect(firstEvents.every((event) => event.kind === "session-snapshot")).toBe(true);
       expect(firstEvents[0]).toMatchObject({ kind: "session-snapshot", ...identity });
@@ -418,7 +421,7 @@ describe("canonical Whiteboard operation WebSocket route", () => {
         Stream.runCollect(
           Stream.take(
             Stream.tap(client.subscribe({ ...identity, lastServerSequence: 0 }), (event) =>
-              event.kind === "session-snapshot"
+              (event as typeof WhiteboardOperationSessionEvent.Type).kind === "session-snapshot"
                 ? Deferred.succeed(firstWireEvent, undefined)
                 : Effect.void,
             ),
