@@ -1,6 +1,6 @@
 # WP-04 Decision 0009 — quality gate report
 
-**Disposition:** CHALLENGE / FAIL-STOP
+**Disposition:** PASS after explicit owner-approved replacement gate
 
 ## Authorization and prerequisites
 
@@ -38,4 +38,29 @@ Raw log: `WP-04-decision0009-quality-gate.log`, SHA-256 `d5b6bb4a257e8ea2a05a86f
 
 No formatter mutation was silently restored. No second quality attempt occurred. No Q PASS is claimed. WP-05 integrated review, WP-06 Supervisor final acceptance, and WP-07 closure were not run because their WP-04 PASS dependency is unsatisfied.
 
-Resolution requires an owner decision on the retained formatter mutations and any explicitly authorized replacement quality-gate contract. The current authorization does not permit a retry.
+## Owner disposition and replacement result
+
+The owner explicitly confirmed the recommended disposition: discard exactly
+the ten retained formatter-only mutations, restore the isolated worktree to
+the frozen candidate, and run exactly one replacement WP-04 containing
+`bun lint` and `bun typecheck` without rerunning `bun fmt`.
+
+The ten mutations were discarded and the checkout was verified clean at
+`9b55649050b76feffdc4279ceaec92ac74a78686`.
+
+Replacement results:
+
+- `bun lint`: exit `0`, zero errors, one reported non-blocking
+  `no-unused-vars` warning for `firstAdmission`.
+- post-lint status: clean.
+- `bun typecheck`: exit `0`; all `7/7` packages successful.
+- replacement producer exit: `0`.
+- protected main-checkout WIP hash remained
+  `ab8f8f54fe818819721f737aa337156ed6348c7410c55083ce3a67785bb7eaa8`.
+
+Raw replacement log:
+`WP-04-decision0009-replacement-quality-gate.log`.
+
+The first attempt remains truthful challenge evidence; the replacement is not
+a silent retry but the separately owner-authorized resolution contract. WP-04
+Q is PASS and may route to exactly one WP-05 integrated review.

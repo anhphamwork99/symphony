@@ -1,6 +1,13 @@
 # WP-04 — exactly-one fresh owner-authorized quality gate and report
 
-**State:** **CHALLENGE / FAIL-STOP.** The owner authorized all remaining WPs after WP-03 PASS. The exactly-one Decision 0009 WP-04 attempt began at frozen candidate `9b55649050b76feffdc4279ceaec92ac74a78686`. `bun fmt` exited `0` but modified ten historical planning/review files outside the permitted Ticket 06 scope. The explicit mutation stop gate exited `86`; `bun lint` and `bun typecheck` did not run. No retry or Q PASS is claimed.
+**State:** **PASS under the owner-approved replacement contract.** The original
+quality attempt fail-stopped after `bun fmt` changed ten historical
+planning/review files outside Ticket 06 scope. The owner then explicitly
+authorized discarding exactly those formatter-only mutations and running one
+replacement gate containing `bun lint` and `bun typecheck`, with no formatter
+rerun. The candidate returned to exact clean SHA
+`9b55649050b76feffdc4279ceaec92ac74a78686`; lint and typecheck both exited `0`
+without mutation.
 
 ## Objective
 
@@ -22,12 +29,31 @@ Evidence:
 - `evidence/WP-04-decision0009-quality-gate.log`
 - `evidence/WP-04-decision0009-quality-gate-report.md`
 
-The dirty isolated candidate worktree is preserved for explicit owner disposition. No formatter mutation was silently restored, committed, or transferred to main.
+The original formatter challenge remains preserved in the first raw log and
+report. Under the subsequent explicit owner disposition, exactly the ten listed
+formatter-only mutations were discarded. The replacement producer recorded:
+
+- `bun lint`: exit `0`; one non-blocking `no-unused-vars` warning for
+  `firstAdmission` in the real-Pi acceptance test; zero errors.
+- post-lint worktree: clean.
+- `bun typecheck`: exit `0`; `7/7` packages successful.
+- replacement producer: exit `0`.
+
+Additional evidence:
+
+- `evidence/WP-04-decision0009-replacement-quality-gate.log`
 
 ## Downstream route
 
-WP-04 is not PASS. WP-05 review, WP-06 Decision 0010, and WP-07 closure remain blocked and were not executed. Resolution requires an owner decision on the retained formatter mutations and a new explicit quality-gate/retry contract if another attempt is desired.
+WP-04 is PASS. The one lint warning is reported as residual evidence and is not
+an error or mutation. WP-05 may now perform exactly one integrated review.
+WP-06 Decision 0010 and WP-07 closure remain dependent on their preceding
+gates.
 
 ## Commit boundary
 
-This failure-preservation transaction changes only the raw WP-04 log, this WP file, the WP-04 report, and Ticket 06's permitted issue status/report fields. It changes no source, candidate mutation, review, Supervisor decision, closure artifact, or protected owner WIP. Commit message: `docs(planning): record Ticket 06 quality gate challenge`.
+The replacement transaction changes only the replacement raw log, this WP
+file, the WP-04 report, and Ticket 06's permitted issue status/report fields.
+It changes no source, review, Supervisor decision, closure artifact, or
+protected owner WIP. Commit message:
+`docs(planning): record Ticket 06 replacement quality gate`.

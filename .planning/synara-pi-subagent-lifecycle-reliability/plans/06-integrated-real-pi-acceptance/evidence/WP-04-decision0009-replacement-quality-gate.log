@@ -1,0 +1,59 @@
+OWNER_DISPOSITION=discard_exact_10_formatter_only_mutations
+BUN_FMT_RERUN=prohibited
+=== bun lint ===
+$ oxlint --report-unused-disable-directives
+
+  ! eslint(no-unused-vars): Variable 'firstAdmission' is declared but never used. Unused variables should start with a '_'.
+      ,-[apps/server/src/provider/piSubagentRealPiAcceptance.test.ts:1095:13]
+ 1094 | 
+ 1095 |       const firstAdmission = await waitFor(
+      :             ^^^^^^^|^^^^^^
+      :                    `-- 'firstAdmission' is declared here
+ 1096 |         () =>
+      `----
+  help: Consider removing this declaration.
+
+Found 1 warning and 0 errors.
+Finished in 250ms on 2658 files with 149 rules using 10 threads.
+BUN_LINT_EXIT=0
+=== post-lint status ===
+=== bun typecheck ===
+$ turbo run typecheck
+• turbo 2.10.5
+
+   • Packages in scope: @synara/cli, @synara/contracts, @synara/desktop, @synara/marketing, @synara/scripts, @synara/shared, @synara/web
+   • Running typecheck in 7 packages
+   • Remote caching disabled, using shared worktree cache
+
+@synara/marketing:typecheck: cache bypass, force executing 4b65bdd1a8567feb
+@synara/contracts:typecheck: cache bypass, force executing 6b992120a46641be
+@synara/marketing:typecheck: $ astro check
+@synara/contracts:typecheck: $ tsc --noEmit
+@synara/marketing:typecheck: 09:30:40 [WARN] [vite] warning: `optimizeDeps.esbuildOptions` option was specified by "astro:dev-toolbar" plugin. This option is deprecated, please use `optimizeDeps.rolldownOptions` instead.
+@synara/marketing:typecheck: 09:30:40 [WARN] [vite] You or a plugin you are using have set `optimizeDeps.esbuildOptions` but this option is now deprecated. Vite now uses Rolldown to optimize the dependencies. Please use `optimizeDeps.rolldownOptions` instead.
+@synara/marketing:typecheck: 09:30:40 [types] Generated 36ms
+@synara/marketing:typecheck: 09:30:40 [check] Getting diagnostics for Astro files in /private/tmp/symphony-t06/apps/marketing...
+@synara/marketing:typecheck: Result (7 files): 
+@synara/marketing:typecheck: - 0 errors
+@synara/marketing:typecheck: - 0 warnings
+@synara/marketing:typecheck: - 0 hints
+@synara/marketing:typecheck: 
+@synara/contracts:typecheck: src/orchestration.test.ts(213,7): message TS44: Consider using Effect Schema for JSON operations instead of JSON.parse/JSON.stringify    effect(preferSchemaOverJson)
+@synara/contracts:typecheck: src/orchestration.test.ts(251,25): message TS44: Consider using Effect Schema for JSON operations instead of JSON.parse/JSON.stringify    effect(preferSchemaOverJson)
+@synara/shared:typecheck: cache bypass, force executing b9defa07d6d42d61
+@synara/shared:typecheck: $ tsc --noEmit
+@synara/desktop:typecheck: cache bypass, force executing 5169f23a25a17172
+@synara/scripts:typecheck: cache bypass, force executing 1fd241c30bfb78a3
+@synara/web:typecheck: cache bypass, force executing e2dfc3b4ba3dff62
+@synara/scripts:typecheck: $ tsc --noEmit
+@synara/web:typecheck: $ tsc --noEmit
+@synara/desktop:typecheck: $ tsc --noEmit
+@synara/cli:typecheck: cache bypass, force executing 3952f08f9f86e50d
+@synara/cli:typecheck: $ tsc --noEmit
+
+ Tasks:    7 successful, 7 total
+Cached:    0 cached, 7 total
+  Time:    12.548s 
+
+BUN_TYPECHECK_EXIT=0
+REPLACEMENT_QUALITY_PRODUCER_EXIT=0
