@@ -516,6 +516,32 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(bridge.getAppliedProgressCount()).toBe(1);
   });
 
+  it("keeps an immediate terminal protected while semantic proof is still pending", async () => {
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    // Promise callbacks have not run yet: the scene write landed, but its
+    // correlated semantic proof is still pending in the bridge.
+    transport.emit(makeTerminal(4, "zero-valid"));
+
+    expect(host.current.elements[0]!.x).toBe(10);
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("protected");
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(0);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("locked-fault");
+    await transport.drainAckChain();
+  });
+
+  it("deduplicates equivalent progress while semantic proof is pending", async () => {
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    transport.emit(makeProgress(3, 1, 1));
+
+    expect(host.callbackSequence).toBe(1);
+    await transport.drainAckChain();
+    expect(transport.ackRequests).toHaveLength(1);
+    expect(bridge.getAppliedProgressCount()).toBe(1);
+  });
+
   it("drops equivalent replayed progress without reapplying or re-acking", async () => {
     await startActiveOperation({ host, transport, bridge, outcomes });
     transport.emit(makeProgress(3, 1, 1));

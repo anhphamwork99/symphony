@@ -161,6 +161,8 @@ export class SynaraWhiteboardOperationBridge {
     readonly generation: number;
   } | null = null;
   private readonly ledger = new Map<number, AppliedProgressLedgerRecord>();
+  /** Writes issued to the adapter whose correlated semantic proof is still pending. */
+  private readonly pendingProgress = new Map<number, WhiteboardOperationProgressEvent>();
   private lastVerifiedSemanticFingerprint: string | null = null;
   private pendingTakeOver: {
     readonly batchId: string;
@@ -421,6 +423,25 @@ export class SynaraWhiteboardOperationBridge {
       );
     }
 
+    const pending = this.pendingProgress.get(event.producerSequence);
+    if (pending !== undefined) {
+      if (
+        pending.batchId === event.batchId &&
+        pending.operationId === event.operationId &&
+        pending.generation === event.generation &&
+        pending.producerSequence === event.producerSequence &&
+        pending.serverSequence === event.serverSequence &&
+        pending.expectedSemanticFingerprint === event.expectedSemanticFingerprint
+      ) {
+        // The adapter write already happened; wait for its one correlated proof.
+        return true;
+      }
+      return this.protectConflicting(
+        "progress conflicts with an application whose semantic proof is pending",
+        event.operationId,
+      );
+    }
+
     const existing = this.ledger.get(event.producerSequence);
     if (existing !== undefined) {
       if (!progressRecordEquivalent(existing, event)) {
@@ -469,6 +490,7 @@ export class SynaraWhiteboardOperationBridge {
 
     const expectedRevision = event.expectedAfterRevision;
     const expectedFingerprint = event.expectedSemanticFingerprint;
+    this.pendingProgress.set(event.producerSequence, event);
     void receipt.acknowledgement
       .then(() => {
         if (this.disposed) return;
@@ -498,12 +520,14 @@ export class SynaraWhiteboardOperationBridge {
           resultingMutationRevision: proof.mutationRevision,
           ackState: "interrupted",
         };
+        this.pendingProgress.delete(event.producerSequence);
         this.ledger.set(record.producerSequence, record);
         this.lastVerifiedSemanticFingerprint = proof.semanticFingerprint;
         // Acknowledge only now: correlated callback + semantic proof exist.
         this.queueAck(record);
       })
       .catch(() => {
+        this.pendingProgress.delete(event.producerSequence);
         // The adapter callback never correlated or verified; the coordinator
         // faulted the lock and reported. Remain protected.
         this.state = "protected";
@@ -685,6 +709,19 @@ export class SynaraWhiteboardOperationBridge {
         "a conflicting terminal outcome arrived for the active operation",
         event.operationId,
       );
+    }
+
+    if (this.pendingProgress.size > 0) {
+      this.coordinator?.protectAiOperationOnSessionLoss({
+        reason: "terminal arrived while a local semantic application proof was pending",
+        code: "operation-session-lost",
+      });
+      this.state = "protected";
+      this.options.onDiagnostic?.({
+        code: "terminal-before-semantic-proof",
+        pendingProducerSequences: [...this.pendingProgress.keys()],
+      });
+      return true;
     }
 
     const appliedSemanticCount = this.ledger.size;
