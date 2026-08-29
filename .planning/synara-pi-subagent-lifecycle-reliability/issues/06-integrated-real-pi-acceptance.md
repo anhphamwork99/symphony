@@ -1,10 +1,12 @@
 # Ticket 06 — integrated real-Pi acceptance
 
-**Status:** ready-for-agent — sole project frontier; Decision 0009 candidate
+**Status:** blocked — Decision 0009 candidate
 `9b55649050b76feffdc4279ceaec92ac74a78686` frozen; WP-01 **PASS** (`19/19`
 files, `306/306` tests); WP-02 **PASS** (exactly one complete five-file
 non-destructive attempt: `22` passed, `1` expected skip, all exits `0`, no
-retry); WP-03 requires fresh owner authorization; no current M/Q PASS
+retry); WP-03 **PASS** (sole manual destructive run); WP-04 **CHALLENGE**
+because `bun fmt` changed ten out-of-scope historical planning/review files;
+no current Q PASS
 **Dependencies:** Tickets 01–05 accepted. [Decision 0008](../decisions/0008-reassessment-live-control-post-await-retirement-classification.md)
 remains aspect-scoped **Authoritative** for post-await same-registration
 classification. [Decision 0007](../decisions/0007-ticket-06-batching-fixture-causal-control-and-candidate-rebaseline.md)
@@ -24,10 +26,12 @@ the old WP-01/WP-02 records, and merge `44249d81c49172e192dcf0f09ddfadc702a4b34c
 The current integration merge `cecc9d8ae62bd97b9c81be07d0cfb473a9862cc7` has
 parents `0e828e0fe5daf273a6a0c04960494756ccdf204e` (planning) and the frozen
 candidate; it is integration provenance only.
-**Current evidence state:** WP-01 D PASS (`306/306`) and WP-02 R PASS
-(`22` passed, `1` expected skip, five serial legs, all exits `0`). No current
-M/Q PASS. This evidence transaction runs no producer, test, gate, review, or
-Supervisor consultation.
+**Current evidence state:** WP-01 D PASS (`306/306`), WP-02 R PASS
+(`22` passed, `1` expected skip, five serial legs, all exits `0`), and WP-03
+M PASS (one selected manual test, exact owned root/descendant zero-survivor
+proof). WP-04 Q is challenged: the one authorized `bun fmt` changed ten
+out-of-scope files and triggered fail-stop exit `86`; lint/typecheck did not
+run. WP-05/06/07 were not run.
 
 ## Candidate freeze and exact lineage
 
@@ -99,10 +103,14 @@ boundary for destructive process-tree claims.
    enqueue-first steer 1/SDK 1, applied), containment `1`, restart `1`, resume
    `1`; aggregate `22` passed, `1` expected skip, all exits `0`; fresh per-leg
    HOME cleanup proven; candidate surface zero-delta.
-4. Fresh owner authorization for WP-03 manual destructive evidence, then fresh
-   owner authorization for WP-04 quality/report evidence after WP-03 PASS.
-5. WP-05 exactly one integrated review, then WP-06 exactly one final Supervisor
-   consultation persisted as Decision 0010, followed by WP-07 closure/routing.
+4. **WP-03 PASS:** exactly one fresh-authorized manual destructive run proved
+   TERM and zero survivors for its exact owned root and descendant, with band-76
+   fencing and complete temporary-root cleanup.
+5. **WP-04 CHALLENGE:** the fresh-authorized quality attempt ran `bun fmt` once;
+   it exited `0` but changed ten out-of-scope historical planning/review files,
+   so the mandatory mutation gate stopped at exit `86`. Lint/typecheck and
+   WP-05/06/07 did not run. Owner disposition and a new retry contract are
+   required.
 
 Focused Decision 0009 implementation evidence is copied byte-identically in
 four logs, all supporting only (not current D/R/Q acceptance):
@@ -142,16 +150,22 @@ observation and generic unavailable remain generic. No public reason, applied/
 acceptance lie, canonical expectation, configuration, coordinator, contract or
 schema, third source/test path, lockfile, or Alfie change is authorized.
 
-## Implementation Report placeholder
+## Implementation Report
 
-- Candidate lineage and exact Symphony/Alfie pins:
-- Isolation and composition evidence:
-- AC evidence matrix by evidence class:
-- Failure/diagnostic stage report:
-- Manual destructive run record (if executed):
-- Review package link and verdict:
-- Supervisor final-acceptance link and verdict:
-- Reopening conditions and residual risk:
+- Candidate lineage and exact Symphony/Alfie pins: candidate
+  `9b55649050b76feffdc4279ceaec92ac74a78686`; Alfie
+  `3fe340b401ca86bcbe8b55abd4de107e1d93482e`.
+- Isolation and composition evidence: WP-01 and WP-02 provenance records; all
+  fresh producer HOMEs cleaned.
+- AC evidence matrix by evidence class: D and R PASS; M PASS; Q challenged.
+- Failure/diagnostic stage report: Decision 0009 structured unavailable mapping
+  proved by D/R evidence; no provider text or acceptance lie.
+- Manual destructive run record: `WP-03-decision0009-operator-record.md`, PASS.
+- Quality report: `WP-04-decision0009-quality-gate-report.md`, CHALLENGE.
+- Review package link and verdict: not run; blocked by WP-04.
+- Supervisor final-acceptance link and verdict: not run; blocked by WP-04.
+- Reopening conditions and residual risk: owner disposition of the ten retained
+  formatter mutations and a new explicit no-retry replacement gate contract.
 
 ## Unlock gate
 

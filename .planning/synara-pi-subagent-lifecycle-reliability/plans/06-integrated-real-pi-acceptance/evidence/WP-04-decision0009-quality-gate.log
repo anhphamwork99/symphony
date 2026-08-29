@@ -1,0 +1,17 @@
+=== bun fmt ===
+$ oxfmt
+Finished in 2322ms on 3118 files using 10 threads.
+BUN_FMT_EXIT=0
+=== formatter status ===
+ M .planning/synara-pi-subagent-lifecycle-reliability/issues/05-restart-reconnect-resume-and-crash-diagnostics.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/PLAN.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/evidence/WP-01-ac-diagnostic-matrix.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/04-cancellation-watchdog-and-teardown-settlement/evidence/WP-02-nondestructive-real-pi-disposition.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/PLAN.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-01-focused-deterministic-evidence.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/WP-03-ticket-closure-and-routing.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/evidence/WP-01-ac-seam-diagnostic-matrix.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/plans/05-restart-reconnect-resume-and-crash-diagnostics/evidence/WP-02-nondestructive-real-pi-disposition.md
+ M .planning/synara-pi-subagent-lifecycle-reliability/reviews/03-terminal-before-cleanup-and-live-lifecycle-containment-review.md
+FORMATTER_MUTATION_STOP=1
+QUALITY_PRODUCER_EXIT=86
