@@ -46,9 +46,10 @@ Additional evidence:
 ## Downstream route
 
 WP-04 is PASS. The one lint warning is reported as residual evidence and is not
-an error or mutation. WP-05 may now perform exactly one integrated review.
-WP-06 Decision 0010 and WP-07 closure remain dependent on their preceding
-gates.
+an error or mutation. WP-05 invoked its independent reviewer exactly once, but
+the runtime returned an invalid response without a final verdict; see
+`../../reviews/06-integrated-real-pi-acceptance-review.md`. WP-06 Decision 0010
+and WP-07 closure remain blocked.
 
 ## Commit boundary
 
