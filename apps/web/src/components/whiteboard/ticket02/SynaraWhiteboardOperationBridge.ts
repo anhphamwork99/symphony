@@ -307,8 +307,15 @@ export class SynaraWhiteboardOperationBridge {
 
   private handleSnapshot(event: WhiteboardOperationSnapshotEvent): boolean {
     if (event.terminal !== undefined && event.terminal.operationId !== undefined) {
-      // A resumed session whose operation already terminated: adopt the
-      // terminal state without re-running any coordinator settlement.
+      if (this.activeOperation !== null || this.coordinator !== null) {
+        // During an active same-authority reconnect, D5 replays the retained
+        // pending/containment/terminal rows after this fence. Do not let the
+        // summary bypass generation, acknowledgement-counter, or coordinator
+        // settlement checks; the sequenced terminal event remains authoritative.
+        return true;
+      }
+      // With no local operation/coordinator to settle, adopt the already
+      // terminal session without manufacturing browser history.
       this.terminalOutcome = event.terminal.outcome;
       this.settledTerminal = {
         operationId: event.terminal.operationId,

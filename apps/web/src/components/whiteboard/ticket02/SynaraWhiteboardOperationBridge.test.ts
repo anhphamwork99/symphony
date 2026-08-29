@@ -437,6 +437,41 @@ describe("Ticket 02 dormant Whiteboard operation bridge (WP-B2)", () => {
     expect(transport.subscribeInputs).toEqual([{ ...IDENTITY, lastServerSequence: 0 }]);
   });
 
+  it("keeps an active terminal snapshot as a fence until retained Take Over truth replays", async () => {
+    await startActiveOperation({ host, transport, bridge, outcomes });
+    transport.emit(makeProgress(3, 1, 1));
+    await transport.drainAckChain();
+
+    const terminalEvent = makeTerminal(6, "interrupted") as Extract<
+      WhiteboardOperationSessionEvent,
+      { readonly kind: "operation-terminal" }
+    >;
+    const { kind: _kind, serverSequence: _serverSequence, ...terminal } = terminalEvent;
+    transport.emit({
+      ...makeSnapshot(6),
+      terminal,
+      acknowledgementSummary: {
+        acceptedSemanticCount: 1,
+        acceptedNoOpCount: 0,
+        rejectedCount: 0,
+        lastAcceptedProducerSequence: 1,
+      },
+    } as WhiteboardOperationSessionEvent);
+
+    expect(outcomes).toHaveLength(0);
+    expect(bridge.state).toBe("operation-active");
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("ai-batch");
+
+    transport.emit(makeTakeOverPending(4));
+    transport.emit(makeContainmentResult(5, "acknowledged"));
+    transport.emit(terminalEvent);
+
+    await vi.waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes[0]).toMatchObject({ outcome: "interrupted", generation: 2 });
+    expect(bridge.getCoordinator()!.getState().events).toHaveLength(1);
+    expect(bridge.getCoordinator()!.getState().lockState).toBe("unlocked");
+  });
+
   it("starts the coordinator only on an admitted operation, never on snapshot alone", async () => {
     await bridge.startSession();
     transport.emit(makeSnapshot(1));
